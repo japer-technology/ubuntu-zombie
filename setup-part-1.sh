@@ -1,27 +1,31 @@
 #!/usr/bin/env bash
 #
-# ai-full-control-ubuntu.sh
-# -------------------------
-# Turn a fresh Ubuntu Desktop into an AI-controllable workstation.
+# setup-part-1.sh
+# ---------------
+# Ubuntu Zombie: baseline installer.
 #
-# This is the minimum recommended install for non-expert Ubuntu users
-# who want an AI assistant to be able to operate the machine end-to-end:
-# terminal, OS, files, Docker, GUI applications, and the browser.
-# Inbound access is restricted to a private Tailscale network. The
-# public internet cannot reach this host.
+# Turn a normal Ubuntu PC into a machine with a resident AI Systems
+# Administrator, authenticated by the configured token provider and
+# contactable by any local user.
+#
+# This is the baseline install: Ubuntu plus the minimum packages needed
+# to give the AI Systems Administrator a useful body (terminal, OS,
+# files, Docker, GUI applications, and the browser). Inbound access is
+# restricted to a private Tailscale network. The public internet cannot
+# reach this host.
 #
 # Read README.md in this directory before running.
 #
 # Usage:
-#   chmod +x ai-full-control-ubuntu.sh
-#   sudo ./ai-full-control-ubuntu.sh
+#   chmod +x setup-part-1.sh
+#   sudo ./setup-part-1.sh
 #
 # Non-interactive use:
-#   sudo AFC_NONINTERACTIVE=1 \
+#   sudo ZOMBIE_NONINTERACTIVE=1 \
 #        SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host" \
 #        VNC_PASSWORD="..." \
 #        TAILSCALE_AUTHKEY="tskey-auth-..." \
-#        ./ai-full-control-ubuntu.sh
+#        ./setup-part-1.sh
 #
 # Re-running is safe: the script is idempotent. Firewall, sudoers, SSH,
 # Tailscale, and VNC state are added to or skipped, not reset.
@@ -33,15 +37,15 @@ set -Eeuo pipefail
 # ---------------------------------------------------------------------------
 
 readonly SCRIPT_VERSION="1.0.0"
-readonly SCRIPT_NAME="ai-full-control-ubuntu.sh"
+readonly SCRIPT_NAME="setup-part-1.sh"
 
 AGENT_USER="${AGENT_USER:-agent}"
 AGENT_HOME="/home/${AGENT_USER}"
-AFC_DIR="${AFC_DIR:-/opt/ai-full-control}"
+ZOMBIE_DIR="${ZOMBIE_DIR:-/opt/ai-zombie}"
 VNC_PORT="${VNC_PORT:-5900}"
-LOG_FILE="${LOG_FILE:-/var/log/ai-full-control-install.log}"
+LOG_FILE="${LOG_FILE:-/var/log/ubuntu-zombie-install.log}"
 
-AFC_NONINTERACTIVE="${AFC_NONINTERACTIVE:-0}"
+ZOMBIE_NONINTERACTIVE="${ZOMBIE_NONINTERACTIVE:-0}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
 VNC_PASSWORD="${VNC_PASSWORD:-}"
 TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
@@ -91,21 +95,21 @@ usage() {
   cat <<EOF
 ${SCRIPT_NAME} ${SCRIPT_VERSION}
 
-Turn a fresh Ubuntu Desktop into an AI-controllable workstation,
-reachable only over Tailscale.
+Ubuntu Zombie baseline installer: turn a normal Ubuntu PC into a machine
+with a resident AI Systems Administrator, reachable only over Tailscale.
 
 Usage:
   sudo ./${SCRIPT_NAME} [--help] [--version]
 
 Environment variables (all optional):
-  AGENT_USER          Login name for the agent user (default: agent)
-  AFC_DIR             Install root (default: /opt/ai-full-control)
-  VNC_PORT            Loopback-only VNC port (default: 5900)
-  LOG_FILE            Install transcript path (default: /var/log/ai-full-control-install.log)
-  AFC_NONINTERACTIVE  Set to 1 to skip all prompts (then SSH_PUBLIC_KEY and VNC_PASSWORD must be set)
-  SSH_PUBLIC_KEY      SSH public key string (an 'ssh-ed25519 ...' or 'ssh-rsa ...' line)
-  VNC_PASSWORD        VNC password for loopback-only emergency desktop access
-  TAILSCALE_AUTHKEY   Pre-auth key for unattended Tailscale enrolment
+  AGENT_USER             Login name for the agent user (default: agent)
+  ZOMBIE_DIR             Install root (default: /opt/ai-zombie)
+  VNC_PORT               Loopback-only VNC port (default: 5900)
+  LOG_FILE               Install transcript path (default: /var/log/ubuntu-zombie-install.log)
+  ZOMBIE_NONINTERACTIVE  Set to 1 to skip all prompts (then SSH_PUBLIC_KEY and VNC_PASSWORD must be set)
+  SSH_PUBLIC_KEY         SSH public key string (an 'ssh-ed25519 ...' or 'ssh-rsa ...' line)
+  VNC_PASSWORD           VNC password for loopback-only emergency desktop access
+  TAILSCALE_AUTHKEY      Pre-auth key for unattended Tailscale enrolment
 
 See README.md in this directory for the full guide.
 EOF
@@ -164,13 +168,13 @@ section "${SCRIPT_NAME} ${SCRIPT_VERSION}"
 
 info "Log file: ${LOG_FILE}"
 info "Agent user: ${AGENT_USER}"
-info "Install root: ${AFC_DIR}"
-info "Mode: $([[ "${AFC_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)"
+info "Install root: ${ZOMBIE_DIR}"
+info "Mode: $([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)"
 
 cat <<EOF
 
 This installer will:
-  - Create a full-control agent user with passwordless sudo
+  - Create the agent user (operating identity of the AI Systems Administrator) with passwordless sudo
   - Enable SSH key-only access
   - Install Tailscale from its official apt repository
   - Allow inbound SSH only on the Tailscale interface
@@ -186,7 +190,7 @@ Run this from the physical Ubuntu machine, not over public SSH.
 
 EOF
 
-if [[ "${AFC_NONINTERACTIVE}" != "1" ]]; then
+if [[ "${ZOMBIE_NONINTERACTIVE}" != "1" ]]; then
   read -r -p "Continue? Type YES to proceed: " CONFIRM
   [[ "${CONFIRM}" == "YES" ]] || die "Cancelled."
 else
@@ -303,7 +307,7 @@ fi
 
 usermod -aG sudo "${AGENT_USER}"
 
-SUDOERS_FILE="/etc/sudoers.d/90-${AGENT_USER}-full-control"
+SUDOERS_FILE="/etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie"
 install -m 0440 /dev/null "${SUDOERS_FILE}"
 cat > "${SUDOERS_FILE}" <<EOF
 # Managed by ${SCRIPT_NAME}. Grants ${AGENT_USER} passwordless root.
@@ -330,7 +334,7 @@ chmod 600 "${AGENT_HOME}/.ssh/authorized_keys"
 
 EXISTING_KEYS="$(wc -l < "${AGENT_HOME}/.ssh/authorized_keys" 2>/dev/null || echo 0)"
 
-if [[ -z "${SSH_PUBLIC_KEY}" && "${AFC_NONINTERACTIVE}" != "1" ]]; then
+if [[ -z "${SSH_PUBLIC_KEY}" && "${ZOMBIE_NONINTERACTIVE}" != "1" ]]; then
   if [[ "${EXISTING_KEYS}" -gt 0 ]]; then
     info "${EXISTING_KEYS} SSH key(s) already authorized for ${AGENT_USER}."
     read -r -p "Add another public key? Leave blank to skip: " SSH_PUBLIC_KEY || true
@@ -349,7 +353,7 @@ if [[ -n "${SSH_PUBLIC_KEY}" ]]; then
   fi
   append_line_once "${SSH_PUBLIC_KEY}" "${AGENT_HOME}/.ssh/authorized_keys"
   ok "Authorized the supplied SSH key."
-elif [[ "${EXISTING_KEYS}" -eq 0 && "${AFC_NONINTERACTIVE}" == "1" ]]; then
+elif [[ "${EXISTING_KEYS}" -eq 0 && "${ZOMBIE_NONINTERACTIVE}" == "1" ]]; then
   die "Non-interactive mode requires SSH_PUBLIC_KEY when no key is already authorized."
 fi
 
@@ -364,7 +368,7 @@ chmod 600 "${AGENT_HOME}/.ssh/authorized_keys"
 section "Harden SSH"
 
 install -d -m 755 /etc/ssh/sshd_config.d
-cat > /etc/ssh/sshd_config.d/99-ai-full-control.conf <<EOF
+cat > /etc/ssh/sshd_config.d/99-ubuntu-zombie.conf <<EOF
 # Managed by ${SCRIPT_NAME}.
 PermitRootLogin no
 PasswordAuthentication no
@@ -487,34 +491,35 @@ runuser -l "${AGENT_USER}" -c "dbus-run-session -- gsettings set org.gnome.deskt
 ok "Sleep masked, lock disabled."
 
 # ---------------------------------------------------------------------------
-# Workspace at /opt/ai-full-control
+# Workspace at /opt/ai-zombie
 # ---------------------------------------------------------------------------
 
-section "Create AI Full Control workspace"
+section "Create Ubuntu Zombie workspace"
 
-install -d -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" "${AFC_DIR}" \
-  "${AFC_DIR}/bin" "${AFC_DIR}/logs" "${AFC_DIR}/state" \
-  "${AFC_DIR}/scripts" "${AFC_DIR}/tools"
-install -d -m 700 -o "${AGENT_USER}" -g "${AGENT_USER}" "${AFC_DIR}/secrets"
+install -d -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" "${ZOMBIE_DIR}" \
+  "${ZOMBIE_DIR}/bin" "${ZOMBIE_DIR}/logs" "${ZOMBIE_DIR}/state" \
+  "${ZOMBIE_DIR}/scripts" "${ZOMBIE_DIR}/tools"
+install -d -m 700 -o "${AGENT_USER}" -g "${AGENT_USER}" "${ZOMBIE_DIR}/secrets"
 
-if [[ ! -f "${AFC_DIR}/secrets/env" ]]; then
-  install -m 600 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${AFC_DIR}/secrets/env"
-  cat > "${AFC_DIR}/secrets/env" <<EOF
-# Cloud LLM keys and runtime environment for the agent user.
+if [[ ! -f "${ZOMBIE_DIR}/secrets/env" ]]; then
+  install -m 600 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${ZOMBIE_DIR}/secrets/env"
+  cat > "${ZOMBIE_DIR}/secrets/env" <<EOF
+# Token provider credentials and runtime environment for the AI Systems Administrator.
+# The token provider (cloud LLM vendor) authenticates the administrator on this device.
 # Example:
 #   OPENAI_API_KEY=sk-...
 #   ANTHROPIC_API_KEY=sk-ant-...
 
 DISPLAY=:0
-AFC_DIR=${AFC_DIR}
+ZOMBIE_DIR=${ZOMBIE_DIR}
 AGENT_USER=${AGENT_USER}
 AGENT_HOME=${AGENT_HOME}
 EOF
-  chown "${AGENT_USER}:${AGENT_USER}" "${AFC_DIR}/secrets/env"
-  chmod 600 "${AFC_DIR}/secrets/env"
-  ok "Created ${AFC_DIR}/secrets/env (add your LLM keys with: sudoedit ${AFC_DIR}/secrets/env)."
+  chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/secrets/env"
+  chmod 600 "${ZOMBIE_DIR}/secrets/env"
+  ok "Created ${ZOMBIE_DIR}/secrets/env (add your LLM keys with: sudoedit ${ZOMBIE_DIR}/secrets/env)."
 else
-  info "Preserving existing ${AFC_DIR}/secrets/env."
+  info "Preserving existing ${ZOMBIE_DIR}/secrets/env."
 fi
 
 # ---------------------------------------------------------------------------
@@ -597,14 +602,14 @@ npm install -g yarn pnpm typescript ts-node
 
 section "GUI control helper scripts"
 
-cat > "${AFC_DIR}/bin/gui-env" <<EOF
+cat > "${ZOMBIE_DIR}/bin/gui-env" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -f ${AFC_DIR}/secrets/env ]]; then
+if [[ -f ${ZOMBIE_DIR}/secrets/env ]]; then
   set -a
   # shellcheck disable=SC1091
-  source ${AFC_DIR}/secrets/env
+  source ${ZOMBIE_DIR}/secrets/env
   set +a
 fi
 
@@ -615,52 +620,52 @@ export DBUS_SESSION_BUS_ADDRESS="\${DBUS_SESSION_BUS_ADDRESS:-unix:path=\${XDG_R
 exec "\$@"
 EOF
 
-cat > "${AFC_DIR}/bin/screenshot" <<EOF
+cat > "${ZOMBIE_DIR}/bin/screenshot" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-OUT="\${1:-${AFC_DIR}/state/screen.png}"
-${AFC_DIR}/bin/gui-env gnome-screenshot -f "\$OUT"
+OUT="\${1:-${ZOMBIE_DIR}/state/screen.png}"
+${ZOMBIE_DIR}/bin/gui-env gnome-screenshot -f "\$OUT"
 echo "\$OUT"
 EOF
 
-cat > "${AFC_DIR}/bin/click" <<EOF
+cat > "${ZOMBIE_DIR}/bin/click" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 [[ \$# -eq 2 ]] || { echo "Usage: click X Y" >&2; exit 2; }
-${AFC_DIR}/bin/gui-env xdotool mousemove "\$1" "\$2" click 1
+${ZOMBIE_DIR}/bin/gui-env xdotool mousemove "\$1" "\$2" click 1
 EOF
 
-cat > "${AFC_DIR}/bin/type-text" <<EOF
+cat > "${ZOMBIE_DIR}/bin/type-text" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 [[ \$# -ge 1 ]] || { echo "Usage: type-text 'text'" >&2; exit 2; }
-${AFC_DIR}/bin/gui-env xdotool type --delay 10 "\$*"
+${ZOMBIE_DIR}/bin/gui-env xdotool type --delay 10 "\$*"
 EOF
 
-cat > "${AFC_DIR}/bin/key" <<EOF
+cat > "${ZOMBIE_DIR}/bin/key" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 [[ \$# -ge 1 ]] || { echo "Usage: key ctrl+l" >&2; exit 2; }
-${AFC_DIR}/bin/gui-env xdotool key "\$@"
+${ZOMBIE_DIR}/bin/gui-env xdotool key "\$@"
 EOF
 
-cat > "${AFC_DIR}/bin/agent-shell" <<EOF
+cat > "${ZOMBIE_DIR}/bin/agent-shell" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -f ${AFC_DIR}/secrets/env ]]; then
+if [[ -f ${ZOMBIE_DIR}/secrets/env ]]; then
   set -a
   # shellcheck disable=SC1091
-  source ${AFC_DIR}/secrets/env
+  source ${ZOMBIE_DIR}/secrets/env
   set +a
 fi
 
-cd ${AFC_DIR}
-exec tmux new -A -s ai-full-control
+cd ${ZOMBIE_DIR}
+exec tmux new -A -s ubuntu-zombie
 EOF
 
-chmod +x "${AFC_DIR}/bin/"*
-chown -R "${AGENT_USER}:${AGENT_USER}" "${AFC_DIR}"
+chmod +x "${ZOMBIE_DIR}/bin/"*
+chown -R "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}"
 
 # ---------------------------------------------------------------------------
 # Browser automation smoke test
@@ -668,7 +673,7 @@ chown -R "${AGENT_USER}:${AGENT_USER}" "${AFC_DIR}"
 
 section "Browser automation smoke test"
 
-cat > "${AFC_DIR}/tools/browser-test.py" <<'EOF'
+cat > "${ZOMBIE_DIR}/tools/browser-test.py" <<'EOF'
 """Smoke test: drive Chromium through Playwright on the real Xorg desktop."""
 from playwright.sync_api import sync_playwright
 
@@ -680,7 +685,7 @@ with sync_playwright() as p:
     browser.close()
 EOF
 
-chown "${AGENT_USER}:${AGENT_USER}" "${AFC_DIR}/tools/browser-test.py"
+chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/tools/browser-test.py"
 
 # ---------------------------------------------------------------------------
 # x11vnc loopback only
@@ -697,7 +702,7 @@ if [[ -f "${VNC_PASSWD_FILE}" ]]; then
 elif [[ -n "${VNC_PASSWORD}" ]]; then
   runuser -l "${AGENT_USER}" -c "x11vnc -storepasswd '${VNC_PASSWORD}' ~/.vnc/passwd" >/dev/null
   ok "VNC password set from VNC_PASSWORD env var."
-elif [[ "${AFC_NONINTERACTIVE}" == "1" ]]; then
+elif [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]]; then
   die "Non-interactive mode requires VNC_PASSWORD when no VNC password is already stored."
 else
   log
@@ -723,11 +728,11 @@ chown -R "${AGENT_USER}:${AGENT_USER}" \
 
 section "Install verification script"
 
-cat > "${AFC_DIR}/bin/verify" <<EOF
+cat > "${ZOMBIE_DIR}/bin/verify" <<EOF
 #!/usr/bin/env bash
 set -uo pipefail
 
-AFC_DIR="${AFC_DIR}"
+ZOMBIE_DIR="${ZOMBIE_DIR}"
 AGENT_USER="${AGENT_USER}"
 AGENT_HOME="${AGENT_HOME}"
 
@@ -749,14 +754,14 @@ check() {
   fi
 }
 
-if [[ -f \${AFC_DIR}/secrets/env ]]; then
+if [[ -f \${ZOMBIE_DIR}/secrets/env ]]; then
   set -a
   # shellcheck disable=SC1091
-  source \${AFC_DIR}/secrets/env
+  source \${ZOMBIE_DIR}/secrets/env
   set +a
 fi
 
-printf '\\n%s== ai-full-control verify ==%s\\n' "\${C_BOLD}" "\${C_RESET}"
+printf '\\n%s== ubuntu-zombie verify ==%s\\n' "\${C_BOLD}" "\${C_RESET}"
 echo
 
 echo "User and sudo:"
@@ -776,7 +781,7 @@ echo "Desktop and GUI control:"
 check "Xorg session forced for \${AGENT_USER}"  bash -c "grep -q 'XSession=ubuntu-xorg' /var/lib/AccountsService/users/\${AGENT_USER}"
 check "x11vnc autostart present"           test -f \${AGENT_HOME}/.config/autostart/x11vnc.desktop
 check "DISPLAY is set"                     test -n "\${DISPLAY:-}"
-check "xdotool reachable on \${DISPLAY:-:0}" \${AFC_DIR}/bin/gui-env xdotool getdisplaygeometry
+check "xdotool reachable on \${DISPLAY:-:0}" \${ZOMBIE_DIR}/bin/gui-env xdotool getdisplaygeometry
 echo
 
 echo "Runtime:"
@@ -788,8 +793,8 @@ check "node and tsc present"               bash -c "command -v node && command -
 echo
 
 echo "Screenshot:"
-SHOT="\${AFC_DIR}/state/screen.png"
-if \${AFC_DIR}/bin/screenshot "\$SHOT" >/dev/null 2>&1 && [[ -s "\$SHOT" ]]; then
+SHOT="\${ZOMBIE_DIR}/state/screen.png"
+if \${ZOMBIE_DIR}/bin/screenshot "\$SHOT" >/dev/null 2>&1 && [[ -s "\$SHOT" ]]; then
   printf '  %s[ok]%s screenshot saved to %s\\n' "\${C_GREEN}" "\${C_RESET}" "\$SHOT"
   PASS=\$((PASS+1))
 else
@@ -810,8 +815,8 @@ if [[ \$FAIL -gt 0 ]]; then
 fi
 EOF
 
-chmod +x "${AFC_DIR}/bin/verify"
-chown "${AGENT_USER}:${AGENT_USER}" "${AFC_DIR}/bin/verify"
+chmod +x "${ZOMBIE_DIR}/bin/verify"
+chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/bin/verify"
 
 # ---------------------------------------------------------------------------
 # Tailscale enrolment
@@ -862,13 +867,13 @@ Next steps:
 
   2. After reboot, from any device on your Tailscale network:
        ssh ${AGENT_USER}@<tailscale-name-or-ip>
-       ${AFC_DIR}/bin/verify
+       ${ZOMBIE_DIR}/bin/verify
 
   3. Add cloud LLM keys (optional but expected):
-       sudoedit ${AFC_DIR}/secrets/env
+       sudoedit ${ZOMBIE_DIR}/secrets/env
 
   4. Start a persistent agent shell:
-       ${AFC_DIR}/bin/agent-shell
+       ${ZOMBIE_DIR}/bin/agent-shell
 
   5. Emergency desktop (still private):
        ssh -L ${VNC_PORT}:localhost:${VNC_PORT} ${AGENT_USER}@<tailscale-name-or-ip>
