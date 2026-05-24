@@ -9,7 +9,7 @@ body:
         Thanks for taking the time to file a bug.
 
         Before filing, please run `sudo /opt/ai-zombie/bin/collect-diagnostics`
-        (or `sudo ./scripts/setup-part-1.sh doctor` on a failed install) and
+        (or `sudo ./scripts/install.sh doctor` on a failed install) and
         attach the redacted output. **Do not paste API keys, the VNC password,
         Tailscale auth keys, or the contents of `/opt/ai-zombie/secrets/`.**
   - type: input
@@ -26,7 +26,7 @@ body:
       label: Install path
       description: Which invocation surfaced the bug?
       options:
-        - "Fresh install (first `setup-part-1.sh install`)"
+        - "Fresh install (first `install.sh install`)"
         - "Re-run install (idempotent path)"
         - "verify"
         - "doctor"
@@ -40,7 +40,7 @@ body:
     id: version
     attributes:
       label: Ubuntu Zombie version
-      description: Output of `./scripts/setup-part-1.sh --version` or contents of the `VERSION` file.
+      description: Output of `./scripts/install.sh --version` or contents of the `VERSION` file.
       placeholder: "0.2.0"
     validations:
       required: true
@@ -63,7 +63,7 @@ body:
     id: verify-output
     attributes:
       label: `verify` / `doctor` output
-      description: Redacted output of `sudo ./scripts/setup-part-1.sh verify` and/or `doctor`.
+      description: Redacted output of `sudo ./scripts/install.sh verify` and/or `doctor`.
       render: text
   - type: textarea
     id: logs

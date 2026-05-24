@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# setup-part-1-uninstall.sh
-# -------------------------
+# uninstall.sh
+# ------------
 # Reverse the Ubuntu Zombie installer.
 #
 # Removes the chat service, sudoers drop-in, SSH drop-in, x11vnc
@@ -10,11 +10,11 @@
 # /opt/ai-zombie/state/ to /var/backups/ before deletion.
 #
 # Usage:
-#   sudo ./setup-part-1-uninstall.sh            # interactive
-#   sudo ./setup-part-1-uninstall.sh --dry-run  # preview
-#   sudo ./setup-part-1-uninstall.sh --archive  # archive then remove
-#   sudo ./setup-part-1-uninstall.sh --yes      # skip confirmations
-#   sudo ./setup-part-1-uninstall.sh --keep-agent  # do not remove user
+#   sudo ./uninstall.sh            # interactive
+#   sudo ./uninstall.sh --dry-run  # preview
+#   sudo ./uninstall.sh --archive  # archive then remove
+#   sudo ./uninstall.sh --yes      # skip confirmations
+#   sudo ./uninstall.sh --keep-agent  # do not remove user
 #
 # This script intentionally does NOT remove Docker, Tailscale, Node,
 # Python, or other base packages — those are normal Ubuntu software

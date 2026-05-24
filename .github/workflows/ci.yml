@@ -24,7 +24,7 @@ jobs:
         run: |
           set -e
           mapfile -t files < <( { git ls-files; git ls-files --others --exclude-standard; } \
-            | grep -E '\.(sh|bash)$|^scripts/setup-part-1' \
+            | grep -E '\.(sh|bash)$' \
             | grep -v '^payload/agent/templates/' | sort -u )
           # Also lint the helper scripts under payload/bin (no .sh extension).
           mapfile -t bins  < <( { git ls-files payload/bin; git ls-files --others --exclude-standard payload/bin; } | sort -u )

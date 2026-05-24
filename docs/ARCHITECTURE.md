@@ -28,7 +28,7 @@ the whole stack fits in one head.
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ Host body — created by setup-part-1.sh                          │
+│ Host body — created by install.sh                               │
 │   agent user (passwordless sudo)                                │
 │   SSH (Tailscale-only, key-only)                                │
 │   UFW (deny inbound, allow on tailscale0)                       │
@@ -43,7 +43,7 @@ the whole stack fits in one head.
 
 ## Components
 
-### `setup-part-1.sh`
+### `install.sh`
 
 Single installer with subcommand dispatch:
 
@@ -52,9 +52,9 @@ Single installer with subcommand dispatch:
 - `doctor` — explain what is wrong and what would fix it.
 - `repair` — apply known-safe fixes (re-asserts permissions, retries
   Tailscale login, restarts the chat service, etc.).
-- `uninstall` — delegates to `setup-part-1-uninstall.sh`.
+- `uninstall` — delegates to `uninstall.sh`.
 
-### `setup-part-1-uninstall.sh`
+### `uninstall.sh`
 
 Reverses install. `--dry-run` lists what would change.
 `--archive` tars `/home/agent` and `/opt/ai-zombie/state/` to

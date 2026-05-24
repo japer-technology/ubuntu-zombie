@@ -87,7 +87,7 @@ enable it (required for unattended desktop automation), re-run the
 installer with:
 
 ```bash
-sudo ZOMBIE_ENABLE_AUTOLOGIN=1 ./scripts/setup-part-1.sh install
+sudo ZOMBIE_ENABLE_AUTOLOGIN=1 ./scripts/install.sh install
 ```
 
 Autologin trades a meaningful slice of physical-access security for

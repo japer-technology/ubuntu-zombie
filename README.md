@@ -21,8 +21,8 @@ for the exact promise and what is intentionally out of scope.
 ```bash
 git clone https://github.com/japer-technology/ubuntu-zombie.git
 cd ubuntu-zombie
-chmod +x scripts/setup-part-1.sh
-sudo ./scripts/setup-part-1.sh install
+chmod +x scripts/install.sh
+sudo ./scripts/install.sh install
 sudo reboot
 # after reboot:
 /opt/ai-zombie/bin/verify
@@ -38,11 +38,11 @@ Full walkthrough with expected output and failure branches:
 ## Subcommands
 
 ```
-sudo ./scripts/setup-part-1.sh install     # full install, idempotent
-sudo ./scripts/setup-part-1.sh verify      # read-only state check
-sudo ./scripts/setup-part-1.sh doctor      # explain failures
-sudo ./scripts/setup-part-1.sh repair      # fix known-safe drift
-sudo ./scripts/setup-part-1.sh uninstall   # reverse the install
+sudo ./scripts/install.sh install     # full install, idempotent
+sudo ./scripts/install.sh verify      # read-only state check
+sudo ./scripts/install.sh doctor      # explain failures
+sudo ./scripts/install.sh repair      # fix known-safe drift
+sudo ./scripts/install.sh uninstall   # reverse the install
 ```
 
 Non-interactive variants and every environment variable: see

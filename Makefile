@@ -11,8 +11,8 @@ help:
 	@echo "Targets:"
 	@echo "  lint           ShellCheck + bash -n + python compile"
 	@echo "  test           non-root smoke and repository checks"
-	@echo "  install-local  sudo ./scripts/setup-part-1.sh install (RUN ON A VM)"
-	@echo "  verify         sudo ./scripts/setup-part-1.sh verify"
+	@echo "  install-local  sudo ./scripts/install.sh install (RUN ON A VM)"
+	@echo "  verify         sudo ./scripts/install.sh verify"
 	@echo "  package        tar a release bundle into dist/"
 	@echo "  clean          remove dist/ and python caches"
 
@@ -33,11 +33,11 @@ test:
 
 install-local:
 	@if [ "$$(id -u)" -ne 0 ]; then echo 'install-local must be run as root (sudo make install-local)'; exit 1; fi
-	./scripts/setup-part-1.sh install
+	./scripts/install.sh install
 
 verify:
 	@if [ -x /opt/ai-zombie/bin/verify ]; then /opt/ai-zombie/bin/verify; \
-	 else ./scripts/setup-part-1.sh verify; fi
+	 else ./scripts/install.sh verify; fi
 
 package:
 	@mkdir -p dist

@@ -12,7 +12,7 @@ installer without breaking anything that already works?
 
 The answer is not a research project. The pieces exist. `ubuntu-zombie`
 already implements a working baseline in a single Bash script,
-`setup-part-1.sh`, that turns a normal Ubuntu PC into exactly the
+`install.sh`, that turns a normal Ubuntu PC into exactly the
 machine `WHY-1.md` describes. The remaining work is not invention. It
 is packaging, installer integration, governance, and a small number of
 deliberate trust-model choices that need to be made in the open.
@@ -20,7 +20,7 @@ deliberate trust-model choices that need to be made in the open.
 ## What already exists
 
 Before describing what to build, it is worth being precise about what
-is already done. `setup-part-1.sh` is idempotent, runs on a fresh
+is already done. `install.sh` is idempotent, runs on a fresh
 Ubuntu host, and walks through a fixed set of stages:
 
 - It updates the system and installs a base package set.
@@ -50,7 +50,7 @@ The phrase "ship it in the installer" can mean three quite different
 things, and conflating them is the main reason this kind of work
 stalls. They should be done in order, not in parallel.
 
-**Stage one: a Debian package.** Today `setup-part-1.sh` is a script
+**Stage one: a Debian package.** Today `install.sh` is a script
 that a human runs as root. The first step toward shipping is to turn
 it into a normal Ubuntu package — `ubuntu-zombie` — that can be
 installed with `apt install ubuntu-zombie` and that places its work
@@ -99,7 +99,7 @@ machine return to a plain Ubuntu install.
 
 **No hidden network behaviour.** The package must not bring up any
 inbound service on a public interface. The Tailscale-only rule that
-`setup-part-1.sh` already enforces should be encoded as a firewall
+`install.sh` already enforces should be encoded as a firewall
 profile that ships with the package and is verified by the
 post-install check. If Tailscale is not yet authenticated, the
 package should fail closed, not open.
@@ -110,7 +110,7 @@ package provides the slot — `/opt/ai-zombie/secrets/env` with strict
 permissions — and the installer screen provides the prompt. The
 package itself ships no credentials.
 
-**Idempotence as a property, not an accident.** `setup-part-1.sh` is
+**Idempotence as a property, not an accident.** `install.sh` is
 already idempotent. The package must preserve that. Re-running the
 post-install step, upgrading the package, or reconfiguring it with
 `dpkg-reconfigure ubuntu-zombie` must converge on the same state
@@ -197,7 +197,7 @@ maintainer's confidence. It needs an evidence trail.
 
 **Continuous integration on a real Ubuntu image.** The package's CI
 should boot a clean Ubuntu cloud image, install the package
-non-interactively (the path `setup-part-1.sh` already supports via
+non-interactively (the path `install.sh` already supports via
 `ZOMBIE_NONINTERACTIVE=1`), run the verification script, exercise
 install / reconfigure / purge cycles, and assert that the machine
 returns to a clean state after purge. This is not optional.
@@ -245,7 +245,7 @@ than tenant identities in a closed system.
 ## Conclusion
 
 The proposal in `WHY-1.md` is not waiting on missing technology. The
-body of the administrator already exists in `setup-part-1.sh`. The
+body of the administrator already exists in `install.sh`. The
 trust model is already worked out. The remaining work is the ordinary
 work of turning a script into a package, a package into an archive
 seed, and an archive seed into an installer option — with the

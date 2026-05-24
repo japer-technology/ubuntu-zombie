@@ -113,7 +113,7 @@ self-hosted "ai sysadmin" linux
 
 ### GitHub code / repo search
 ```
-filename:setup-part-1.sh
+filename:install.sh
 filename:install.sh "agent" "passwordless sudo" "tailscale"
 "AGENT_USER" "TAILSCALE_AUTHKEY" "VNC_PASSWORD" in:file
 "ai-full-control" in:file,path,name

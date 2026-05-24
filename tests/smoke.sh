@@ -4,7 +4,7 @@
 # Subcommands:
 #   syntax        bash -n on every shell script we ship
 #   python        py_compile on every Python file under payload/agent
-#   subcommands   ensure scripts/setup-part-1.sh recognises every documented subcommand
+#   subcommands   ensure scripts/install.sh recognises every documented subcommand
 #   noninteractive verify ZOMBIE_NONINTERACTIVE=1 with missing required env
 #                  exits with code 64
 #   standards     ensure repository metadata and packaging inputs are present
@@ -22,7 +22,7 @@ shell_files() {
   } | while read -r f; do
     [[ -z "$f" || ! -f "$f" ]] && continue
     case "$f" in
-      *.sh|setup-part-1*) printf '%s\n' "$f" ;;
+      *.sh)               printf '%s\n' "$f" ;;
       payload/bin/*)      printf '%s\n' "$f" ;;
     esac
   done | sort -u
@@ -50,12 +50,12 @@ run_python() {
 
 run_subcommands() {
   echo "[smoke] subcommand parsing"
-  ./scripts/setup-part-1.sh --help    >/dev/null
-  ./scripts/setup-part-1.sh --version >/dev/null
+  ./scripts/install.sh --help    >/dev/null
+  ./scripts/install.sh --version >/dev/null
   # Each subcommand should at least parse and not bail with code 2 (bad usage).
   for sub in verify doctor; do
     set +e
-    out="$(./scripts/setup-part-1.sh "${sub}" 2>&1)"
+    out="$(./scripts/install.sh "${sub}" 2>&1)"
     rc=$?
     set -e
     if [[ $rc -eq 2 ]]; then
@@ -65,7 +65,7 @@ run_subcommands() {
     fi
   done
   # 'doctor' must run as a non-root user without erroring on argument parsing.
-  ./scripts/setup-part-1.sh doctor >/dev/null || true
+  ./scripts/install.sh doctor >/dev/null || true
 }
 
 run_noninteractive() {
@@ -79,7 +79,7 @@ run_noninteractive() {
   # validate_noninteractive in a subshell via bash -c calling internal logic
   # would require refactoring. We approximate by checking that the help text
   # mentions ZOMBIE_NONINTERACTIVE.
-  ./scripts/setup-part-1.sh --help | grep -q ZOMBIE_NONINTERACTIVE
+  ./scripts/install.sh --help | grep -q ZOMBIE_NONINTERACTIVE
   rm -rf "${tmpdir}"
 }
 

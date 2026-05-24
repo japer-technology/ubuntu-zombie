@@ -1,6 +1,6 @@
 # Recommendations to Make Ubuntu Zombie a True MVP / MVVP
 
-Ubuntu Zombie already has a strong proof-of-concept: `setup-part-1.sh`
+Ubuntu Zombie already has a strong proof-of-concept: `install.sh`
 creates a privileged `agent` user, hardens SSH, restricts ingress to
 Tailscale, installs Docker, Python/Node runtimes, browser automation,
 desktop automation helpers, VNC over localhost, and a verification script.
@@ -128,8 +128,8 @@ does not yet ship an uninstall path.
 
 Add:
 
-- `setup-part-1.sh uninstall`, or a separate
-  `setup-part-1-uninstall.sh`.
+- `install.sh uninstall`, or a separate
+  `uninstall.sh`.
 - A dry-run mode that lists what would be removed.
 - Removal of sudoers drop-ins, SSH drop-ins, x11vnc autostart, helper
   scripts, systemd services, package-managed configuration, and optional

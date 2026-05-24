@@ -16,9 +16,9 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [0.2.0] - 2026-05-24
 
 ### Added — MVP product loop
-- Subcommand dispatch on `setup-part-1.sh`:
+- Subcommand dispatch on `install.sh`:
   `install`, `verify`, `doctor`, `repair`, `uninstall`.
-- Separate `setup-part-1-uninstall.sh` with `--dry-run` and `--archive`
+- Separate `uninstall.sh` with `--dry-run` and `--archive`
   modes that remove sudoers drop-ins, SSH drop-ins, x11vnc autostart,
   the chat systemd service, generated helpers, and (optionally) the
   `agent` user. User data under `/home/agent` and
@@ -90,7 +90,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - README rewritten as a concise front door pointing to the new docs.
 
 ### Changed
-- `setup-part-1.sh` reads the version from the `VERSION` file at the
+- `install.sh` reads the version from the `VERSION` file at the
   repository root when present.
 - Graphical autologin is no longer enabled by default; the installer
   prints the recommended override when the choice matters for
@@ -99,7 +99,7 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [0.1.0] - 2025-Q4
 
 ### Added
-- Initial proof-of-concept installer (`setup-part-1.sh`) that creates
+- Initial proof-of-concept installer (`install.sh`) that creates
   the `agent` user, configures passwordless sudo, hardens SSH,
   installs Tailscale + UFW, forces Xorg + autologin, installs Docker,
   Python and Node runtimes, Playwright + Chromium, GUI automation

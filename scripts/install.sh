@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# setup-part-1.sh
-# ---------------
+# install.sh
+# ----------
 # Ubuntu Zombie: baseline installer + chat service.
 #
 # Turn a normal Ubuntu Desktop LTS PC into a machine with a resident
@@ -15,7 +15,7 @@
 #   verify      Read-only state check (no mutation).
 #   doctor      Explain what is wrong and likely fixes.
 #   repair      Apply known-safe fixes for common drift.
-#   uninstall   Delegate to setup-part-1-uninstall.sh.
+#   uninstall   Delegate to uninstall.sh.
 #
 # Common env vars (see docs/CONFIGURATION.md for the full list):
 #   ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
@@ -33,7 +33,7 @@ set -Eeuo pipefail
 # Configuration
 # ---------------------------------------------------------------------------
 
-readonly SCRIPT_NAME="setup-part-1.sh"
+readonly SCRIPT_NAME="install.sh"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 # Repository root is one level above scripts/. The installer reads VERSION and
@@ -128,7 +128,7 @@ Subcommands:
   doctor      Explain failures and likely fixes.
   repair      Apply known-safe fixes (re-assert permissions, retry
               Tailscale login, restart the chat service).
-  uninstall   Reverse the install (delegates to setup-part-1-uninstall.sh).
+  uninstall   Reverse the install (delegates to uninstall.sh).
 
 Environment variables (selected; see CONFIGURATION.md for all):
   ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
@@ -504,10 +504,10 @@ cmd_repair() {
 # ---------------------------------------------------------------------------
 
 cmd_uninstall() {
-  if [[ -x "${SCRIPT_DIR}/setup-part-1-uninstall.sh" ]]; then
-    exec "${SCRIPT_DIR}/setup-part-1-uninstall.sh" "${PARSED_ARGS[@]}"
+  if [[ -x "${SCRIPT_DIR}/uninstall.sh" ]]; then
+    exec "${SCRIPT_DIR}/uninstall.sh" "${PARSED_ARGS[@]}"
   fi
-  die "setup-part-1-uninstall.sh not found alongside ${SCRIPT_NAME}." 1
+  die "uninstall.sh not found alongside ${SCRIPT_NAME}." 1
 }
 
 # ---------------------------------------------------------------------------
@@ -1420,7 +1420,7 @@ Public exposure:
 Install transcript: ${LOG_FILE}
 Audit log:          ${ZOMBIE_LOG_DIR}/audit.log
 Policy:             ${ZOMBIE_ETC}/policy.yaml
-Uninstall:          sudo ${SCRIPT_DIR}/setup-part-1-uninstall.sh --dry-run
+Uninstall:          sudo ${SCRIPT_DIR}/uninstall.sh --dry-run
 EOF
 
 if [[ "${TS_STATUS_OK}" != "1" ]]; then
