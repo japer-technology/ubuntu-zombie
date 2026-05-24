@@ -8,7 +8,7 @@
 # AI Systems Administrator, authenticated by the configured token
 # provider, contactable through a private loopback chat UI.
 #
-# Read README.md and QUICKSTART.md before running.
+# Read README.md and docs/QUICKSTART.md before running.
 #
 # Subcommands:
 #   install     Full install (default). Idempotent.
@@ -17,7 +17,7 @@
 #   repair      Apply known-safe fixes for common drift.
 #   uninstall   Delegate to setup-part-1-uninstall.sh.
 #
-# Common env vars (see CONFIGURATION.md for the full list):
+# Common env vars (see docs/CONFIGURATION.md for the full list):
 #   ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
 #                               VNC_PASSWORD must be set unless already
 #                               configured on disk).
@@ -36,9 +36,13 @@ set -Eeuo pipefail
 readonly SCRIPT_NAME="setup-part-1.sh"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
+# Repository root is one level above scripts/. The installer reads VERSION and
+# the payload from the repo root so it can be invoked from anywhere.
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+readonly REPO_ROOT
 
-if [[ -f "${SCRIPT_DIR}/VERSION" ]]; then
-  SCRIPT_VERSION="$(tr -d '[:space:]' < "${SCRIPT_DIR}/VERSION")"
+if [[ -f "${REPO_ROOT}/VERSION" ]]; then
+  SCRIPT_VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
 else
   SCRIPT_VERSION="0.2.0"
 fi
@@ -59,7 +63,7 @@ SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
 VNC_PASSWORD="${VNC_PASSWORD:-}"
 TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
 
-PAYLOAD_DIR="${PAYLOAD_DIR:-${SCRIPT_DIR}/payload}"
+PAYLOAD_DIR="${PAYLOAD_DIR:-${REPO_ROOT}/payload}"
 
 # Exit codes:
 #   0  ok

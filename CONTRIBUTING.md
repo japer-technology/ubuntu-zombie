@@ -30,23 +30,30 @@ You need:
 
 ## Layout
 
-See `ARCHITECTURE.md` for components. The repository roughly mirrors
+See `docs/ARCHITECTURE.md` for components. The repository roughly mirrors
 what ends up on a target machine:
 
 ```
 .
-├── setup-part-1.sh              # main installer
-├── setup-part-1-uninstall.sh    # uninstaller
-├── payload/                     # files copied to /opt/ai-zombie/
-│   ├── agent/                   # Python chat service
-│   ├── bin/                     # operator helpers
-│   ├── etc/policy.yaml          # default policy
-│   ├── systemd/                 # unit files
-│   └── logrotate/               # rotation rules
+├── scripts/
+│   ├── setup-part-1.sh           # main installer
+│   └── setup-part-1-uninstall.sh # uninstaller
+├── payload/                      # files copied to /opt/ai-zombie/
+│   ├── agent/                    # Python chat service
+│   ├── bin/                      # operator helpers
+│   ├── etc/policy.yaml           # default policy
+│   ├── systemd/                  # unit files
+│   └── logrotate/                # rotation rules
 ├── tests/
-│   └── smoke.sh                 # syntax + non-interactive checks
+│   └── smoke.sh                  # syntax + non-interactive checks
+├── docs/                         # user-facing docs and design notes
 ├── Makefile
-└── *.md                         # docs
+├── VERSION
+├── README.md
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── CODE_OF_CONDUCT.md
+└── SECURITY.md
 ```
 
 ## Running tests
@@ -78,14 +85,14 @@ CI runs the same script on every push and pull request, plus
 
 1. Implement `BaseProvider` in `payload/agent/providers.py`.
 2. Register it in `provider_from_env()`.
-3. Document the env vars in `CONFIGURATION.md`.
+3. Document the env vars in `docs/CONFIGURATION.md`.
 4. Add a smoke test in `tests/smoke.sh` for the import.
 
 ## Adding a policy class
 
 1. Add the class and matching patterns to `payload/etc/policy.yaml`.
 2. Add a handler in `payload/agent/policy.py`.
-3. Document the class in `ARCHITECTURE.md`.
+3. Document the class in `docs/ARCHITECTURE.md`.
 
 ## Filing an issue
 

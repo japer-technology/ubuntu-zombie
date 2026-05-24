@@ -30,6 +30,6 @@ token provider authenticates the administrator. The operator owns the
 machine and can rotate the API key, revoke the SSH key, disable the
 Tailscale account, or uninstall the system at any time.
 
-See [`SECURITY.md`](SECURITY.md) for the full trust boundary,
+See [`SECURITY.md`](../SECURITY.md) for the full trust boundary,
 [`ARCHITECTURE.md`](ARCHITECTURE.md) for the components, and
 [`ROADMAP.md`](ROADMAP.md) for what is intentionally post-MVP.

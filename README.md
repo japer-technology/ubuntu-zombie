@@ -13,7 +13,7 @@ private Tailscale tailnet. The operator owns the machine, the SSH
 key, the API key, and the kill switch.
 
 This is not a locked appliance, a hosted service, or an autonomous
-agent that decides what the PC is for. See [`VISION.md`](VISION.md)
+agent that decides what the PC is for. See [`docs/VISION.md`](docs/VISION.md)
 for the exact promise and what is intentionally out of scope.
 
 ## Quickstart
@@ -21,8 +21,8 @@ for the exact promise and what is intentionally out of scope.
 ```bash
 git clone https://github.com/japer-technology/ubuntu-zombie.git
 cd ubuntu-zombie
-chmod +x setup-part-1.sh
-sudo ./setup-part-1.sh install
+chmod +x scripts/setup-part-1.sh
+sudo ./scripts/setup-part-1.sh install
 sudo reboot
 # after reboot:
 /opt/ai-zombie/bin/verify
@@ -33,42 +33,41 @@ ssh -L 7878:127.0.0.1:7878 agent@<tailscale-name-or-ip>
 ```
 
 Full walkthrough with expected output and failure branches:
-[`QUICKSTART.md`](QUICKSTART.md).
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md).
 
 ## Subcommands
 
 ```
-sudo ./setup-part-1.sh install     # full install, idempotent
-sudo ./setup-part-1.sh verify      # read-only state check
-sudo ./setup-part-1.sh doctor      # explain failures
-sudo ./setup-part-1.sh repair      # fix known-safe drift
-sudo ./setup-part-1.sh uninstall   # reverse the install
+sudo ./scripts/setup-part-1.sh install     # full install, idempotent
+sudo ./scripts/setup-part-1.sh verify      # read-only state check
+sudo ./scripts/setup-part-1.sh doctor      # explain failures
+sudo ./scripts/setup-part-1.sh repair      # fix known-safe drift
+sudo ./scripts/setup-part-1.sh uninstall   # reverse the install
 ```
 
 Non-interactive variants and every environment variable: see
-[`CONFIGURATION.md`](CONFIGURATION.md) and `--help`.
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) and `--help`.
 
 ## Documentation
 
-| Document                                       | When to read it                                   |
-| ---------------------------------------------- | ------------------------------------------------- |
-| [`VISION.md`](VISION.md)                       | What this project promises (and does not)         |
-| [`QUICKSTART.md`](QUICKSTART.md)               | First successful install in ten steps             |
-| [`CONFIGURATION.md`](CONFIGURATION.md)         | Provider keys, Tailscale, VNC, chat, policy       |
-| [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)     | Common failures and their fixes                   |
-| [`SECURITY.md`](SECURITY.md)                   | Trust model, what the provider sees, disclosure   |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md)           | Components, action classes, trust boundaries      |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md)           | How to test and change the installer              |
-| [`CHANGELOG.md`](CHANGELOG.md)                 | Versioned release history                         |
-| [`ROADMAP.md`](ROADMAP.md)                     | Post-MVP work                                     |
+| Document                                                       | When to read it                                   |
+| -------------------------------------------------------------- | ------------------------------------------------- |
+| [`docs/VISION.md`](docs/VISION.md)                             | What this project promises (and does not)         |
+| [`docs/QUICKSTART.md`](docs/QUICKSTART.md)                     | First successful install in ten steps             |
+| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)               | Provider keys, Tailscale, VNC, chat, policy       |
+| [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)           | Common failures and their fixes                   |
+| [`SECURITY.md`](SECURITY.md)                                   | Trust model, what the provider sees, disclosure   |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                 | Components, action classes, trust boundaries      |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)                           | How to test and change the installer              |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)                     | Community expectations                            |
+| [`CHANGELOG.md`](CHANGELOG.md)                                 | Versioned release history                         |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md)                           | Post-MVP work                                     |
 
-Background essays (kept for context, not required reading):
-[`IDEA.md`](IDEA.md), [`HOW-1.md`](HOW-1.md),
-[`WHY-1.md`](WHY-1.md), [`POSSIBILITIES-1.md`](POSSIBILITIES-1.md),
-[`POSSIBILITIES-2.md`](POSSIBILITIES-2.md),
-[`SIMILAR.md`](SIMILAR.md), [`SEARCH.md`](SEARCH.md), and the MVP
-recommendation that produced this version,
-[`RECOMMENDATIONS-1.md`](RECOMMENDATIONS-1.md).
+Background essays (kept for context, not required reading) live under
+[`docs/design-notes/`](docs/design-notes/): `IDEA.md`, `HOW-1.md`,
+`WHY-1.md`, `POSSIBILITIES-1.md`, `POSSIBILITIES-2.md`, `SIMILAR.md`,
+`SEARCH.md`, and the MVP recommendation that produced this version,
+`RECOMMENDATIONS-1.md`.
 
 ## Trust model in one paragraph
 
