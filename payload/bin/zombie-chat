@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# zombie-chat — print the chat URL and a remote-tunnel example.
+set -euo pipefail
+
+PORT="${ZOMBIE_CHAT_PORT:-7878}"
+HOST="$(hostname)"
+
+cat <<EOF
+Ubuntu Zombie chat
+------------------
+
+Local URL:
+  http://127.0.0.1:${PORT}/
+
+Remote (from a device on your Tailscale network):
+  ssh -L ${PORT}:127.0.0.1:${PORT} agent@${HOST}
+  # then open http://127.0.0.1:${PORT}/ in your local browser
+
+Service control:
+  sudo systemctl status ubuntu-zombie-chat.service
+  sudo systemctl restart ubuntu-zombie-chat.service
+  sudo journalctl -u ubuntu-zombie-chat.service -f
+
+Audit log:
+  /opt/ai-zombie/bin/audit-recent
+
+EOF

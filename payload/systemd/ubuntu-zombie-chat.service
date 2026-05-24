@@ -1,0 +1,33 @@
+[Unit]
+Description=Ubuntu Zombie chat service (loopback-only AI Systems Administrator)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent
+Group=agent
+WorkingDirectory=/opt/ai-zombie
+EnvironmentFile=-/opt/ai-zombie/secrets/env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/agent/agent-env/bin/python /opt/ai-zombie/agent/server.py --host 127.0.0.1 --port ${ZOMBIE_CHAT_PORT}
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening — the service must keep writing the audit log
+# under /var/log/ubuntu-zombie/, so /var/log is not made read-only.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=false
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

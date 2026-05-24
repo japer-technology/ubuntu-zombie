@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ubuntu Zombie — {{HOSTNAME}}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; padding: 0;
+         display: flex; flex-direction: column; height: 100vh; }
+  header { padding: .6rem 1rem; border-bottom: 1px solid #8884;
+           display: flex; justify-content: space-between; align-items: baseline; }
+  header h1 { font-size: 1rem; margin: 0; }
+  header .status { font-size: .8rem; opacity: .8; }
+  main { flex: 1; overflow-y: auto; padding: 1rem; max-width: 60rem;
+         width: 100%; margin: 0 auto; box-sizing: border-box; }
+  .msg { margin: .8rem 0; padding: .6rem .8rem; border-radius: .5rem;
+         white-space: pre-wrap; word-wrap: break-word; }
+  .user { background: #4a90e220; border: 1px solid #4a90e266; }
+  .assistant { background: #8884; }
+  .system { background: #f5a62320; border: 1px solid #f5a62366;
+            font-family: ui-monospace, monospace; font-size: .85rem; }
+  .system.error { background: #e74c3c30; border-color: #e74c3c; }
+  .role { font-size: .7rem; text-transform: uppercase; opacity: .6;
+          margin-bottom: .2rem; }
+  .proposal { border: 1px solid #f5a623; border-radius: .5rem;
+              padding: .6rem .8rem; margin: .5rem 0;
+              background: #f5a62315; }
+  .proposal code { display: block; padding: .4rem .6rem;
+                   background: #0002; border-radius: .3rem;
+                   font-family: ui-monospace, monospace; font-size: .85rem;
+                   white-space: pre-wrap; word-wrap: break-word; }
+  .proposal .class { font-size: .75rem; text-transform: uppercase;
+                     letter-spacing: .05em; opacity: .8; }
+  .proposal.read_only { border-color: #2ecc71; background: #2ecc7115; }
+  .proposal.destructive { border-color: #e74c3c; background: #e74c3c15; }
+  .proposal .actions { margin-top: .5rem; display: flex; gap: .5rem;
+                       align-items: center; flex-wrap: wrap; }
+  button { padding: .35rem .8rem; border-radius: .3rem;
+           border: 1px solid #8888; background: #fff2; cursor: pointer; }
+  button.primary { background: #2ecc7140; border-color: #2ecc71; }
+  button.danger { background: #e74c3c40; border-color: #e74c3c; }
+  input[type=text] { padding: .35rem .5rem; border-radius: .3rem;
+                     border: 1px solid #8888; background: #fff2;
+                     min-width: 18rem; }
+  footer { padding: .8rem 1rem; border-top: 1px solid #8884; }
+  form { display: flex; gap: .5rem; max-width: 60rem; margin: 0 auto; }
+  textarea { flex: 1; min-height: 3rem; padding: .5rem;
+             border-radius: .3rem; border: 1px solid #8888;
+             font: inherit; resize: vertical; background: #fff2; }
+  .examples { font-size: .8rem; opacity: .75;
+              max-width: 60rem; margin: 0 auto; padding: .3rem 1rem 0; }
+  .examples summary { cursor: pointer; }
+  .result { margin-top: .5rem; }
+  .result pre { background: #0003; padding: .4rem .6rem;
+                border-radius: .3rem; max-height: 16rem; overflow: auto;
+                font-size: .8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ubuntu Zombie · {{HOSTNAME}} · {{OS}}</h1>
+  <div class="status">Provider: {{PROVIDER_STATUS}}</div>
+</header>
+<main id="log" aria-live="polite"></main>
+<details class="examples">
+  <summary>Safe example prompts</summary>
+  <pre>{{EXAMPLES}}</pre>
+</details>
+<footer>
+  <form id="form">
+    <textarea id="prompt" placeholder="Ask the administrator..." required></textarea>
+    <button type="submit" class="primary">Send</button>
+  </form>
+</footer>
+<script>
+"use strict";
+let conversationId = null;
+const log = document.getElementById("log");
+const form = document.getElementById("form");
+const promptEl = document.getElementById("prompt");
+
+function el(tag, attrs = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else e.setAttribute(k, v);
+  }
+  for (const c of children) {
+    if (c == null) continue;
+    e.appendChild(typeof c === "string" ? document.createTextNode(c) : c);
+  }
+  return e;
+}
+
+function addMessage(role, content, opts = {}) {
+  const cls = opts.error ? `msg ${role} error` : `msg ${role}`;
+  const wrap = el("div", { class: cls });
+  wrap.appendChild(el("div", { class: "role", text: role }));
+  wrap.appendChild(el("div", { text: content }));
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  return wrap;
+}
+
+function renderResult(result) {
+  const wrap = el("div", { class: "result" });
+  wrap.appendChild(el("div", { text: `exit ${result.exit_code} · ${result.duration_ms} ms` }));
+  if (result.stdout) wrap.appendChild(el("pre", { text: result.stdout }));
+  if (result.stderr) {
+    const pre = el("pre", { text: result.stderr });
+    pre.style.color = "#e74c3c";
+    wrap.appendChild(pre);
+  }
+  if (result.follow_up && result.follow_up.length) {
+    const f = el("div", {});
+    f.appendChild(el("div", { text: "Suggested follow-ups:" }));
+    for (const cmd of result.follow_up) f.appendChild(el("code", { text: cmd }));
+    wrap.appendChild(f);
+  }
+  return wrap;
+}
+
+function renderProposal(p) {
+  const wrap = el("div", { class: `proposal ${p.action_class}` });
+  wrap.appendChild(el("div", { class: "class", text: p.action_class }));
+  wrap.appendChild(el("code", { text: p.command }));
+  if (p.result) {
+    wrap.appendChild(el("div", { text: "(executed automatically — read-only)" }));
+    wrap.appendChild(renderResult(p.result));
+  } else if (p.requires_approval) {
+    const actions = el("div", { class: "actions" });
+    let phraseInput = null;
+    if (p.requires_phrase) {
+      phraseInput = el("input", { type: "text",
+        placeholder: `type: ${p.confirm_phrase}` });
+      actions.appendChild(phraseInput);
+    }
+    const approve = el("button", { class: "primary", text: "Approve" });
+    const deny = el("button", { class: "danger", text: "Deny" });
+    approve.addEventListener("click", async () => {
+      approve.disabled = deny.disabled = true;
+      const body = { proposal_id: p.id, decision: "approve" };
+      if (phraseInput) body.phrase = phraseInput.value;
+      const r = await fetch("/api/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      actions.remove();
+      if (data.error) wrap.appendChild(el("div", { class: "system error", text: data.error }));
+      else if (data.result) wrap.appendChild(renderResult(data.result));
+    });
+    deny.addEventListener("click", async () => {
+      approve.disabled = deny.disabled = true;
+      await fetch("/api/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proposal_id: p.id, decision: "deny" }),
+      });
+      actions.remove();
+      wrap.appendChild(el("div", { text: "Denied." }));
+    });
+    actions.appendChild(approve);
+    actions.appendChild(deny);
+    wrap.appendChild(actions);
+  }
+  return wrap;
+}
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const prompt = promptEl.value.trim();
+  if (!prompt) return;
+  addMessage("user", prompt);
+  promptEl.value = "";
+  promptEl.disabled = true;
+  try {
+    const r = await fetch("/api/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, conversation_id: conversationId }),
+    });
+    const data = await r.json();
+    conversationId = data.conversation_id ?? conversationId;
+    if (data.error) addMessage("system", data.error, { error: true });
+    if (data.reply) addMessage("assistant", data.reply);
+    for (const p of (data.proposals || [])) log.appendChild(renderProposal(p));
+    log.scrollTop = log.scrollHeight;
+  } catch (err) {
+    addMessage("system", String(err), { error: true });
+  } finally {
+    promptEl.disabled = false;
+    promptEl.focus();
+  }
+});
+
+promptEl.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    form.requestSubmit();
+  }
+});
+</script>
+</body>
+</html>

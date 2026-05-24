@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# audit-recent — pretty-print recent JSON-lines audit entries.
+set -euo pipefail
+
+AUDIT_LOG="${ZOMBIE_AUDIT_LOG:-/var/log/ubuntu-zombie/audit.log}"
+
+usage() {
+  cat <<EOF
+audit-recent — show recent Ubuntu Zombie audit entries.
+
+Usage:
+  audit-recent [-n N] [--all]
+
+Options:
+  -n N      Show the last N entries (default 25).
+  --all     Show the entire log.
+  -h, --help  Show this help.
+EOF
+}
+
+N=25
+SHOW_ALL=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --all)     SHOW_ALL=1; shift ;;
+    -n)        N="${2:-25}"; shift 2 ;;
+    *)         echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [[ ! -r "${AUDIT_LOG}" ]]; then
+  echo "Audit log not readable at ${AUDIT_LOG}." >&2
+  echo "Hint: run with sudo, or add yourself to the log's group." >&2
+  exit 1
+fi
+
+if [[ "${SHOW_ALL}" == "1" ]]; then
+  LINES="$(cat "${AUDIT_LOG}")"
+else
+  LINES="$(tail -n "${N}" "${AUDIT_LOG}")"
+fi
+
+if [[ -z "${LINES}" ]]; then
+  echo "(audit log is empty)"
+  exit 0
+fi
+
+if command -v jq >/dev/null 2>&1; then
+  printf '%s\n' "${LINES}" | jq -r '
+    def color(t):
+      if t == "prompt"          then "\u001b[36m"
+      elif t == "proposal"      then "\u001b[33m"
+      elif t == "approval"      then "\u001b[35m"
+      elif t == "execution"     then "\u001b[32m"
+      elif t == "provider_error" then "\u001b[31m"
+      else "\u001b[0m" end;
+    "\(color(.type))[\(.ts)] \(.type)\u001b[0m " +
+      (if .command          then "cmd=\(.command)"          else "" end) +
+      (if .action_class     then " class=\(.action_class)"  else "" end) +
+      (if .exit_code != null then " exit=\(.exit_code)"     else "" end) +
+      (if .decision         then " decision=\(.decision)"   else "" end) +
+      (if .prompt           then " prompt=\((.prompt|tostring)[0:80])" else "" end) +
+      (if .error            then " error=\(.error)"         else "" end)
+  '
+else
+  printf '%s\n' "${LINES}"
+fi

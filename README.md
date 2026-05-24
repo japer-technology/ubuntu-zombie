@@ -1,123 +1,88 @@
 # Ubuntu Zombie
 
-> A normal Ubuntu PC with a resident AI Systems Administrator,
-> authenticated by the token provider and contactable by any user of
-> the machine.
+> **Ubuntu Zombie adds a private, root-capable AI Systems
+> Administrator account to supported Ubuntu Desktop LTS machines so a
+> novice owner can ask the machine to diagnose, explain, configure,
+> repair, and operate itself.**
 
-This project does not turn Ubuntu into a sealed appliance, a remote
-server box.
+It is a normal Ubuntu PC with an administrator inside it. Any local
+user can open a private chat, ask the machine to do something, see
+exactly what is proposed, approve it, and watch it happen. Everything
+the AI does is audit-logged. Inbound network access is restricted to a
+private Tailscale tailnet. The operator owns the machine, the SSH
+key, the API key, and the kill switch.
 
-It starts as a normal Ubuntu PC.
+This is not a locked appliance, a hosted service, or an autonomous
+agent that decides what the PC is for. See [`VISION.md`](VISION.md)
+for the exact promise and what is intentionally out of scope.
 
-It can remain ordinary, or it can become as complicated as the user
-wants: desktop workstation, server, browser machine, Docker host,
-automation rig, Forgejo controller, local lab, strange experimental
-monster, or all of those at once.
+## Quickstart
 
-The difference is that the machine now has a resident AI Systems
-Administrator.
+```bash
+git clone https://github.com/japer-technology/ubuntu-zombie.git
+cd ubuntu-zombie
+chmod +x setup-part-1.sh
+sudo ./setup-part-1.sh install
+sudo reboot
+# after reboot:
+/opt/ai-zombie/bin/verify
+sudo /opt/ai-zombie/bin/secrets-edit   # add an LLM API key
+sudo systemctl restart ubuntu-zombie-chat.service
+# open http://127.0.0.1:7878/ locally, or tunnel over Tailscale:
+ssh -L 7878:127.0.0.1:7878 agent@<tailscale-name-or-ip>
+```
 
-Any user of the PC can contact that administrator. They can ask for
-help, ask questions, request software, diagnose problems, inspect
-logs, configure services, manage files, drive the desktop, operate the
-browser, or explain what the machine is doing.
+Full walkthrough with expected output and failure branches:
+[`QUICKSTART.md`](QUICKSTART.md).
 
-The AI Systems Administrator is authenticated by the token provider.
-The PC itself remains the user’s machine.
+## Subcommands
 
-The baseline installer is deliberately small: Ubuntu plus the minimum
-packages needed to give the AI Systems Administrator a useful body.
-The desktop, browser, Docker, services, tools, and stranger machinery
-can then be added as the user wants.
+```
+sudo ./setup-part-1.sh install     # full install, idempotent
+sudo ./setup-part-1.sh verify      # read-only state check
+sudo ./setup-part-1.sh doctor      # explain failures
+sudo ./setup-part-1.sh repair      # fix known-safe drift
+sudo ./setup-part-1.sh uninstall   # reverse the install
+```
 
-You do not need to be a Linux expert to run it. You need to be willing
-to sit in front of the machine once with a keyboard.
+Non-interactive variants and every environment variable: see
+[`CONFIGURATION.md`](CONFIGURATION.md) and `--help`.
 
----
+## Documentation
 
-## What this machine becomes
+| Document                                       | When to read it                                   |
+| ---------------------------------------------- | ------------------------------------------------- |
+| [`VISION.md`](VISION.md)                       | What this project promises (and does not)         |
+| [`QUICKSTART.md`](QUICKSTART.md)               | First successful install in ten steps             |
+| [`CONFIGURATION.md`](CONFIGURATION.md)         | Provider keys, Tailscale, VNC, chat, policy       |
+| [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md)     | Common failures and their fixes                   |
+| [`SECURITY.md`](SECURITY.md)                   | Trust model, what the provider sees, disclosure   |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md)           | Components, action classes, trust boundaries      |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md)           | How to test and change the installer              |
+| [`CHANGELOG.md`](CHANGELOG.md)                 | Versioned release history                         |
+| [`ROADMAP.md`](ROADMAP.md)                     | Post-MVP work                                     |
 
-This installer adds a resident administrator to a normal Ubuntu PC.
+Background essays (kept for context, not required reading):
+[`IDEA.md`](IDEA.md), [`HOW-1.md`](HOW-1.md),
+[`WHY-1.md`](WHY-1.md), [`POSSIBILITIES-1.md`](POSSIBILITIES-1.md),
+[`POSSIBILITIES-2.md`](POSSIBILITIES-2.md),
+[`SIMILAR.md`](SIMILAR.md), [`SEARCH.md`](SEARCH.md), and the MVP
+recommendation that produced this version,
+[`RECOMMENDATIONS-1.md`](RECOMMENDATIONS-1.md).
 
-It does not remove the human users.
+## Trust model in one paragraph
 
-It does not replace the desktop.
+The local `agent` Linux user is the operating identity of the AI
+Systems Administrator and holds passwordless `sudo`. The configured
+cloud LLM provider authenticates the administrator. The operator owns
+the machine, the SSH private key, the API key, and the Tailscale
+account, and can rotate, revoke, or uninstall any of them at any
+time. Privileged actions go through a local policy gate before
+`sudo`. Every action is audit-logged. There is no public inbound
+exposure. Read [`SECURITY.md`](SECURITY.md) before running the
+installer.
 
-It does not decide what the machine is for.
+## License
 
-The PC remains open-ended. It may be plain or elaborate. It may be a
-simple workstation, a full graphical desktop, a server, a development
-box, a Docker host, a browser automation machine, a forge controller,
-or the most complicated Ubuntu installation the user can imagine.
-
-The AI Systems Administrator is an added privileged presence. It can
-be contacted by any user of the PC, while the machine itself remains
-owned and controlled locally.
-
----
-
-## Who authenticates the AI Systems Administrator
-
-This project takes a deliberate position on authentication and control:
-
-The token provider — the cloud LLM vendor whose API key is configured
-in `secrets/env` — authenticates the AI Systems Administrator on this
-device.
-
-The token provider does not own the PC.
-
-The token provider does not define what the PC is.
-
-The token provider does not decide how strange, simple, complex, useful,
-or abnormal the PC becomes.
-
-The provider supplies the token stream. The local machine supplies the
-body: shell, files, desktop, browser, Docker, services, network,
-memory, and root-capable authority.
-
-Concretely:
-
-- The local operator owns the machine.
-- Human users may use the machine normally.
-- Any user of the PC may contact the AI Systems Administrator.
-- The AI Systems Administrator is authenticated by the configured
-  token provider.
-- The privileged operating identity of the AI Systems Administrator is
-  the local `agent` account.
-- `agent` has passwordless `sudo`.
-- Human users do not need to become `agent` in order to speak to the
-  administrator.
-- The operator chooses the provider, controls the API key, controls
-  the SSH key, controls the Tailscale account, and can disconnect or
-  remove the system.
-
-That is the trust model.
-
-The AI Systems Administrator lives on the PC, but the PC remains the
-user’s machine.
-
----
-
-## Trust model — read this first
-
-This installer makes one deliberate trade-off so the AI Systems
-Administrator can do real work:
-
-- `agent` is root-capable through passwordless `sudo`.
-- The configured token provider authenticates the AI Systems
-  Administrator.
-- The API key, SSH private key, and Tailscale account together form
-  the effective credential set for privileged administration.
-- Any local user may contact the AI Systems Administrator, but local
-  policy decides what requests are informational, user-level,
-  administrative, or forbidden.
-- The machine is reachable remotely only through the private Tailscale
-  network.
-- There is no public inbound exposure.
-
-Treat the SSH private key, the LLM API key, the Tailscale account, and
-`/opt/ai-zombie/secrets/env` the same way you would treat a root
-password.
-
-This is not a locked appliance. It is a normal PC with an administrator
-inside it.
+See `LICENSE` (if present) or contact the maintainers. By contributing
+you agree your contributions are released under the same license.

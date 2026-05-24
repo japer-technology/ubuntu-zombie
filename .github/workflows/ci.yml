@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint and syntax
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: ShellCheck
+        run: |
+          set -e
+          mapfile -t files < <( { git ls-files; git ls-files --others --exclude-standard; } \
+            | grep -E '\.(sh|bash)$|^setup-part-1' \
+            | grep -v '^payload/agent/templates/' | sort -u )
+          # Also lint the helper scripts under payload/bin (no .sh extension).
+          mapfile -t bins  < <( { git ls-files payload/bin; git ls-files --others --exclude-standard payload/bin; } | sort -u )
+          for f in "${files[@]}" "${bins[@]}"; do
+            [[ -f "$f" ]] || continue
+            head -n1 "$f" | grep -q '^#!.*bash' || continue
+            echo "shellcheck $f"
+            shellcheck --severity=warning "$f"
+          done
+
+      - name: bash -n syntax check
+        run: bash tests/smoke.sh syntax
+
+      - name: Python compile
+        run: bash tests/smoke.sh python
+
+      - name: Subcommand parsing
+        run: bash tests/smoke.sh subcommands
+
+      - name: Non-interactive guards
+        run: bash tests/smoke.sh noninteractive
+
+      - name: Secret pattern scan
+        run: |
+          set -e
+          # No literal API keys or pre-auth tokens should be committed.
+          # Allow example placeholders ("sk-...") but flag long values.
+          if git grep -nE '(sk-[A-Za-z0-9_-]{20,}|sk-ant-[A-Za-z0-9_-]{20,}|tskey-auth-[A-Za-z0-9_-]{20,})' -- . ':!CHANGELOG.md'; then
+            echo 'Likely secret found in repository.' >&2
+            exit 1
+          fi

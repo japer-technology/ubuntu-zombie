@@ -1,0 +1,8 @@
+[Unit]
+Description=Periodic Ubuntu Zombie health check
+
+[Service]
+Type=oneshot
+User=agent
+Group=agent
+ExecStart=/opt/ai-zombie/bin/health-check

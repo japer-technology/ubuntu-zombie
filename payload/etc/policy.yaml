@@ -1,0 +1,130 @@
+# Ubuntu Zombie default policy.
+#
+# Action classes:
+#   read_only       informational, never mutating; runs automatically.
+#   user_change     changes within the agent user's own home.
+#   system_change   package, service, file, or Docker mutation.
+#   network_change  firewall, Tailscale, sshd, interface mutation.
+#   destructive     irreversible mutation; requires confirmation phrase.
+#
+# Defaults are conservative. Operators may tighten or loosen per class.
+
+settings:
+  destructive_confirmation: "yes, I understand this is destructive"
+  default_class: system_change  # used when no rule matches
+
+classes:
+  read_only:
+    approval: auto
+    description: Diagnostics and inspection only.
+  user_change:
+    approval: required
+    description: Changes within /home/agent or user-owned files.
+  system_change:
+    approval: required
+    description: Package, service, file, or Docker mutation.
+  network_change:
+    approval: required
+    description: Firewall, Tailscale, sshd, interface mutation.
+  destructive:
+    approval: required
+    confirm_phrase: true
+    description: Irreversible mutation. Requires confirmation phrase.
+
+# Patterns are matched in order against the proposed command string.
+# The first matching rule decides the class. Patterns are Python
+# regular expressions, matched with re.search().
+rules:
+  # ----- destructive -----
+  - pattern: '\brm\s+-rf\s+/'
+    class: destructive
+  - pattern: '\bmkfs(\.|\s)'
+    class: destructive
+  - pattern: '\bdd\b.*\bof=/dev/'
+    class: destructive
+  - pattern: '\buserdel\b'
+    class: destructive
+  - pattern: '\bshred\b'
+    class: destructive
+  - pattern: '\bdocker\s+(system\s+prune|volume\s+rm|image\s+prune\s+-a)'
+    class: destructive
+  - pattern: '>\s*/dev/sd[a-z]'
+    class: destructive
+
+  # ----- network_change -----
+  - pattern: '\bufw\b'
+    class: network_change
+  - pattern: '\biptables\b'
+    class: network_change
+  - pattern: '\bnft\b'
+    class: network_change
+  - pattern: '\btailscale\s+(up|down|logout|set)'
+    class: network_change
+  - pattern: '\bip\s+(link|addr|route)\s+(set|add|del|change)'
+    class: network_change
+  - pattern: '\bsystemctl\s+(start|stop|restart|reload|enable|disable|mask|unmask)\s+(ssh|sshd|tailscaled|networking|systemd-networkd|NetworkManager)'
+    class: network_change
+
+  # ----- system_change -----
+  - pattern: '\bapt(-get)?\s+(install|remove|purge|autoremove|upgrade|dist-upgrade)'
+    class: system_change
+  - pattern: '\bdpkg\s+(-i|--install|-r|--remove|-P|--purge)'
+    class: system_change
+  - pattern: '\bsnap\s+(install|remove|refresh)'
+    class: system_change
+  - pattern: '\bsystemctl\s+(start|stop|restart|reload|enable|disable|mask|unmask)\b'
+    class: system_change
+  - pattern: '\bservice\s+\S+\s+(start|stop|restart|reload)'
+    class: system_change
+  - pattern: '\bdocker\s+(run|start|stop|restart|rm|build|pull|push|exec)'
+    class: system_change
+  - pattern: '\busermod\b'
+    class: system_change
+  - pattern: '\bgroupadd\b'
+    class: system_change
+  - pattern: '\badduser\b'
+    class: system_change
+  - pattern: '\bchmod\b|\bchown\b|\bchgrp\b'
+    class: system_change
+  - pattern: '\bmv\s+'
+    class: system_change
+  - pattern: '\brm\s+'
+    class: system_change
+  - pattern: '\bcp\s+.*\s+/etc/'
+    class: system_change
+  - pattern: '>\s*/etc/'
+    class: system_change
+
+  # ----- user_change -----
+  - pattern: '\bgit\s+clone\b'
+    class: user_change
+  - pattern: '\bgit\s+(pull|fetch|checkout|reset)\b'
+    class: user_change
+  - pattern: '\bmkdir\b'
+    class: user_change
+  - pattern: '\btouch\b'
+    class: user_change
+  - pattern: '\bpip\s+install\b'
+    class: user_change
+  - pattern: '\bnpm\s+(install|i|add)\b'
+    class: user_change
+
+  # ----- read_only -----
+  - pattern: '^(ls|cat|head|tail|less|file|stat|wc|find|grep|rg|ag)\b'
+    class: read_only
+  - pattern: '^(df|du|free|uptime|uname|hostname|id|whoami|w|who|pwd|date)\b'
+    class: read_only
+  - pattern: '^(ps|top|htop)\b'
+    class: read_only
+  - pattern: '^(systemctl\s+(status|is-active|is-enabled|list-units|show)|journalctl\b)'
+    class: read_only
+  - pattern: '^(ip\s+(a|addr|link)\s*(show)?|ss\b|netstat\b|ping\b|dig\b|host\b|nslookup\b)'
+    class: read_only
+  - pattern: '^(apt\s+list|apt-cache\s+(search|show|policy)|dpkg\s+-l|dpkg\s+-s)'
+    class: read_only
+  - pattern: '^(docker\s+(ps|images|info|version|logs|inspect|stats)|tailscale\s+status|ufw\s+status)'
+    class: read_only
+  - pattern: '^(git\s+(status|log|diff|show|branch|remote))'
+    class: read_only
+  - pattern: '^(env|printenv|which|type|command\s+-v)'
+    class: read_only
