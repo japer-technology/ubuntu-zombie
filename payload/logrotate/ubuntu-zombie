@@ -1,0 +1,23 @@
+/var/log/ubuntu-zombie/audit.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 agent agent
+    postrotate
+        # The chat service reopens on append; no SIGHUP needed.
+        :
+    endscript
+}
+
+/var/log/ubuntu-zombie-install.log {
+    monthly
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0600 root root
+}
