@@ -60,6 +60,7 @@ Non-interactive variants and every environment variable: see
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                 | Components, action classes, trust boundaries      |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md)                           | How to test and change the installer              |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)                     | Community expectations                            |
+| [`LICENSE`](LICENSE)                                           | MIT license terms                                 |
 | [`CHANGELOG.md`](CHANGELOG.md)                                 | Versioned release history                         |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md)                           | Post-MVP work                                     |
 
@@ -83,5 +84,5 @@ installer.
 
 ## License
 
-See `LICENSE` (if present) or contact the maintainers. By contributing
-you agree your contributions are released under the same license.
+Ubuntu Zombie is released under the MIT License. By contributing you agree
+your contributions are released under the same license.

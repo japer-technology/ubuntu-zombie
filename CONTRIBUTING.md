@@ -53,6 +53,7 @@ what ends up on a target machine:
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
 ├── CODE_OF_CONDUCT.md
+├── LICENSE
 └── SECURITY.md
 ```
 

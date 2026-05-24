@@ -7,6 +7,12 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- `LICENSE`, `CODE_OF_CONDUCT.md`, and `.editorconfig` so the repository
+  metadata matches the documented GitHub project layout.
+- Smoke coverage and CI checks for required repository metadata and the
+  release package source bundle.
+
 ## [0.2.0] - 2026-05-24
 
 ### Added — MVP product loop
