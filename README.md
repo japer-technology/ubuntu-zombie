@@ -5,7 +5,7 @@
 > the machine.
 
 This project does not turn Ubuntu into a sealed appliance, a remote
-server box, or a machine that belongs to the AI provider.
+server box.
 
 It starts as a normal Ubuntu PC.
 
