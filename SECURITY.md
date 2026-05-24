@@ -94,7 +94,7 @@ service. The chat will load but refuse to reach a provider.
 
 Stronger: `sudo systemctl disable --now ubuntu-zombie-chat.service`.
 
-Strongest: `sudo ./setup-part-1.sh uninstall`. The uninstaller removes
+Strongest: `sudo ./scripts/setup-part-1.sh uninstall`. The uninstaller removes
 the chat service, sudoers drop-in, SSH drop-in, x11vnc autostart, and
 generated helpers, optionally removing the `agent` user and archiving
 state.

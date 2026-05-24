@@ -4,7 +4,7 @@
 # Subcommands:
 #   syntax        bash -n on every shell script we ship
 #   python        py_compile on every Python file under payload/agent
-#   subcommands   ensure setup-part-1.sh recognises every documented subcommand
+#   subcommands   ensure scripts/setup-part-1.sh recognises every documented subcommand
 #   noninteractive verify ZOMBIE_NONINTERACTIVE=1 with missing required env
 #                  exits with code 64
 #   all (default) run everything
@@ -49,12 +49,12 @@ run_python() {
 
 run_subcommands() {
   echo "[smoke] subcommand parsing"
-  ./setup-part-1.sh --help    >/dev/null
-  ./setup-part-1.sh --version >/dev/null
+  ./scripts/setup-part-1.sh --help    >/dev/null
+  ./scripts/setup-part-1.sh --version >/dev/null
   # Each subcommand should at least parse and not bail with code 2 (bad usage).
   for sub in verify doctor; do
     set +e
-    out="$(./setup-part-1.sh "${sub}" 2>&1)"
+    out="$(./scripts/setup-part-1.sh "${sub}" 2>&1)"
     rc=$?
     set -e
     if [[ $rc -eq 2 ]]; then
@@ -64,7 +64,7 @@ run_subcommands() {
     fi
   done
   # 'doctor' must run as a non-root user without erroring on argument parsing.
-  ./setup-part-1.sh doctor >/dev/null || true
+  ./scripts/setup-part-1.sh doctor >/dev/null || true
 }
 
 run_noninteractive() {
@@ -78,7 +78,7 @@ run_noninteractive() {
   # validate_noninteractive in a subshell via bash -c calling internal logic
   # would require refactoring. We approximate by checking that the help text
   # mentions ZOMBIE_NONINTERACTIVE.
-  ./setup-part-1.sh --help | grep -q ZOMBIE_NONINTERACTIVE
+  ./scripts/setup-part-1.sh --help | grep -q ZOMBIE_NONINTERACTIVE
   rm -rf "${tmpdir}"
 }
 

@@ -11,8 +11,8 @@ help:
 	@echo "Targets:"
 	@echo "  lint           ShellCheck + bash -n + python compile"
 	@echo "  test           non-root smoke tests (tests/smoke.sh)"
-	@echo "  install-local  sudo ./setup-part-1.sh install (RUN ON A VM)"
-	@echo "  verify         sudo ./setup-part-1.sh verify"
+	@echo "  install-local  sudo ./scripts/setup-part-1.sh install (RUN ON A VM)"
+	@echo "  verify         sudo ./scripts/setup-part-1.sh verify"
 	@echo "  package        tar a release bundle into dist/"
 	@echo "  clean          remove dist/ and python caches"
 
@@ -33,21 +33,19 @@ test:
 
 install-local:
 	@if [ "$$(id -u)" -ne 0 ]; then echo 'install-local must be run as root (sudo make install-local)'; exit 1; fi
-	./setup-part-1.sh install
+	./scripts/setup-part-1.sh install
 
 verify:
 	@if [ -x /opt/ai-zombie/bin/verify ]; then /opt/ai-zombie/bin/verify; \
-	 else ./setup-part-1.sh verify; fi
+	 else ./scripts/setup-part-1.sh verify; fi
 
 package:
 	@mkdir -p dist
 	@tar --exclude-vcs --exclude='dist' --exclude='__pycache__' \
 	     -czf dist/ubuntu-zombie-$(VERSION).tar.gz \
-	     setup-part-1.sh setup-part-1-uninstall.sh \
-	     payload tests Makefile VERSION CHANGELOG.md README.md \
-	     QUICKSTART.md CONFIGURATION.md TROUBLESHOOTING.md \
-	     SECURITY.md ARCHITECTURE.md CONTRIBUTING.md VISION.md \
-	     ROADMAP.md
+	     scripts payload tests Makefile VERSION \
+	     README.md CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md \
+	     SECURITY.md docs
 	@echo "Wrote dist/ubuntu-zombie-$(VERSION).tar.gz"
 
 clean:
