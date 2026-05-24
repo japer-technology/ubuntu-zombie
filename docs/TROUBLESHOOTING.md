@@ -4,7 +4,7 @@ Common failures and the fastest fixes. Start with:
 
 ```bash
 /opt/ai-zombie/bin/health-check
-sudo ./scripts/setup-part-1.sh doctor
+sudo ./scripts/install.sh doctor
 ```
 
 `doctor` describes what is wrong; `repair` fixes known safe drift.
@@ -24,7 +24,7 @@ backoff. If it gives up:
 ```bash
 ps -ef | grep -E 'apt|dpkg|unattended'
 sudo systemctl stop unattended-upgrades.service
-sudo ./scripts/setup-part-1.sh install   # safe to re-run
+sudo ./scripts/install.sh install   # safe to re-run
 ```
 
 ## Tailscale will not log in
@@ -32,7 +32,7 @@ sudo ./scripts/setup-part-1.sh install   # safe to re-run
 ```bash
 sudo tailscale up                    # follow the URL it prints
 # or, unattended:
-sudo TAILSCALE_AUTHKEY=tskey-auth-… ./scripts/setup-part-1.sh repair
+sudo TAILSCALE_AUTHKEY=tskey-auth-… ./scripts/install.sh repair
 ```
 
 If you see `Logged out` and you supplied a pre-auth key, the key is
@@ -60,7 +60,7 @@ sudo systemctl restart ubuntu-zombie-chat.service
 - Check `DISPLAY`: `/opt/ai-zombie/bin/gui-env env | grep DISPLAY`.
 - Verify the session is Xorg, not Wayland:
   `loginctl show-session "$XDG_SESSION_ID" -p Type`.
-- If Wayland is active, re-run `sudo ./scripts/setup-part-1.sh repair` and
+- If Wayland is active, re-run `sudo ./scripts/install.sh repair` and
   log out / log back in.
 
 ## Playwright complains about missing libraries

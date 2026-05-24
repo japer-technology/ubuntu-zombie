@@ -36,8 +36,8 @@ what ends up on a target machine:
 ```
 .
 ├── scripts/
-│   ├── setup-part-1.sh           # main installer
-│   └── setup-part-1-uninstall.sh # uninstaller
+│   ├── install.sh                # main installer
+│   └── uninstall.sh              # uninstaller
 ├── payload/                      # files copied to /opt/ai-zombie/
 │   ├── agent/                    # Python chat service
 │   ├── bin/                      # operator helpers

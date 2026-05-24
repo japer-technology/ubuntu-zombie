@@ -30,6 +30,6 @@ can move quickly. Delete sections that do not apply.
 
 <!--
 What is the worst case if this lands and is wrong? How would an
-operator recover? (e.g. "sudo ./scripts/setup-part-1.sh repair", or
-"sudo ./scripts/setup-part-1.sh uninstall".)
+operator recover? (e.g. "sudo ./scripts/install.sh repair", or
+"sudo ./scripts/install.sh uninstall".)
 -->

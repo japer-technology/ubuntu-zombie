@@ -33,8 +33,8 @@ restarts `sshd` and tightens the firewall; you can lock yourself out.
 ```bash
 git clone https://github.com/japer-technology/ubuntu-zombie.git
 cd ubuntu-zombie
-chmod +x scripts/setup-part-1.sh
-sudo ./scripts/setup-part-1.sh install
+chmod +x scripts/install.sh
+sudo ./scripts/install.sh install
 ```
 
 Non-interactive variant (CI, fleet provisioning, scripted re-install):
@@ -45,7 +45,7 @@ sudo ZOMBIE_NONINTERACTIVE=1 \
      VNC_PASSWORD="replace-me" \
      TAILSCALE_AUTHKEY="tskey-auth-…" \
      ZOMBIE_ENABLE_AUTOLOGIN=0 \
-     ./scripts/setup-part-1.sh install
+     ./scripts/install.sh install
 ```
 
 Re-running `install` is safe. The script is idempotent.
@@ -72,7 +72,7 @@ explained by:
 
 ```bash
 /opt/ai-zombie/bin/health-check
-sudo ./scripts/setup-part-1.sh doctor
+sudo ./scripts/install.sh doctor
 ```
 
 ## 4. Add an API key
@@ -163,9 +163,9 @@ Keep running: do nothing.
 Uninstall:
 
 ```bash
-sudo ./scripts/setup-part-1.sh uninstall --dry-run   # preview
-sudo ./scripts/setup-part-1.sh uninstall              # remove
-sudo ./scripts/setup-part-1.sh uninstall --archive    # remove and archive /home/agent
+sudo ./scripts/install.sh uninstall --dry-run   # preview
+sudo ./scripts/install.sh uninstall              # remove
+sudo ./scripts/install.sh uninstall --archive    # remove and archive /home/agent
 ```
 
 Uninstall removes the chat service, sudoers drop-in, SSH drop-in,
