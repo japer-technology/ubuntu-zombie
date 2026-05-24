@@ -7,6 +7,7 @@
 #   subcommands   ensure scripts/setup-part-1.sh recognises every documented subcommand
 #   noninteractive verify ZOMBIE_NONINTERACTIVE=1 with missing required env
 #                  exits with code 64
+#   standards     ensure repository metadata and packaging inputs are present
 #   all (default) run everything
 
 set -euo pipefail
@@ -82,16 +83,49 @@ run_noninteractive() {
   rm -rf "${tmpdir}"
 }
 
+run_standards() {
+  echo "[smoke] repository standards"
+  local required=(
+    README.md
+    LICENSE
+    CODE_OF_CONDUCT.md
+    SECURITY.md
+    CONTRIBUTING.md
+    CHANGELOG.md
+    VERSION
+    Makefile
+    .editorconfig
+    .github/CODEOWNERS
+    .github/PULL_REQUEST_TEMPLATE.md
+    .github/workflows/ci.yml
+  )
+  local f
+  for f in "${required[@]}"; do
+    [[ -s "$f" ]] || { echo "missing required repository file: $f" >&2; exit 1; }
+  done
+
+  # Keep the release bundle source list honest without creating dist/.
+  tar --exclude-vcs --exclude='dist' --exclude='__pycache__' \
+      -czf /tmp/ubuntu-zombie-smoke-package.tar.gz \
+      scripts payload tests Makefile VERSION \
+      README.md CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md \
+      LICENSE .editorconfig \
+      SECURITY.md docs
+  rm -f /tmp/ubuntu-zombie-smoke-package.tar.gz
+}
+
 case "${cmd}" in
   syntax)         run_syntax ;;
   python)         run_python ;;
   subcommands)    run_subcommands ;;
   noninteractive) run_noninteractive ;;
+  standards)      run_standards ;;
   all)
     run_syntax
     run_python
     run_subcommands
     run_noninteractive
+    run_standards
     echo "[smoke] all checks passed"
     ;;
   *) echo "unknown subcommand: ${cmd}" >&2; exit 2 ;;

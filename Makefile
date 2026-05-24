@@ -10,7 +10,7 @@ VERSION := $(shell cat VERSION)
 help:
 	@echo "Targets:"
 	@echo "  lint           ShellCheck + bash -n + python compile"
-	@echo "  test           non-root smoke tests (tests/smoke.sh)"
+	@echo "  test           non-root smoke and repository checks"
 	@echo "  install-local  sudo ./scripts/setup-part-1.sh install (RUN ON A VM)"
 	@echo "  verify         sudo ./scripts/setup-part-1.sh verify"
 	@echo "  package        tar a release bundle into dist/"
@@ -45,6 +45,7 @@ package:
 	     -czf dist/ubuntu-zombie-$(VERSION).tar.gz \
 	     scripts payload tests Makefile VERSION \
 	     README.md CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md \
+	     LICENSE .editorconfig \
 	     SECURITY.md docs
 	@echo "Wrote dist/ubuntu-zombie-$(VERSION).tar.gz"
 

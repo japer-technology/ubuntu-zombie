@@ -47,6 +47,12 @@ jobs:
       - name: Non-interactive guards
         run: bash tests/smoke.sh noninteractive
 
+      - name: Repository standards
+        run: bash tests/smoke.sh standards
+
+      - name: Package source bundle
+        run: make package
+
       - name: Secret pattern scan
         run: |
           set -e
