@@ -87,9 +87,9 @@ Add:
 - Action classes: `read_only`, `user_change`, `system_change`,
   `network_change`, `destructive`
 - Defaults:
-  - read-only diagnostics may run automatically;
+  - read-only diagnostics may run automatically.
   - package installs, service changes, firewall changes, file deletion,
-    user/account changes, and Docker changes require approval;
+    user/account changes, and Docker changes require approval.
   - destructive actions require an extra confirmation phrase.
 
 Acceptance criteria:
@@ -166,8 +166,8 @@ Acceptance criteria:
 
 Before installing large packages, check:
 
-- Ubuntu Desktop version.
-- CPU architecture.
+- Ubuntu Desktop version;
+- CPU architecture;
 - available disk space;
 - available memory;
 - outbound DNS and HTTPS connectivity;
