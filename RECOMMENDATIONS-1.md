@@ -23,8 +23,9 @@ project into a minimum viable and minimum valuable product.
 Add a short product promise to `README.md` and a new `VISION.md`:
 
 > Ubuntu Zombie adds a private, root-capable AI systems administrator
-> account to Ubuntu so a novice owner can ask the machine to diagnose,
-> explain, configure, repair, and operate itself.
+> account to supported Ubuntu Desktop LTS machines so a novice owner can
+> ask the machine to diagnose, explain, configure, repair, and operate
+> itself.
 
 The MVP should not promise autonomous ownership of the machine. It should
 promise a controlled sysadmin assistant with local authority, audit logs,
@@ -61,7 +62,8 @@ Add:
 - A local web chat bound to `127.0.0.1`.
 - An SSH tunnel example for remote private access over Tailscale.
 - A small Python service running as `agent`.
-- SQLite conversation history under `/opt/ai-zombie/state/`.
+- SQLite conversation history under the current install root,
+  `/opt/ai-zombie/state/`.
 - A provider adapter that can call at least one cloud LLM.
 - A command execution layer that captures stdout, stderr, exit code, and
   proposed follow-up checks.
@@ -110,7 +112,7 @@ Add:
   command output summaries, exit codes, changed files when known, and
   verification results.
 - Log rotation.
-- A helper command: `/opt/ai-zombie/bin/audit-tail`
+- A helper command: `/opt/ai-zombie/bin/audit-recent`
 
 Acceptance criteria:
 
