@@ -19,7 +19,7 @@ classes:
     description: Diagnostics and inspection only.
   user_change:
     approval: required
-    description: Changes within /home/agent or user-owned files.
+    description: Changes within the agent account's home directory or user-owned files.
   system_change:
     approval: required
     description: Package, service, file, or Docker mutation.

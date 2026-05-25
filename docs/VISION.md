@@ -24,7 +24,8 @@ That is the entire MVP promise. It is deliberately narrow.
 
 ## Trust model summary
 
-The local `agent` account holds passwordless `sudo` and is the
+The local `zombie` account (renameable at install time with
+`ZOMBIE_USER=<name>`) holds passwordless `sudo` and is the
 operating identity of the AI Systems Administrator. The configured
 token provider authenticates the administrator. The operator owns the
 machine and can rotate the API key, revoke the SSH key, disable the

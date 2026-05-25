@@ -41,12 +41,17 @@ Non-interactive variant (CI, fleet provisioning, scripted re-install):
 
 ```bash
 sudo ZOMBIE_NONINTERACTIVE=1 \
+     ZOMBIE_USER=zombie \
      SSH_PUBLIC_KEY="ssh-ed25519 AAAA… you@workstation" \
      VNC_PASSWORD="replace-me" \
      TAILSCALE_AUTHKEY="tskey-auth-…" \
      ZOMBIE_ENABLE_AUTOLOGIN=0 \
      ./scripts/install.sh install
 ```
+
+`ZOMBIE_USER` is optional; omit it to get the default account name
+`zombie`. Set it to any valid local username if you would rather the
+AI Systems Administrator live in (for example) `admin` or `ai`.
 
 Re-running `install` is safe. The script is idempotent.
 
@@ -61,7 +66,8 @@ and Docker group membership take effect.
 
 ## 3. Verify
 
-After reboot, log in as `agent` (or SSH in over Tailscale) and run:
+After reboot, log in as `zombie` (or whatever name you passed via
+`ZOMBIE_USER` at install time, or SSH in over Tailscale) and run:
 
 ```bash
 /opt/ai-zombie/bin/verify
@@ -108,7 +114,7 @@ Remotely over Tailscale (SSH tunnel; the chat never binds to a public
 interface):
 
 ```bash
-ssh -L 7878:127.0.0.1:7878 agent@<tailscale-name-or-ip>
+ssh -L 7878:127.0.0.1:7878 zombie@<tailscale-name-or-ip>
 # then open http://127.0.0.1:7878/ in your local browser
 ```
 
@@ -127,7 +133,7 @@ Read-only questions are answered without prompting for approval.
 
 When the assistant proposes a command in a non-read-only class, the UI
 shows a clearly labelled approval card. Approve it and the command runs
-as `agent` and is logged.
+as the agent account (`zombie` by default) and is logged.
 
 ## 8. Inspect the audit log
 
@@ -165,12 +171,12 @@ Uninstall:
 ```bash
 sudo ./scripts/install.sh uninstall --dry-run   # preview
 sudo ./scripts/install.sh uninstall              # remove
-sudo ./scripts/install.sh uninstall --archive    # remove and archive /home/agent
+sudo ./scripts/install.sh uninstall --archive    # remove and archive /home/zombie
 ```
 
 Uninstall removes the chat service, sudoers drop-in, SSH drop-in,
 x11vnc autostart, generated helpers, and (with confirmation) the
-`agent` user. It does not delete user data without explicit
+local `zombie` account. It does not delete user data without explicit
 confirmation.
 
 ---

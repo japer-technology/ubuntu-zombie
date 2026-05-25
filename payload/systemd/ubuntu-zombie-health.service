@@ -3,6 +3,6 @@ Description=Periodic Ubuntu Zombie health check
 
 [Service]
 Type=oneshot
-User=agent
-Group=agent
+User=__AGENT_USER__
+Group=__AGENT_USER__
 ExecStart=/opt/ai-zombie/bin/health-check

@@ -8,13 +8,13 @@ the whole stack fits in one head.
 ┌─────────────────────────────────────────────────────────────────┐
 │ Operator (human)                                                │
 │   browser  ──SSH tunnel──▶  http://127.0.0.1:7878/             │
-│   shell    ──SSH─────────▶  agent@host                          │
+│   shell    ──SSH─────────▶  zombie@host                         │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               │ loopback only
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│ Chat service (systemd: ubuntu-zombie-chat.service, user=agent)  │
+│ Chat service (systemd: ubuntu-zombie-chat.service, user=zombie) │
 │   ┌─────────────┐  ┌──────────────┐  ┌─────────────────────┐    │
 │   │ Provider    │  │ Policy gate  │  │ Command runner      │    │
 │   │ (OpenAI /   │─▶│ policy.yaml  │─▶│ sudo wrapper        │    │
@@ -29,12 +29,12 @@ the whole stack fits in one head.
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ Host body — created by install.sh                               │
-│   agent user (passwordless sudo)                                │
+│   zombie user (passwordless sudo)                               │
 │   SSH (Tailscale-only, key-only)                                │
 │   UFW (deny inbound, allow on tailscale0)                       │
 │   Xorg + GDM, optional autologin                                │
 │   x11vnc on 127.0.0.1:5900                                      │
-│   Docker CE, Python venv (~agent/agent-env), Node toolchain     │
+│   Docker CE, Python venv (~zombie/agent-env), Node toolchain    │
 │   Playwright + Chromium                                         │
 │   GUI helpers (screenshot, click, type, key) under              │
 │     /opt/ai-zombie/bin/                                         │
@@ -57,13 +57,14 @@ Single installer with subcommand dispatch:
 ### `uninstall.sh`
 
 Reverses install. `--dry-run` lists what would change.
-`--archive` tars `/home/agent` and `/opt/ai-zombie/state/` to
+`--archive` tars `/home/zombie` (or whatever name was supplied via
+`ZOMBIE_USER`) and `/opt/ai-zombie/state/` to
 `/var/backups/` before removal. User data is never deleted without an
 explicit confirmation prompt.
 
 ### `/opt/ai-zombie/`
 
-Owned by `agent:agent`. Layout:
+Owned by the agent account (`zombie:zombie` by default). Layout:
 
 ```
 /opt/ai-zombie/

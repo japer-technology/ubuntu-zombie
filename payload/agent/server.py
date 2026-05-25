@@ -15,6 +15,7 @@ over Tailscale; see ``CONFIGURATION.md``.
 from __future__ import annotations
 
 import argparse
+import getpass
 import html
 import json
 import os
@@ -44,9 +45,30 @@ SECRETS_FILE = Path(os.environ.get("ZOMBIE_SECRETS", "/opt/ai-zombie/secrets/env
 DEFAULT_PORT = int(os.environ.get("ZOMBIE_CHAT_PORT", "7878"))
 DEFAULT_HOST = "127.0.0.1"
 
-SYSTEM_PROMPT = """You are the AI Systems Administrator for an Ubuntu Desktop machine.
 
-You operate as the local Linux user "agent", who has passwordless sudo.
+def _agent_account() -> str:
+    """Return the local Linux account the chat service runs as.
+
+    The installer sets ``ZOMBIE_USER`` (default ``zombie``) in the
+    systemd unit so the chat service and its prompts can reference the
+    real account name even when the operator picked a custom one. Fall
+    back to the current process owner when the env var is unset (e.g.
+    when running the service by hand for development).
+    """
+    value = os.environ.get("ZOMBIE_USER")
+    if value:
+        return value
+    try:
+        return getpass.getuser()
+    except Exception:  # pragma: no cover - extremely defensive
+        return "zombie"
+
+
+AGENT_USER = _agent_account()
+
+SYSTEM_PROMPT_TEMPLATE = """You are the AI Systems Administrator for an Ubuntu Desktop machine.
+
+You operate as the local Linux user "{agent_user}", who has passwordless sudo.
 Every privileged or mutating command you propose will be sent through
 a policy gate that may require explicit operator approval before it
 runs. Read-only diagnostics can be run automatically.
@@ -60,8 +82,10 @@ Style:
 - Refuse and explain if asked to exfiltrate secrets, disable the audit
   log, or weaken the policy gate.
 
-Machine facts (auto-collected): {facts}
+Machine facts (auto-collected): {{facts}}
 """
+
+SYSTEM_PROMPT = SYSTEM_PROMPT_TEMPLATE.format(agent_user=AGENT_USER)
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +101,7 @@ def assert_secrets_safe() -> None:
         raise SystemExit(
             f"Refusing to start: {SECRETS_FILE} has group/world "
             "permissions. Fix with: sudo chmod 600 "
-            f"{SECRETS_FILE} && sudo chown agent:agent {SECRETS_FILE}"
+            f"{SECRETS_FILE} && sudo chown {AGENT_USER}:{AGENT_USER} {SECRETS_FILE}"
         )
 
 

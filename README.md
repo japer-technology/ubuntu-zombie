@@ -29,7 +29,7 @@ sudo reboot
 sudo /opt/ai-zombie/bin/secrets-edit   # add an LLM API key
 sudo systemctl restart ubuntu-zombie-chat.service
 # open http://127.0.0.1:7878/ locally, or tunnel over Tailscale:
-ssh -L 7878:127.0.0.1:7878 agent@<tailscale-name-or-ip>
+ssh -L 7878:127.0.0.1:7878 zombie@<tailscale-name-or-ip>
 ```
 
 Full walkthrough with expected output and failure branches:
@@ -72,7 +72,8 @@ Background essays (kept for context, not required reading) live under
 
 ## Trust model in one paragraph
 
-The local `agent` Linux user is the operating identity of the AI
+The local `zombie` Linux user (renameable at install time with
+`ZOMBIE_USER=<name>`) is the operating identity of the AI
 Systems Administrator and holds passwordless `sudo`. The configured
 cloud LLM provider authenticates the administrator. The operator owns
 the machine, the SSH private key, the API key, and the Tailscale

@@ -6,8 +6,10 @@
 #
 # Removes the chat service, sudoers drop-in, SSH drop-in, x11vnc
 # autostart, generated helpers, policy, logrotate rule, and (with
-# confirmation) the agent user. Optionally archives /home/agent and
-# /opt/ai-zombie/state/ to /var/backups/ before deletion.
+# confirmation) the agent user account (default name `zombie`,
+# overridable with ZOMBIE_USER). Optionally archives the account's
+# home directory and /opt/ai-zombie/state/ to /var/backups/ before
+# deletion.
 #
 # Usage:
 #   sudo ./uninstall.sh            # interactive
@@ -16,13 +18,18 @@
 #   sudo ./uninstall.sh --yes      # skip confirmations
 #   sudo ./uninstall.sh --keep-agent  # do not remove user
 #
+# Environment:
+#   ZOMBIE_USER=<name>   override the account name (default `zombie`).
+#                        `AGENT_USER` is still accepted as a legacy
+#                        alias so older installs can still be reversed.
+#
 # This script intentionally does NOT remove Docker, Tailscale, Node,
 # Python, or other base packages — those are normal Ubuntu software
 # that other things may depend on.
 
 set -Eeuo pipefail
 
-AGENT_USER="${AGENT_USER:-agent}"
+AGENT_USER="${ZOMBIE_USER:-${AGENT_USER:-zombie}}"
 AGENT_HOME="/home/${AGENT_USER}"
 ZOMBIE_DIR="${ZOMBIE_DIR:-/opt/ai-zombie}"
 VNC_PORT="${VNC_PORT:-5900}"
@@ -46,7 +53,7 @@ ok()   { printf '%s[+]%s %s\n' "${C_GREEN}" "${C_RESET}" "$*"; }
 die()  { printf '%s[x]%s %s\n' "${C_RED}"  "${C_RESET}" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,25p' "$0"
+  sed -n '2,30p' "$0"
 }
 
 for arg in "$@"; do

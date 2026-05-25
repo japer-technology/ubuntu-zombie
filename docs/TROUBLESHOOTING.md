@@ -56,7 +56,7 @@ sudo systemctl restart ubuntu-zombie-chat.service
 `xdotool` or screenshots fail with `Can't open display`.
 
 - The desktop session must exist. With autologin disabled (the default),
-  log in graphically as `agent` first.
+  log in graphically as `zombie` first.
 - Check `DISPLAY`: `/opt/ai-zombie/bin/gui-env env | grep DISPLAY`.
 - Verify the session is Xorg, not Wayland:
   `loginctl show-session "$XDG_SESSION_ID" -p Type`.
@@ -69,7 +69,7 @@ sudo systemctl restart ubuntu-zombie-chat.service
 Re-run:
 
 ```bash
-sudo -iu agent
+sudo -iu zombie
 . ~/agent-env/bin/activate
 python -m playwright install --with-deps chromium
 ```
@@ -78,9 +78,9 @@ python -m playwright install --with-deps chromium
 
 - Cannot connect: confirm the SSH tunnel
   `ss -ltn 'sport = :5900'` should show `127.0.0.1:5900`.
-- Forgot the password: `sudo -u agent x11vnc -storepasswd`.
+- Forgot the password: `sudo -u zombie x11vnc -storepasswd`.
 - Black screen: the desktop session is not running. With autologin
-  disabled, log in physically as `agent` once.
+  disabled, log in physically as `zombie` once.
 
 ## Secrets file permissions
 
@@ -88,7 +88,7 @@ The chat service refuses to start if `/opt/ai-zombie/secrets/env` is
 group- or world-readable. Reassert:
 
 ```bash
-sudo chown agent:agent /opt/ai-zombie/secrets/env
+sudo chown zombie:zombie /opt/ai-zombie/secrets/env
 sudo chmod 600 /opt/ai-zombie/secrets/env
 sudo systemctl restart ubuntu-zombie-chat.service
 ```

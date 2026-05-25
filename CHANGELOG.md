@@ -12,6 +12,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   metadata matches the documented GitHub project layout.
 - Smoke coverage and CI checks for required repository metadata and the
   release package source bundle.
+- `ZOMBIE_USER` env var to choose the local Linux account name used as
+  the operating identity of the AI Systems Administrator. The legacy
+  `AGENT_USER` is still honoured as a backward-compatible alias.
+
+### Changed
+- The agent account created by the installer is now called `zombie` by
+  default (previously `agent`). The name is overridable at install time
+  via `ZOMBIE_USER`, and is propagated to the sudoers drop-in, the
+  systemd `User=`/`Group=` of `ubuntu-zombie-chat.service`, the venv
+  ownership, the SSH `AllowUsers` line, and the chat service system
+  prompt. Existing installs are unaffected — re-run the installer with
+  `ZOMBIE_USER=agent` (or `AGENT_USER=agent`) to keep the old name.
 
 ## [0.2.0] - 2026-05-24
 
