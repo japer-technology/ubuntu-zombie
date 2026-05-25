@@ -21,8 +21,13 @@
 #   ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
 #                               VNC_PASSWORD must be set unless already
 #                               configured on disk).
-#   ZOMBIE_ENABLE_AUTOLOGIN=1   enable graphical autologin for `agent`
-#                               (off by default).
+#   ZOMBIE_USER="zombie"        name of the local account created as the
+#                               operating identity of the AI Systems
+#                               Administrator. Defaults to `zombie`. The
+#                               legacy name `AGENT_USER` is still
+#                               accepted for backward compatibility.
+#   ZOMBIE_ENABLE_AUTOLOGIN=1   enable graphical autologin for the
+#                               agent account (off by default).
 #   SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host"
 #   VNC_PASSWORD="..."
 #   TAILSCALE_AUTHKEY="tskey-auth-..."
@@ -48,7 +53,7 @@ else
 fi
 readonly SCRIPT_VERSION
 
-AGENT_USER="${AGENT_USER:-agent}"
+AGENT_USER="${ZOMBIE_USER:-${AGENT_USER:-zombie}}"
 AGENT_HOME="/home/${AGENT_USER}"
 ZOMBIE_DIR="${ZOMBIE_DIR:-/opt/ai-zombie}"
 ZOMBIE_ETC="/etc/ubuntu-zombie"
@@ -134,6 +139,10 @@ Environment variables (selected; see CONFIGURATION.md for all):
   ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
                               VNC_PASSWORD must be set unless already
                               configured on disk).
+  ZOMBIE_USER=<name>          name of the local agent account (default
+                              'zombie'). Must be set on every later
+                              install/verify/doctor/repair/uninstall
+                              run that targets a non-default account.
   ZOMBIE_ENABLE_AUTOLOGIN=1   enable graphical autologin (off by default).
   SSH_PUBLIC_KEY              SSH public key string.
   VNC_PASSWORD                Loopback-only VNC password.
@@ -551,7 +560,7 @@ info "Mode: $([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive ||
 cat <<EOF
 
 This installer will:
-  - Create the agent user (operating identity of the AI Systems Administrator) with passwordless sudo
+  - Create the ${AGENT_USER} user (operating identity of the AI Systems Administrator) with passwordless sudo
   - Enable SSH key-only access
   - Install Tailscale from its official apt repository
   - Allow inbound SSH only on the Tailscale interface
@@ -653,7 +662,7 @@ apt_install \
 # Agent user and sudo
 # ---------------------------------------------------------------------------
 
-section "Create agent user"
+section "Create ${AGENT_USER} user"
 
 if id "${AGENT_USER}" >/dev/null 2>&1; then
   info "User ${AGENT_USER} already exists."
@@ -1053,9 +1062,18 @@ if [[ ! -f "${ZOMBIE_LOG_DIR}/audit.log" ]]; then
   install -m 640 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${ZOMBIE_LOG_DIR}/audit.log"
 fi
 
-# systemd units.
-install -m 644 "${PAYLOAD_DIR}/systemd/ubuntu-zombie-chat.service"   /etc/systemd/system/ubuntu-zombie-chat.service
-install -m 644 "${PAYLOAD_DIR}/systemd/ubuntu-zombie-health.service" /etc/systemd/system/ubuntu-zombie-health.service
+# systemd units. The shipped unit files use the literal placeholders
+# `__AGENT_USER__` and `__AGENT_HOME__` so the chosen account name is
+# substituted in at install time. This keeps the units valid for the
+# default `zombie` account and any operator-chosen override.
+render_unit() {
+  local src="$1" dest="$2"
+  sed -e "s|__AGENT_USER__|${AGENT_USER}|g" \
+      -e "s|__AGENT_HOME__|${AGENT_HOME}|g" \
+      "${src}" | install -m 644 /dev/stdin "${dest}"
+}
+render_unit "${PAYLOAD_DIR}/systemd/ubuntu-zombie-chat.service"   /etc/systemd/system/ubuntu-zombie-chat.service
+render_unit "${PAYLOAD_DIR}/systemd/ubuntu-zombie-health.service" /etc/systemd/system/ubuntu-zombie-health.service
 install -m 644 "${PAYLOAD_DIR}/systemd/ubuntu-zombie-health.timer"   /etc/systemd/system/ubuntu-zombie-health.timer
 systemctl daemon-reload
 systemctl enable --now ubuntu-zombie-chat.service || warn "Chat service did not start; see journalctl -u ubuntu-zombie-chat"

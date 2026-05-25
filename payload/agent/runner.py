@@ -55,10 +55,11 @@ def run(command: str, *, timeout: int = DEFAULT_TIMEOUT, cwd: str | None = None,
         env: dict[str, str] | None = None) -> CommandResult:
     """Run ``command`` through ``bash -c`` so shell features work.
 
-    The chat service is itself running as ``agent``; commands inherit
-    that identity. Privileged commands must include ``sudo`` explicitly
-    and are routed through the policy gate before this function is
-    called.
+    The chat service is itself running as the local agent account
+    (``zombie`` by default; configurable at install time); commands
+    inherit that identity. Privileged commands must include ``sudo``
+    explicitly and are routed through the policy gate before this
+    function is called.
     """
     start = time.monotonic()
     try:

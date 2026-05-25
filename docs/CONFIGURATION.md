@@ -5,8 +5,9 @@ Everything an operator can tune after a successful install.
 ## Provider keys
 
 Provider credentials live in `/opt/ai-zombie/secrets/env`, mode `0600`,
-owned by `agent:agent`. Edit them with the safe helper, which
-re-asserts permissions after `$EDITOR` exits:
+owned by the local agent account (default `zombie:zombie`; whatever
+name was passed to `ZOMBIE_USER` at install time). Edit them with the
+safe helper, which re-asserts permissions after `$EDITOR` exits:
 
 ```bash
 sudo /opt/ai-zombie/bin/secrets-edit
@@ -28,6 +29,28 @@ Restart the chat service after editing:
 ```bash
 sudo systemctl restart ubuntu-zombie-chat.service
 ```
+
+## Agent account name
+
+The installer creates a single local Linux user as the operating
+identity of the AI Systems Administrator. The default name is
+`zombie`. To pick a different name, pass `ZOMBIE_USER` to the
+installer:
+
+```bash
+sudo ZOMBIE_USER=admin ./scripts/install.sh install
+```
+
+The same variable must be set on every later `install`, `verify`,
+`doctor`, `repair`, or `uninstall` run that targets a non-default
+account. `AGENT_USER` is still accepted as a backward-compatible alias
+so older installs (which used `agent`) can still be repaired or
+removed by exporting `AGENT_USER=agent`.
+
+The chosen name appears throughout: `/home/<name>`, the sudoers
+drop-in `/etc/sudoers.d/90-<name>-ubuntu-zombie`, the systemd
+`User=`/`Group=` of `ubuntu-zombie-chat.service`, and the system
+prompt the chat service hands to the LLM.
 
 ## Rotating provider keys
 
@@ -55,7 +78,7 @@ sudo systemctl disable --now ubuntu-zombie-chat.service
 To remove privileged access without uninstalling everything:
 
 ```bash
-sudo rm /etc/sudoers.d/90-agent-ubuntu-zombie
+sudo rm /etc/sudoers.d/90-zombie-ubuntu-zombie
 ```
 
 ## Policy
@@ -96,18 +119,18 @@ typing the password. Read `SECURITY.md` before enabling it.
 
 ## VNC
 
-`x11vnc` binds to `127.0.0.1:5900` only and starts via the agent's
-GNOME autostart entry. Tunnel to it over Tailscale:
+`x11vnc` binds to `127.0.0.1:5900` only and starts via the agent
+account's GNOME autostart entry. Tunnel to it over Tailscale:
 
 ```bash
-ssh -L 5900:127.0.0.1:5900 agent@<tailscale-name-or-ip>
+ssh -L 5900:127.0.0.1:5900 zombie@<tailscale-name-or-ip>
 # open a VNC viewer at localhost:5900
 ```
 
 Reset the password:
 
 ```bash
-sudo -u agent x11vnc -storepasswd
+sudo -u zombie x11vnc -storepasswd
 ```
 
 ## Chat access
@@ -115,8 +138,9 @@ sudo -u agent x11vnc -storepasswd
 The chat UI is served at `http://127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}/`.
 Tunnel over Tailscale exactly the same way as VNC. There is no
 authentication on the loopback socket itself — anyone with shell
-access as `agent` (or root) can use it. That matches the trust model:
-having a shell on the box is already root-equivalent.
+access as the agent account (default `zombie`) or root can use it.
+That matches the trust model: having a shell on the box is already
+root-equivalent.
 
 ## Logs and state
 

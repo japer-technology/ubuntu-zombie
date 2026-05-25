@@ -5,12 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=agent
-Group=agent
+User=__AGENT_USER__
+Group=__AGENT_USER__
 WorkingDirectory=/opt/ai-zombie
 EnvironmentFile=-/opt/ai-zombie/secrets/env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/agent/agent-env/bin/python /opt/ai-zombie/agent/server.py --host 127.0.0.1 --port ${ZOMBIE_CHAT_PORT}
+Environment=ZOMBIE_USER=__AGENT_USER__
+ExecStart=__AGENT_HOME__/agent-env/bin/python /opt/ai-zombie/agent/server.py --host 127.0.0.1 --port ${ZOMBIE_CHAT_PORT}
 Restart=on-failure
 RestartSec=3
 StandardOutput=journal
