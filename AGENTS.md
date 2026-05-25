@@ -56,8 +56,10 @@ Both must pass before you hand work back. They require `bash`,
 `shellcheck`, and `python3` — nothing else.
 
 Do **not** run `make install-local` or `scripts/install.sh install`
-inside this sandbox. It is destructive and intended only for a
-disposable Ubuntu Desktop LTS VM. The same applies to `uninstall.sh`,
+from an agent environment, your workstation, or any machine you are
+not prepared to wipe. The installer mutates users, sudoers, systemd
+units, firewall rules, and Tailscale state; it is intended only for
+a disposable Ubuntu Desktop LTS VM. The same applies to `uninstall.sh`,
 `secrets-edit`, and anything under `/opt/ai-zombie/`.
 
 ## Non-negotiable rules
