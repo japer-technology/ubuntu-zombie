@@ -1,8 +1,8 @@
 # Ubuntu Zombie
 
 > **Ubuntu Zombie adds a private, root-capable AI Systems
-> Administrator account to supported Ubuntu Desktop LTS machines so a
-> novice owner can ask the machine to diagnose, explain, configure,
+> Administrator account to supported Ubuntu Desktop LTS machines so an
+> owner can ask the machine to diagnose, explain, configure,
 > repair, and operate itself.**
 
 It is a normal Ubuntu PC with an administrator inside it. Any local
