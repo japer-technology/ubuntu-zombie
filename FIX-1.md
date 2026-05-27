@@ -134,7 +134,7 @@ independently and in priority order.
 - **fix**: Either
   - Use a dedicated sub-directory: `BACKUP_DIR="${BACKUP_DIR:-/var/backups/ubuntu-zombie}"`
     and create only that with `0700`; or
-  - Only set the mode when creating the directory new:
+  (x) Only set the mode when creating the directory new:
     `[[ -d "${BACKUP_DIR}" ]] || install -d -m 700 "${BACKUP_DIR}"`.
 - **validation**:
   - On a fresh VM record `stat -c '%a %U:%G' /var/backups` before/after running
@@ -177,7 +177,7 @@ independently and in priority order.
 - **root cause**: `"$@"` expands into multiple words; `eval` then joins them
   with spaces and re-parses, dropping the original quoting.
 - **fix**: Either
-  - Change callers to pass a single string and use `eval "$1"`; or
+  (x) Change callers to pass a single string and use `eval "$1"`; or
   - Keep `"$@"` and drop `eval`, then have callers that need shell features
     (redirections, `||`) wrap themselves in `bash -c '...'`.
   Pick whichever is the smaller diff (the former, currently).
