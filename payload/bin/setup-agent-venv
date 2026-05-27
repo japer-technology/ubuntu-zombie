@@ -38,9 +38,12 @@ pip_with_retry() {
 }
 
 pip_with_retry install --upgrade pip wheel setuptools
+# Phase 1 (UPGRADE-TO-PI-PLAN §4.1): the bespoke openai/anthropic
+# Python clients are gone. Provider calls go through the Node
+# @earendil-works/pi-ai library via payload/agent/pi-ai-bridge.mjs.
+# The Python venv still ships the broader operator toolkit (requests,
+# pyautogui, playwright, …) used by helpers outside the chat loop.
 pip_with_retry install --upgrade \
-  openai \
-  anthropic \
   requests \
   pydantic \
   rich \

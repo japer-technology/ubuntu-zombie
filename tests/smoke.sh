@@ -82,6 +82,89 @@ if extracted != ["cat script.sh | bash"]:
     raise SystemExit("blank fenced command extraction failed")
 if p.classify(extracted[0]) != "system_change":
     raise SystemExit("extracted interpreter pipeline was not gated")
+
+# Phase 1 (UPGRADE-TO-PI-PLAN §4): providers.py is a thin adapter
+# over @earendil-works/pi-ai. The Python-facing surface must stay
+# import-clean (no third-party deps) and provider selection must
+# honour ZOMBIE_PROVIDER plus the expanded key matrix.
+import os
+import providers as _pr
+
+assert set(_pr.SUPPORTED_PROVIDERS) == {
+    "openai", "anthropic", "gemini", "xai", "openrouter", "mistral", "groq"
+}, _pr.SUPPORTED_PROVIDERS
+
+# Snapshot env so we can reset it cleanly.
+_keys = (
+    "ZOMBIE_PROVIDER", "ZOMBIE_MODEL",
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+    "XAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY",
+)
+_saved = {k: os.environ.pop(k, None) for k in _keys}
+try:
+    # No keys, no explicit provider -> NoProviderConfigured + helpful status.
+    try:
+        _pr.provider_from_env()
+    except _pr.NoProviderConfigured:
+        pass
+    else:
+        raise SystemExit("provider_from_env should raise without any key")
+    name, status = _pr.provider_status()
+    if name != "none":
+        raise SystemExit(f"provider_status with no key returned {name!r}")
+
+    # Unknown ZOMBIE_PROVIDER must fail loudly.
+    os.environ["ZOMBIE_PROVIDER"] = "bogus"
+    try:
+        _pr.provider_from_env()
+    except _pr.NoProviderConfigured:
+        pass
+    else:
+        raise SystemExit("unknown ZOMBIE_PROVIDER should raise")
+    del os.environ["ZOMBIE_PROVIDER"]
+
+    # Autodetect picks the first provider whose key is set.
+    os.environ["GROQ_API_KEY"] = "test"
+    p_auto = _pr.provider_from_env()
+    if p_auto.name != "groq":
+        raise SystemExit(f"autodetect returned {p_auto.name!r}")
+    if not p_auto.model:
+        raise SystemExit("groq adapter should pick a default model")
+
+    # Explicit ZOMBIE_PROVIDER wins over autodetect, but still needs
+    # its own key.
+    os.environ["ZOMBIE_PROVIDER"] = "gemini"
+    try:
+        _pr.provider_from_env()
+    except _pr.NoProviderConfigured:
+        pass
+    else:
+        raise SystemExit("missing GEMINI_API_KEY should raise")
+    os.environ["GEMINI_API_KEY"] = "test"
+    p_gem = _pr.provider_from_env()
+    if p_gem.name != "gemini":
+        raise SystemExit(f"explicit provider returned {p_gem.name!r}")
+
+    # OpenRouter has no default model and must surface a clear error
+    # when ZOMBIE_MODEL is not set.
+    os.environ["ZOMBIE_PROVIDER"] = "openrouter"
+    os.environ["OPENROUTER_API_KEY"] = "test"
+    try:
+        _pr.provider_from_env()
+    except _pr.NoProviderConfigured:
+        pass
+    else:
+        raise SystemExit("openrouter without ZOMBIE_MODEL should raise")
+    os.environ["ZOMBIE_MODEL"] = "anthropic/claude-3.5-sonnet"
+    p_or = _pr.provider_from_env()
+    if p_or.model != "anthropic/claude-3.5-sonnet":
+        raise SystemExit(f"openrouter model was {p_or.model!r}")
+finally:
+    for k, v in _saved.items():
+        if v is None:
+            os.environ.pop(k, None)
+        else:
+            os.environ[k] = v
 PY
 }
 

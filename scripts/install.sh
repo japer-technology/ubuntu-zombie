@@ -559,7 +559,7 @@ cmd_doctor() {
     else
       warn "secrets/env permissions ${perms} (must be 600). Fix: sudo ./${SCRIPT_NAME} repair"
     fi
-    if grep -Eq '^(OPENAI|ANTHROPIC)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
+    if grep -Eq '^(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
       ok "Provider token present."
     else
       warn "No provider token. Fix: sudo ${ZOMBIE_DIR}/bin/secrets-edit"
@@ -1155,13 +1155,19 @@ if [[ ! -f "${ZOMBIE_DIR}/secrets/env" ]]; then
   install -m 600 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${ZOMBIE_DIR}/secrets/env"
   cat > "${ZOMBIE_DIR}/secrets/env" <<EOF
 # Token provider credentials and runtime environment for the AI Systems Administrator.
-# Pick ONE provider line and paste the key:
+# Pick ONE provider line and paste the key. All providers are routed
+# through @earendil-works/pi-ai; see docs/CONFIGURATION.md.
 #   OPENAI_API_KEY=sk-...
 #   ANTHROPIC_API_KEY=sk-ant-...
+#   GEMINI_API_KEY=...
+#   XAI_API_KEY=...
+#   OPENROUTER_API_KEY=...
+#   MISTRAL_API_KEY=...
+#   GROQ_API_KEY=...
 #
 # Optional:
-#   ZOMBIE_PROVIDER=openai      # or anthropic
-#   ZOMBIE_MODEL=gpt-4o-mini    # override default model
+#   ZOMBIE_PROVIDER=openai      # openai|anthropic|gemini|xai|openrouter|mistral|groq
+#   ZOMBIE_MODEL=gpt-4o-mini    # override default model (required for openrouter)
 #   ZOMBIE_CHAT_PORT=${CHAT_PORT}
 
 DISPLAY=:0
@@ -1259,6 +1265,17 @@ section "Node runtime"
 retry 4 5 -- npm install -g npm@latest
 retry 4 5 -- npm install -g yarn pnpm typescript ts-node
 
+# pi-ai is the unified LLM client for the chat service (UPGRADE-TO-PI-PLAN
+# Phase 1). Pinned to the exact version recorded in
+# payload/agent/pi-ai.version so bumps are deliberate PRs with smoke
+# evidence.
+PI_AI_VERSION="$(tr -d '[:space:]' < "${PAYLOAD_DIR}/agent/pi-ai.version")"
+if [[ -z "${PI_AI_VERSION}" ]]; then
+  die "payload/agent/pi-ai.version is empty; refusing to install pi-ai unpinned." 1
+fi
+log "Installing @earendil-works/pi-ai@${PI_AI_VERSION} globally."
+retry 4 5 -- npm install -g --ignore-scripts "@earendil-works/pi-ai@${PI_AI_VERSION}"
+
 # ---------------------------------------------------------------------------
 # Deploy payload: chat service, helpers, policy, systemd, logrotate.
 # ---------------------------------------------------------------------------
@@ -1276,6 +1293,13 @@ for f in server.py providers.py policy.py audit.py runner.py history.py examples
   install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
     "${PAYLOAD_DIR}/agent/${f}" "${ZOMBIE_DIR}/agent/${f}"
 done
+# Phase 1 (UPGRADE-TO-PI-PLAN §4): the pi-ai bridge and its version pin
+# travel with the Python sources so providers.py can find them at the
+# default path. Bridge is read-only; only root mutates the agent tree.
+install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+  "${PAYLOAD_DIR}/agent/pi-ai-bridge.mjs" "${ZOMBIE_DIR}/agent/pi-ai-bridge.mjs"
+install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+  "${PAYLOAD_DIR}/agent/pi-ai.version" "${ZOMBIE_DIR}/agent/pi-ai.version"
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/templates/index.html" "${ZOMBIE_DIR}/agent/templates/index.html"
 
@@ -1481,6 +1505,7 @@ ZOMBIE_DIR="${ZOMBIE_DIR}"
 AGENT_USER="${AGENT_USER}"
 AGENT_HOME="${AGENT_HOME}"
 ZOMBIE_SKIP_TAILSCALE="${ZOMBIE_SKIP_TAILSCALE}"
+PI_AI_VERSION="${PI_AI_VERSION}"
 
 if [[ -t 1 ]]; then
   C_RESET=\$'\\033[0m'; C_RED=\$'\\033[31m'; C_GREEN=\$'\\033[32m'; C_BOLD=\$'\\033[1m'
@@ -1536,10 +1561,11 @@ echo
 
 echo "Runtime:"
 check "Python venv exists"                 test -x \${AGENT_HOME}/agent-env/bin/python
-check "openai SDK importable"              \${AGENT_HOME}/agent-env/bin/python -c "import openai"
-check "anthropic SDK importable"           \${AGENT_HOME}/agent-env/bin/python -c "import anthropic"
 check "playwright importable"              \${AGENT_HOME}/agent-env/bin/python -c "from playwright.sync_api import sync_playwright"
 check "node and tsc present"               bash -c "command -v node && command -v tsc"
+check "pi-ai bridge deployed"              test -r \${ZOMBIE_DIR}/agent/pi-ai-bridge.mjs
+check "pi-ai installed (any version)"      bash -c "npm ls -g --depth=0 @earendil-works/pi-ai >/dev/null"
+check "pi-ai pinned to \${PI_AI_VERSION}"     bash -c "npm ls -g --depth=0 @earendil-works/pi-ai 2>/dev/null | grep -q '@earendil-works/pi-ai@\${PI_AI_VERSION}'"
 echo
 
 echo "Chat service and policy:"
@@ -1617,7 +1643,7 @@ fi
 section "First-run status"
 
 PROVIDER_OK=0
-if grep -Eq '^(OPENAI|ANTHROPIC)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
+if grep -Eq '^(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
   PROVIDER_OK=1
 fi
 
@@ -1648,7 +1674,7 @@ NEXT_STEP=""
 if [[ "${ZOMBIE_SKIP_TAILSCALE}" != "1" && "${TS_STATUS_OK}" != "1" ]]; then
   NEXT_STEP="sudo tailscale up"
 elif [[ "${PROVIDER_OK}" != "1" ]]; then
-  NEXT_STEP="sudo ${ZOMBIE_DIR}/bin/secrets-edit   # add OPENAI_API_KEY or ANTHROPIC_API_KEY"
+  NEXT_STEP="sudo ${ZOMBIE_DIR}/bin/secrets-edit   # paste any of OPENAI/ANTHROPIC/GEMINI/XAI/OPENROUTER/MISTRAL/GROQ _API_KEY"
 elif [[ "${CHAT_OK}" != "1" ]]; then
   NEXT_STEP="sudo systemctl start ubuntu-zombie-chat.service"
 else
