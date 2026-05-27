@@ -101,17 +101,44 @@ if p.default_class != "destructive":
 if not p.requires_approval(p.classify("foozle --bar")):
     raise SystemExit("fail-closed default no longer requires approval")
 
-# Fence parsing regressions: CRLF, mixed line endings, and blank
-# language tags should still feed extracted commands to the policy gate.
-if server.extract_commands("```bash\r\nls\r\n```") != ["ls"]:
-    raise SystemExit("CRLF fenced command extraction failed")
-if server.extract_commands("```bash\r\nprintf hi\n```") != ["printf hi"]:
-    raise SystemExit("mixed-line-ending fenced command extraction failed")
-extracted = server.extract_commands("```\ncat script.sh | bash\n```")
-if extracted != ["cat script.sh | bash"]:
-    raise SystemExit("blank fenced command extraction failed")
-if p.classify(extracted[0]) != "system_change":
-    raise SystemExit("extracted interpreter pipeline was not gated")
+# Phase 2 (UPGRADE-TO-PI-PLAN §5): the legacy extract_commands /
+# fenced-bash workflow has been removed; commands now arrive as
+# structured pi-mono tool calls. The policy gate must classify them
+# via classify_tool, and the closed registry must enforce schemas.
+if hasattr(server, "extract_commands"):
+    raise SystemExit("extract_commands must be removed in Phase 2")
+import tools as _t
+assert set(_t.tool_names()) == {
+    "shell.run", "fs.read", "fs.write", "pkg.query", "pkg.install",
+    "svc.status", "svc.control", "net.status", "gui.screenshot",
+    "gui.click", "gui.type", "skill.list", "skill.load",
+}, _t.tool_names()
+# Per-tool default classifications come from the registry; shell.run
+# is computed per-argv via the existing classify() path.
+if p.classify_tool("fs.read", {"path": "/etc/os-release"}) != "read_only":
+    raise SystemExit("fs.read should be read_only")
+if p.classify_tool("pkg.install", {"names": ["curl"]}) != "system_change":
+    raise SystemExit("pkg.install should be system_change")
+if p.classify_tool("svc.control", {"unit": "ssh", "action": "restart"}) != "system_change":
+    raise SystemExit("svc.control should be system_change")
+if p.classify_tool("shell.run", {"argv": ["ls", "-la"]}) != "read_only":
+    raise SystemExit("shell.run ls should be read_only via classify()")
+if p.classify_tool("shell.run", {"command": "sudo apt-get install -y curl"}) != "system_change":
+    raise SystemExit("shell.run sudo apt-get install should be system_change")
+# Unknown tools fail closed.
+if not p.requires_approval(p.classify_tool("totally.unknown", {})):
+    raise SystemExit("unknown tool must require operator approval")
+# Schema validation rejects bad args without side effects.
+try:
+    _t.validate_args("fs.read", {"path": 12})
+    raise SystemExit("fs.read with int path must be rejected")
+except _t.SchemaError:
+    pass
+try:
+    _t.validate_args("svc.control", {"unit": "ssh", "action": "nuke"})
+    raise SystemExit("svc.control with bad action must be rejected")
+except _t.SchemaError:
+    pass
 
 # Phase 1 (UPGRADE-TO-PI-PLAN §4): providers.py is a thin adapter
 # over @earendil-works/pi-ai. The Python-facing surface must stay
@@ -196,6 +223,58 @@ finally:
         else:
             os.environ[k] = v
 PY
+
+  # Phase 2 (UPGRADE-TO-PI-PLAN §5 / P2.6): stubbed end-to-end run of
+  # pi_mono.run_turn against tests/fixtures/stub-pi-mono.mjs. Verifies
+  # the bridge protocol, schema validation, dispatch, and event
+  # accounting without requiring `pi` (or even npm) on the test host.
+  if command -v node >/dev/null 2>&1; then
+    echo "  pi-mono stub end-to-end"
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/tests/fixtures/stub-pi-mono.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import json, os, sys
+import pi_mono, tools, policy
+
+p = policy.load_policy()
+collected = []
+
+def on_tool_call(call_id, name, args):
+    collected.append((name, dict(args)))
+    cls = p.classify_tool(name, args)
+    if p.requires_approval(cls):
+        return {"ok": False, "error": "operator_approval_required: " + cls}
+    try:
+        tools.validate_args(name, args)
+    except tools.SchemaError as exc:
+        return {"ok": False, "error": f"schema: {exc}"}
+    # Don't actually dispatch fs.read inside the test sandbox; the
+    # stub plan only exercises the protocol path. Return a stub
+    # observation that mimics fs.read shape.
+    return {"ok": True, "result": {"path": args.get("path"),
+                                    "content": "STUBBED",
+                                    "size": 7}}
+
+out = pi_mono.run_turn(
+    prompt="hello",
+    system_prompt="you are stubbed",
+    history=[],
+    on_tool_call=on_tool_call,
+    tool_names=tools.tool_names(),
+)
+if out["final"] != "stubbed pi-mono turn complete":
+    raise SystemExit(f"unexpected final: {out['final']!r}")
+if not collected or collected[0][0] != "fs.read":
+    raise SystemExit(f"expected fs.read tool call, got {collected!r}")
+if not any(e.get("type") == "tool_call" for e in out["events"]):
+    raise SystemExit("no tool_call events recorded")
+if not any(e.get("type") == "final" for e in out["events"]):
+    raise SystemExit("no final event recorded")
+PY
+  else
+    echo "  (skipping pi-mono stub end-to-end: node not on PATH)"
+  fi
 }
 
 run_subcommands() {

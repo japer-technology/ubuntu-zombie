@@ -8,6 +8,45 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- Phase 2 of `docs/UPGRADE-TO-PI-PLAN.md` — atomic cutover from the
+  fenced-bash parser to the `pi-mono` agent loop:
+  - **P2.1** Pinned `@earendil-works/pi-coding-agent` via
+    `payload/agent/pi-mono.version`; installer runs `npm install -g`
+    against the pinned version and `verify` asserts the pin.
+  - **P2.2** Closed 13-tool registry in `payload/agent/tools.py`
+    (`shell.run`, `fs.read`, `fs.write`, `pkg.query`, `pkg.install`,
+    `svc.status`, `svc.control`, `net.status`, `gui.screenshot`,
+    `gui.click`, `gui.type`, `skill.list`, `skill.load`) with per-tool
+    schema validation, path allow-lists for filesystem tools, and
+    fail-closed dispatch.
+  - **P2.3** Additive history schema migration in
+    `payload/agent/history.py` via `PRAGMA user_version`, with a
+    pre-migration snapshot saved to
+    `state/conversations.db.bak.<ts>`. New `events` table records
+    structured `tool_call`/`tool_observation`/`pending_tool_call`
+    events for the UI replay.
+  - **P2.4** Node bridge (`payload/agent/pi-mono-bridge.mjs`) wraps
+    `pi --mode json --no-builtin-tools --tools <names>` and speaks a
+    line-delimited JSON protocol to the Python client
+    (`payload/agent/pi_mono.py`). `ZOMBIE_PI_MONO_BRIDGE` lets the
+    smoke suite swap in `tests/fixtures/stub-pi-mono.mjs`.
+  - **P2.5** Per-tool approval UI: `payload/agent/templates/index.html`
+    replaces `renderProposal` with `tool_call`/`tool_observation`/
+    `pending_tool_call` renderers, a per-turn budget counter, and
+    `tool_call_id`-keyed approval POSTs.
+  - **P2.6** New `policy.yaml` blocks (`tool_classes:` and
+    `agent: max_tool_calls_per_turn / max_elevated_calls_per_turn`),
+    classified via `policy.classify_tool`. Audit log gains
+    `log_tool_call(...)` recording SHA-256 + byte count of stdout/
+    stderr (never raw content), plus extended sensitive-env redaction.
+  - Installer + `uninstall.sh` updates: deploy `pi-mono-bridge.mjs`,
+    render `/opt/ai-zombie/pi/{settings.json,APPEND_SYSTEM.md}`,
+    create `state/logs/` and `state/pi-mono-sessions/`, snapshot the
+    DB before migration, add pi-mono checks to `verify`, re-render
+    pi configs from `cmd_repair`, and prompt to remove the global
+    `@earendil-works/pi-coding-agent` package on uninstall.
+
+### Added
 - `LICENSE`, `CODE_OF_CONDUCT.md`, and `.editorconfig` so the repository
   metadata matches the documented GitHub project layout.
 - Smoke coverage and CI checks for required repository metadata and the

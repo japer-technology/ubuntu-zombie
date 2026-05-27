@@ -471,6 +471,24 @@ question.
 - **D7.** `extract_commands` is removed atomically in P2.6
   ([`UPGRADE-TO-PI.md`](UPGRADE-TO-PI.md) §9.6).
 
+### Phase status
+
+- **Phase 0** — complete (security prerequisites; argv-aware
+  classifier, fail-closed default, sudo allow-list).
+- **Phase 1** — complete (atomic `pi-ai` provider swap).
+- **Phase 2** — complete. `pi-mono` (`@earendil-works/pi-coding-agent`
+  pinned in `payload/agent/pi-mono.version`) is the agent loop;
+  fenced-bash parser removed; closed 13-tool registry in
+  `payload/agent/tools.py`; structured `tool_call` /
+  `tool_observation` / `pending_tool_call` events; per-tool approval
+  UI; additive history schema migration with pre-migration snapshot;
+  per-turn budgets via `policy.yaml` `agent:` block; documented
+  rollback in `docs/TROUBLESHOOTING.md`. **Documented deviation:**
+  pi-mono logs are `0640` agent-owned rather than root-only, because
+  the chat service does not run as root and needs to write them.
+- **Phase 3** — not started.
+- **Phase 4** — not started.
+
 ---
 
 ## 12. Out of scope

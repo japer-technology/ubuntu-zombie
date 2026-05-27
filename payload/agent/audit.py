@@ -4,9 +4,16 @@ Every prompt, proposed action, approval decision, command, exit code,
 and verification result is appended as one JSON object per line to
 ``/var/log/ubuntu-zombie/audit.log``. Secrets are redacted before
 write.
+
+Phase 2 of ``docs/UPGRADE-TO-PI-PLAN.md`` (P2.3) extends the redactor
+matrix with the secrets-file path and a list of sensitive environment
+variable names, and adds a structured ``tool_call`` event variant that
+records classification, decision, exit, duration, and SHA-256 digests
+of stdout/stderr.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -18,6 +25,34 @@ from pathlib import Path
 from typing import Any, Mapping
 
 AUDIT_PATH = Path(os.environ.get("ZOMBIE_AUDIT_LOG", "/var/log/ubuntu-zombie/audit.log"))
+
+# Sensitive env-var names whose values must never appear in the audit
+# log even outside their token-shaped substrings (e.g. an operator
+# pasted a short token that does not match the ``sk-...`` pattern).
+_SENSITIVE_ENV_NAMES = (
+    "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+    "XAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY",
+    "GROQ_API_KEY", "TAILSCALE_AUTHKEY", "VNC_PASSWORD",
+    "ZOMBIE_SECRETS",
+)
+
+
+def _secrets_path_redactors() -> tuple[tuple[re.Pattern[str], str], ...]:
+    paths = {os.environ.get("ZOMBIE_SECRETS") or "/opt/ai-zombie/secrets/env"}
+    out: list[tuple[re.Pattern[str], str]] = []
+    for p in paths:
+        if not p:
+            continue
+        out.append((re.compile(re.escape(p)), "***SECRETS_PATH***"))
+    return tuple(out)
+
+
+def _sensitive_env_redactors() -> tuple[tuple[re.Pattern[str], str], ...]:
+    return tuple(
+        (re.compile(rf"\b{name}\s*[:=]\s*\S+"), f"{name}=***REDACTED***")
+        for name in _SENSITIVE_ENV_NAMES
+    )
+
 
 # Token-shaped strings: provider keys, base64 blobs, ssh keys, etc.
 _REDACTORS: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -33,7 +68,7 @@ _REDACTORS: tuple[tuple[re.Pattern[str], str], ...] = (
      r"\1\2***REDACTED***"),
     (re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]+?-----END [A-Z ]+PRIVATE KEY-----"),
      "***REDACTED PRIVATE KEY***"),
-)
+) + _sensitive_env_redactors() + _secrets_path_redactors()
 
 _LOCK = threading.Lock()
 
@@ -84,6 +119,48 @@ def log_event(event_type: str, **fields: Any) -> str:
         with AUDIT_PATH.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
     return entry_id
+
+
+def log_tool_call(
+    *,
+    tool: str,
+    classification: str,
+    decision: str,
+    args_summary: Mapping[str, Any] | None = None,
+    exit_code: int | None = None,
+    duration_ms: int | None = None,
+    stdout: str | None = None,
+    stderr: str | None = None,
+    error: str | None = None,
+    **extra: Any,
+) -> str:
+    """Append a ``tool_call`` audit entry.
+
+    Stdout/stderr are recorded as length + SHA-256 digest so the audit
+    log stays bounded and never persists tool output verbatim (per the
+    Phase 2 plan §6 risk register, R5/R6).
+    """
+    fields: dict[str, Any] = {
+        "tool": tool,
+        "classification": classification,
+        "decision": decision,
+    }
+    if args_summary is not None:
+        fields["args"] = dict(args_summary)
+    if exit_code is not None:
+        fields["exit_code"] = exit_code
+    if duration_ms is not None:
+        fields["duration_ms"] = duration_ms
+    if error is not None:
+        fields["error"] = error
+    if stdout is not None:
+        fields["stdout_sha256"] = hashlib.sha256(stdout.encode("utf-8", "replace")).hexdigest()
+        fields["stdout_bytes"] = len(stdout.encode("utf-8", "replace"))
+    if stderr is not None:
+        fields["stderr_sha256"] = hashlib.sha256(stderr.encode("utf-8", "replace")).hexdigest()
+        fields["stderr_bytes"] = len(stderr.encode("utf-8", "replace"))
+    fields.update(extra)
+    return log_event("tool_call", **fields)
 
 
 def tail(n: int = 25) -> list[dict[str, Any]]:
