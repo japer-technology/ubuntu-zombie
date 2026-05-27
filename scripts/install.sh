@@ -237,15 +237,16 @@ is_ssh_pubkey() {
   [[ "$1" =~ ^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\  ]]
 }
 
-is_valid_username_syntax() {
-  [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+is_supported_agent_username() {
+  [[ "$1" =~ ^[a-z_]([a-z0-9_-]{0,30}[a-z0-9_])?$ ]] || return 1
+  [[ "$1" != "root" && "$1" != "nobody" ]]
 }
 
 # Validate user-controlled install settings before they are interpolated into
 # paths, sudoers entries, generated unit files, or shell commands.
 validate_config() {
-  if ! is_valid_username_syntax "${AGENT_USER}"; then
-    die "Invalid agent username '${AGENT_USER}'. Use a normal lowercase Linux username (letters, digits, underscore, hyphen; max 32 chars)." 2
+  if ! is_supported_agent_username "${AGENT_USER}"; then
+    die "Invalid agent username '${AGENT_USER}'. Use a non-reserved lowercase Linux username (letters, digits, underscore, hyphen; max 32 chars; no trailing hyphen)." 2
   fi
   if [[ "${ZOMBIE_DIR}" != /* ]]; then
     die "ZOMBIE_DIR must be an absolute path." 2
@@ -1208,6 +1209,7 @@ chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/tools/browser-test.py"
 section "x11vnc loopback-only desktop access"
 
 runuser -l "${AGENT_USER}" -c "mkdir -p ~/.vnc ~/.config/autostart ~/.local/share"
+install -d -m 700 -o "${AGENT_USER}" -g "${AGENT_USER}" "${AGENT_HOME}/.vnc"
 
 VNC_PASSWD_FILE="${AGENT_HOME}/.vnc/passwd"
 
