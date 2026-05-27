@@ -751,11 +751,14 @@ ok "Configured passwordless sudo for ${AGENT_USER}."
 section "SSH key setup"
 
 install -d -m 700 -o "${AGENT_USER}" -g "${AGENT_USER}" "${AGENT_HOME}/.ssh"
-install -m 600 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${AGENT_HOME}/.ssh/authorized_keys.tmp"
-if [[ -f "${AGENT_HOME}/.ssh/authorized_keys" ]]; then
-  cat "${AGENT_HOME}/.ssh/authorized_keys" > "${AGENT_HOME}/.ssh/authorized_keys.tmp"
+# Only create authorized_keys if it does not already exist. The previous
+# "cat existing > tmp && mv tmp existing" dance was a functional no-op that
+# left a window where a full disk could truncate the operator's keys and
+# lock them out. See FIX-1-05. The chown/chmod below re-asserts ownership
+# and mode whether or not the file pre-existed.
+if [[ ! -e "${AGENT_HOME}/.ssh/authorized_keys" ]]; then
+  install -m 600 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${AGENT_HOME}/.ssh/authorized_keys"
 fi
-mv "${AGENT_HOME}/.ssh/authorized_keys.tmp" "${AGENT_HOME}/.ssh/authorized_keys"
 chown "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.ssh/authorized_keys"
 chmod 600 "${AGENT_HOME}/.ssh/authorized_keys"
 

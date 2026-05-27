@@ -140,6 +140,11 @@ independently and in priority order.
   - On a fresh VM record `stat -c '%a %U:%G' /var/backups` before/after running
     `uninstall.sh --archive`; mode must not change.
   - `make lint`.
+- **status**: **fixed**. The `--archive` block in `scripts/uninstall.sh` (lines
+  ~133–140) now guards the `install -d -m 700 ${BACKUP_DIR}` call with
+  `[[ ! -d "${BACKUP_DIR}" ]]`, so the mode/ownership of an existing
+  `/var/backups` (default `BACKUP_DIR`) is left untouched. A new `BACKUP_DIR`
+  is still created `0700`. `make lint` and `make test` pass.
 
 ---
 
@@ -162,6 +167,14 @@ independently and in priority order.
     confirm `authorized_keys` content is byte-identical before/after the second
     run.
   - `make test`.
+- **status**: **fixed**. The SSH-key setup in `scripts/install.sh` (around
+  lines 753–763) no longer copies the existing `authorized_keys` through a
+  `.tmp` sibling. Instead it creates an empty `authorized_keys` with
+  `install -m 600 -o ${AGENT_USER} -g ${AGENT_USER} /dev/null …` only when the
+  file does not already exist, then re-asserts ownership/mode with
+  `chown`/`chmod`. A second run is now byte-identical to the first, and an
+  ENOSPC during install can no longer truncate a pre-existing key file. `make
+  lint` and `make test` pass.
 
 ---
 
@@ -185,6 +198,12 @@ independently and in priority order.
   - Add a smoke check that passes an argument with embedded space and asserts
     correct behaviour.
   - `make lint`, `make test`.
+- **status**: **fixed**. `run()` in `scripts/uninstall.sh` (lines ~72–82) now
+  uses `eval "$1"` (with an updated shellcheck-disable comment) instead of
+  `eval "$@"`. All existing callers already pass the command as a single
+  string literal, so behaviour is unchanged today, but any future caller whose
+  argument contains spaces or quoting will no longer be silently re-split by
+  `eval`. `make lint` and `make test` pass.
 
 ---
 

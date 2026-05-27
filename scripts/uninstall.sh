@@ -73,8 +73,11 @@ run() {
   if [[ "${DRY_RUN}" == "1" ]]; then
     printf '%s[dry]%s %s\n' "${C_YEL}" "${C_RESET}" "$*"
   else
-    # shellcheck disable=SC2294 # commands include shell metacharacters; eval is intentional.
-    eval "$@"
+    # Callers pass a single string with shell metacharacters (redirections,
+    # `||`, globbing). Re-evaluate that one string so the quoting survives.
+    # See FIX-1-06.
+    # shellcheck disable=SC2294 # eval on a single composed command string is intentional.
+    eval "$1"
   fi
 }
 
@@ -131,7 +134,12 @@ fi
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 if [[ "${ARCHIVE}" == "1" ]]; then
   info "Archiving ${AGENT_HOME} and ${ZOMBIE_DIR}/state to ${BACKUP_DIR}"
-  run "install -d -m 700 ${BACKUP_DIR}"
+  # Only assert mode when creating the directory new; otherwise leave the
+  # existing mode/ownership alone (e.g. /var/backups must stay 0755 so dpkg,
+  # cracklib, and audit collectors keep working). See FIX-1-04.
+  if [[ ! -d "${BACKUP_DIR}" ]]; then
+    run "install -d -m 700 ${BACKUP_DIR}"
+  fi
   if [[ -d "${AGENT_HOME}" ]]; then
     run "tar -czf ${BACKUP_DIR}/ubuntu-zombie-home-${STAMP}.tar.gz -C / home/${AGENT_USER}"
   fi
