@@ -3,11 +3,24 @@
 Common failures and the fastest fixes. Start with:
 
 ```bash
-/opt/ai-zombie/bin/health-check
-sudo ./scripts/install.sh doctor
+/opt/ai-zombie/bin/health-check        # or: zombie-health
+sudo ./scripts/install.sh verify       # read-only state check
+sudo ./scripts/install.sh doctor       # explains what is wrong
 ```
 
-`doctor` describes what is wrong; `repair` fixes known safe drift.
+`verify` reports the post-install invariants (no mutation). `doctor`
+describes what is wrong and points at the fix. `repair` applies the
+known-safe fixes: it re-asserts `secrets/env` ownership and `0600`
+mode, re-asserts UFW (`deny in / allow out`, plus the SSH rule scoped
+to `tailscale0` unless `ZOMBIE_SKIP_TAILSCALE=1` was set at install),
+re-renders the `pi-mono` runtime configs under `/opt/ai-zombie/pi/`,
+re-deploys the built-in skill catalogue under `/opt/ai-zombie/skills/`,
+optionally retries Tailscale login when `TAILSCALE_AUTHKEY` is set,
+and restarts the chat service.
+
+A timer (`ubuntu-zombie-health.timer`) runs `health-check` 5 minutes
+after boot and every 15 minutes thereafter; its last run is visible in
+`systemctl status ubuntu-zombie-health.service`.
 
 ---
 
@@ -38,6 +51,16 @@ sudo TAILSCALE_AUTHKEY=tskey-auth-… ./scripts/install.sh repair
 If you see `Logged out` and you supplied a pre-auth key, the key is
 expired or scoped to the wrong tailnet. Generate a new one at
 <https://login.tailscale.com/admin/settings/keys>.
+
+If you intentionally installed without Tailscale
+(`ZOMBIE_SKIP_TAILSCALE=1`), `doctor` and `health-check` will skip the
+Tailscale check; SSH is allowed on every interface instead of being
+scoped to `tailscale0`. Run any repair with the same variable set so
+the firewall rule is rewritten correctly:
+
+```bash
+sudo ZOMBIE_SKIP_TAILSCALE=1 ./scripts/install.sh repair
+```
 
 ## Docker group not applied
 
@@ -84,8 +107,11 @@ python -m playwright install --with-deps chromium
 
 ## Secrets file permissions
 
-The chat service refuses to start if `/opt/ai-zombie/secrets/env` is
-group- or world-readable. Reassert:
+`/opt/ai-zombie/secrets/env` must be owned by the agent user and mode
+`0600`. `doctor` and `health-check` flag it as `[--]` / `[warn]` when
+the permissions drift. `secrets-edit` re-asserts ownership and mode on
+exit (even on editor failure), and `install.sh repair` re-asserts them
+across the whole tree. To fix by hand:
 
 ```bash
 sudo chown zombie:zombie /opt/ai-zombie/secrets/env
@@ -102,10 +128,19 @@ journalctl -u ubuntu-zombie-chat.service -n 200 --no-pager
 
 Typical causes:
 
-- Missing API key. Add one with
-  `sudo /opt/ai-zombie/bin/secrets-edit`.
-- Port `7878` taken. Set `ZOMBIE_CHAT_PORT` in `secrets/env`.
+- Missing provider token. Add one with
+  `sudo /opt/ai-zombie/bin/secrets-edit` (or `sudo secrets-edit`).
+  `doctor` looks for any of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `GEMINI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`,
+  `MISTRAL_API_KEY`, or `GROQ_API_KEY`.
+- Port `7878` taken. Override by setting `ZOMBIE_CHAT_PORT` in
+  `secrets/env`; the systemd unit ships `Environment=ZOMBIE_CHAT_PORT=7878`
+  as a fallback so the service still starts when `secrets/env` is
+  missing or empty.
 - Bad permissions on `secrets/env` (see above).
+- `pi-mono` runtime configs missing under `/opt/ai-zombie/pi/`. Run
+  `sudo ./scripts/install.sh repair` to re-render them from the
+  packaged templates.
 
 ## "What did the AI just do?"
 
@@ -115,51 +150,84 @@ Typical causes:
 sudo less /var/log/ubuntu-zombie/audit.log
 ```
 
-## Rolling back the Phase 2 pi-mono cutover
+`audit-recent` is also reachable on `PATH` as `audit-recent`.
+Companion shortcuts installed by the installer:
 
-Phase 2 of [`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md)
-replaced the fenced-bash parser with the `pi-mono` agent loop and
-migrated the conversations schema. The cutover is reversible:
+| Symlink                            | Target                                      |
+|------------------------------------|---------------------------------------------|
+| `/usr/local/bin/audit-recent`      | `/opt/ai-zombie/bin/audit-recent`           |
+| `/usr/local/bin/secrets-edit`      | `/opt/ai-zombie/bin/secrets-edit`           |
+| `/usr/local/bin/zombie-chat`       | `/opt/ai-zombie/bin/zombie-chat`            |
+| `/usr/local/bin/zombie-health`     | `/opt/ai-zombie/bin/health-check`           |
+| `/usr/local/bin/zombie-diagnostics`| `/opt/ai-zombie/bin/collect-diagnostics`    |
+
+The audit log is rotated weekly (8 generations kept) by the
+`/etc/logrotate.d/ubuntu-zombie` rule and is created mode `0640`
+owned by the agent user.
+
+## Rolling back to the pre-`pi-mono` chat service
+
+The chat service drives the [`pi-mono`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
+agent loop through `payload/agent/pi-mono-bridge.mjs`. The version is
+pinned by `payload/agent/pi-mono.version` and the install snapshots
+`state/conversations.db` before running the additive schema migration.
+To roll back:
 
 1. **Stop the chat service** so nothing writes to history:
    ```bash
    sudo systemctl stop ubuntu-zombie-chat.service
    ```
 2. **Restore the pre-migration snapshot.** The installer copies
-   `state/conversations.db` to `state/conversations.db.bak.<ts>` *before*
-   running the additive schema migration. Pick the most recent
+   `state/conversations.db` to `state/conversations.db.bak.<ts>`
+   *before* the chat service runs the migration. Pick the most recent
    timestamp and restore it:
    ```bash
    sudo ls /opt/ai-zombie/state/conversations.db.bak.*
    sudo cp -a /opt/ai-zombie/state/conversations.db.bak.<ts> \
               /opt/ai-zombie/state/conversations.db
    ```
-3. **Pin pi-mono to the previous release** (or remove it entirely):
+3. **Pin `pi-mono` to a different release** (or remove it entirely):
    ```bash
    sudo npm uninstall -g @earendil-works/pi-coding-agent
    # or, to roll forward instead of back:
-   sudo npm install -g @earendil-works/pi-coding-agent@<previous-version>
+   sudo npm install -g @earendil-works/pi-coding-agent@<version>
    ```
-4. **Check out the previous payload** (the Phase 1 tag in `git`) and
-   re-run `sudo ./scripts/install.sh repair`. The chat service will
-   come back up against the restored DB and the previous binary.
+4. **Check out the previous payload** in `git` and re-run
+   `sudo ./scripts/install.sh repair`. The chat service comes back up
+   against the restored DB and the previously pinned binary.
 
-Pi-mono bridge logs live under `/opt/ai-zombie/state/logs/pi-mono.*.log`
-(rotated daily, kept 14 days). They are the first thing to inspect
-when an `operator_approval_required` failure appears unexpectedly or
-when the bridge exits without emitting `final`.
+`pi-mono` bridge logs live under
+`/opt/ai-zombie/state/logs/pi-mono.*.log` (one file per service start
+and turn; rotated daily, 14 generations kept by
+`/etc/logrotate.d/ubuntu-zombie`). They are the first thing to inspect
+when an `operator_approval_required` error appears unexpectedly, when
+a `budget_exceeded:` observation is emitted, or when the bridge exits
+without emitting `final`. Per-session scratch space lives under
+`/opt/ai-zombie/state/pi-mono-sessions/`.
 
 ## Non-interactive install fails immediately
 
 `ZOMBIE_NONINTERACTIVE=1` requires `SSH_PUBLIC_KEY` and `VNC_PASSWORD`
 to be set when neither is already configured on disk. Exit code `64`
-indicates missing required environment.
+indicates missing required environment. Exit code `2` indicates a bad
+argument (for example a non-integer `ZOMBIE_CHAT_PORT`); exit code
+`65` indicates an incompatible host, and `66` a network preflight
+failure.
 
 ## Collect a diagnostic bundle for a bug report
 
 ```bash
-sudo /opt/ai-zombie/bin/collect-diagnostics
+sudo /opt/ai-zombie/bin/collect-diagnostics    # or: sudo zombie-diagnostics
 # produces /tmp/ubuntu-zombie-diagnostics-YYYYMMDD-HHMMSS.tar.gz
 ```
 
-Secrets are redacted before the bundle is written.
+The bundle captures `os-release`, `uname`, disk and memory snapshots,
+`systemctl status` for the chat service and health timer, recent
+journal output for `ubuntu-zombie-chat` and `tailscaled`, `tailscale
+status`, `ufw status verbose`, Docker `version`/`info`, the verify and
+health-check transcripts, the installer log, the (already-redacted)
+audit log, `/etc/ubuntu-zombie/policy.yaml`, and a `dpkg -l` for the
+core packages. Token-shaped values (`sk-…`, `sk-ant-…`, `tskey-…`,
+SSH public keys, `API_KEY`/`TOKEN`/`PASSWORD`/`SECRET` lines) are
+redacted before the bundle is written; please still review the
+contents before sharing.
