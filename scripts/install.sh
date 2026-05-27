@@ -237,13 +237,13 @@ is_ssh_pubkey() {
   [[ "$1" =~ ^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\  ]]
 }
 
-is_local_username() {
+is_valid_username_syntax() {
   [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
 }
 
 validate_config() {
-  if ! is_local_username "${AGENT_USER}"; then
-    die "Invalid ZOMBIE_USER/AGENT_USER '${AGENT_USER}'. Use a normal lowercase Linux username (letters, digits, underscore, hyphen; max 32 chars)." 2
+  if ! is_valid_username_syntax "${AGENT_USER}"; then
+    die "Invalid agent username '${AGENT_USER}'. Set ZOMBIE_USER (or legacy AGENT_USER) to a normal lowercase Linux username (letters, digits, underscore, hyphen; max 32 chars)." 2
   fi
   if [[ "${ZOMBIE_DIR}" != /* ]]; then
     die "ZOMBIE_DIR must be an absolute path." 2
