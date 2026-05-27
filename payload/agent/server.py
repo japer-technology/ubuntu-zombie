@@ -139,7 +139,12 @@ def load_secrets_env() -> None:
             if end != -1:
                 val = val[1:end]
             else:
+                # Unmatched quote: strip the opening quote and still
+                # honour a trailing ``#`` comment on the remainder.
                 val = val[1:]
+                hash_idx = val.find("#")
+                if hash_idx != -1:
+                    val = val[:hash_idx].rstrip()
         else:
             hash_idx = val.find("#")
             if hash_idx != -1:
@@ -196,15 +201,19 @@ def _join_continuations(block: str) -> list[str]:
     text = block.replace("\r\n", "\n").replace("\r", "\n")
 
     # Detect here-doc: treat the whole block as one command.
-    if re.search(r"<<-?\s*['\"]?\w+['\"]?", text):
+    if re.search(r"<<-?\s*['\"]?[\w-]+['\"]?", text):
         joined = text.strip("\n")
         return [joined] if joined.strip() else []
 
-    # Fold trailing-backslash continuations.
+    # Fold trailing-backslash continuations. A line ending in an odd
+    # number of ``\`` characters is a real continuation; an even number
+    # means the final ``\`` is itself escaped.
     folded_lines: list[str] = []
     buf = ""
     for line in text.split("\n"):
-        if line.endswith("\\") and not line.endswith("\\\\"):
+        stripped = line.rstrip("\\")
+        trailing_backslashes = len(line) - len(stripped)
+        if trailing_backslashes % 2 == 1:
             buf += line[:-1]
             continue
         buf += line
