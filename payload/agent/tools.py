@@ -53,7 +53,13 @@ def _check_field(name: str, value: Any, spec: dict[str, Any]) -> None:
         return
     if expected == "string" and not isinstance(value, str):
         raise SchemaError(f"{name}: expected string, got {type(value).__name__}")
-    if expected == "integer" and not isinstance(value, int):
+    if expected == "integer" and (
+        isinstance(value, bool) or not isinstance(value, int)
+    ):
+        # ``bool`` is a subclass of ``int`` in Python; reject it explicitly so
+        # callers cannot smuggle ``True``/``False`` into integer fields such
+        # as ``shell.run`` ``timeout`` (which would otherwise be coerced to
+        # ``0`` and immediately fire ``TimeoutExpired``).
         raise SchemaError(f"{name}: expected integer, got {type(value).__name__}")
     if expected == "boolean" and not isinstance(value, bool):
         raise SchemaError(f"{name}: expected boolean, got {type(value).__name__}")
@@ -271,11 +277,18 @@ def _shim_gui_type(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _skills_dirs() -> list[Path]:
-    return [
+    dirs = [
         Path("/opt/ai-zombie/skills"),
         Path("/etc/ubuntu-zombie/skills.d"),
-        Path(os.environ.get("ZOMBIE_SKILLS_DIR", "")) if os.environ.get("ZOMBIE_SKILLS_DIR") else Path(""),
     ]
+    # Honour ``ZOMBIE_SKILLS_DIR`` only when it is a non-empty value. An
+    # empty string would otherwise become ``Path("")``/``Path(".")`` and
+    # silently add the chat service's working directory to the skills
+    # search path, bypassing the root-owned trees above.
+    extra = os.environ.get("ZOMBIE_SKILLS_DIR", "").strip()
+    if extra:
+        dirs.append(Path(extra))
+    return dirs
 
 
 def _shim_skill_list(_args: dict[str, Any]) -> dict[str, Any]:
