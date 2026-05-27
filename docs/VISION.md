@@ -6,11 +6,7 @@
   </picture>
 </p>
 
-<p align="center"><em>A normal Ubuntu PC, with an administrator inside it.</em></p>
-
----
-
-## The one-sentence promise
+## The one-sentence vision
 
 > **Ubuntu Zombie turns a supported Ubuntu Desktop LTS machine into a
 > computer that can administer itself — by installing a private,
