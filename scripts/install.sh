@@ -241,6 +241,8 @@ is_valid_username_syntax() {
   [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
 }
 
+# Validate user-controlled install settings before they are interpolated into
+# paths, sudoers entries, generated unit files, or shell commands.
 validate_config() {
   if ! is_valid_username_syntax "${AGENT_USER}"; then
     die "Invalid agent username '${AGENT_USER}'. Set ZOMBIE_USER (or legacy AGENT_USER) to a normal lowercase Linux username (letters, digits, underscore, hyphen; max 32 chars)." 2
@@ -253,6 +255,8 @@ validate_config() {
   fi
 }
 
+# Unknown positional arguments are collected in PARSED_ARGS during option
+# parsing; only the uninstall subcommand forwards them to uninstall.sh.
 reject_unexpected_args() {
   (( ${#PARSED_ARGS[@]} == 0 )) && return 0
   die "Unexpected argument(s) for ${SUBCOMMAND}: ${PARSED_ARGS[*]}" 2
