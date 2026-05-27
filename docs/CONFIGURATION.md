@@ -24,17 +24,36 @@ Supported variables:
 | `OPENROUTER_API_KEY` | API key for the OpenRouter aggregator. Requires `ZOMBIE_MODEL` to be set to a fully-qualified id such as `anthropic/claude-3.5-sonnet`. |
 | `MISTRAL_API_KEY`    | API key for the Mistral provider         |
 | `GROQ_API_KEY`       | API key for the Groq provider            |
-| `ZOMBIE_PROVIDER`    | One of `openai`, `anthropic`, `gemini`, `xai`, `openrouter`, `mistral`, `groq` (default: first key found, in the order above) |
-| `ZOMBIE_MODEL`       | Override the provider's default model    |
+| `ZOMBIE_PROVIDER`    | One of `openai`, `anthropic`, `gemini`, `xai`, `mistral`, `groq`, `openrouter` (default: first key found, in that order) |
+| `ZOMBIE_MODEL`       | Override the provider's default model (required for `openrouter`) |
+| `ZOMBIE_OPENAI_MODEL`     | Override the default model used when the active provider is `openai` |
+| `ZOMBIE_ANTHROPIC_MODEL`  | Override the default model used when the active provider is `anthropic` |
+| `ZOMBIE_GEMINI_MODEL`     | Override the default model used when the active provider is `gemini` |
+| `ZOMBIE_XAI_MODEL`        | Override the default model used when the active provider is `xai` |
+| `ZOMBIE_MISTRAL_MODEL`    | Override the default model used when the active provider is `mistral` |
+| `ZOMBIE_GROQ_MODEL`       | Override the default model used when the active provider is `groq` |
+| `ZOMBIE_OPENROUTER_MODEL` | Fully-qualified OpenRouter model id (e.g. `anthropic/claude-3.5-sonnet`); takes precedence over `ZOMBIE_MODEL` for `openrouter` |
 | `ZOMBIE_CHAT_PORT`   | Loopback port for the chat UI (default `7878`) |
-| `DISPLAY`            | X display for desktop helpers (default `:0`) |
+| `DISPLAY`            | X display for desktop helpers (default `:0`; pre-seeded in the generated `secrets/env`) |
+
+Per-provider defaults if no `ZOMBIE_MODEL` / `ZOMBIE_<PROVIDER>_MODEL`
+override is set (from `payload/agent/providers.py`):
+
+| Provider     | Default model               |
+| ------------ | --------------------------- |
+| `openai`     | `gpt-4o-mini`               |
+| `anthropic`  | `claude-3-5-sonnet-latest`  |
+| `gemini`     | `gemini-2.0-flash`          |
+| `xai`        | `grok-2-1212`               |
+| `mistral`    | `mistral-small-latest`      |
+| `groq`       | `llama-3.1-8b-instant`      |
+| `openrouter` | *(no default; must be set)* |
 
 All providers are routed through [`@earendil-works/pi-ai`][pi-ai],
 installed globally by `scripts/install.sh` at the version pinned in
-`payload/agent/pi-ai.version`. The bespoke OpenAI/Anthropic Python
-clients that used to live in `payload/agent/providers.py` were
-removed in the Phase 1 cutover documented in
-[`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md).
+`payload/agent/pi-ai.version`. The chat service shells out to the Node
+bridge at `/opt/ai-zombie/agent/pi-ai-bridge.mjs`; there are no
+bespoke per-provider Python clients.
 
 [pi-ai]: https://github.com/earendil-works/pi
 
@@ -106,11 +125,10 @@ restart needed.
 ### Fail-closed default
 
 `settings.default_class` is the classification used when no rule
-matches a proposed command. Starting with Phase 0 of
-[`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md), the shipped
-default is `destructive` — the highest gated class — so unknown
-commands cannot auto-run. Operators may relax this to a lower class
-once a workflow is proven safe.
+matches a proposed command. The shipped default is `destructive` —
+the highest gated class — so unknown commands cannot auto-run.
+Operators may relax this to a lower class once a workflow is proven
+safe.
 
 ### Sudo allow-list
 
@@ -125,15 +143,28 @@ program that `sudo` invokes (after `sudo` consumes its own flags), so
 `apt` and `systemctl`. Add entries only after confirming the
 underlying program is safe to elevate.
 
-### Tool classes and per-turn budgets (Phases 2 and 4)
+### Tool classes and per-turn budgets
 
-Phase 2 of [`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md)
-replaces the fenced-bash parser with the `pi-mono` agent loop
-(`@earendil-works/pi-coding-agent`). The agent now emits structured
-tool calls from a closed 13-tool registry (`shell.run`, `fs.read`,
-`fs.write`, `pkg.query`, `pkg.install`, `svc.status`, `svc.control`,
-`net.status`, `gui.screenshot`, `gui.click`, `gui.type`, `skill.list`,
-`skill.load`). Two new `policy.yaml` blocks control them:
+The agent emits structured tool calls from a closed 13-tool registry
+defined in `payload/agent/tools.py`:
+
+| Tool              | Registry default class | Purpose                                                    |
+| ----------------- | ---------------------- | ---------------------------------------------------------- |
+| `shell.run`       | per-argv via `classify` | Run a shell command through the existing runner.          |
+| `fs.read`         | `read_only`            | Read a UTF-8 text file within the readable allow-list.     |
+| `fs.write`        | `user_change`          | Write text content to a path within the writable allow-list. |
+| `pkg.query`       | `read_only`            | Query installed package metadata via dpkg/apt-cache.       |
+| `pkg.install`     | `system_change`        | Install Debian packages via apt-get.                       |
+| `svc.status`      | `read_only`            | Inspect a systemd unit (status / is-active).               |
+| `svc.control`     | `system_change`        | Start/stop/restart/reload/enable/disable a systemd unit.   |
+| `net.status`      | `read_only`            | Read-only firewall/Tailscale/interface inspection.         |
+| `gui.screenshot`  | `read_only`            | Capture the desktop session into the state directory.      |
+| `gui.click`       | `user_change`          | Move to (x, y) and click a mouse button via xdotool.       |
+| `gui.type`        | `user_change`          | Type text into the focused window via xdotool.             |
+| `skill.list`      | `read_only`            | Enumerate available skills.                                |
+| `skill.load`      | `read_only`            | Read the markdown body of a skill by name.                 |
+
+Two `policy.yaml` blocks control them:
 
 ```yaml
 tool_classes:
@@ -148,10 +179,7 @@ agent:
   max_elevated_calls_per_turn: 3     # cap on non read_only calls
 ```
 
-Phase 4 / P4.1 of [`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md)
-realigned the defaults with [`docs/UPGRADE-TO-PI.md`](UPGRADE-TO-PI.md)
-§6.1–§6.2 (12 / 3) and made the elevated budget enforcement match the
-total-call budget enforcement:
+Budget enforcement:
 
 - `max_tool_calls_per_turn` is enforced by `pi_mono.run_turn` and the
   bridge — once exceeded, the agent receives a synthetic
@@ -160,7 +188,7 @@ total-call budget enforcement:
   classification returned by `policy.classify_tool`. Each call past the
   budget is recorded as a `budget_exceeded` audit decision and the
   agent sees the same synthetic observation so it ends the turn
-  cleanly. The same counter still drives the operator-facing per-turn
+  cleanly. The same counter drives the operator-facing per-turn
   budget badge in the UI.
 
 ### pi-mono runtime
@@ -177,18 +205,9 @@ The installer pins `@earendil-works/pi-coding-agent` to the version in
 | `/opt/ai-zombie/state/logs/pi-mono.*.log` | per-turn bridge logs, rotated daily   |
 | `/opt/ai-zombie/state/pi-mono-sessions/`  | pi session/checkpoint state           |
 
-Environment overrides (read by `payload/agent/pi_mono.py`):
-
-| Variable                  | Purpose                                                  |
-| ------------------------- | -------------------------------------------------------- |
-| `ZOMBIE_PI_MONO_BIN`      | Override the `pi` binary path (defaults to `which pi`).  |
-| `ZOMBIE_PI_MONO_BRIDGE`   | Override the bridge script (used by smoke tests).        |
-| `ZOMBIE_PI_MONO_LOG_DIR`  | Override the log directory.                              |
-| `ZOMBIE_PI_MONO_SETTINGS` | Override the settings.json path.                         |
-
-After editing `policy.yaml` or any template under
-`/opt/ai-zombie/agent/templates/`, run `sudo ./scripts/install.sh
-repair` to re-render the `pi/` tree and restart the chat service.
+Environment overrides for the `pi-mono` runtime are documented in
+[Advanced environment overrides](#advanced-environment-overrides)
+below (look for the `ZOMBIE_PI_MONO_*` variables).
 
 ## Tailscale
 
@@ -200,6 +219,11 @@ re-enrol or change accounts:
 sudo tailscale logout
 sudo tailscale up
 ```
+
+For unattended installs, set `TAILSCALE_AUTHKEY` to a Tailscale
+pre-auth key before running `install`; the installer will run
+`tailscale up --ssh=false --authkey "$TAILSCALE_AUTHKEY"` for you.
+The variable is ignored when `ZOMBIE_SKIP_TAILSCALE=1`.
 
 The chat service never binds outside `127.0.0.1`; remote access is by
 SSH tunnel only.
@@ -248,8 +272,9 @@ typing the password. Read `SECURITY.md` before enabling it.
 
 ## VNC
 
-`x11vnc` binds to `127.0.0.1:5900` only and starts via the agent
-account's GNOME autostart entry. Tunnel to it over Tailscale:
+`x11vnc` binds to `127.0.0.1:${VNC_PORT:-5900}` only and starts via
+the agent account's GNOME autostart entry. Tunnel to it over
+Tailscale:
 
 ```bash
 ssh -L 5900:127.0.0.1:5900 zombie@<tailscale-name-or-ip>
@@ -260,6 +285,13 @@ Reset the password:
 
 ```bash
 sudo -u zombie x11vnc -storepasswd
+```
+
+The port is fixed at install time. To change it, re-run the
+installer with `VNC_PORT=<n>` (and re-tunnel accordingly):
+
+```bash
+sudo VNC_PORT=5901 ./scripts/install.sh install
 ```
 
 ## Chat access
@@ -273,12 +305,84 @@ root-equivalent.
 
 ## Logs and state
 
-| Path                                    | Purpose                          |
-| --------------------------------------- | -------------------------------- |
-| `/var/log/ubuntu-zombie-install.log`    | Installer transcripts            |
-| `/var/log/ubuntu-zombie/audit.log`      | JSON-lines AI audit trail        |
-| `/opt/ai-zombie/state/conversations.db` | Chat history (SQLite)            |
-| `/opt/ai-zombie/state/screen.png`       | Latest screenshot helper output  |
+| Path                                       | Purpose                                         |
+| ------------------------------------------ | ----------------------------------------------- |
+| `/var/log/ubuntu-zombie-install.log`       | Installer transcripts                           |
+| `/var/log/ubuntu-zombie/audit.log`         | JSON-lines AI audit trail                       |
+| `/opt/ai-zombie/state/conversations.db`    | Chat history (SQLite)                           |
+| `/opt/ai-zombie/state/screen.png`          | Latest screenshot helper output                 |
+| `/opt/ai-zombie/state/logs/pi-mono.*.log`  | Per-turn pi-mono bridge logs (rotated daily)    |
+| `/opt/ai-zombie/state/pi-mono-sessions/`   | pi session/checkpoint state                     |
+
+## Operator helpers
+
+`scripts/install.sh` installs a small set of helper commands under
+`/opt/ai-zombie/bin/`:
+
+| Command                | Purpose                                                                 |
+| ---------------------- | ----------------------------------------------------------------------- |
+| `secrets-edit`         | Safely edit `secrets/env`; re-asserts `0600` mode after `$EDITOR` exits |
+| `health-check`         | One-shot health summary (chat service, Tailscale, SSH, desktop, …)      |
+| `audit-recent`         | Tail the most recent decisions from `audit.log`                         |
+| `collect-diagnostics`  | Bundle logs and state into a tarball with secrets redacted              |
+| `zombie-chat`          | Print the local chat URL and a copy-pasteable SSH tunnel example        |
+
+The installer also drops `verify` and a few GUI shims (`gui-env`,
+`screenshot`, `click`, `type`, `key`) under the same directory; the
+agent invokes them directly.
+
+## Install subcommands
+
+`scripts/install.sh` is idempotent and exposes several subcommands;
+all honour the same `ZOMBIE_*` environment variables documented
+above:
+
+| Subcommand  | Effect                                                                |
+| ----------- | --------------------------------------------------------------------- |
+| `install`   | Full install (default). Safe to re-run.                               |
+| `verify`    | Read-only state check. Does not change state.                         |
+| `doctor`    | Explain failures and likely fixes.                                    |
+| `repair`    | Apply known-safe fixes (re-assert permissions, re-render `pi/` tree). |
+| `uninstall` | Reverse the install (delegates to `scripts/uninstall.sh`).            |
+
+After editing `policy.yaml` or any template under
+`/opt/ai-zombie/agent/templates/`, run `sudo ./scripts/install.sh
+repair` to re-render the `pi/` tree and restart the chat service.
+
+## Skills
+
+Skill files are short markdown briefs the agent loads via `skill.list`
+/ `skill.load`. They are read from two directories:
+
+| Path                         | Purpose                                                         |
+| ---------------------------- | --------------------------------------------------------------- |
+| `/opt/ai-zombie/skills/`     | Root-owned, ships with the package (`apt`, `docker`, `gui`, `systemd`, `tailscale`, `ufw`). |
+| `/etc/ubuntu-zombie/skills.d/` | Operator-extensible. Same mode/owner contract as `policy.yaml`. |
+
+Drop additional `*.md` files into `/etc/ubuntu-zombie/skills.d/` to
+extend the catalogue. Names must be unique across both directories;
+shadowing is rejected at load time.
+
+## Advanced environment overrides
+
+Most operators never need these — the defaults match what
+`scripts/install.sh` lays down — but they are honoured by the agent
+processes and are useful for development, CI, and bespoke layouts:
+
+| Variable                  | Default                                  | Consumer            |
+| ------------------------- | ---------------------------------------- | ------------------- |
+| `ZOMBIE_DIR`              | `/opt/ai-zombie`                         | installer, agent    |
+| `ZOMBIE_SECRETS`          | `${ZOMBIE_DIR}/secrets/env`              | `server.py`, audit  |
+| `ZOMBIE_POLICY`           | `/etc/ubuntu-zombie/policy.yaml`         | `policy.py`         |
+| `ZOMBIE_AUDIT_LOG`        | `/var/log/ubuntu-zombie/audit.log`       | `audit.py`, `audit-recent` |
+| `ZOMBIE_HISTORY_DB`       | `/opt/ai-zombie/state/conversations.db`  | `history.py`        |
+| `ZOMBIE_SKILLS_DIR`       | *(unset)*                                | `skill_loader.py` (extra directory consulted first) |
+| `ZOMBIE_NODE`             | `which node`                             | pi-ai bridge spawner |
+| `ZOMBIE_PI_AI_BRIDGE`     | `${ZOMBIE_DIR}/agent/pi-ai-bridge.mjs`   | pi-ai bridge spawner (used by tests) |
+| `ZOMBIE_PI_MONO_BIN`      | `which pi`                               | `pi_mono.py`        |
+| `ZOMBIE_PI_MONO_BRIDGE`   | `${ZOMBIE_DIR}/agent/pi-mono-bridge.mjs` | `pi_mono.py` (used by smoke tests) |
+| `ZOMBIE_PI_MONO_LOG_DIR`  | `/opt/ai-zombie/state/logs`              | `pi_mono.py`        |
+| `ZOMBIE_PI_MONO_SETTINGS` | `/opt/ai-zombie/pi/settings.json`        | `pi_mono.py`        |
 
 ## Health check
 
