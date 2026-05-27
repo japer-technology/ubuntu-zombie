@@ -68,13 +68,6 @@ Non-interactive variants and every environment variable: see
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)                     | Community expectations                            |
 | [`LICENSE`](LICENSE)                                           | MIT license terms                                 |
 | [`CHANGELOG.md`](CHANGELOG.md)                                 | Versioned release history                         |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md)                           | Post-MVP work                                     |
-
-Background essays (kept for context, not required reading) live under
-[`docs/design-notes/`](docs/design-notes/): `IDEA.md`, `HOW-1.md`,
-`WHY-1.md`, `POSSIBILITIES-1.md`, `POSSIBILITIES-2.md`, `SIMILAR.md`,
-`SEARCH.md`, and the MVP recommendation that produced this version,
-`RECOMMENDATIONS-1.md`.
 
 ## Trust model in one paragraph
 
