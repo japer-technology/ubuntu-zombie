@@ -183,7 +183,10 @@ def _coerce_rules(raw: Any) -> list[Rule]:
         if not pattern or not class_name:
             continue
         try:
-            compiled = re.compile(str(pattern))
+            # FIX-3-25: compile with re.MULTILINE so the ``^...``
+            # anchors in policy.yaml match the start of each line in a
+            # multi-line command, not just the very first character.
+            compiled = re.compile(str(pattern), re.MULTILINE)
         except re.error:
             continue
         out.append(Rule(pattern=compiled, class_name=str(class_name)))
@@ -216,7 +219,10 @@ def _extract_rules_from_text(text: str) -> list[Rule]:
         elif line.startswith("class:") and pattern is not None:
             class_name = _strip_quotes(line[len("class:"):].strip())
             try:
-                out.append(Rule(pattern=re.compile(pattern), class_name=class_name))
+                # FIX-3-25: see _coerce_rules — match every line so
+                # multi-line proposals still classify correctly.
+                out.append(Rule(pattern=re.compile(pattern, re.MULTILINE),
+                                class_name=class_name))
             except re.error:
                 pass
             pattern = None
@@ -229,16 +235,20 @@ def _strip_quotes(s: str) -> str:
     return s
 
 
-_cache: tuple[float, Policy] | None = None
+_cache: tuple[tuple[int, int], Policy] | None = None
 
 
 def load_policy(path: Path = POLICY_PATH) -> Policy:
     global _cache
     try:
-        mtime = path.stat().st_mtime
+        st = path.stat()
     except FileNotFoundError:
         return _default_policy()
-    if _cache is not None and _cache[0] == mtime:
+    # FIX-3-14: use ``(st_mtime_ns, st_size)`` as the cache key. The
+    # previous key was ``st_mtime`` (seconds), which loses two writes
+    # inside the same FS tick (common on tmpfs / certain CI setups).
+    key = (st.st_mtime_ns, st.st_size)
+    if _cache is not None and _cache[0] == key:
         return _cache[1]
     text = path.read_text(encoding="utf-8")
     try:
@@ -273,7 +283,7 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
         ),
         default_class=str(settings.get("default_class", "system_change")),
     )
-    _cache = (mtime, policy)
+    _cache = (key, policy)
     return policy
 
 

@@ -101,6 +101,31 @@ class AnthropicProvider(BaseProvider):
         return "".join(getattr(p, "text", "") for p in parts)
 
 
+def provider_status() -> tuple[str, str]:
+    """Cheap, side-effect-free banner for ``GET /``.
+
+    Returns ``(name, status_text)`` based purely on environment
+    variables. Unlike ``provider_from_env`` this does **not**
+    instantiate any SDK client, so it is safe to call on every page
+    load (FIX-3-07). The actual provider call still happens lazily in
+    ``post_message`` where errors can be surfaced to the operator.
+    """
+    explicit = (os.environ.get("ZOMBIE_PROVIDER") or "").strip().lower()
+    if explicit == "openai":
+        return ("openai",
+                "configured" if os.environ.get("OPENAI_API_KEY")
+                else "OPENAI_API_KEY not set")
+    if explicit == "anthropic":
+        return ("anthropic",
+                "configured" if os.environ.get("ANTHROPIC_API_KEY")
+                else "ANTHROPIC_API_KEY not set")
+    if os.environ.get("OPENAI_API_KEY"):
+        return ("openai", "configured")
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return ("anthropic", "configured")
+    return ("none", "no API key found")
+
+
 def provider_from_env(name: str | None = None,
                       model: str | None = None) -> BaseProvider:
     """Return a configured provider, or raise ``NoProviderConfigured``."""

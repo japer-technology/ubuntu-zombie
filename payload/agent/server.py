@@ -38,6 +38,7 @@ from history import History  # noqa: E402
 from policy import load_policy  # noqa: E402
 from providers import (  # noqa: E402
     Message, NoProviderConfigured, ProviderError, provider_from_env,
+    provider_status,
 )
 from runner import run as run_command  # noqa: E402
 
@@ -82,10 +83,19 @@ Style:
 - Refuse and explain if asked to exfiltrate secrets, disable the audit
   log, or weaken the policy gate.
 
-Machine facts (auto-collected): {{facts}}
+Machine facts (auto-collected): {facts}
 """
 
-SYSTEM_PROMPT = SYSTEM_PROMPT_TEMPLATE.format(agent_user=AGENT_USER)
+
+def render_system_prompt(facts: str) -> str:
+    """Render the system prompt in a single ``.format`` call.
+
+    FIX-3-19: the previous implementation called ``.format`` twice
+    (once at module load with ``agent_user``, once per message with
+    ``facts``), which required escaping any future ``{`` in the
+    template and broke if ``AGENT_USER`` contained ``{``/``}``.
+    """
+    return SYSTEM_PROMPT_TEMPLATE.format(agent_user=AGENT_USER, facts=facts)
 
 
 # ---------------------------------------------------------------------------
@@ -112,11 +122,28 @@ def load_secrets_env() -> None:
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
+        # FIX-3-13: allow shell-style ``export FOO=bar`` lines.
+        if line.startswith("export "):
+            line = line[len("export "):].lstrip()
         if "=" not in line:
             continue
         key, _, val = line.partition("=")
         key = key.strip()
-        val = val.strip().strip('"').strip("'")
+        val = val.strip()
+        # FIX-3-13: honour mid-line ``#`` comments, but only when the
+        # ``#`` sits outside a quoted value (otherwise values like
+        # ``****** would be truncated).
+        if val and val[0] in ("'", '"'):
+            quote = val[0]
+            end = val.find(quote, 1)
+            if end != -1:
+                val = val[1:end]
+            else:
+                val = val[1:]
+        else:
+            hash_idx = val.find("#")
+            if hash_idx != -1:
+                val = val[:hash_idx].rstrip()
         if key and key not in os.environ:
             os.environ[key] = val
 
@@ -145,17 +172,65 @@ def machine_facts() -> dict[str, str]:
 # Command extraction
 # ---------------------------------------------------------------------------
 
-_BASH_BLOCK = re.compile(r"```(?:bash|sh|shell)\n(.*?)```", re.DOTALL)
+# FIX-3-09/FIX-3-24: accept optional whitespace, CRLF line endings, and
+# a broader set of language tags (or none) on the opening fence.
+_BASH_BLOCK = re.compile(
+    r"```(?:bash|sh|shell|console|text)?[ \t]*\r?\n(.*?)```",
+    re.DOTALL,
+)
+
+
+def _join_continuations(block: str) -> list[str]:
+    """Yield logical shell commands from a fenced block.
+
+    FIX-3-10 / FIX-3-12: previously each physical line in a block was
+    treated as an independent command, which broke
+    backslash-continuations and here-docs (the second line of
+    ``cat <<EOF`` ran as a standalone shell statement). This helper
+    joins trailing-``\\`` continuations and collapses any block that
+    contains a ``<<`` here-doc into a single logical command sent
+    through the policy gate as a unit. Per-line ``#`` filtering is
+    only applied for the single-command shape so a leading shebang
+    inside a multi-line script is preserved.
+    """
+    text = block.replace("\r\n", "\n").replace("\r", "\n")
+
+    # Detect here-doc: treat the whole block as one command.
+    if re.search(r"<<-?\s*['\"]?\w+['\"]?", text):
+        joined = text.strip("\n")
+        return [joined] if joined.strip() else []
+
+    # Fold trailing-backslash continuations.
+    folded_lines: list[str] = []
+    buf = ""
+    for line in text.split("\n"):
+        if line.endswith("\\") and not line.endswith("\\\\"):
+            buf += line[:-1]
+            continue
+        buf += line
+        folded_lines.append(buf)
+        buf = ""
+    if buf:
+        folded_lines.append(buf)
+
+    out: list[str] = []
+    for line in folded_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # Per-line ``#`` filter only when this really is a one-line
+        # command (no continuations were folded into it). A folded
+        # multi-line command may legitimately start with a shebang.
+        if "\n" not in stripped and stripped.startswith("#"):
+            continue
+        out.append(stripped)
+    return out
 
 
 def extract_commands(text: str) -> list[str]:
     out: list[str] = []
     for block in _BASH_BLOCK.findall(text):
-        for line in block.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            out.append(stripped)
+        out.extend(_join_continuations(block))
     return out
 
 
@@ -193,7 +268,7 @@ class App:
             return {"conversation_id": conv_id, "error": err}
 
         facts = ", ".join(f"{k}={v}" for k, v in machine_facts().items())
-        msgs = [Message(role="system", content=SYSTEM_PROMPT.format(facts=facts))]
+        msgs = [Message(role="system", content=render_system_prompt(facts))]
         for m in self.history.get_messages(conv_id):
             if m["role"] in {"user", "assistant"}:
                 msgs.append(Message(role=m["role"], content=m["content"]))
@@ -331,17 +406,20 @@ INDEX_HTML_PATH = HERE / "templates" / "index.html"
 
 def _render_index(app: App) -> bytes:
     facts = machine_facts()
-    try:
-        provider_name = provider_from_env().name
-        provider_status = f"connected ({provider_name})"
-    except NoProviderConfigured as exc:
-        provider_status = f"no provider configured: {exc}"
-    except ProviderError as exc:
-        provider_status = f"error: {exc}"
+    # FIX-3-07: avoid constructing a fresh SDK client on every GET /.
+    # ``provider_status`` is pure env-var inspection (no network, no
+    # client setup) and was added to providers.py for this purpose.
+    name, status = provider_status()
+    if name == "none":
+        banner = status
+    elif "not set" in status or "no" in status:
+        banner = f"{name}: {status}"
+    else:
+        banner = f"connected ({name})"
     text = INDEX_HTML_PATH.read_text(encoding="utf-8")
     text = text.replace("{{HOSTNAME}}", html.escape(facts.get("hostname", "?")))
     text = text.replace("{{OS}}", html.escape(facts.get("os", "Ubuntu")))
-    text = text.replace("{{PROVIDER_STATUS}}", html.escape(provider_status))
+    text = text.replace("{{PROVIDER_STATUS}}", html.escape(banner))
     examples = (HERE / "examples.md").read_text(encoding="utf-8") if (HERE / "examples.md").exists() else ""
     text = text.replace("{{EXAMPLES}}", html.escape(examples))
     return text.encode("utf-8")
@@ -431,8 +509,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_handler(app: App) -> type[Handler]:
-    Handler.app = app
-    return Handler
+    # FIX-3-20: return a fresh subclass per App rather than mutating
+    # ``Handler.app`` (a class attribute), so two App instances in the
+    # same process do not stomp on each other.
+    class _Handler(Handler):
+        pass
+    _Handler.app = app
+    return _Handler
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -448,8 +531,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"refusing to bind to non-loopback host: {args.host}", file=sys.stderr)
         return 2
 
-    load_secrets_env()
+    # FIX-3-08: the safe-mode check only stats the secrets file; run it
+    # *before* parsing the contents into os.environ so a refusal-to-
+    # start path cannot leak the secrets (e.g. via a future ExecStopPost
+    # hook that dumps the environment).
     assert_secrets_safe()
+    load_secrets_env()
     app = App()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     log_event("service_start", host=args.host, port=args.port,

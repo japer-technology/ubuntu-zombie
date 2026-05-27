@@ -60,10 +60,19 @@ n=1; delay=5
 while true; do
   if python -m playwright install chromium; then break; fi
   if (( n >= 4 )); then
-    echo "playwright install failed after ${n} attempts; rerun later."
-    break
+    echo "playwright install failed after ${n} attempts; rerun later." >&2
+    # FIX-3-04: signal failure so callers (install.sh) can detect the
+    # broken browser install instead of falling off the end with the
+    # echo's exit status (0).
+    mkdir -p "${HOME}/.cache/ubuntu-zombie"
+    : > "${HOME}/.cache/ubuntu-zombie/playwright-failed"
+    exit 1
   fi
   echo "playwright retry ${n} in ${delay}s..."
   sleep "${delay}"
   n=$((n + 1)); delay=$((delay * 2))
 done
+
+# FIX-3-04: clear the failure sentinel on success so the next health
+# check stops complaining once the operator has fixed the network.
+rm -f "${HOME}/.cache/ubuntu-zombie/playwright-failed" 2>/dev/null || true

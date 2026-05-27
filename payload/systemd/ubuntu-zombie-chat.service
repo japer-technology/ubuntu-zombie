@@ -11,6 +11,12 @@ WorkingDirectory=/opt/ai-zombie
 EnvironmentFile=-/opt/ai-zombie/secrets/env
 Environment=PYTHONUNBUFFERED=1
 Environment=ZOMBIE_USER=__AGENT_USER__
+# FIX-3-02: provide a default for ZOMBIE_CHAT_PORT so the unit still
+# starts when the operator has not added the variable to
+# /opt/ai-zombie/secrets/env (EnvironmentFile= is optional). Without
+# this, ${ZOMBIE_CHAT_PORT} would expand to '' and argparse would
+# reject ``--port ''``.
+Environment=ZOMBIE_CHAT_PORT=7878
 ExecStart=__AGENT_HOME__/agent-env/bin/python /opt/ai-zombie/agent/server.py --host 127.0.0.1 --port ${ZOMBIE_CHAT_PORT}
 Restart=on-failure
 RestartSec=3
@@ -19,7 +25,14 @@ StandardError=journal
 
 # Security hardening — the service must keep writing the audit log
 # under /var/log/ubuntu-zombie/, so /var/log is not made read-only.
-NoNewPrivileges=true
+#
+# FIX-3-01: ``NoNewPrivileges=true`` is intentionally absent here. The
+# whole product is designed around the agent account elevating via
+# passwordless ``sudo`` (a setuid binary) once the policy gate has
+# approved a command; NoNewPrivileges would block every such elevation.
+# The policy gate in payload/etc/policy.yaml is the security boundary,
+# not the systemd sandbox. For extra defence-in-depth use a dedicated
+# AppArmor profile that allows /usr/bin/sudo.
 ProtectSystem=full
 ProtectHome=false
 PrivateTmp=true

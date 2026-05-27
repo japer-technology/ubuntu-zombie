@@ -50,6 +50,11 @@ rules:
     class: destructive
   - pattern: '>\s*/dev/sd[a-z]'
     class: destructive
+  # FIX-3-03: ``find`` with -delete or -exec*/-ok* runs arbitrary
+  # destructive commands; force the highest tier even if the operator
+  # is impatient. Must precede any user_change/read_only rule for find.
+  - pattern: '\bfind\b.*(-delete\b|-exec\b|-execdir\b|-ok\b|-okdir\b|-fprint\b|-fprintf\b|-fls\b)'
+    class: destructive
 
   # ----- network_change -----
   - pattern: '\bufw\b'
@@ -86,6 +91,11 @@ rules:
     class: system_change
   - pattern: '\bchmod\b|\bchown\b|\bchgrp\b'
     class: system_change
+  # FIX-3-26: ``git rm``/``git mv`` are user-level VCS operations; flag
+  # them as user_change before the bare \brm\s+ / \bmv\s+ rules below
+  # catch them as system_change. First match wins.
+  - pattern: '\bgit\s+(rm|mv)\b'
+    class: user_change
   - pattern: '\bmv\s+'
     class: system_change
   - pattern: '\brm\s+'
@@ -110,7 +120,14 @@ rules:
     class: user_change
 
   # ----- read_only -----
-  - pattern: '^(ls|cat|head|tail|less|file|stat|wc|find|grep|rg|ag)\b'
+  # FIX-3-03: ``find`` removed from this read_only group. A ``find`` with
+  # -delete or -exec*/-ok*/-fprint* is destructive (handled above);
+  # safe ``find`` invocations are matched by the rule that follows.
+  - pattern: '^(ls|cat|head|tail|less|file|stat|wc|grep|rg|ag)\b'
+    class: read_only
+  # FIX-3-03: ``find`` is read_only only when it does *not* contain any
+  # of the side-effecting flags. Approval flow still applies otherwise.
+  - pattern: '^find\b(?!.*(-delete\b|-exec\b|-execdir\b|-ok\b|-okdir\b|-fprint\b|-fprintf\b|-fls\b))'
     class: read_only
   - pattern: '^(df|du|free|uptime|uname|hostname|id|whoami|w|who|pwd|date)\b'
     class: read_only

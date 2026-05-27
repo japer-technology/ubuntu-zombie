@@ -5,7 +5,7 @@
     delaycompress
     missingok
     notifempty
-    create 0640 agent agent
+    create 0640 __AGENT_USER__ __AGENT_USER__
     postrotate
         # The chat service reopens on append; no SIGHUP needed.
         :

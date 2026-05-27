@@ -1279,8 +1279,11 @@ else
   info "Preserving existing ${ZOMBIE_ETC}/policy.yaml."
 fi
 
-# logrotate.
-install -m 644 "${PAYLOAD_DIR}/logrotate/ubuntu-zombie" /etc/logrotate.d/ubuntu-zombie
+# logrotate. The shipped file uses the ``__AGENT_USER__`` placeholder
+# so the `create` line names the operator-chosen account (FIX-3-06).
+sed -e "s|__AGENT_USER__|${AGENT_USER}|g" \
+    "${PAYLOAD_DIR}/logrotate/ubuntu-zombie" \
+    | install -m 644 /dev/stdin /etc/logrotate.d/ubuntu-zombie
 
 # Audit log seed file (so chat service can open it without race).
 if [[ ! -f "${ZOMBIE_LOG_DIR}/audit.log" ]]; then
