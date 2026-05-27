@@ -90,6 +90,7 @@ run_bad_usage() {
   expect_exit_code 2 env 'ZOMBIE_USER=bad user' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_USER=root' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_USER=bad-' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_USER=bad_' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_DIR=relative/path' ./scripts/install.sh doctor
   expect_exit_code 2 env 'LOG_FILE=relative.log' ./scripts/install.sh doctor
 }

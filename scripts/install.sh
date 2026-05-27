@@ -238,7 +238,7 @@ is_ssh_pubkey() {
 }
 
 is_supported_agent_username() {
-  [[ "$1" =~ ^[a-z_]([a-z0-9_-]{0,30}[a-z0-9_])?$ ]] || return 1
+  [[ "$1" =~ ^[a-z]([a-z0-9_-]{0,30}[a-z0-9])?$ ]] || return 1
   [[ "$1" != "root" && "$1" != "nobody" ]]
 }
 
@@ -246,7 +246,7 @@ is_supported_agent_username() {
 # paths, sudoers entries, generated unit files, or shell commands.
 validate_config() {
   if ! is_supported_agent_username "${AGENT_USER}"; then
-    die "Invalid agent username '${AGENT_USER}'. Use a non-reserved lowercase Linux username (letters, digits, underscore, hyphen; max 32 chars; no trailing hyphen)." 2
+    die "Invalid agent username '${AGENT_USER}'. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation)." 2
   fi
   if [[ "${ZOMBIE_DIR}" != /* ]]; then
     die "ZOMBIE_DIR must be an absolute path." 2
@@ -259,7 +259,7 @@ validate_config() {
 # Unknown positional arguments are collected in PARSED_ARGS during option
 # parsing; only the uninstall subcommand forwards them to uninstall.sh.
 reject_unexpected_positional_args() {
-  (( ${#PARSED_ARGS[@]} == 0 )) && return 0
+  [[ ${#PARSED_ARGS[@]} -eq 0 ]] && return 0
   die "Unexpected argument(s) for ${SUBCOMMAND}: ${PARSED_ARGS[*]}" 2
 }
 
@@ -1216,7 +1216,10 @@ VNC_PASSWD_FILE="${AGENT_HOME}/.vnc/passwd"
 if [[ -f "${VNC_PASSWD_FILE}" ]]; then
   info "VNC password already set; keeping it."
 elif [[ -n "${VNC_PASSWORD}" ]]; then
-  runuser -u "${AGENT_USER}" -- x11vnc -storepasswd "${VNC_PASSWORD}" "${VNC_PASSWD_FILE}" >/dev/null
+  printf '%s\n%s\n' "${VNC_PASSWORD}" "${VNC_PASSWORD}" \
+    | runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" x11vnc -storepasswd >/dev/null
+  chown "${AGENT_USER}:${AGENT_USER}" "${VNC_PASSWD_FILE}"
+  chmod 600 "${VNC_PASSWD_FILE}"
   ok "VNC password set from VNC_PASSWORD env var."
 elif [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]]; then
   die "Non-interactive mode requires VNC_PASSWORD when no VNC password is already stored." 64
