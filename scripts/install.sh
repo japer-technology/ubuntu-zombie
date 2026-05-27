@@ -237,6 +237,27 @@ is_ssh_pubkey() {
   [[ "$1" =~ ^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\  ]]
 }
 
+is_local_username() {
+  [[ "$1" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+}
+
+validate_config() {
+  if ! is_local_username "${AGENT_USER}"; then
+    die "Invalid ZOMBIE_USER/AGENT_USER '${AGENT_USER}'. Use a normal lowercase Linux username (letters, digits, underscore, hyphen; max 32 chars)." 2
+  fi
+  if [[ "${ZOMBIE_DIR}" != /* ]]; then
+    die "ZOMBIE_DIR must be an absolute path." 2
+  fi
+  if [[ "${LOG_FILE}" != /* ]]; then
+    die "LOG_FILE must be an absolute path." 2
+  fi
+}
+
+reject_unexpected_args() {
+  (( ${#PARSED_ARGS[@]} == 0 )) && return 0
+  die "Unexpected argument(s) for ${SUBCOMMAND}: ${PARSED_ARGS[*]}" 2
+}
+
 # Source /etc/os-release into the current shell.
 load_os_release() {
   # shellcheck disable=SC1091
@@ -525,12 +546,14 @@ cmd_uninstall() {
 
 trap 'on_error ${LINENO}' ERR
 
+validate_config
+
 case "${SUBCOMMAND}" in
-  verify)    cmd_verify; exit $? ;;
-  doctor)    cmd_doctor; exit $? ;;
-  repair)    require_root; cmd_repair; exit $? ;;
+  verify)    reject_unexpected_args; cmd_verify; exit $? ;;
+  doctor)    reject_unexpected_args; cmd_doctor; exit $? ;;
+  repair)    reject_unexpected_args; require_root; cmd_repair; exit $? ;;
   uninstall) require_root; cmd_uninstall; exit $? ;;
-  install)   : ;;
+  install)   reject_unexpected_args ;;
   *)         die "Unknown subcommand: ${SUBCOMMAND}" 2 ;;
 esac
 
@@ -1187,7 +1210,7 @@ VNC_PASSWD_FILE="${AGENT_HOME}/.vnc/passwd"
 if [[ -f "${VNC_PASSWD_FILE}" ]]; then
   info "VNC password already set; keeping it."
 elif [[ -n "${VNC_PASSWORD}" ]]; then
-  runuser -l "${AGENT_USER}" -c "x11vnc -storepasswd '${VNC_PASSWORD}' ~/.vnc/passwd" >/dev/null
+  runuser -u "${AGENT_USER}" -- x11vnc -storepasswd "${VNC_PASSWORD}" "${VNC_PASSWD_FILE}" >/dev/null
   ok "VNC password set from VNC_PASSWORD env var."
 elif [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]]; then
   die "Non-interactive mode requires VNC_PASSWORD when no VNC password is already stored." 64
