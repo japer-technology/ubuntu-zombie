@@ -245,7 +245,7 @@ is_valid_username_syntax() {
 # paths, sudoers entries, generated unit files, or shell commands.
 validate_config() {
   if ! is_valid_username_syntax "${AGENT_USER}"; then
-    die "Invalid agent username '${AGENT_USER}'. Set ZOMBIE_USER (or legacy AGENT_USER) to a normal lowercase Linux username (letters, digits, underscore, hyphen; max 32 chars)." 2
+    die "Invalid agent username '${AGENT_USER}'. Use a normal lowercase Linux username (letters, digits, underscore, hyphen; max 32 chars)." 2
   fi
   if [[ "${ZOMBIE_DIR}" != /* ]]; then
     die "ZOMBIE_DIR must be an absolute path." 2
@@ -257,7 +257,7 @@ validate_config() {
 
 # Unknown positional arguments are collected in PARSED_ARGS during option
 # parsing; only the uninstall subcommand forwards them to uninstall.sh.
-reject_unexpected_args() {
+reject_unexpected_positional_args() {
   (( ${#PARSED_ARGS[@]} == 0 )) && return 0
   die "Unexpected argument(s) for ${SUBCOMMAND}: ${PARSED_ARGS[*]}" 2
 }
@@ -553,11 +553,11 @@ trap 'on_error ${LINENO}' ERR
 validate_config
 
 case "${SUBCOMMAND}" in
-  verify)    reject_unexpected_args; cmd_verify; exit $? ;;
-  doctor)    reject_unexpected_args; cmd_doctor; exit $? ;;
-  repair)    reject_unexpected_args; require_root; cmd_repair; exit $? ;;
+  verify)    reject_unexpected_positional_args; cmd_verify; exit $? ;;
+  doctor)    reject_unexpected_positional_args; cmd_doctor; exit $? ;;
+  repair)    reject_unexpected_positional_args; require_root; cmd_repair; exit $? ;;
   uninstall) require_root; cmd_uninstall; exit $? ;;
-  install)   reject_unexpected_args ;;
+  install)   reject_unexpected_positional_args ;;
   *)         die "Unknown subcommand: ${SUBCOMMAND}" 2 ;;
 esac
 
