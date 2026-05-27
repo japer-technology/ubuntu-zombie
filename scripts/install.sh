@@ -238,7 +238,7 @@ is_ssh_pubkey() {
 }
 
 is_supported_agent_username() {
-  [[ "$1" =~ ^[a-z]([a-z0-9_-]{0,30}[a-z0-9])?$ ]] || return 1
+  [[ "$1" =~ ^[a-z]([a-z0-9_-]{0,30}[a-z0-9]|[a-z0-9]{0,31})$ ]] || return 1
   [[ "$1" != "root" && "$1" != "nobody" ]]
 }
 
@@ -1217,7 +1217,7 @@ if [[ -f "${VNC_PASSWD_FILE}" ]]; then
   info "VNC password already set; keeping it."
 elif [[ -n "${VNC_PASSWORD}" ]]; then
   printf '%s\n%s\n' "${VNC_PASSWORD}" "${VNC_PASSWORD}" \
-    | runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" x11vnc -storepasswd >/dev/null
+    | runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" x11vnc -storepasswd >/dev/null 2>&1
   chown "${AGENT_USER}:${AGENT_USER}" "${VNC_PASSWD_FILE}"
   chmod 600 "${VNC_PASSWD_FILE}"
   ok "VNC password set from VNC_PASSWORD env var."
