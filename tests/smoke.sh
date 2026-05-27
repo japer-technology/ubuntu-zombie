@@ -101,17 +101,44 @@ if p.default_class != "destructive":
 if not p.requires_approval(p.classify("foozle --bar")):
     raise SystemExit("fail-closed default no longer requires approval")
 
-# Fence parsing regressions: CRLF, mixed line endings, and blank
-# language tags should still feed extracted commands to the policy gate.
-if server.extract_commands("```bash\r\nls\r\n```") != ["ls"]:
-    raise SystemExit("CRLF fenced command extraction failed")
-if server.extract_commands("```bash\r\nprintf hi\n```") != ["printf hi"]:
-    raise SystemExit("mixed-line-ending fenced command extraction failed")
-extracted = server.extract_commands("```\ncat script.sh | bash\n```")
-if extracted != ["cat script.sh | bash"]:
-    raise SystemExit("blank fenced command extraction failed")
-if p.classify(extracted[0]) != "system_change":
-    raise SystemExit("extracted interpreter pipeline was not gated")
+# Phase 2 (UPGRADE-TO-PI-PLAN §5): the legacy extract_commands /
+# fenced-bash workflow has been removed; commands now arrive as
+# structured pi-mono tool calls. The policy gate must classify them
+# via classify_tool, and the closed registry must enforce schemas.
+if hasattr(server, "extract_commands"):
+    raise SystemExit("extract_commands must be removed in Phase 2")
+import tools as _t
+assert set(_t.tool_names()) == {
+    "shell.run", "fs.read", "fs.write", "pkg.query", "pkg.install",
+    "svc.status", "svc.control", "net.status", "gui.screenshot",
+    "gui.click", "gui.type", "skill.list", "skill.load",
+}, _t.tool_names()
+# Per-tool default classifications come from the registry; shell.run
+# is computed per-argv via the existing classify() path.
+if p.classify_tool("fs.read", {"path": "/etc/os-release"}) != "read_only":
+    raise SystemExit("fs.read should be read_only")
+if p.classify_tool("pkg.install", {"names": ["curl"]}) != "system_change":
+    raise SystemExit("pkg.install should be system_change")
+if p.classify_tool("svc.control", {"unit": "ssh", "action": "restart"}) != "system_change":
+    raise SystemExit("svc.control should be system_change")
+if p.classify_tool("shell.run", {"argv": ["ls", "-la"]}) != "read_only":
+    raise SystemExit("shell.run ls should be read_only via classify()")
+if p.classify_tool("shell.run", {"command": "sudo apt-get install -y curl"}) != "system_change":
+    raise SystemExit("shell.run sudo apt-get install should be system_change")
+# Unknown tools fail closed.
+if not p.requires_approval(p.classify_tool("totally.unknown", {})):
+    raise SystemExit("unknown tool must require operator approval")
+# Schema validation rejects bad args without side effects.
+try:
+    _t.validate_args("fs.read", {"path": 12})
+    raise SystemExit("fs.read with int path must be rejected")
+except _t.SchemaError:
+    pass
+try:
+    _t.validate_args("svc.control", {"unit": "ssh", "action": "nuke"})
+    raise SystemExit("svc.control with bad action must be rejected")
+except _t.SchemaError:
+    pass
 
 # Phase 1 (UPGRADE-TO-PI-PLAN §4): providers.py is a thin adapter
 # over @earendil-works/pi-ai. The Python-facing surface must stay

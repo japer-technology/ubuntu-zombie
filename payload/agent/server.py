@@ -3,14 +3,23 @@
 A small loopback-only HTTP server that:
 
 - serves a single-page chat UI;
-- forwards prompts to the configured cloud provider;
-- runs read-only diagnostic commands inline;
-- asks for explicit approval before privileged or destructive commands;
+- forwards prompts to the pi-mono agent loop
+  (``@earendil-works/pi-coding-agent``) via the bridge in
+  ``pi-mono-bridge.mjs``;
+- mediates every tool call through the closed registry in ``tools.py``;
+- runs read-only tools inline; queues elevated tools for explicit
+  operator approval;
 - records every step in the JSON-lines audit log;
-- persists conversations to SQLite.
+- persists conversations + structured tool events to SQLite.
 
 The server binds to ``127.0.0.1`` only. Remote access is by SSH tunnel
 over Tailscale; see ``CONFIGURATION.md``.
+
+Phase 2 of ``docs/UPGRADE-TO-PI-PLAN.md`` removed the previous
+``extract_commands`` fenced-bash workflow and the ``SYSTEM_PROMPT_TEMPLATE``
+that asked the model to propose commands in markdown fences. The
+prompt-formatting helpers are still exposed for the installer
+(``server.py --render-append-system``) and for tests.
 """
 from __future__ import annotations
 
@@ -20,7 +29,6 @@ import html
 import json
 import os
 import platform
-import re
 import socket
 import stat
 import sys
@@ -33,14 +41,12 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from audit import log_event, tail as audit_tail  # noqa: E402
+from audit import log_event, log_tool_call, tail as audit_tail  # noqa: E402
 from history import History  # noqa: E402
 from policy import load_policy  # noqa: E402
-from providers import (  # noqa: E402
-    Message, NoProviderConfigured, ProviderError, provider_from_env,
-    provider_status,
-)
-from runner import run as run_command  # noqa: E402
+from providers import provider_status  # noqa: E402
+import pi_mono  # noqa: E402
+import tools as tools_mod  # noqa: E402
 
 SECRETS_FILE = Path(os.environ.get("ZOMBIE_SECRETS", "/opt/ai-zombie/secrets/env"))
 DEFAULT_PORT = int(os.environ.get("ZOMBIE_CHAT_PORT", "7878"))
@@ -48,14 +54,7 @@ DEFAULT_HOST = "127.0.0.1"
 
 
 def _agent_account() -> str:
-    """Return the local Linux account the chat service runs as.
-
-    The installer sets ``ZOMBIE_USER`` (default ``zombie``) in the
-    systemd unit so the chat service and its prompts can reference the
-    real account name even when the operator picked a custom one. Fall
-    back to the current process owner when the env var is unset (e.g.
-    when running the service by hand for development).
-    """
+    """Return the local Linux account the chat service runs as."""
     value = os.environ.get("ZOMBIE_USER")
     if value:
         return value
@@ -67,19 +66,21 @@ def _agent_account() -> str:
 
 AGENT_USER = _agent_account()
 
-SYSTEM_PROMPT_TEMPLATE = """You are the AI Systems Administrator for an Ubuntu Desktop machine.
+APPEND_SYSTEM_TEMPLATE = """You are the AI Systems Administrator for an Ubuntu Desktop machine.
 
 You operate as the local Linux user "{agent_user}", who has passwordless sudo.
-Every privileged or mutating command you propose will be sent through
-a policy gate that may require explicit operator approval before it
-runs. Read-only diagnostics can be run automatically.
+Tool calls are mediated by a policy gate; read-only diagnostics run
+automatically, anything that mutates the machine waits for explicit
+operator approval. Per-turn tool-call budgets are enforced.
+
+You have a fixed, closed tool registry — you cannot define new tools,
+and the operator-side approval gate cannot be bypassed by chaining
+shell.run. Prefer typed tools (fs.read, pkg.query, svc.status,
+net.status, gui.screenshot, …) over shell.run when one fits.
 
 Style:
 - Be concise. Prefer one short paragraph over many.
-- When you want to inspect or change the machine, propose ONE shell
-  command at a time inside a fenced ```bash block. Do not propose
-  multiple unrelated commands in the same turn.
-- Quote command output you have already received rather than guessing.
+- Quote tool output you have already received rather than guessing.
 - Refuse and explain if asked to exfiltrate secrets, disable the audit
   log, or weaken the policy gate.
 
@@ -87,15 +88,10 @@ Machine facts (auto-collected): {facts}
 """
 
 
-def render_system_prompt(facts: str) -> str:
-    """Render the system prompt in a single ``.format`` call.
-
-    FIX-3-19: the previous implementation called ``.format`` twice
-    (once at module load with ``agent_user``, once per message with
-    ``facts``), which required escaping any future ``{`` in the
-    template and broke if ``AGENT_USER`` contained ``{``/``}``.
-    """
-    return SYSTEM_PROMPT_TEMPLATE.format(agent_user=AGENT_USER, facts=facts)
+def render_append_system(facts: str) -> str:
+    """Render the system-prompt suffix that pi-mono receives via
+    ``--append-system-prompt``."""
+    return APPEND_SYSTEM_TEMPLATE.format(agent_user=AGENT_USER, facts=facts)
 
 
 # ---------------------------------------------------------------------------
@@ -174,87 +170,16 @@ def machine_facts() -> dict[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# Command extraction
-# ---------------------------------------------------------------------------
-
-# FIX-3-09/FIX-3-24: accept optional whitespace, CRLF line endings, and
-# a broader set of language tags (or none) on the opening fence.
-_BASH_BLOCK = re.compile(
-    r"```(?:bash|sh|shell|console|text)?[ \t]*\r?\n(.*?)```",
-    re.DOTALL,
-)
-
-
-def _join_continuations(block: str) -> list[str]:
-    """Yield logical shell commands from a fenced block.
-
-    FIX-3-10 / FIX-3-12: previously each physical line in a block was
-    treated as an independent command, which broke
-    backslash-continuations and here-docs (the second line of
-    ``cat <<EOF`` ran as a standalone shell statement). This helper
-    joins trailing-``\\`` continuations and collapses any block that
-    contains a ``<<`` here-doc into a single logical command sent
-    through the policy gate as a unit. Per-line ``#`` filtering is
-    only applied for the single-command shape so a leading shebang
-    inside a multi-line script is preserved.
-    """
-    text = block.replace("\r\n", "\n").replace("\r", "\n")
-
-    # Detect here-doc: treat the whole block as one command.
-    if re.search(r"<<-?\s*['\"]?[\w-]+['\"]?", text):
-        joined = text.strip("\n")
-        return [joined] if joined.strip() else []
-
-    # Fold trailing-backslash continuations. A line ending in an odd
-    # number of ``\`` characters is a real continuation; an even number
-    # means the final ``\`` is itself escaped.
-    folded_lines: list[str] = []
-    buf = ""
-    for line in text.split("\n"):
-        stripped = line.rstrip("\\")
-        trailing_backslashes = len(line) - len(stripped)
-        if trailing_backslashes % 2 == 1:
-            buf += line[:-1]
-            continue
-        buf += line
-        folded_lines.append(buf)
-        buf = ""
-    if buf:
-        folded_lines.append(buf)
-
-    out: list[str] = []
-    for line in folded_lines:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        # Per-line ``#`` filter only when this really is a one-line
-        # command (no continuations were folded into it). A folded
-        # multi-line command may legitimately start with a shebang.
-        if "\n" not in stripped and stripped.startswith("#"):
-            continue
-        out.append(stripped)
-    return out
-
-
-def extract_commands(text: str) -> list[str]:
-    out: list[str] = []
-    for block in _BASH_BLOCK.findall(text):
-        out.extend(_join_continuations(block))
-    return out
-
-
-# ---------------------------------------------------------------------------
 # Application state
 # ---------------------------------------------------------------------------
 
 class App:
     def __init__(self) -> None:
         self.history = History()
+        # Pending tool calls awaiting operator approval. Keyed by the
+        # ``tool_call_id`` we surface in the UI (audit-log entry id).
         self.pending: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
-
-    def provider(self) -> Any:
-        return provider_from_env()
 
     # ---- conversation flow ----
     def post_message(self, conv_id: int | None, prompt: str) -> dict[str, Any]:
@@ -263,147 +188,236 @@ class App:
         log_event("prompt", conversation_id=conv_id, prompt=prompt)
         self.history.add_message(conv_id, "user", prompt)
 
-        try:
-            provider = self.provider()
-        except NoProviderConfigured as exc:
-            err = str(exc)
-            self.history.add_message(conv_id, "system", err, {"error": True})
-            log_event("provider_error", conversation_id=conv_id, error=err)
-            return {"conversation_id": conv_id, "error": err}
-        except ProviderError as exc:
-            err = str(exc)
-            self.history.add_message(conv_id, "system", err, {"error": True})
-            log_event("provider_error", conversation_id=conv_id, error=err)
-            return {"conversation_id": conv_id, "error": err}
-
         facts = ", ".join(f"{k}={v}" for k, v in machine_facts().items())
-        msgs = [Message(role="system", content=render_system_prompt(facts))]
-        for m in self.history.get_messages(conv_id):
-            if m["role"] in {"user", "assistant"}:
-                msgs.append(Message(role=m["role"], content=m["content"]))
+        system_prompt = render_append_system(facts)
+        history_payload = [
+            {"role": m["role"], "content": m["content"]}
+            for m in self.history.get_messages(conv_id)
+            if m["role"] in {"user", "assistant"}
+        ]
 
-        try:
-            reply = provider.chat(msgs)
-        except Exception as exc:  # noqa: BLE001 - surface to user
-            err = f"Provider call failed: {exc.__class__.__name__}: {exc}"
-            self.history.add_message(conv_id, "system", err, {"error": True})
-            log_event("provider_error", conversation_id=conv_id, error=err)
-            return {"conversation_id": conv_id, "error": err}
-
-        self.history.add_message(conv_id, "assistant", reply,
-                                 {"provider": provider.name, "model": provider.model})
-
-        proposals = self._handle_commands(conv_id, reply)
-        return {
-            "conversation_id": conv_id,
-            "reply": reply,
-            "proposals": proposals,
-            "messages": self.history.get_messages(conv_id),
-        }
-
-    def _handle_commands(self, conv_id: int, reply: str) -> list[dict[str, Any]]:
-        proposals: list[dict[str, Any]] = []
         policy = load_policy()
-        for cmd in extract_commands(reply):
-            class_name = policy.classify(cmd)
-            requires_approval = policy.requires_approval(class_name)
-            requires_phrase = policy.requires_phrase(class_name)
-            entry_id = log_event(
-                "proposal",
+        max_calls = int(getattr(policy, "max_tool_calls_per_turn", 8) or 8)
+        turn_events: list[dict[str, Any]] = []
+
+        def on_tool_call(call_id: str, name: str, args: dict[str, Any]) -> dict[str, Any]:
+            # Validate against the closed registry first; reject unknown
+            # tools and schema mismatches without side effects.
+            try:
+                cleaned = tools_mod.validate_args(name, args)
+            except tools_mod.SchemaError as exc:
+                log_tool_call(tool=name, classification="unknown",
+                              decision="schema_rejected",
+                              args_summary=_summarize(args),
+                              error=str(exc), conversation_id=conv_id)
+                self.history.add_event(conv_id, "tool_call", {
+                    "tool_call_id": call_id, "tool": name, "args": _summarize(args),
+                    "decision": "schema_rejected", "error": str(exc),
+                })
+                return {"ok": False, "error": f"schema_rejected: {exc}"}
+
+            classification = policy.classify_tool(name, cleaned)
+            requires_approval = policy.requires_approval(classification)
+            requires_phrase = policy.requires_phrase(classification)
+            entry_id = log_tool_call(
+                tool=name, classification=classification,
+                decision=("queued" if requires_approval else "auto"),
+                args_summary=_summarize(cleaned),
                 conversation_id=conv_id,
-                command=cmd,
-                action_class=class_name,
-                requires_approval=requires_approval,
-                requires_phrase=requires_phrase,
             )
-            proposal = {
+            self.history.add_event(conv_id, "tool_call", {
                 "id": entry_id,
-                "command": cmd,
-                "action_class": class_name,
-                "requires_approval": requires_approval,
+                "tool_call_id": call_id,
+                "tool": name,
+                "args": _summarize(cleaned),
+                "classification": classification,
+                "decision": ("queued" if requires_approval else "auto"),
                 "requires_phrase": requires_phrase,
-                "confirm_phrase": policy.destructive_confirmation if requires_phrase else None,
-            }
-            if not requires_approval:
-                result = self._execute(conv_id, entry_id, cmd, class_name, auto=True)
-                proposal["result"] = result
-            else:
+            })
+
+            if requires_approval:
                 with self._lock:
                     self.pending[entry_id] = {
                         "conversation_id": conv_id,
-                        "command": cmd,
-                        "action_class": class_name,
+                        "tool_call_id": call_id,
+                        "tool": name,
+                        "args": cleaned,
+                        "classification": classification,
                         "requires_phrase": requires_phrase,
                     }
-            proposals.append(proposal)
-        return proposals
+                self.history.add_event(conv_id, "pending_tool_call", {
+                    "id": entry_id, "tool_call_id": call_id, "tool": name,
+                    "classification": classification,
+                    "requires_phrase": requires_phrase,
+                    "confirm_phrase": (policy.destructive_confirmation
+                                        if requires_phrase else None),
+                })
+                # End the model turn cleanly — pi sees an observation
+                # explaining the operator gate so it can summarize.
+                return {"ok": False,
+                        "error": ("operator_approval_required: this call has "
+                                  "been queued for human review; do not retry.")}
 
-    def approve(self, proposal_id: str, decision: str,
+            # Auto-approved (read_only): execute now.
+            try:
+                result = tools_mod.dispatch(name, cleaned)
+                self.history.add_event(conv_id, "tool_observation", {
+                    "tool_call_id": call_id, "tool": name,
+                    "ok": True, "result": _truncate_obs(result),
+                })
+                log_tool_call(
+                    tool=name, classification=classification, decision="executed",
+                    args_summary=_summarize(cleaned),
+                    exit_code=result.get("exit_code") if isinstance(result, dict) else None,
+                    duration_ms=result.get("duration_ms") if isinstance(result, dict) else None,
+                    stdout=(result.get("stdout") if isinstance(result, dict) else None),
+                    stderr=(result.get("stderr") if isinstance(result, dict) else None),
+                    conversation_id=conv_id, tool_call_id=call_id,
+                )
+                turn_events.append({"kind": "tool_observation", "tool": name,
+                                    "result": result})
+                return {"ok": True, "result": result}
+            except Exception as exc:  # noqa: BLE001
+                self.history.add_event(conv_id, "tool_observation", {
+                    "tool_call_id": call_id, "tool": name,
+                    "ok": False, "error": str(exc),
+                })
+                log_tool_call(tool=name, classification=classification,
+                              decision="error",
+                              args_summary=_summarize(cleaned),
+                              error=str(exc), conversation_id=conv_id)
+                return {"ok": False, "error": str(exc)}
+
+        try:
+            turn = pi_mono.run_turn(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                history=history_payload,
+                on_tool_call=on_tool_call,
+                tool_names=tools_mod.tool_names(),
+                max_tool_calls=max_calls,
+            )
+        except pi_mono.BridgeError as exc:
+            err = str(exc)
+            self.history.add_message(conv_id, "system", err, {"error": True})
+            log_event("provider_error", conversation_id=conv_id, error=err)
+            return {"conversation_id": conv_id, "error": err}
+        except Exception as exc:  # noqa: BLE001
+            err = f"pi-mono call failed: {exc.__class__.__name__}: {exc}"
+            self.history.add_message(conv_id, "system", err, {"error": True})
+            log_event("provider_error", conversation_id=conv_id, error=err)
+            return {"conversation_id": conv_id, "error": err}
+
+        reply = turn.get("final") or ""
+        self.history.add_message(conv_id, "assistant", reply,
+                                 {"engine": "pi-mono",
+                                  "log_path": turn.get("log_path")})
+        return {
+            "conversation_id": conv_id,
+            "reply": reply,
+            "events": self.history.get_events(conv_id),
+            "messages": self.history.get_messages(conv_id),
+        }
+
+    def approve(self, tool_call_id: str, decision: str,
                 phrase: str | None = None) -> dict[str, Any]:
         with self._lock:
-            pending = self.pending.pop(proposal_id, None)
+            pending = self.pending.pop(tool_call_id, None)
         if not pending:
-            return {"error": "Unknown or already-handled proposal."}
+            return {"error": "Unknown or already-handled tool call."}
         conv_id = pending["conversation_id"]
-        command = pending["command"]
-        class_name = pending["action_class"]
+        tool = pending["tool"]
+        args = pending["args"]
+        classification = pending["classification"]
 
         if decision != "approve":
-            log_event("approval", proposal_id=proposal_id,
-                      conversation_id=conv_id, decision="denied")
-            self.history.add_message(
-                conv_id, "system",
-                f"Operator denied command: `{command}`",
-                {"proposal_id": proposal_id, "decision": "denied"},
-            )
-            return {"status": "denied", "proposal_id": proposal_id}
+            log_tool_call(tool=tool, classification=classification,
+                          decision="denied",
+                          args_summary=_summarize(args),
+                          conversation_id=conv_id, tool_call_id=tool_call_id)
+            self.history.add_event(conv_id, "tool_observation", {
+                "tool_call_id": tool_call_id, "tool": tool,
+                "ok": False, "decision": "denied",
+                "error": "operator denied",
+            })
+            return {"status": "denied", "tool_call_id": tool_call_id}
 
         if pending["requires_phrase"]:
             policy = load_policy()
             if (phrase or "").strip() != policy.destructive_confirmation:
-                log_event("approval", proposal_id=proposal_id,
-                          conversation_id=conv_id, decision="denied",
-                          reason="missing or wrong confirmation phrase")
+                log_tool_call(tool=tool, classification=classification,
+                              decision="denied",
+                              args_summary=_summarize(args),
+                              error="missing or wrong confirmation phrase",
+                              conversation_id=conv_id,
+                              tool_call_id=tool_call_id)
                 return {"status": "denied",
                         "error": "Destructive action requires the exact "
-                                 f"confirmation phrase: {policy.destructive_confirmation!r}"}
+                                 f"confirmation phrase: "
+                                 f"{policy.destructive_confirmation!r}"}
 
-        log_event("approval", proposal_id=proposal_id,
-                  conversation_id=conv_id, decision="approved")
-        result = self._execute(conv_id, proposal_id, command, class_name, auto=False)
-        return {"status": "approved", "proposal_id": proposal_id, "result": result}
+        try:
+            result = tools_mod.dispatch(tool, args)
+            self.history.add_event(conv_id, "tool_observation", {
+                "tool_call_id": tool_call_id, "tool": tool,
+                "ok": True, "result": _truncate_obs(result),
+                "decision": "approved",
+            })
+            log_tool_call(
+                tool=tool, classification=classification, decision="approved",
+                args_summary=_summarize(args),
+                exit_code=result.get("exit_code") if isinstance(result, dict) else None,
+                duration_ms=result.get("duration_ms") if isinstance(result, dict) else None,
+                stdout=(result.get("stdout") if isinstance(result, dict) else None),
+                stderr=(result.get("stderr") if isinstance(result, dict) else None),
+                conversation_id=conv_id, tool_call_id=tool_call_id,
+            )
+            return {"status": "approved", "tool_call_id": tool_call_id,
+                    "result": result}
+        except Exception as exc:  # noqa: BLE001
+            self.history.add_event(conv_id, "tool_observation", {
+                "tool_call_id": tool_call_id, "tool": tool,
+                "ok": False, "error": str(exc),
+            })
+            log_tool_call(tool=tool, classification=classification,
+                          decision="error",
+                          args_summary=_summarize(args), error=str(exc),
+                          conversation_id=conv_id, tool_call_id=tool_call_id)
+            return {"status": "error", "tool_call_id": tool_call_id,
+                    "error": str(exc)}
 
-    def _execute(self, conv_id: int, proposal_id: str, command: str,
-                 class_name: str, *, auto: bool) -> dict[str, Any]:
-        res = run_command(command)
-        log_event(
-            "execution",
-            proposal_id=proposal_id,
-            conversation_id=conv_id,
-            command=command,
-            action_class=class_name,
-            auto=auto,
-            exit_code=res.exit_code,
-            duration_ms=res.duration_ms,
-            stdout_tail=res.stdout[-2000:],
-            stderr_tail=res.stderr[-2000:],
-            follow_up=res.follow_up,
-        )
-        payload = {
-            "exit_code": res.exit_code,
-            "stdout": res.stdout,
-            "stderr": res.stderr,
-            "duration_ms": res.duration_ms,
-            "follow_up": res.follow_up,
-        }
-        self.history.add_message(
-            conv_id,
-            "system",
-            f"$ {command}\n[exit {res.exit_code}]\n{res.stdout}{res.stderr}",
-            {"proposal_id": proposal_id, "auto": auto,
-             "action_class": class_name, "exit_code": res.exit_code},
-        )
-        return payload
+
+def _summarize(args: Any) -> dict[str, Any]:
+    """Return a small, audit-safe summary of tool args."""
+    if not isinstance(args, dict):
+        return {"_": repr(args)[:120]}
+    out: dict[str, Any] = {}
+    for k, v in args.items():
+        if isinstance(v, str):
+            out[k] = v if len(v) <= 200 else v[:200] + "…"
+        elif isinstance(v, (int, float, bool)) or v is None:
+            out[k] = v
+        elif isinstance(v, list):
+            out[k] = [str(x)[:80] for x in v[:8]]
+        else:
+            out[k] = repr(v)[:120]
+    return out
+
+
+def _truncate_obs(result: Any, limit: int = 4000) -> Any:
+    """Bound observation size before persisting to history.
+
+    The audit log records SHA-256 digests of the full output; the
+    history is for UI replay only and should not balloon.
+    """
+    if not isinstance(result, dict):
+        return result
+    out = dict(result)
+    for key in ("stdout", "stderr", "content"):
+        val = out.get(key)
+        if isinstance(val, str) and len(val) > limit:
+            out[key] = val[:limit] + f"\n…[truncated, {len(val) - limit} more chars]"
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -416,8 +430,6 @@ INDEX_HTML_PATH = HERE / "templates" / "index.html"
 def _render_index(app: App) -> bytes:
     facts = machine_facts()
     # FIX-3-07: avoid constructing a fresh SDK client on every GET /.
-    # ``provider_status`` is pure env-var inspection (no network, no
-    # client setup) and was added to providers.py for this purpose.
     name, status = provider_status()
     if name == "none":
         banner = status
@@ -483,10 +495,20 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self._send_json({"error": "bad id"}, 400)
                 return
-            self._send_json({"messages": self.app.history.get_messages(cid)})
+            self._send_json({
+                "messages": self.app.history.get_messages(cid),
+                "events": self.app.history.get_events(cid),
+            })
             return
         if self.path == "/api/audit":
             self._send_json({"entries": audit_tail(50)})
+            return
+        if self.path == "/api/tools":
+            self._send_json({"tools": [
+                {"name": n, "classification": spec["classification"],
+                 "description": spec.get("description", "")}
+                for n, spec in tools_mod.TOOL_REGISTRY.items()
+            ]})
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -506,13 +528,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/approve":
             data = self._read_json()
-            pid = data.get("proposal_id")
+            # Accept the new ``tool_call_id`` field; reject the legacy
+            # ``proposal_id`` so callers cannot accidentally drive the
+            # removed code path.
+            tcid = data.get("tool_call_id")
             decision = data.get("decision", "deny")
             phrase = data.get("phrase")
-            if not pid:
-                self._send_json({"error": "missing proposal_id"}, 400)
+            if not tcid:
+                self._send_json({"error": "missing tool_call_id"}, 400)
                 return
-            self._send_json(self.app.approve(pid, decision, phrase))
+            self._send_json(self.app.approve(tcid, decision, phrase))
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -533,7 +558,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="bind address (default: %(default)s)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT,
                         help="bind port (default: %(default)s)")
+    parser.add_argument("--render-append-system", action="store_true",
+                        help="Print the rendered pi-mono append-system-prompt "
+                             "(used by the installer) and exit.")
     args = parser.parse_args(argv)
+
+    if args.render_append_system:
+        facts = ", ".join(f"{k}={v}" for k, v in machine_facts().items())
+        sys.stdout.write(render_append_system(facts))
+        return 0
 
     if args.host not in {"127.0.0.1", "localhost", "::1"}:
         # Loopback-only is a security invariant.

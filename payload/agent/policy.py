@@ -153,6 +153,49 @@ class Policy:
     def requires_phrase(self, class_name: str) -> bool:
         return bool(self.classes.get(class_name, ClassDef(class_name)).confirm_phrase)
 
+    def classify_tool(self, name: str, args: dict[str, Any] | None) -> str:
+        """Classify a structured tool call.
+
+        Phase 2 of ``docs/UPGRADE-TO-PI-PLAN.md`` (P2.2) moves the
+        policy gate to the tool layer. Every ``pi-mono`` tool call is
+        passed through this method so the operator-editable
+        ``policy.yaml`` remains the single source of truth, even though
+        the assistant no longer emits free-form shell.
+
+        ``shell.run`` falls through to :meth:`classify` against the
+        rendered argv so the existing regex/argv ruleset (and the
+        sudo allow-list) continues to apply unchanged. All other tools
+        are looked up in :data:`~tools.TOOL_REGISTRY` for their
+        registered default class, then escalated by ``policy.yaml``
+        overrides under the ``tool_classes:`` block if present.
+
+        Unknown tools fall through to ``default_class`` (fail-closed
+        per P0.2 / P2.2).
+        """
+        try:
+            from tools import TOOL_REGISTRY  # local import to avoid cycle
+        except Exception:  # pragma: no cover - tools.py should always import
+            TOOL_REGISTRY = {}  # type: ignore[assignment]
+
+        args = args or {}
+        if name == "shell.run":
+            argv = args.get("argv")
+            if isinstance(argv, list) and argv:
+                return self.classify([str(a) for a in argv])
+            cmd = args.get("command")
+            if isinstance(cmd, str) and cmd.strip():
+                return self.classify(cmd)
+            # No argv and no command — refuse to auto-run.
+            return self.default_class
+
+        spec = TOOL_REGISTRY.get(name)
+        if spec is None:
+            return self.default_class
+        cls = str(spec.get("classification", self.default_class))
+        if cls not in _CLASS_RANK:
+            return self.default_class
+        return cls
+
 
 # ----- argv-aware helpers (P0.1) ----------------------------------------
 
