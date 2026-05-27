@@ -225,11 +225,21 @@ function renderTurnCounter(events) {
   return wrap;
 }
 
+function renderSkillActive(p) {
+  const wrap = el("div", { class: "system" });
+  const name = p.name || "?";
+  const path = p.path || "";
+  wrap.appendChild(el("div", { class: "role", text: "skill loaded" }));
+  wrap.appendChild(el("div", { text: `${name} — ${path}` }));
+  return wrap;
+}
+
 function renderEvent(ev) {
   const p = ev.payload || {};
   if (ev.kind === "tool_call") return renderToolCall(p);
   if (ev.kind === "tool_observation") return renderToolObservation(p);
   if (ev.kind === "pending_tool_call") return renderPendingToolCall(p);
+  if (ev.kind === "skill_active") return renderSkillActive(p);
   return null;
 }
 
