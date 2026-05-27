@@ -46,6 +46,7 @@ from history import History  # noqa: E402
 from policy import load_policy  # noqa: E402
 from providers import provider_status  # noqa: E402
 import pi_mono  # noqa: E402
+import skill_loader  # noqa: E402
 import tools as tools_mod  # noqa: E402
 
 SECRETS_FILE = Path(os.environ.get("ZOMBIE_SECRETS", "/opt/ai-zombie/secrets/env"))
@@ -195,6 +196,26 @@ class App:
             for m in self.history.get_messages(conv_id)
             if m["role"] in {"user", "assistant"}
         ]
+
+        # Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1): select skills whose
+        # trigger words appear in the operator's recent prompts and
+        # append them to the system prompt. ``skill_active`` history
+        # events record the provenance so the UI can show *what* was
+        # injected (§6.4 — "skill provenance").
+        recent_user = [m["content"] for m in self.history.get_messages(conv_id)
+                       if m["role"] == "user"]
+        active_skills = skill_loader.select_skills(recent_user)
+        block = skill_loader.render_skills_block(active_skills)
+        if block:
+            system_prompt = system_prompt.rstrip() + "\n\n" + block
+        for skill in active_skills:
+            self.history.add_event(conv_id, "skill_active", {
+                "name": skill.name,
+                "path": str(skill.path),
+                "triggers": list(skill.triggers),
+            })
+            log_event("skill_active", conversation_id=conv_id,
+                      name=skill.name, path=str(skill.path))
 
         policy = load_policy()
         max_calls = int(getattr(policy, "max_tool_calls_per_turn", 8) or 8)

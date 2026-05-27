@@ -486,7 +486,17 @@ question.
   rollback in `docs/TROUBLESHOOTING.md`. **Documented deviation:**
   pi-mono logs are `0640` agent-owned rather than root-only, because
   the chat service does not run as root and needs to write them.
-- **Phase 3** — not started.
+- **Phase 3** — complete. Six built-in skills ship under
+  `payload/agent/skills/` and install to `/opt/ai-zombie/skills/`
+  (root:root `0644`); operator-extensible skills live in
+  `/etc/ubuntu-zombie/skills.d/` (same contract as `policy.yaml`);
+  `payload/agent/skill_loader.py` selects skills by trigger-word match
+  against the last *N* user messages and renders them with on-disk
+  provenance into the pi-mono system prompt; `server.py` records a
+  `skill_active` history event per active skill and the UI renders the
+  source path so prompt injection via a skill stays visible (§6.4);
+  `install.sh repair` re-deploys the catalogue and `install.sh verify`
+  asserts each shipped skill is present.
 - **Phase 4** — not started.
 
 ---

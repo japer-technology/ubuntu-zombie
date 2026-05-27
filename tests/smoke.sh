@@ -140,6 +140,58 @@ try:
 except _t.SchemaError:
     pass
 
+# Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1): skill loader discovers the
+# six built-in skills, parses their trigger markers, selects only on
+# trigger-word match in recent user messages, and renders a block that
+# carries the on-disk path so the UI can show provenance.
+import skill_loader
+from pathlib import Path
+
+skills = skill_loader.load_skills([Path("payload/agent/skills")])
+names = {s.name for s in skills}
+assert names == {"apt", "systemd", "tailscale", "ufw", "docker", "gui"}, names
+for s in skills:
+    assert s.triggers, f"skill {s.name} has no triggers"
+
+# Trigger match on the last user turn only.
+sel = skill_loader.select_skills(
+    ["I want to talk about cats", "Can you check if docker is installed?"],
+    dirs=[Path("payload/agent/skills")],
+)
+assert [s.name for s in sel] == ["docker"], [s.name for s in sel]
+
+# No trigger words -> no skills selected.
+sel = skill_loader.select_skills(
+    ["What is the weather like?"],
+    dirs=[Path("payload/agent/skills")],
+)
+assert sel == [], sel
+
+# ``recent`` window excludes older messages.
+sel = skill_loader.select_skills(
+    ["restart the nginx systemd unit",
+     "now check the firewall",
+     "and one more thing",
+     "tell me a joke"],
+    recent=1,
+    dirs=[Path("payload/agent/skills")],
+)
+assert sel == [], sel
+
+# Rendered block carries provenance (the file path) so prompt
+# injection via a skill remains visible (§6.4).
+sel = skill_loader.select_skills(
+    ["please run apt-get update"],
+    dirs=[Path("payload/agent/skills")],
+)
+assert [s.name for s in sel] == ["apt"], [s.name for s in sel]
+block = skill_loader.render_skills_block(sel)
+assert "payload/agent/skills/apt.md" in block, block
+assert "Active skill: apt" in block, block
+
+# Empty selection -> empty block (no header noise on every turn).
+assert skill_loader.render_skills_block([]) == ""
+
 # Phase 1 (UPGRADE-TO-PI-PLAN §4): providers.py is a thin adapter
 # over @earendil-works/pi-ai. The Python-facing surface must stay
 # import-clean (no third-party deps) and provider selection must
@@ -396,6 +448,16 @@ run_standards() {
   local f
   for f in "${required[@]}"; do
     [[ -s "$f" ]] || { echo "missing required repository file: $f" >&2; exit 1; }
+  done
+
+  # Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1): the six built-in skills
+  # ship under payload/agent/skills/ so ``make package`` carries them
+  # into the release bundle and the installer can deploy them to
+  # /opt/ai-zombie/skills/.
+  local s
+  for s in apt systemd tailscale ufw docker gui; do
+    [[ -s "payload/agent/skills/${s}.md" ]] || \
+      { echo "missing built-in skill: payload/agent/skills/${s}.md" >&2; exit 1; }
   done
 
   # Keep the release bundle source list honest without creating dist/.

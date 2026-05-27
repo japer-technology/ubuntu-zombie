@@ -673,6 +673,22 @@ cmd_repair() {
     fi
     ok "pi-mono runtime configs re-rendered."
   fi
+
+  # Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1+P3.2): repair re-deploys the
+  # built-in skill catalogue from the payload tree so manual edits to
+  # /opt/ai-zombie/skills/ are reverted, and ensures
+  # /etc/ubuntu-zombie/skills.d/ exists so operator skills survive a
+  # repair run.
+  if [[ -d "${PAYLOAD_DIR}/agent/skills" ]]; then
+    install -d -m 755 -o root -g root "${ZOMBIE_DIR}/skills"
+    shopt -s nullglob
+    for f in "${PAYLOAD_DIR}/agent/skills/"*.md; do
+      install -m 644 -o root -g root "${f}" "${ZOMBIE_DIR}/skills/$(basename "${f}")"
+    done
+    shopt -u nullglob
+    install -d -m 755 -o root -g root "${ZOMBIE_ETC}/skills.d"
+    ok "Skill catalogue re-deployed."
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1323,7 +1339,7 @@ fi
 # Chat service source.
 install -d -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${ZOMBIE_DIR}/agent" "${ZOMBIE_DIR}/agent/templates"
-for f in server.py providers.py policy.py audit.py runner.py history.py tools.py pi_mono.py examples.md; do
+for f in server.py providers.py policy.py audit.py runner.py history.py tools.py pi_mono.py skill_loader.py examples.md; do
   install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
     "${PAYLOAD_DIR}/agent/${f}" "${ZOMBIE_DIR}/agent/${f}"
 done
@@ -1402,6 +1418,22 @@ if [[ ! -f "${ZOMBIE_ETC}/policy.yaml" ]]; then
 else
   info "Preserving existing ${ZOMBIE_ETC}/policy.yaml."
 fi
+
+# Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1+P3.2): ship the built-in skill
+# catalogue to /opt/ai-zombie/skills/ (root-owned, world-readable) and
+# provision the operator-extensible /etc/ubuntu-zombie/skills.d/ tree
+# with the same mode/owner contract as policy.yaml. Skills are static
+# markdown read at chat-turn time; the loader never mutates them.
+install -d -m 755 -o root -g root "${ZOMBIE_DIR}/skills"
+if [[ -d "${PAYLOAD_DIR}/agent/skills" ]]; then
+  shopt -s nullglob
+  for f in "${PAYLOAD_DIR}/agent/skills/"*.md; do
+    install -m 644 -o root -g root "${f}" "${ZOMBIE_DIR}/skills/$(basename "${f}")"
+  done
+  shopt -u nullglob
+  ok "Installed built-in skills to ${ZOMBIE_DIR}/skills/."
+fi
+install -d -m 755 -o root -g root "${ZOMBIE_ETC}/skills.d"
 
 # logrotate. The shipped file uses the ``__AGENT_USER__`` placeholder
 # so the `create` line names the operator-chosen account (FIX-3-06).
@@ -1653,8 +1685,17 @@ check "pi-mono pinned to \${PI_MONO_VERSION}" bash -c "npm ls -g --depth=0 @eare
 check "pi-mono settings rendered"          test -r \${ZOMBIE_DIR}/pi/settings.json
 check "pi-mono APPEND_SYSTEM rendered"     test -r \${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md
 check "pi-mono log dir present"            test -d \${ZOMBIE_DIR}/state/logs
+check "built-in skills directory present"  test -d \${ZOMBIE_DIR}/skills
+check "skill apt.md deployed"              test -r \${ZOMBIE_DIR}/skills/apt.md
+check "skill systemd.md deployed"          test -r \${ZOMBIE_DIR}/skills/systemd.md
+check "skill tailscale.md deployed"        test -r \${ZOMBIE_DIR}/skills/tailscale.md
+check "skill ufw.md deployed"              test -r \${ZOMBIE_DIR}/skills/ufw.md
+check "skill docker.md deployed"           test -r \${ZOMBIE_DIR}/skills/docker.md
+check "skill gui.md deployed"              test -r \${ZOMBIE_DIR}/skills/gui.md
+check "operator skills.d/ present"         test -d /etc/ubuntu-zombie/skills.d
 check "agent tools.py compiles"            \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/tools.py
 check "agent pi_mono.py compiles"          \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/pi_mono.py
+check "agent skill_loader.py compiles"     \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/skill_loader.py
 echo
 
 echo "Chat service and policy:"
