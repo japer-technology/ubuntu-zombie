@@ -837,3 +837,9 @@ make package    # tar a release bundle into dist/
 If a change passes `make lint && make test` and the relevant section
 of this document still describes reality, the change is ready to
 review.
+
+<p align="right">
+  <picture>
+    <img src="https://raw.githubusercontent.com/japer-technology/ubuntu-zombie/main/LOGO.png" alt="Ubuntu Zombie" width="80">
+  </picture>
+</p>
