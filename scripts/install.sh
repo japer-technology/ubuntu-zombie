@@ -1208,7 +1208,7 @@ chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/tools/browser-test.py"
 
 section "x11vnc loopback-only desktop access"
 
-runuser -l "${AGENT_USER}" -c "mkdir -p ~/.vnc ~/.config/autostart ~/.local/share"
+runuser -l "${AGENT_USER}" -c "mkdir -p ~/.config/autostart ~/.local/share"
 install -d -m 700 -o "${AGENT_USER}" -g "${AGENT_USER}" "${AGENT_HOME}/.vnc"
 
 VNC_PASSWD_FILE="${AGENT_HOME}/.vnc/passwd"
@@ -1216,8 +1216,10 @@ VNC_PASSWD_FILE="${AGENT_HOME}/.vnc/passwd"
 if [[ -f "${VNC_PASSWD_FILE}" ]]; then
   info "VNC password already set; keeping it."
 elif [[ -n "${VNC_PASSWORD}" ]]; then
-  printf '%s\n%s\n' "${VNC_PASSWORD}" "${VNC_PASSWORD}" \
-    | runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" x11vnc -storepasswd >/dev/null 2>&1
+  if ! printf '%s\n%s\n' "${VNC_PASSWORD}" "${VNC_PASSWORD}" \
+    | runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" x11vnc -storepasswd >/dev/null 2>&1; then
+    die "Failed to store VNC password." 1
+  fi
   chown "${AGENT_USER}:${AGENT_USER}" "${VNC_PASSWD_FILE}"
   chmod 600 "${VNC_PASSWD_FILE}"
   ok "VNC password set from VNC_PASSWORD env var."
