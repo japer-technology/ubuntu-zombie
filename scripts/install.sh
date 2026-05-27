@@ -240,7 +240,15 @@ curl_get() {
 append_line_once() {
   local line="$1"
   local file="$2"
-  grep -qxF "$line" "$file" 2>/dev/null || echo "$line" >> "$file"
+  if grep -qxF "$line" "$file" 2>/dev/null; then
+    return 0
+  fi
+  # Ensure the file ends with a newline before appending, so we don't
+  # concatenate the new line onto whatever was on the final partial line.
+  if [[ -s "$file" ]] && [[ "$(tail -c1 "$file" 2>/dev/null)" != $'\n' ]]; then
+    printf '\n' >> "$file"
+  fi
+  printf '%s\n' "$line" >> "$file"
 }
 
 is_ssh_pubkey() {
@@ -751,7 +759,7 @@ mv "${AGENT_HOME}/.ssh/authorized_keys.tmp" "${AGENT_HOME}/.ssh/authorized_keys"
 chown "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.ssh/authorized_keys"
 chmod 600 "${AGENT_HOME}/.ssh/authorized_keys"
 
-EXISTING_KEYS="$(wc -l < "${AGENT_HOME}/.ssh/authorized_keys" 2>/dev/null || echo 0)"
+EXISTING_KEYS="$(awk 'END{print NR}' "${AGENT_HOME}/.ssh/authorized_keys" 2>/dev/null || echo 0)"
 
 if [[ -z "${SSH_PUBLIC_KEY}" && "${ZOMBIE_NONINTERACTIVE}" != "1" ]]; then
   if [[ "${EXISTING_KEYS}" -gt 0 ]]; then
@@ -1073,11 +1081,36 @@ pip_with_retry install --upgrade \
   mss \
   opencv-python \
   python-xlib
+'
 
-# Playwright browser deps tend to flake on transient network.
+# Install Chromium system dependencies as root (apt-get requires it). The
+# unprivileged playwright install below will then only fetch the browser
+# binaries, which it can do as ${AGENT_USER}.
+AGENT_VENV_PY="${AGENT_HOME}/agent-env/bin/python"
+if [[ -x "${AGENT_VENV_PY}" ]]; then
+  n=1; delay=5
+  while true; do
+    if "${AGENT_VENV_PY}" -m playwright install-deps chromium; then break; fi
+    if (( n >= 4 )); then
+      warn "playwright install-deps failed after ${n} attempts; Chromium may not launch."
+      break
+    fi
+    log "playwright install-deps retry ${n} in ${delay}s..."
+    sleep "${delay}"; n=$((n + 1)); delay=$((delay * 2))
+  done
+else
+  warn "Agent venv python not found at ${AGENT_VENV_PY}; skipping playwright system deps."
+fi
+
+runuser -l "${AGENT_USER}" -c '
+set -euo pipefail
+# shellcheck disable=SC1091
+. ~/agent-env/bin/activate
+
+# Playwright browser downloads tend to flake on transient network.
 n=1; delay=5
 while true; do
-  if python -m playwright install --with-deps chromium; then break; fi
+  if python -m playwright install chromium; then break; fi
   if (( n >= 4 )); then
     echo "playwright install failed after ${n} attempts; rerun later."
     break
