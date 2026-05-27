@@ -30,9 +30,9 @@ Companion documents:
   allow-list) is a **hard prerequisite** for anything below.
 - [`UPGRADE-2.md`](UPGRADE-2.md) — scope decision (what to take from
   GMI, what to leave). UPGRADE-3 does not re-litigate §3 of UPGRADE-2.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md),
-  [`docs/VISION.md`](docs/VISION.md),
-  [`SECURITY.md`](SECURITY.md) — the constraints that bound the design.
+- [`docs/ARCHITECTURE.md`](ARCHITECTURE.md),
+  [`docs/VISION.md`](VISION.md),
+  [`SECURITY.md`](../SECURITY.md) — the constraints that bound the design.
 
 ---
 
@@ -361,7 +361,7 @@ To be explicit about scope, by symmetry with UPGRADE-2 §9:
   audit, approval workflow, and systemd unit all stay.
 - **No new public listener.** The loopback-only property of the chat
   service (`docs/ARCHITECTURE.md`,
-  [`SECURITY.md`](SECURITY.md)) is preserved.
+  [`SECURITY.md`](../SECURITY.md)) is preserved.
 - **No code in this PR.** This file is the only artefact.
 
 ---

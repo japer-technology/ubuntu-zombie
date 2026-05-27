@@ -21,9 +21,9 @@ Companion documents:
   default, sudo-allow-list, etc.) are **prerequisites** for anything in
   this document, because a Pi-style multi-tool agent makes the policy
   gate's blast radius much larger.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — the existing L1/L2/L3
+- [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — the existing L1/L2/L3
   layering this proposal has to slot into.
-- [`docs/VISION.md`](docs/VISION.md) — the promise this proposal must
+- [`docs/VISION.md`](VISION.md) — the promise this proposal must
   not violate ("a normal Ubuntu PC with an administrator inside it",
   not "a hosted service").
 
