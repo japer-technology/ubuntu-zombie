@@ -97,11 +97,48 @@ for arg in "$@"; do
   esac
 done
 
+# Validate user-controlled inputs before they are interpolated into any
+# command string handed to `run` (which eval's it). Mirrors
+# install.sh::validate_config so the uninstaller has the same guarantees.
+# Runs before the EUID check so smoke tests can assert exit-code 2 for
+# obviously-bad ZOMBIE_USER values without needing root. See FIX-2-01.
+is_supported_agent_username() {
+  [[ "$1" =~ ^[a-z]([a-z0-9_-]{0,30}[a-z0-9]|[a-z0-9]{0,31})$ ]] || return 1
+  [[ "$1" != "root" && "$1" != "nobody" ]]
+}
+
+validate_config() {
+  if ! is_supported_agent_username "${AGENT_USER}"; then
+    printf '%s[x]%s Invalid agent username %q. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation).\n' \
+      "${C_RED}" "${C_RESET}" "${AGENT_USER}" >&2
+    exit 2
+  fi
+  if [[ "${ZOMBIE_DIR}" != /* ]]; then
+    printf '%s[x]%s ZOMBIE_DIR must be an absolute path; got %q\n' \
+      "${C_RED}" "${C_RESET}" "${ZOMBIE_DIR}" >&2
+    exit 2
+  fi
+  if [[ "${BACKUP_DIR}" != /* ]]; then
+    printf '%s[x]%s BACKUP_DIR must be an absolute path; got %q\n' \
+      "${C_RED}" "${C_RESET}" "${BACKUP_DIR}" >&2
+    exit 2
+  fi
+}
+validate_config
+
 [[ ${EUID} -eq 0 ]] || die "Run with sudo: sudo $0"
 
 run() {
+  # Defensive guard: callers must pass exactly one composed command string,
+  # not argv-style arguments (which would be silently dropped under
+  # `eval "$1"`). See FIX-2-11.
+  if (( $# != 1 )); then
+    printf '%s[x]%s run() takes exactly one composed command string; got %d args: %s\n' \
+      "${C_RED}" "${C_RESET}" "$#" "$*" >&2
+    exit 1
+  fi
   if [[ "${DRY_RUN}" == "1" ]]; then
-    printf '%s[dry]%s %s\n' "${C_YEL}" "${C_RESET}" "$*"
+    printf '%s[dry]%s %s\n' "${C_YEL}" "${C_RESET}" "$1"
   else
     # Callers pass a single string with shell metacharacters (redirections,
     # `||`, globbing). Re-evaluate that one string so the quoting survives.
@@ -139,6 +176,26 @@ done
 run "systemctl daemon-reload"
 
 run "rm -f /etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie"
+# Also remove drop-ins from any previous install that used a different
+# ZOMBIE_USER, so a stale NOPASSWD:ALL entry cannot be left behind.
+# See FIX-2-04. The shell does the glob expansion locally; the only
+# metacharacters in $f come from the kernel's directory listing, and
+# FIX-2-01 guarantees AGENT_USER is safe so we cannot accidentally
+# delete the current-account drop-in twice via an odd glob expansion.
+shopt -s nullglob
+for f in /etc/sudoers.d/90-*-ubuntu-zombie; do
+  case "$f" in
+    /etc/sudoers.d/90-"${AGENT_USER}"-ubuntu-zombie) continue ;;
+  esac
+  orphan_name="${f#/etc/sudoers.d/90-}"
+  orphan_name="${orphan_name%-ubuntu-zombie}"
+  warn "Removing orphaned sudoers drop-in for user '${orphan_name}': ${f}"
+  if id "${orphan_name}" >/dev/null 2>&1; then
+    warn "  account '${orphan_name}' still exists; remove it manually if no longer wanted."
+  fi
+  run "rm -f $f"
+done
+shopt -u nullglob
 run "rm -f /etc/ssh/sshd_config.d/99-ubuntu-zombie.conf"
 if [[ "${DRY_RUN}" != "1" ]]; then
   warn "Reloading sshd. PermitRootLogin, PasswordAuthentication, and AllowUsers"
@@ -158,6 +215,21 @@ if command -v ufw >/dev/null 2>&1; then
   if ufw status 2>/dev/null | grep -q "tailscale0.*22/tcp"; then
     run "ufw --force delete allow in on tailscale0 to any port 22 proto tcp 2>/dev/null || true"
   fi
+  # Also remove the all-interface SSH rule that install.sh adds when
+  # ZOMBIE_SKIP_TAILSCALE=1. Match by the stable comment so we never
+  # delete an operator-managed 22/tcp rule. See FIX-2-03.
+  while ufw status numbered 2>/dev/null | grep -F '# SSH (Tailscale skipped)' | grep -q '22/tcp'; do
+    rule_num="$(ufw status numbered 2>/dev/null \
+      | awk -F'[][]' '/# SSH \(Tailscale skipped\)/ && /22\/tcp/ {print $2; exit}')"
+    [[ -z "${rule_num}" ]] && break
+    run "yes | ufw delete ${rule_num} >/dev/null 2>&1 || true"
+    # Guard against an infinite loop if the delete silently fails.
+    if ufw status numbered 2>/dev/null \
+        | awk -F'[][]' '/# SSH \(Tailscale skipped\)/ && /22\/tcp/ {print $2; exit}' \
+        | grep -qx "${rule_num}"; then
+      break
+    fi
+  done
 fi
 
 # -------------------------------------------------------------------
@@ -172,11 +244,14 @@ if [[ "${ARCHIVE}" == "1" ]]; then
   if [[ ! -d "${BACKUP_DIR}" ]]; then
     run "install -d -m 700 ${BACKUP_DIR}"
   fi
+  # Create the tarballs with mode 0600 so SSH keys, the VNC password,
+  # and any provider tokens are not world-readable when BACKUP_DIR itself
+  # is 0755 (the Ubuntu default for /var/backups). See FIX-2-02.
   if [[ -d "${AGENT_HOME}" ]]; then
-    run "tar -czf ${BACKUP_DIR}/ubuntu-zombie-home-${STAMP}.tar.gz -C / home/${AGENT_USER}"
+    run "(umask 077 && tar -czf ${BACKUP_DIR}/ubuntu-zombie-home-${STAMP}.tar.gz -C / home/${AGENT_USER})"
   fi
   if [[ -d "${ZOMBIE_DIR}/state" ]]; then
-    run "tar -czf ${BACKUP_DIR}/ubuntu-zombie-state-${STAMP}.tar.gz -C ${ZOMBIE_DIR} state"
+    run "(umask 077 && tar -czf ${BACKUP_DIR}/ubuntu-zombie-state-${STAMP}.tar.gz -C ${ZOMBIE_DIR} state)"
   fi
 fi
 
@@ -204,6 +279,8 @@ fi
 # -------------------------------------------------------------------
 # 7. Remove the agent user (last, so its home is still owned).
 # -------------------------------------------------------------------
+UNINSTALL_EXIT=0
+
 if [[ "${KEEP_AGENT}" == "1" ]]; then
   info "Keeping user ${AGENT_USER} (--keep-agent)."
 elif id "${AGENT_USER}" >/dev/null 2>&1; then
@@ -212,8 +289,34 @@ elif id "${AGENT_USER}" >/dev/null 2>&1; then
     run "loginctl terminate-user ${AGENT_USER} 2>/dev/null || true"
     run "pkill -KILL -u ${AGENT_USER} 2>/dev/null || true"
     sleep 1
-    run "deluser --remove-home ${AGENT_USER} 2>/dev/null || userdel -r ${AGENT_USER} 2>/dev/null || true"
-    ok "Removed user ${AGENT_USER}"
+    # FIX-2-05: do not swallow removal failures. Capture the rc and verify
+    # the account is actually gone before printing the success line.
+    if [[ "${DRY_RUN}" == "1" ]]; then
+      run "deluser --remove-home ${AGENT_USER} 2>/dev/null || userdel -r ${AGENT_USER}"
+      ok "Would remove user ${AGENT_USER}"
+    else
+      set +e
+      deluser --remove-home "${AGENT_USER}" >/dev/null 2>&1
+      rc=$?
+      if (( rc != 0 )); then
+        userdel -r "${AGENT_USER}" >/dev/null 2>&1
+        rc=$?
+      fi
+      set -e
+      if (( rc == 0 )) && ! id "${AGENT_USER}" >/dev/null 2>&1; then
+        ok "Removed user ${AGENT_USER}"
+        # FIX-2-12: drop the now-orphaned primary group so a future
+        # `adduser` of the same name does not pick up unexpected file
+        # ownership. --only-if-empty makes this safe.
+        if getent group "${AGENT_USER}" >/dev/null 2>&1; then
+          run "delgroup --only-if-empty ${AGENT_USER} >/dev/null 2>&1 || true"
+        fi
+      else
+        warn "Failed to remove user ${AGENT_USER}; see 'who', 'loginctl list-sessions',"
+        warn "  'lsof +D ${AGENT_HOME}' and re-run after the processes are gone."
+        UNINSTALL_EXIT=1
+      fi
+    fi
   else
     warn "Keeping user ${AGENT_USER}. Its home and authorized_keys remain."
   fi
@@ -235,7 +338,11 @@ if [[ -f /etc/gdm3/custom.conf ]]; then
 fi
 
 echo
-ok "Uninstall complete."
+if (( UNINSTALL_EXIT != 0 )); then
+  warn "Uninstall finished with errors (exit ${UNINSTALL_EXIT})."
+else
+  ok "Uninstall complete."
+fi
 cat <<EOF
 
 Left intact on purpose:
@@ -250,3 +357,5 @@ If you want to fully purge package state too:
   sudo apt-get purge -y docker-ce docker-ce-cli containerd.io \\
        docker-buildx-plugin docker-compose-plugin tailscale x11vnc
 EOF
+
+exit "${UNINSTALL_EXIT}"
