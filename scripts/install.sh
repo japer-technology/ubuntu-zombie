@@ -28,9 +28,14 @@
 #                               accepted for backward compatibility.
 #   ZOMBIE_ENABLE_AUTOLOGIN=1   enable graphical autologin for the
 #                               agent account (off by default).
+#   ZOMBIE_SKIP_TAILSCALE=1     skip installing and enrolling Tailscale.
+#                               When set, inbound SSH is allowed on every
+#                               interface instead of being restricted to
+#                               tailscale0. A Tailscale account is then
+#                               not required.
 #   SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host"
 #   VNC_PASSWORD="..."
-#   TAILSCALE_AUTHKEY="tskey-auth-..."
+#   TAILSCALE_AUTHKEY="tskey-auth-..."  (ignored when ZOMBIE_SKIP_TAILSCALE=1)
 
 set -Eeuo pipefail
 
@@ -64,6 +69,7 @@ LOG_FILE="${LOG_FILE:-/var/log/ubuntu-zombie-install.log}"
 
 ZOMBIE_NONINTERACTIVE="${ZOMBIE_NONINTERACTIVE:-0}"
 ZOMBIE_ENABLE_AUTOLOGIN="${ZOMBIE_ENABLE_AUTOLOGIN:-0}"
+ZOMBIE_SKIP_TAILSCALE="${ZOMBIE_SKIP_TAILSCALE:-0}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
 VNC_PASSWORD="${VNC_PASSWORD:-}"
 TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
@@ -144,9 +150,13 @@ Environment variables (selected; see CONFIGURATION.md for all):
                               install/verify/doctor/repair/uninstall
                               run that targets a non-default account.
   ZOMBIE_ENABLE_AUTOLOGIN=1   enable graphical autologin (off by default).
+  ZOMBIE_SKIP_TAILSCALE=1     skip installing/enrolling Tailscale. Inbound
+                              SSH is then allowed on every interface
+                              rather than only on tailscale0.
   SSH_PUBLIC_KEY              SSH public key string.
   VNC_PASSWORD                Loopback-only VNC password.
-  TAILSCALE_AUTHKEY           Pre-auth key for unattended Tailscale.
+  TAILSCALE_AUTHKEY           Pre-auth key for unattended Tailscale
+                              (ignored when ZOMBIE_SKIP_TAILSCALE=1).
 
 See README.md, QUICKSTART.md, and SECURITY.md.
 EOF
@@ -338,7 +348,7 @@ preflight() {
   fi
 
   # Public-SSH risk: are we connected over a non-Tailscale SSH session?
-  if [[ -n "${SSH_CONNECTION:-}" ]]; then
+  if [[ -n "${SSH_CONNECTION:-}" && "${ZOMBIE_SKIP_TAILSCALE}" != "1" ]]; then
     local from_ip
     from_ip="$(awk '{print $1}' <<<"${SSH_CONNECTION}")"
     if ! ip -o addr show dev tailscale0 2>/dev/null | grep -q "${from_ip}"; then
@@ -351,7 +361,9 @@ preflight() {
   fi
 
   # Tailscale already present?
-  if command -v tailscale >/dev/null 2>&1; then
+  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+    info "Tailscale install/enrolment will be skipped (ZOMBIE_SKIP_TAILSCALE=1)."
+  elif command -v tailscale >/dev/null 2>&1; then
     if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
       info "Tailscale is already installed and logged in."
     else
@@ -469,14 +481,16 @@ cmd_doctor() {
     warn "Chat service unit missing. Fix: sudo ./${SCRIPT_NAME} install"
   fi
 
-  if command -v tailscale >/dev/null 2>&1; then
+  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+    info "Tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)."
+  elif command -v tailscale >/dev/null 2>&1; then
     if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
       ok "Tailscale logged in."
     else
       warn "Tailscale logged out. Fix: sudo tailscale up"
     fi
   else
-    warn "Tailscale missing. Fix: sudo ./${SCRIPT_NAME} install"
+    warn "Tailscale missing. Fix: sudo ./${SCRIPT_NAME} install (or set ZOMBIE_SKIP_TAILSCALE=1)"
   fi
 
   if ufw status 2>/dev/null | grep -q "Status: active"; then
@@ -518,14 +532,20 @@ cmd_repair() {
   if command -v ufw >/dev/null 2>&1; then
     ufw --force default deny incoming || true
     ufw --force default allow outgoing || true
-    if ! ufw status | grep -q "tailscale0.*22/tcp"; then
-      ufw allow in on tailscale0 to any port 22 proto tcp comment "SSH over Tailscale only" || true
+    if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+      if ! ufw status | grep -qE '(^|[[:space:]])22/tcp([[:space:]]|$)'; then
+        ufw allow 22/tcp comment "SSH (Tailscale skipped)" || true
+      fi
+    else
+      if ! ufw status | grep -q "tailscale0.*22/tcp"; then
+        ufw allow in on tailscale0 to any port 22 proto tcp comment "SSH over Tailscale only" || true
+      fi
     fi
     ufw --force enable >/dev/null || true
     ok "Firewall re-asserted."
   fi
 
-  if [[ -n "${TAILSCALE_AUTHKEY}" ]]; then
+  if [[ "${ZOMBIE_SKIP_TAILSCALE}" != "1" && -n "${TAILSCALE_AUTHKEY}" ]]; then
     tailscale up --ssh=false --authkey "${TAILSCALE_AUTHKEY}" || warn "Tailscale auth-key login failed."
   fi
 
@@ -592,8 +612,8 @@ cat <<EOF
 This installer will:
   - Create the ${AGENT_USER} user (operating identity of the AI Systems Administrator) with passwordless sudo
   - Enable SSH key-only access
-  - Install Tailscale from its official apt repository
-  - Allow inbound SSH only on the Tailscale interface
+  - $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "Skip Tailscale install/enrolment (ZOMBIE_SKIP_TAILSCALE=1); allow SSH on every interface" || echo "Install Tailscale from its official apt repository")
+  - $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "Allow inbound SSH on every interface (no Tailscale)" || echo "Allow inbound SSH only on the Tailscale interface")
   - Force Xorg instead of Wayland
   - $([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo "Enable graphical autologin (ZOMBIE_ENABLE_AUTOLOGIN=1)" || echo "Leave graphical autologin disabled (default)")
   - Enable loopback-only x11vnc for emergency desktop access
@@ -785,39 +805,58 @@ ok "SSH hardened (key-only, ${AGENT_USER} only)."
 
 section "Install Tailscale"
 
-if ! command -v tailscale >/dev/null 2>&1; then
-  install -d -m 755 /usr/share/keyrings
-  TS_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-noble}}"
-  curl_get "https://pkgs.tailscale.com/stable/ubuntu/${TS_CODENAME}.noarmor.gpg" \
-    -o /usr/share/keyrings/tailscale-archive-keyring.gpg
-  chmod 0644 /usr/share/keyrings/tailscale-archive-keyring.gpg
-  cat > /etc/apt/sources.list.d/tailscale.list <<EOF
+if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+  info "Skipping Tailscale install (ZOMBIE_SKIP_TAILSCALE=1)."
+else
+  if ! command -v tailscale >/dev/null 2>&1; then
+    install -d -m 755 /usr/share/keyrings
+    TS_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-noble}}"
+    curl_get "https://pkgs.tailscale.com/stable/ubuntu/${TS_CODENAME}.noarmor.gpg" \
+      -o /usr/share/keyrings/tailscale-archive-keyring.gpg
+    chmod 0644 /usr/share/keyrings/tailscale-archive-keyring.gpg
+    cat > /etc/apt/sources.list.d/tailscale.list <<EOF
 deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu ${TS_CODENAME} main
 EOF
-  apt_get update
-  apt_install tailscale
-  ok "Tailscale installed from official apt repository."
-else
-  info "Tailscale already installed."
-fi
+    apt_get update
+    apt_install tailscale
+    ok "Tailscale installed from official apt repository."
+  else
+    info "Tailscale already installed."
+  fi
 
-systemctl enable --now tailscaled >/dev/null
+  systemctl enable --now tailscaled >/dev/null
+fi
 
 # ---------------------------------------------------------------------------
 # Firewall (idempotent)
 # ---------------------------------------------------------------------------
 
-section "Firewall (Tailscale-only inbound)"
+if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+  section "Firewall (SSH allowed on every interface)"
 
-ufw --force default deny incoming
-ufw --force default allow outgoing
+  ufw --force default deny incoming
+  ufw --force default allow outgoing
 
-if ! ufw status | grep -q "tailscale0.*22/tcp"; then
-  ufw allow in on tailscale0 to any port 22 proto tcp comment "SSH over Tailscale only"
+  if ! ufw status | grep -qE '(^|[[:space:]])22/tcp([[:space:]]|$)'; then
+    ufw allow 22/tcp comment "SSH (Tailscale skipped)"
+  fi
+
+  ufw --force enable >/dev/null
+  warn "Tailscale is disabled. SSH is reachable from any network this host can be addressed on."
+  ok "UFW: deny inbound, allow outbound, SSH allowed on every interface."
+else
+  section "Firewall (Tailscale-only inbound)"
+
+  ufw --force default deny incoming
+  ufw --force default allow outgoing
+
+  if ! ufw status | grep -q "tailscale0.*22/tcp"; then
+    ufw allow in on tailscale0 to any port 22 proto tcp comment "SSH over Tailscale only"
+  fi
+
+  ufw --force enable >/dev/null
+  ok "UFW: deny inbound, allow outbound, SSH allowed only on tailscale0."
 fi
-
-ufw --force enable >/dev/null
-ok "UFW: deny inbound, allow outbound, SSH allowed only on tailscale0."
 
 # ---------------------------------------------------------------------------
 # Security services and unattended upgrades
@@ -1258,6 +1297,7 @@ set -uo pipefail
 ZOMBIE_DIR="${ZOMBIE_DIR}"
 AGENT_USER="${AGENT_USER}"
 AGENT_HOME="${AGENT_HOME}"
+ZOMBIE_SKIP_TAILSCALE="${ZOMBIE_SKIP_TAILSCALE}"
 
 if [[ -t 1 ]]; then
   C_RESET=\$'\\033[0m'; C_RED=\$'\\033[31m'; C_GREEN=\$'\\033[32m'; C_BOLD=\$'\\033[1m'
@@ -1295,8 +1335,12 @@ echo
 echo "Network and services:"
 check "ssh service active"                 systemctl is-active ssh
 check "ufw active"                         bash -c "sudo ufw status | grep -q 'Status: active'"
-check "tailscale binary present"           command -v tailscale
-check "tailscale is logged in"             bash -c "tailscale status >/dev/null 2>&1 && ! tailscale status | grep -q 'Logged out'"
+if [[ "\${ZOMBIE_SKIP_TAILSCALE}" != "1" ]]; then
+  check "tailscale binary present"           command -v tailscale
+  check "tailscale is logged in"             bash -c "tailscale status >/dev/null 2>&1 && ! tailscale status | grep -q 'Logged out'"
+else
+  printf '  %s[--]%s tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)\\n' "\${C_BOLD}" "\${C_RESET}"
+fi
 check "docker engine reachable"            docker version
 echo
 
@@ -1358,7 +1402,9 @@ ln -sf "${ZOMBIE_DIR}/bin/verify" /usr/local/bin/zombie-verify
 section "Tailscale authentication"
 
 TS_STATUS_OK=0
-if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
+if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+  info "Skipping Tailscale enrolment (ZOMBIE_SKIP_TAILSCALE=1)."
+elif tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
   info "Tailscale is already logged in."
   TS_STATUS_OK=1
 elif [[ -n "${TAILSCALE_AUTHKEY}" ]]; then
@@ -1406,20 +1452,28 @@ bullet() {
   fi
 }
 
-bullet "${TS_STATUS_OK}" "Tailscale logged in"
+if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+  bullet "1" "Tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)"
+else
+  bullet "${TS_STATUS_OK}" "Tailscale logged in"
+fi
 bullet "${PROVIDER_OK}"  "Provider token present in secrets/env"
 bullet "${CHAT_OK}"      "Chat service running on 127.0.0.1:${CHAT_PORT}"
 echo
 
 NEXT_STEP=""
-if [[ "${TS_STATUS_OK}" != "1" ]]; then
+if [[ "${ZOMBIE_SKIP_TAILSCALE}" != "1" && "${TS_STATUS_OK}" != "1" ]]; then
   NEXT_STEP="sudo tailscale up"
 elif [[ "${PROVIDER_OK}" != "1" ]]; then
   NEXT_STEP="sudo ${ZOMBIE_DIR}/bin/secrets-edit   # add OPENAI_API_KEY or ANTHROPIC_API_KEY"
 elif [[ "${CHAT_OK}" != "1" ]]; then
   NEXT_STEP="sudo systemctl start ubuntu-zombie-chat.service"
 else
-  NEXT_STEP="open http://127.0.0.1:${CHAT_PORT}/  (or tunnel: ssh -L ${CHAT_PORT}:127.0.0.1:${CHAT_PORT} ${AGENT_USER}@<tailscale-name>)"
+  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+    NEXT_STEP="open http://127.0.0.1:${CHAT_PORT}/  (or tunnel: ssh -L ${CHAT_PORT}:127.0.0.1:${CHAT_PORT} ${AGENT_USER}@<host>)"
+  else
+    NEXT_STEP="open http://127.0.0.1:${CHAT_PORT}/  (or tunnel: ssh -L ${CHAT_PORT}:127.0.0.1:${CHAT_PORT} ${AGENT_USER}@<tailscale-name>)"
+  fi
 fi
 
 ufw status verbose || true
@@ -1461,10 +1515,10 @@ Surfaces installed:
   - GUI:      Xorg + xdotool + screenshot + x11vnc (loopback)
   - Browser:  Playwright + Chromium
   - Chat:     loopback HTTP on ${CHAT_PORT}, policy + audit
-  - Network:  Tailscale-only inbound
+  - Network:  $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "SSH on every interface (Tailscale skipped)" || echo "Tailscale-only inbound")
 
 Public exposure:
-  - SSH:           Tailscale interface only
+  - SSH:           $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "every interface (Tailscale skipped)" || echo "Tailscale interface only")
   - VNC:           localhost only
   - Chat:          localhost only
   - Password SSH:  disabled
@@ -1477,7 +1531,7 @@ Policy:             ${ZOMBIE_ETC}/policy.yaml
 Uninstall:          sudo ${SCRIPT_DIR}/uninstall.sh --dry-run
 EOF
 
-if [[ "${TS_STATUS_OK}" != "1" ]]; then
+if [[ "${ZOMBIE_SKIP_TAILSCALE}" != "1" && "${TS_STATUS_OK}" != "1" ]]; then
   warn "Tailscale is not logged in yet. Run 'sudo tailscale up' before rebooting."
 fi
 
