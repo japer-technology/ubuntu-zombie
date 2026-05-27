@@ -53,7 +53,37 @@ ok()   { printf '%s[+]%s %s\n' "${C_GREEN}" "${C_RESET}" "$*"; }
 die()  { printf '%s[x]%s %s\n' "${C_RED}"  "${C_RESET}" "$*" >&2; exit 1; }
 
 usage() {
-  sed -n '2,30p' "$0"
+  # Heredoc instead of `sed -n '2,30p' "$0"` so the help output cannot
+  # drift into the executable preamble when the header comment grows or
+  # shrinks. See FIX-1-08.
+  cat <<'EOF'
+uninstall.sh
+------------
+Reverse the Ubuntu Zombie installer.
+
+Removes the chat service, sudoers drop-in, SSH drop-in, x11vnc
+autostart, generated helpers, policy, logrotate rule, and (with
+confirmation) the agent user account (default name `zombie`,
+overridable with ZOMBIE_USER). Optionally archives the account's
+home directory and /opt/ai-zombie/state/ to /var/backups/ before
+deletion.
+
+Usage:
+  sudo ./uninstall.sh            # interactive
+  sudo ./uninstall.sh --dry-run  # preview
+  sudo ./uninstall.sh --archive  # archive then remove
+  sudo ./uninstall.sh --yes      # skip confirmations
+  sudo ./uninstall.sh --keep-agent  # do not remove user
+
+Environment:
+  ZOMBIE_USER=<name>   override the account name (default `zombie`).
+                       `AGENT_USER` is still accepted as a legacy
+                       alias so older installs can still be reversed.
+
+This script intentionally does NOT remove Docker, Tailscale, Node,
+Python, or other base packages — those are normal Ubuntu software
+that other things may depend on.
+EOF
 }
 
 for arg in "$@"; do
@@ -111,6 +141,8 @@ run "systemctl daemon-reload"
 run "rm -f /etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie"
 run "rm -f /etc/ssh/sshd_config.d/99-ubuntu-zombie.conf"
 if [[ "${DRY_RUN}" != "1" ]]; then
+  warn "Reloading sshd. PermitRootLogin, PasswordAuthentication, and AllowUsers"
+  warn "now revert to the Ubuntu defaults; this host may be more open than before."
   systemctl reload ssh 2>/dev/null || systemctl restart ssh 2>/dev/null || true
 fi
 

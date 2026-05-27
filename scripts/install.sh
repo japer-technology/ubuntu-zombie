@@ -163,13 +163,21 @@ EOF
 }
 
 SUBCOMMAND="install"
+SUBCOMMAND_SEEN=0
 PARSED_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)    usage; exit 0 ;;
     -v|--version) printf '%s %s\n' "${SCRIPT_NAME}" "${SCRIPT_VERSION}"; exit 0 ;;
     install|verify|doctor|repair|uninstall)
-                  SUBCOMMAND="$1"; shift ;;
+                  if (( SUBCOMMAND_SEEN )); then
+                    # A second subcommand token (e.g. `install install`) is
+                    # ambiguous — fall through to the catch-all so it is
+                    # reported as an unexpected positional. See FIX-1-15.
+                    PARSED_ARGS+=("$1"); shift
+                  else
+                    SUBCOMMAND="$1"; SUBCOMMAND_SEEN=1; shift
+                  fi ;;
     --) shift; PARSED_ARGS+=("$@"); break ;;
     -*) die "Unknown flag: $1 (try --help)" 2 ;;
     *)  PARSED_ARGS+=("$1"); shift ;;
@@ -285,8 +293,27 @@ reject_unexpected_positional_args() {
 
 # Source /etc/os-release into the current shell.
 load_os_release() {
-  # shellcheck disable=SC1091
-  [[ -r /etc/os-release ]] && . /etc/os-release || true
+  if [[ -r /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release || true
+  fi
+}
+
+# Map the running Ubuntu's VERSION_ID / *_CODENAME to a supported Ubuntu
+# apt-repo codename. Tailscale and Docker both publish per-codename repos,
+# so a wrong guess installs an incompatible package set. Returns 0 and
+# echoes the codename on success; returns non-zero with no output if the
+# host is not a supported Ubuntu LTS. See FIX-1-09.
+resolve_ubuntu_codename() {
+  local codename="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
+  if [[ -z "${codename}" ]]; then
+    case "${VERSION_ID:-}" in
+      22.04) codename="jammy" ;;
+      24.04) codename="noble" ;;
+      *)     return 1 ;;
+    esac
+  fi
+  printf '%s\n' "${codename}"
 }
 
 # ---------------------------------------------------------------------------
@@ -642,7 +669,7 @@ EOF
 
 if [[ "${ZOMBIE_NONINTERACTIVE}" != "1" ]]; then
   read -r -p "Continue? Type YES to proceed: " CONFIRM
-  [[ "${CONFIRM}" == "YES" ]] || die "Cancelled." 0
+  [[ "${CONFIRM}" == "YES" ]] || { info "Cancelled."; exit 0; }
 else
   info "Non-interactive mode: proceeding without confirmation."
 fi
@@ -824,7 +851,9 @@ if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
 else
   if ! command -v tailscale >/dev/null 2>&1; then
     install -d -m 755 /usr/share/keyrings
-    TS_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-noble}}"
+    if ! TS_CODENAME="$(resolve_ubuntu_codename)"; then
+      die "Cannot determine Ubuntu codename for Tailscale repo (VERSION_ID='${VERSION_ID:-}'); supported: 22.04 jammy, 24.04 noble." 65
+    fi
     curl_get "https://pkgs.tailscale.com/stable/ubuntu/${TS_CODENAME}.noarmor.gpg" \
       -o /usr/share/keyrings/tailscale-archive-keyring.gpg
     chmod 0644 /usr/share/keyrings/tailscale-archive-keyring.gpg
@@ -869,9 +898,12 @@ else
   ufw --force default deny incoming
   ufw --force default allow outgoing
 
-  # Remove any prior all-interface SSH rule from a previous (skipped-Tailscale) run.
-  while ufw status numbered | grep -E '(^|[[:space:]])22/tcp([[:space:]]|$)' | grep -vq 'tailscale0'; do
-    rule_num="$(ufw status numbered | awk -F'[][]' '/22\/tcp/ && !/tailscale0/ {print $2; exit}')"
+  # Remove any prior all-interface SSH rule we previously added (matched by
+  # the comment we set in the skip-Tailscale branch). Tightened in FIX-1-16
+  # so we never delete an unrelated 22/tcp rule the operator may have added.
+  while ufw status numbered | grep -F '# SSH (Tailscale skipped)' | grep -q '22/tcp'; do
+    rule_num="$(ufw status numbered \
+      | awk -F'[][]' '/# SSH \(Tailscale skipped\)/ && /22\/tcp/ {print $2; exit}')"
     [[ -z "${rule_num}" ]] && break
     yes | ufw delete "${rule_num}" >/dev/null 2>&1 || break
   done
@@ -1029,7 +1061,9 @@ if ! command -v docker >/dev/null 2>&1; then
   chmod a+r /etc/apt/keyrings/docker.asc
 
   load_os_release
-  DOCKER_CODENAME="${UBUNTU_CODENAME:-${VERSION_CODENAME:-noble}}"
+  if ! DOCKER_CODENAME="$(resolve_ubuntu_codename)"; then
+    die "Cannot determine Ubuntu codename for Docker repo (VERSION_ID='${VERSION_ID:-}'); supported: 22.04 jammy, 24.04 noble." 65
+  fi
   ARCH="$(dpkg --print-architecture)"
 
   cat > /etc/apt/sources.list.d/docker.list <<EOF
@@ -1051,44 +1085,19 @@ ok "Docker ready, ${AGENT_USER} is in the docker group."
 
 section "Python cloud-agent runtime"
 
-runuser -l "${AGENT_USER}" -c '
-set -euo pipefail
-if [[ ! -d ~/agent-env ]]; then
-  python3 -m venv ~/agent-env
-fi
-# shellcheck disable=SC1091
-. ~/agent-env/bin/activate
+# Stage the venv setup helper into ${ZOMBIE_DIR}/bin early so the
+# unprivileged setup below can exec it. The rest of the operator
+# helpers are installed in the "Deploy chat service" section below.
+# Extracted in FIX-1-12 so the body is lintable by ShellCheck.
+install -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+  "${PAYLOAD_DIR}/bin/setup-agent-venv" "${ZOMBIE_DIR}/bin/setup-agent-venv"
 
-pip_with_retry() {
-  local n=1 delay=3
-  while true; do
-    if pip "$@"; then return 0; fi
-    if (( n >= 4 )); then return 1; fi
-    echo "pip retry ${n} in ${delay}s..."
-    sleep "${delay}"; n=$((n + 1)); delay=$((delay * 2))
-  done
-}
-
-pip_with_retry install --upgrade pip wheel setuptools
-pip_with_retry install --upgrade \
-  openai \
-  anthropic \
-  requests \
-  pydantic \
-  rich \
-  typer \
-  python-dotenv \
-  playwright \
-  pyautogui \
-  pillow \
-  mss \
-  opencv-python \
-  python-xlib
-'
+# Build the venv and install python packages as the agent user.
+runuser -l "${AGENT_USER}" -- "${ZOMBIE_DIR}/bin/setup-agent-venv"
 
 # Install Chromium system dependencies as root (apt-get requires it). The
-# unprivileged playwright install below will then only fetch the browser
-# binaries, which it can do as ${AGENT_USER}.
+# unprivileged playwright browser download in setup-agent-venv above will
+# then only fetch the browser binaries, which it can do as ${AGENT_USER}.
 AGENT_VENV_PY="${AGENT_HOME}/agent-env/bin/python"
 if [[ -x "${AGENT_VENV_PY}" ]]; then
   n=1; delay=5
@@ -1104,24 +1113,6 @@ if [[ -x "${AGENT_VENV_PY}" ]]; then
 else
   warn "Agent venv python not found at ${AGENT_VENV_PY}; skipping playwright system deps."
 fi
-
-runuser -l "${AGENT_USER}" -c '
-set -euo pipefail
-# shellcheck disable=SC1091
-. ~/agent-env/bin/activate
-
-# Playwright browser downloads tend to flake on transient network.
-n=1; delay=5
-while true; do
-  if python -m playwright install chromium; then break; fi
-  if (( n >= 4 )); then
-    echo "playwright install failed after ${n} attempts; rerun later."
-    break
-  fi
-  echo "playwright retry ${n} in ${delay}s..."
-  sleep "${delay}"; n=$((n + 1)); delay=$((delay * 2))
-done
-'
 
 ok "Python venv ready at ${AGENT_HOME}/agent-env."
 
@@ -1155,7 +1146,7 @@ install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/templates/index.html" "${ZOMBIE_DIR}/agent/templates/index.html"
 
 # Operator helpers.
-for f in audit-recent health-check collect-diagnostics secrets-edit zombie-chat; do
+for f in audit-recent health-check collect-diagnostics secrets-edit zombie-chat setup-agent-venv; do
   install -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
     "${PAYLOAD_DIR}/bin/${f}" "${ZOMBIE_DIR}/bin/${f}"
 done
@@ -1188,6 +1179,10 @@ fi
 # default `zombie` account and any operator-chosen override.
 render_unit() {
   local src="$1" dest="$2"
+  # NOTE (FIX-1-17): The `s|…|${AGENT_USER}|g` substitution is only safe
+  # because `is_supported_agent_username` (see validate_config) forbids the
+  # sed-special characters `|`, `&`, and `\` in the username. If that
+  # validator is ever relaxed, escape AGENT_USER/AGENT_HOME for sed here.
   sed -e "s|__AGENT_USER__|${AGENT_USER}|g" \
       -e "s|__AGENT_HOME__|${AGENT_HOME}|g" \
       "${src}" | install -m 644 /dev/stdin "${dest}"

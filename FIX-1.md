@@ -223,6 +223,12 @@ independently and in priority order.
 - **validation**:
   - Interactive run, answer anything except `YES`, confirm `$?` is `0` and no
     red banner is printed.
+- **status**: **fixed**. `scripts/install.sh` (around line 645) now uses
+  `info "Cancelled."; exit 0` instead of `die "Cancelled." 0`, so the
+  user-initiated cancellation path returns exit code 0 with the neutral
+  `[i]` marker and CI parents no longer have to special-case the red
+  banner. `grep -n 'die ".*" 0'` over `scripts/` returns no other
+  callers. `make lint` and `make test` pass.
 
 ---
 
@@ -240,6 +246,12 @@ independently and in priority order.
 - **validation**:
   - `./scripts/uninstall.sh --help` final line should be the comment ending
     with `... may depend on.`, not `set -Eeuo pipefail`.
+- **status**: **fixed**. `usage()` in `scripts/uninstall.sh` was rewritten
+  to emit a self-contained heredoc, so the help text can no longer drift
+  into the executable preamble when the header comment block changes
+  length. `./scripts/uninstall.sh --help` now ends with the
+  "...other things may depend on." paragraph instead of `set -Eeuo
+  pipefail`. `make lint` and `make test` pass.
 
 ---
 
@@ -262,6 +274,14 @@ independently and in priority order.
   - Manually unset `UBUNTU_CODENAME`/`VERSION_CODENAME` and confirm the script
     no longer silently defaults to `noble`.
   - `make lint`.
+- **status**: **fixed**. A new `resolve_ubuntu_codename` helper in
+  `scripts/install.sh` (defined alongside `load_os_release`) prefers
+  `UBUNTU_CODENAME` / `VERSION_CODENAME` when set and otherwise maps
+  `VERSION_ID` via an explicit case (`22.04 → jammy`, `24.04 → noble`).
+  Unknown / empty values now fail with exit code `65` instead of
+  silently defaulting to `noble`. Both the Tailscale apt-repo block
+  and the Docker apt-repo block call the helper. `make lint` and
+  `make test` pass.
 
 ---
 
@@ -279,6 +299,13 @@ independently and in priority order.
   in place.
 - **validation**:
   - Visual review of `--dry-run` output.
+- **status**: **fixed**. The SSH drop-in removal block in
+  `scripts/uninstall.sh` now emits two `warn` lines immediately before
+  the `systemctl reload ssh` call, telling the operator that
+  `PermitRootLogin`, `PasswordAuthentication`, and `AllowUsers` are
+  about to revert to Ubuntu defaults and the host may become more open
+  than before. Behaviour is unchanged for `--dry-run`. `make lint` and
+  `make test` pass.
 
 ---
 
@@ -292,6 +319,11 @@ independently and in priority order.
 - **symptom**: shellcheck SC2015. If `. /etc/os-release` ever returned non-zero
   the `|| true` would mask it.
 - **fix**: `if [[ -r /etc/os-release ]]; then . /etc/os-release || true; fi`.
+- **status**: **fixed**. `load_os_release` in `scripts/install.sh` was
+  rewritten to use an explicit `if [[ -r /etc/os-release ]]; then . … ||
+  true; fi`, eliminating the SC2015 `A && B || C` short-circuit. Behaviour
+  is unchanged for a readable `/etc/os-release`; an unreadable file is
+  still silently tolerated. `make lint` and `make test` pass.
 
 ### FIX-1-12 — Inline `runuser` heredoc is unlintable
 
@@ -305,6 +337,17 @@ independently and in priority order.
   `runuser -l "$AGENT_USER" -- "${ZOMBIE_DIR}/bin/setup-agent-venv"`. The new
   file is then picked up by `tests/smoke.sh::run_syntax`.
 - **validation**: `make lint`, `make test`.
+- **status**: **fixed**. A new `payload/bin/setup-agent-venv` helper
+  contains the venv creation, pip retry/install set, and Playwright
+  Chromium browser download. `scripts/install.sh` stages it into
+  `${ZOMBIE_DIR}/bin/setup-agent-venv` early (before the operator
+  helpers are deployed) and invokes it via `runuser -l "${AGENT_USER}"
+  -- "${ZOMBIE_DIR}/bin/setup-agent-venv"`. The `setup-agent-venv` is
+  also added to the regular operator-helper install loop so subsequent
+  re-runs keep it in sync with the payload tree. The previously
+  single-quoted `runuser -c '…'` heredocs are gone, so both `shellcheck`
+  and `tests/smoke.sh::run_syntax` now lint the body. `make lint` and
+  `make test` pass.
 
 ### FIX-1-13 — Dead code in `tests/smoke.sh::run_noninteractive`
 
@@ -318,6 +361,13 @@ independently and in priority order.
   guard the dispatch with `if [[ "${BASH_SOURCE[0]}" == "$0" ]]`), then `bash
   -c 'source scripts/install.sh; validate_noninteractive'` with controlled env.
 - **validation**: `make test`.
+- **status**: **fixed**. `run_noninteractive` in `tests/smoke.sh` was
+  reduced to the single `grep -q ZOMBIE_NONINTERACTIVE` assertion on
+  `--help` output that was actually doing work. The unused `tmpdir`,
+  `HAVE_SUDO`, and `sudo -n true` probe have been removed, and the
+  comment now explains why a fuller test would need to refactor
+  `install.sh` to source-guard `validate_noninteractive`. `make lint`
+  and `make test` pass.
 
 ### FIX-1-14 — `bad-usage` test passes for the wrong reason
 
@@ -331,6 +381,12 @@ independently and in priority order.
   or use a subcommand that does not require root (`doctor unexpected` already
   exercises the same path on line 88).
 - **validation**: `make test`.
+- **status**: **fixed**. `tests/smoke.sh::run_bad_usage` no longer
+  asserts `expect_exit_code 2 ./scripts/install.sh install unexpected`.
+  The `doctor unexpected`, `verify unexpected`, and `repair unexpected`
+  cases (all of which take the `reject_unexpected_positional_args`
+  branch without first hitting `require_root`) remain, so the actual
+  validator we care about is still under test. `make test` passes.
 
 ### FIX-1-15 — Subcommand parser accepts `install verify` as `install + arg`
 
@@ -345,6 +401,14 @@ independently and in priority order.
   once; on a second match, fall through to the `*)` arm and `die ... 2`.
 - **validation**: Add a `tests/smoke.sh` line:
   `expect_exit_code 2 ./scripts/install.sh install install`.
+- **status**: **fixed**. The argument parser in `scripts/install.sh`
+  now tracks `SUBCOMMAND_SEEN`. On the first subcommand token (`install`,
+  `verify`, `doctor`, `repair`, `uninstall`) it sets `SUBCOMMAND` and
+  flips the flag; a second matching token is pushed onto `PARSED_ARGS`
+  and ultimately rejected by `reject_unexpected_positional_args` with
+  exit code `2`. New `tests/smoke.sh` assertions cover both
+  `doctor doctor` and `install install`. `make lint` and `make test`
+  pass.
 
 ### FIX-1-16 — UFW cleanup loop matches too broadly
 
@@ -357,6 +421,13 @@ independently and in priority order.
 - **fix**: Tighten the `awk` pattern to match only rules whose comment matches
   the one we set (`SSH (Tailscale skipped)`).
 - **validation**: Manual review on a host with multiple `22/tcp` rules.
+- **status**: **fixed**. The cleanup loop in the
+  "Firewall (Tailscale-only inbound)" branch of `scripts/install.sh`
+  now filters `ufw status numbered` output by the literal comment
+  `# SSH (Tailscale skipped)` that the skip-Tailscale branch sets, and
+  only then extracts the rule number for `22/tcp` rows. An unrelated
+  operator-added `22/tcp` rule with a different comment (or none) is
+  left untouched. `make lint` and `make test` pass.
 
 ### FIX-1-17 — `render_unit` relies on validator to be `sed`-safe
 
@@ -369,6 +440,13 @@ independently and in priority order.
 - **fix**: Add an inline comment in `render_unit` noting the coupling so the
   validator is not relaxed without revisiting this.
 - **validation**: Code review.
+- **status**: **fixed**. `render_unit` in `scripts/install.sh` now has
+  an inline `NOTE (FIX-1-17)` comment spelling out that the unescaped
+  `sed s|…|…|g` substitution is only safe because
+  `is_supported_agent_username` forbids the sed-special characters
+  `|`, `&`, and `\`, and instructing future editors to escape
+  `AGENT_USER`/`AGENT_HOME` for sed if that validator is ever relaxed.
+  `make lint` and `make test` pass.
 
 ---
 

@@ -83,10 +83,16 @@ expect_exit_code() {
 
 run_bad_usage() {
   echo "[smoke] bad usage guards"
-  expect_exit_code 2 ./scripts/install.sh install unexpected
-  expect_exit_code 2 ./scripts/install.sh verify unexpected
+  # `install unexpected` used to live here but install requires root, so on
+  # a non-root runner the assertion was satisfied by require_root rather
+  # than by reject_unexpected_positional_args. `doctor unexpected`
+  # exercises the same code path without needing root. See FIX-1-14.
   expect_exit_code 2 ./scripts/install.sh doctor unexpected
+  expect_exit_code 2 ./scripts/install.sh verify unexpected
   expect_exit_code 2 ./scripts/install.sh repair unexpected
+  # Duplicate subcommand tokens must be rejected too (FIX-1-15).
+  expect_exit_code 2 ./scripts/install.sh doctor doctor
+  expect_exit_code 2 ./scripts/install.sh install install
   expect_exit_code 2 env 'ZOMBIE_USER=bad user' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_USER=root' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_USER=bad-' ./scripts/install.sh doctor
@@ -97,17 +103,12 @@ run_bad_usage() {
 
 run_noninteractive() {
   echo "[smoke] non-interactive guard"
-  # Repoint AGENT_HOME so the script does not see this CI user's authorized_keys.
-  tmpdir="$(mktemp -d)"
-  set +e
-  out="$(sudo -n true 2>/dev/null && echo HAVE_SUDO || true)"
-  set -e
-  # We cannot actually run 'install' without root. Instead, source the script's
-  # validate_noninteractive in a subshell via bash -c calling internal logic
-  # would require refactoring. We approximate by checking that the help text
-  # mentions ZOMBIE_NONINTERACTIVE.
+  # We cannot exercise the full install path without root, so we only
+  # assert that the documented escape hatch is still advertised in
+  # --help. The previous version of this test allocated a tmpdir and
+  # probed `sudo -n true` but discarded both, so they have been removed
+  # (FIX-1-13).
   ./scripts/install.sh --help | grep -q ZOMBIE_NONINTERACTIVE
-  rm -rf "${tmpdir}"
 }
 
 run_standards() {
