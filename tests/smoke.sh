@@ -47,6 +47,42 @@ run_python() {
   # Importability of policy.py without 3rd-party deps.
   echo "  import policy"
   PYTHONPATH=payload/agent python3 -c 'import policy; p = policy.load_policy(); print("classes:", list(p.classes))'
+  echo "  policy payload regressions"
+  PYTHONPATH=payload/agent ZOMBIE_POLICY=payload/etc/policy.yaml python3 - <<'PY'
+import policy
+import server
+
+p = policy.load_policy()
+
+# Policy classification regressions: read-only command heads must not
+# auto-run when shell syntax would mutate files or execute interpreters.
+cases = {
+    "grep needle file > out": "user_change",
+    "cat <<EOF > /tmp/out\nhello\nEOF": "user_change",
+    "cat <<EOF\nhello\nEOF": "read_only",
+    "cat script.sh | bash": "system_change",
+    "cat data | sudo tee /etc/example": "system_change",
+    "cat data | tee /dev/stderr": "read_only",
+    "grep needle file 2>&1 >/dev/null": "read_only",
+    "find /tmp -name x -delete": "destructive",
+}
+for command, want in cases.items():
+    got = p.classify(command)
+    if got != want:
+        raise SystemExit(f"classify({command!r}) = {got!r}, want {want!r}")
+
+# Fence parsing regressions: CRLF, mixed line endings, and blank
+# language tags should still feed extracted commands to the policy gate.
+if server.extract_commands("```bash\r\nls\r\n```") != ["ls"]:
+    raise SystemExit("CRLF fenced command extraction failed")
+if server.extract_commands("```bash\r\nprintf hi\n```") != ["printf hi"]:
+    raise SystemExit("mixed-line-ending fenced command extraction failed")
+extracted = server.extract_commands("```\ncat script.sh | bash\n```")
+if extracted != ["cat script.sh | bash"]:
+    raise SystemExit("blank fenced command extraction failed")
+if p.classify(extracted[0]) != "system_change":
+    raise SystemExit("extracted interpreter pipeline was not gated")
+PY
 }
 
 run_subcommands() {
