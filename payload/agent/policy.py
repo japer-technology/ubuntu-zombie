@@ -96,7 +96,11 @@ class Policy:
     # registry-shipped defaults from ``tools.TOOL_REGISTRY``.
     tool_classes: dict[str, str] = field(default_factory=dict)
     # Phase 2 / §6 R7: per-turn agent budgets to bound runaway loops.
-    max_tool_calls_per_turn: int = 8
+    # Phase 4 / P4.1 (UPGRADE-TO-PI-PLAN §7): defaults realigned with
+    # ``docs/UPGRADE-TO-PI.md`` §6.1–§6.2 (12 / 3) to match the
+    # documented contract and the typical turn shape observed once the
+    # Phase 3 skills started landing tool calls in parallel.
+    max_tool_calls_per_turn: int = 12
     max_elevated_calls_per_turn: int = 3
 
     def classify(self, command: str | Iterable[str]) -> str:
@@ -618,7 +622,7 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
         default_class=str(settings.get("default_class", "destructive")),
         sudo_allow_list=sudo_allow_list,
         tool_classes=tool_classes,
-        max_tool_calls_per_turn=_coerce_int(agent_raw.get("max_tool_calls_per_turn"), 8),
+        max_tool_calls_per_turn=_coerce_int(agent_raw.get("max_tool_calls_per_turn"), 12),
         max_elevated_calls_per_turn=_coerce_int(agent_raw.get("max_elevated_calls_per_turn"), 3),
     )
     _cache = (key, policy)

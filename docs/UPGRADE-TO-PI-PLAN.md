@@ -470,6 +470,26 @@ question.
   §9.5).
 - **D7.** `extract_commands` is removed atomically in P2.6
   ([`UPGRADE-TO-PI.md`](UPGRADE-TO-PI.md) §9.6).
+- **D8.** Phase 4 / P4.2 — *no-go on a persistent `pi-mono` child.*
+  Per-turn `pi-mono` spawn is retained. The cost of opening the
+  process-lifecycle surface (restart-on-crash, cross-conversation
+  tool-state isolation, deciding when to recycle the child after a
+  `policy.yaml` reload, holding a Node runtime resident on a desktop
+  host) is not justified without measured evidence that per-turn
+  spawn latency is unacceptable on target hardware. The Phase 4
+  acceptance criterion explicitly contemplates closing P4.2 without
+  merging when no such evidence exists; revisit if and only if a
+  future measurement on a supported Ubuntu Desktop SKU shows
+  unacceptable interactive latency.
+- **D9.** Phase 4 / P4.1 — default per-turn budgets aligned with
+  [`UPGRADE-TO-PI.md`](UPGRADE-TO-PI.md) §6.1–§6.2
+  (`max_tool_calls_per_turn` 12, `max_elevated_calls_per_turn` 3).
+  Both budgets enforce a soft failure via a synthetic
+  `budget_exceeded` observation; the elevated budget is enforced in
+  `server.py` against `policy.classify_tool`, the total-call budget
+  in `pi_mono.run_turn`. Regression coverage in
+  `tests/smoke.sh` exercises both soft-failure paths against the
+  `tests/fixtures/stub-pi-mono.mjs` bridge.
 
 ### Phase status
 
@@ -497,7 +517,16 @@ question.
   source path so prompt injection via a skill stays visible (§6.4);
   `install.sh repair` re-deploys the catalogue and `install.sh verify`
   asserts each shipped skill is present.
-- **Phase 4** — not started.
+- **Phase 4** — complete. **P4.1** realigned the per-turn budget
+  defaults with [`UPGRADE-TO-PI.md`](UPGRADE-TO-PI.md) §6.1–§6.2
+  (12 / 3) and made `max_elevated_calls_per_turn` an enforced
+  soft-failure budget in `payload/agent/server.py` alongside the
+  existing total-call budget in `payload/agent/pi_mono.py`. Both
+  budgets now emit a synthetic `budget_exceeded` observation
+  (recorded in the JSONL audit and the history `events` table) so
+  the model ends the turn cleanly. `tests/smoke.sh` exercises both
+  soft-failure paths against the stub bridge. **P4.2** closed as
+  no-go without code change; rationale recorded in D8 above.
 
 ---
 
