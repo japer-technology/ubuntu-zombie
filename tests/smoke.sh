@@ -68,8 +68,11 @@ for command, want in cases.items():
 
 if server.extract_commands("```bash\r\nls\r\n```") != ["ls"]:
     raise SystemExit("CRLF fenced command extraction failed")
-if server.extract_commands("```\ncat script.sh | bash\n```") != ["cat script.sh | bash"]:
+extracted = server.extract_commands("```\ncat script.sh | bash\n```")
+if extracted != ["cat script.sh | bash"]:
     raise SystemExit("blank fenced command extraction failed")
+if p.classify(extracted[0]) != "system_change":
+    raise SystemExit("extracted interpreter pipeline was not gated")
 PY
 }
 
