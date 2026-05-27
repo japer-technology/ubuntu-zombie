@@ -56,8 +56,10 @@ p = policy.load_policy()
 cases = {
     "grep needle file > out": "user_change",
     "cat <<EOF > /tmp/out\nhello\nEOF": "user_change",
+    "cat <<EOF\nhello\nEOF": "read_only",
     "cat script.sh | bash": "system_change",
     "cat data | sudo tee /etc/example": "system_change",
+    "cat data | tee /dev/stderr": "read_only",
     "grep needle file 2>&1 >/dev/null": "read_only",
     "find /tmp -name x -delete": "destructive",
 }

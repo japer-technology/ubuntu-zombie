@@ -128,13 +128,13 @@ rules:
     class: user_change
   - pattern: '\bnpm\s+(install|i|add)\b'
     class: user_change
-  - pattern: '\btee\s+(-a\s+)?(?!/dev/null\b)\S+'
+  - pattern: '\btee\s+(-a\s+)?(?!/dev/(null|stdout|stderr|tty|fd/\d+)\b)\S+'
     class: user_change
   # Redirection to a real file mutates state even if the command head is
   # read-only (`grep x file > out`, `cat <<EOF > /tmp/x`, etc.). The
-  # negative lookbehind avoids treating heredoc `<<` as a write; the
-  # target allow-list permits fd duplication (`2>&1`) and `/dev/null`,
-  # but not file writes.
+  # pattern matches optional fd prefixes plus `>`/`>>` writes; the
+  # negative lookbehind avoids heredoc `<<`. The target allow-list
+  # permits fd duplication (`2>&1`) and `/dev/null`, but not file writes.
   - pattern: '(?<!<)[0-9]*>>?\s*(?!&[0-9]\b|/dev/null\b)'
     class: user_change
 
