@@ -238,6 +238,8 @@ is_ssh_pubkey() {
 }
 
 is_supported_agent_username() {
+  # Either 2-32 chars starting with a letter and ending alphanumeric, with
+  # underscore/hyphen allowed in the middle, or 1-32 alphanumeric chars.
   [[ "$1" =~ ^[a-z]([a-z0-9_-]{0,30}[a-z0-9]|[a-z0-9]{0,31})$ ]] || return 1
   [[ "$1" != "root" && "$1" != "nobody" ]]
 }
@@ -1218,7 +1220,7 @@ if [[ -f "${VNC_PASSWD_FILE}" ]]; then
 elif [[ -n "${VNC_PASSWORD}" ]]; then
   if ! printf '%s\n%s\n' "${VNC_PASSWORD}" "${VNC_PASSWORD}" \
     | runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" x11vnc -storepasswd >/dev/null 2>&1; then
-    die "Failed to store VNC password." 1
+    die "Failed to store VNC password; check that x11vnc is installed and ${AGENT_HOME}/.vnc is writable." 1
   fi
   chown "${AGENT_USER}:${AGENT_USER}" "${VNC_PASSWD_FILE}"
   chmod 600 "${VNC_PASSWD_FILE}"
