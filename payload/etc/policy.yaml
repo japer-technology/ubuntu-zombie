@@ -128,13 +128,16 @@ rules:
     class: user_change
   - pattern: '\bnpm\s+(install|i|add)\b'
     class: user_change
+  # Pseudo-device targets like /dev/stderr and /dev/fd/2 write to an
+  # existing stream, not persistent filesystem state.
   - pattern: '\btee\s+(-a\s+)?(?!/dev/(null|stdout|stderr|tty|fd/\d+)\b)\S+'
     class: user_change
   # Redirection to a real file mutates state even if the command head is
   # read-only (`grep x file > out`, `cat <<EOF > /tmp/x`, etc.). The
-  # pattern matches optional fd prefixes plus `>`/`>>` writes; the
-  # negative lookbehind avoids heredoc `<<`. The target allow-list
-  # permits fd duplication (`2>&1`) and `/dev/null`, but not file writes.
+  # pattern matches optional fd prefixes plus `>`/`>>` writes (for
+  # example `grep x > file.txt`); the negative lookbehind avoids heredoc
+  # `<<`. The target allow-list permits fd duplication (`2>&1`) and
+  # `/dev/null`, but not file writes.
   - pattern: '(?<!<)[0-9]*>>?\s*(?!&[0-9]\b|/dev/null\b)'
     class: user_change
 

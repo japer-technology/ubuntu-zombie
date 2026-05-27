@@ -70,6 +70,8 @@ for command, want in cases.items():
 
 if server.extract_commands("```bash\r\nls\r\n```") != ["ls"]:
     raise SystemExit("CRLF fenced command extraction failed")
+if server.extract_commands("```bash\r\nprintf hi\n```") != ["printf hi"]:
+    raise SystemExit("mixed-line-ending fenced command extraction failed")
 extracted = server.extract_commands("```\ncat script.sh | bash\n```")
 if extracted != ["cat script.sh | bash"]:
     raise SystemExit("blank fenced command extraction failed")
