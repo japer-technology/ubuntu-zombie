@@ -18,9 +18,15 @@ You need:
   (recommended) or a working browser to log in interactively.
 - One SSH public key (`ssh-ed25519 …` is preferred) from the machine
   you will use to control this PC.
-- One LLM API key from a supported provider:
-  - `OPENAI_API_KEY=sk-…`, or
+- One LLM API key from a supported provider. All providers are routed
+  through `@earendil-works/pi-ai`; pick exactly one:
+  - `OPENAI_API_KEY=sk-…`
   - `ANTHROPIC_API_KEY=sk-ant-…`
+  - `GEMINI_API_KEY=…`
+  - `XAI_API_KEY=…`
+  - `OPENROUTER_API_KEY=…` (also requires `ZOMBIE_MODEL=…`)
+  - `MISTRAL_API_KEY=…`
+  - `GROQ_API_KEY=…`
 - A keyboard physically attached to the PC for the first run.
 
 Do **not** run the installer over a public SSH session. The installer
@@ -53,7 +59,18 @@ sudo ZOMBIE_NONINTERACTIVE=1 \
 `zombie`. Set it to any valid local username if you would rather the
 AI Systems Administrator live in (for example) `admin` or `ai`.
 
-Re-running `install` is safe. The script is idempotent.
+Set `ZOMBIE_SKIP_TAILSCALE=1` to skip installing and enrolling
+Tailscale (in which case inbound SSH is allowed on every interface
+instead of being restricted to the `tailscale0` interface, and
+`TAILSCALE_AUTHKEY` is ignored).
+
+Re-running `install` is safe. The script is idempotent. If something
+drifts later (file permissions, missing service, dropped Tailscale
+session), run:
+
+```bash
+sudo ./scripts/install.sh repair
+```
 
 ## 2. Reboot
 
@@ -73,27 +90,44 @@ After reboot, log in as `zombie` (or whatever name you passed via
 /opt/ai-zombie/bin/verify
 ```
 
+(The same check is also reachable as `zombie-verify` on `PATH`.)
+
 You should see a green block of `[ok]` checks. Anything red is
 explained by:
 
 ```bash
-/opt/ai-zombie/bin/health-check
+/opt/ai-zombie/bin/health-check          # also on PATH as: zombie-health
 sudo ./scripts/install.sh doctor
+```
+
+To re-apply known-safe fixes (permissions, service restart, Tailscale
+re-auth with `TAILSCALE_AUTHKEY`), run:
+
+```bash
+sudo ./scripts/install.sh repair
 ```
 
 ## 4. Add an API key
 
 ```bash
-sudo /opt/ai-zombie/bin/secrets-edit
+sudo /opt/ai-zombie/bin/secrets-edit     # also on PATH as: secrets-edit
 ```
 
-Uncomment one of the provider lines and paste your key:
+Uncomment exactly one provider line and paste your key. All providers
+are routed through `@earendil-works/pi-ai`:
 
 ```
 OPENAI_API_KEY=sk-…
-# or
-ANTHROPIC_API_KEY=sk-ant-…
-ZOMBIE_PROVIDER=openai   # or anthropic
+# ANTHROPIC_API_KEY=sk-ant-…
+# GEMINI_API_KEY=…
+# XAI_API_KEY=…
+# OPENROUTER_API_KEY=…
+# MISTRAL_API_KEY=…
+# GROQ_API_KEY=…
+
+# Optional knobs:
+ZOMBIE_PROVIDER=openai     # openai|anthropic|gemini|xai|openrouter|mistral|groq
+ZOMBIE_MODEL=gpt-4o-mini   # override default model (required for openrouter)
 ```
 
 Restart the chat service:
@@ -109,6 +143,8 @@ Locally:
 ```
 http://127.0.0.1:7878/
 ```
+
+(Override the port at install time with `ZOMBIE_CHAT_PORT=<port>`.)
 
 Remotely over Tailscale (SSH tunnel; the chat never binds to a public
 interface):
@@ -138,7 +174,7 @@ as the agent account (`zombie` by default) and is logged.
 ## 8. Inspect the audit log
 
 ```bash
-/opt/ai-zombie/bin/audit-recent
+/opt/ai-zombie/bin/audit-recent          # also on PATH as: audit-recent
 ```
 
 You will see a JSON-lines summary of prompts, proposed actions,
@@ -169,15 +205,21 @@ Keep running: do nothing.
 Uninstall:
 
 ```bash
-sudo ./scripts/install.sh uninstall --dry-run   # preview
-sudo ./scripts/install.sh uninstall              # remove
-sudo ./scripts/install.sh uninstall --archive    # remove and archive /home/zombie
+sudo ./scripts/install.sh uninstall --dry-run      # preview
+sudo ./scripts/install.sh uninstall                # remove (interactive)
+sudo ./scripts/install.sh uninstall --archive      # archive /home/<agent> and
+                                                   # /opt/ai-zombie/state/ to
+                                                   # /var/backups/ before removal
+sudo ./scripts/install.sh uninstall --yes          # skip confirmations
+sudo ./scripts/install.sh uninstall --keep-agent   # leave the local user in place
 ```
 
 Uninstall removes the chat service, sudoers drop-in, SSH drop-in,
-x11vnc autostart, generated helpers, and (with confirmation) the
-local `zombie` account. It does not delete user data without explicit
-confirmation.
+x11vnc autostart, generated helpers, policy, logrotate rule, and
+(with confirmation) the local agent account (`zombie` by default, or
+whatever `ZOMBIE_USER` was set to). It intentionally does **not**
+remove Docker, Tailscale, Node, Python, or other base packages —
+those are normal Ubuntu software that other things may depend on.
 
 ---
 
