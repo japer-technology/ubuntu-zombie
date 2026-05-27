@@ -108,7 +108,7 @@ rules:
   # can run arbitrary mutating code even when the command starts with a
   # read-only tool such as `cat` or `grep`. Require approval before they
   # reach the shell.
-  - pattern: '(\|\s*(sudo\s+)?(bash|sh|zsh|python3?|perl|ruby|node)\b|\bsudo\s+(bash|sh|zsh|python3?|perl|ruby|node)\b)'
+  - pattern: '(\|\s*(sudo\s+)?|\bsudo\s+)(bash|sh|zsh|python3?|perl|ruby|node)\b'
     class: system_change
   # `tee` is commonly used to write privileged files from a pipeline and
   # otherwise mutates a file in place; classify before read_only tools.
@@ -131,8 +131,9 @@ rules:
   - pattern: '\btee\s+(-a\s+)?(?!/dev/null\b)\S+'
     class: user_change
   # Redirection to a real file mutates state even if the command head is
-  # read-only (`grep x file > out`, `cat <<EOF > /tmp/x`, etc.). Allow
-  # fd duplication and /dev/null, but require approval for file writes.
+  # read-only (`grep x file > out`, `cat <<EOF > /tmp/x`, etc.). The
+  # prefix avoids heredoc `<<`; the target allow-list permits fd
+  # duplication (`2>&1`) and `/dev/null`, but not file writes.
   - pattern: '(^|[^\w<])[0-9]*>>?\s*(?!&[0-9]\b|/dev/null\b)'
     class: user_change
 
