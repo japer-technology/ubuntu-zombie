@@ -125,7 +125,7 @@ program that `sudo` invokes (after `sudo` consumes its own flags), so
 `apt` and `systemctl`. Add entries only after confirming the
 underlying program is safe to elevate.
 
-### Tool classes and per-turn budgets (Phase 2)
+### Tool classes and per-turn budgets (Phases 2 and 4)
 
 Phase 2 of [`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md)
 replaces the fenced-bash parser with the `pi-mono` agent loop
@@ -144,14 +144,24 @@ tool_classes:
   pkg.install: system_change
 
 agent:
-  max_tool_calls_per_turn: 8         # hard cap; bridge replies error
+  max_tool_calls_per_turn: 12        # total tool calls per user message
   max_elevated_calls_per_turn: 3     # cap on non read_only calls
 ```
 
-`max_tool_calls_per_turn` is enforced by `pi_mono.run_turn` and the
-bridge — once exceeded, the agent receives an `operator_approval_
-required` failure for further calls. `max_elevated_calls_per_turn` is
-the budget surfaced to the operator UI per-turn counter.
+Phase 4 / P4.1 of [`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md)
+realigned the defaults with [`docs/UPGRADE-TO-PI.md`](UPGRADE-TO-PI.md)
+§6.1–§6.2 (12 / 3) and made the elevated budget enforcement match the
+total-call budget enforcement:
+
+- `max_tool_calls_per_turn` is enforced by `pi_mono.run_turn` and the
+  bridge — once exceeded, the agent receives a synthetic
+  `budget_exceeded:` observation for further calls.
+- `max_elevated_calls_per_turn` is enforced by `server.py` against the
+  classification returned by `policy.classify_tool`. Each call past the
+  budget is recorded as a `budget_exceeded` audit decision and the
+  agent sees the same synthetic observation so it ends the turn
+  cleanly. The same counter still drives the operator-facing per-turn
+  budget badge in the UI.
 
 ### pi-mono runtime
 

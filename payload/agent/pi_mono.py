@@ -154,10 +154,15 @@ def run_turn(
             if kind == "tool_call":
                 calls_made += 1
                 if calls_made > max_tool_calls:
+                    # Phase 4 / P4.1 (UPGRADE-TO-PI-PLAN §7): synthetic
+                    # ``budget_exceeded`` observation so the model
+                    # closes the turn instead of looping. Mirrors the
+                    # elevated-budget enforcement in ``server.py``.
                     reply = {"type": "tool_result", "id": event.get("id"),
                              "ok": False,
-                             "error": f"per-turn tool-call budget exceeded "
-                                      f"({max_tool_calls})"}
+                             "error": (f"budget_exceeded: per-turn tool-call "
+                                       f"budget reached ({max_tool_calls}); "
+                                       f"end the turn and summarise.")}
                 else:
                     try:
                         result = on_tool_call(

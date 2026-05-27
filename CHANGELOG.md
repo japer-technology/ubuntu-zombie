@@ -8,6 +8,21 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- Phase 4 of `docs/UPGRADE-TO-PI-PLAN.md` — hardening pass:
+  - **P4.1** Per-turn budget defaults realigned with
+    `docs/UPGRADE-TO-PI.md` §6.1–§6.2 (`max_tool_calls_per_turn` 12,
+    `max_elevated_calls_per_turn` 3) in `payload/etc/policy.yaml` and
+    `payload/agent/policy.py`. `server.py` now enforces
+    `max_elevated_calls_per_turn` and `pi_mono.py` emits a uniform
+    synthetic `budget_exceeded:` observation when either budget is
+    exceeded; the synthetic observation is recorded in the JSONL audit
+    (`decision="budget_exceeded"`) and the history `events` table.
+    `tests/smoke.sh` gained regression tests against
+    `tests/fixtures/stub-pi-mono.mjs` that drive both budgets through
+    the soft-failure path. `docs/CONFIGURATION.md` updated.
+  - **P4.2** Persistent `pi-mono` evaluated and declined (no-go).
+    Rationale recorded in `docs/UPGRADE-TO-PI-PLAN.md` §11; no code
+    change.
 - Phase 2 of `docs/UPGRADE-TO-PI-PLAN.md` — atomic cutover from the
   fenced-bash parser to the `pi-mono` agent loop:
   - **P2.1** Pinned `@earendil-works/pi-coding-agent` via

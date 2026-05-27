@@ -215,11 +215,15 @@ rules:
 # ``svc.status`` against your own services as ``read_only``).
 tool_classes: {}
 
-# Phase 2 (§6 R7): bound runaway agent loops. ``max_tool_calls_per_turn``
-# caps total tool calls per user message; ``max_elevated_calls_per_turn``
-# caps how many of those may be non-``read_only``. Calls beyond the
-# budget receive a synthetic ``budget_exceeded`` observation so the
-# model ends the turn cleanly.
+# Phase 2 (§6 R7) / Phase 4 P4.1 (UPGRADE-TO-PI-PLAN §7): bound runaway
+# agent loops. ``max_tool_calls_per_turn`` caps total tool calls per
+# user message; ``max_elevated_calls_per_turn`` caps how many of those
+# may be non-``read_only``. Calls beyond either budget receive a
+# synthetic ``budget_exceeded`` observation so the model ends the turn
+# cleanly. Defaults are aligned with ``docs/UPGRADE-TO-PI.md`` §6.1–§6.2
+# (12 / 3) to match the documented contract and the typical turn shape
+# observed once the Phase 3 skills started landing tool calls in
+# parallel.
 agent:
-  max_tool_calls_per_turn: 8
+  max_tool_calls_per_turn: 12
   max_elevated_calls_per_turn: 3

@@ -218,10 +218,23 @@ class App:
                       name=skill.name, path=str(skill.path))
 
         policy = load_policy()
-        max_calls = int(getattr(policy, "max_tool_calls_per_turn", 8) or 8)
+        max_calls = int(getattr(policy, "max_tool_calls_per_turn", 12) or 12)
+        # Phase 4 / P4.1 (UPGRADE-TO-PI-PLAN §7): also enforce the
+        # elevated (non ``read_only``) per-turn budget. Read-only tools
+        # auto-run and are cheap; elevated tools queue an operator
+        # prompt and mutate state, so they are bounded separately to
+        # cap the blast radius of a runaway loop. Calls beyond the
+        # budget receive a synthetic ``budget_exceeded`` observation
+        # (see ``payload/etc/policy.yaml``) so the model ends the turn
+        # cleanly.
+        max_elevated = int(
+            getattr(policy, "max_elevated_calls_per_turn", 3) or 3
+        )
+        elevated_calls = 0
         turn_events: list[dict[str, Any]] = []
 
         def on_tool_call(call_id: str, name: str, args: dict[str, Any]) -> dict[str, Any]:
+            nonlocal elevated_calls
             # Validate against the closed registry first; reject unknown
             # tools and schema mismatches without side effects.
             try:
@@ -240,6 +253,30 @@ class App:
             classification = policy.classify_tool(name, cleaned)
             requires_approval = policy.requires_approval(classification)
             requires_phrase = policy.requires_phrase(classification)
+
+            # Phase 4 / P4.1: bound elevated calls (anything other than
+            # ``read_only``) per turn. We count BEFORE queuing so a
+            # runaway sequence of queued approvals is also bounded.
+            if classification != "read_only":
+                elevated_calls += 1
+                if elevated_calls > max_elevated:
+                    err = (f"budget_exceeded: per-turn elevated tool-call "
+                           f"budget reached ({max_elevated}); "
+                           f"end the turn and ask the operator how to proceed.")
+                    log_tool_call(
+                        tool=name, classification=classification,
+                        decision="budget_exceeded",
+                        args_summary=_summarize(cleaned),
+                        error=err, conversation_id=conv_id,
+                        tool_call_id=call_id,
+                    )
+                    self.history.add_event(conv_id, "tool_observation", {
+                        "tool_call_id": call_id, "tool": name,
+                        "ok": False, "decision": "budget_exceeded",
+                        "error": err,
+                    })
+                    return {"ok": False, "error": err}
+
             entry_id = log_tool_call(
                 tool=name, classification=classification,
                 decision=("queued" if requires_approval else "auto"),
