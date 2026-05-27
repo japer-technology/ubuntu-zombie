@@ -1,10 +1,9 @@
-"""Skill loader for the pi-mono runtime (Phase 3).
+"""Skill loader for the pi-mono runtime.
 
-Phase 3 of ``docs/UPGRADE-TO-PI-PLAN.md`` introduces a closed *skill*
-surface: short, on-disk markdown documents that nudge the agent toward
-the correct typed tool for a class of operator request. Skills never
-expand the tool registry — adding a tool still requires a code release
-(§4.5 — "skills cannot expand the tool surface").
+A *skill* is a short on-disk markdown document that nudges the agent
+toward the correct typed tool for a class of operator request.
+Skills never expand the tool registry — adding a tool still requires
+a code release.
 
 A skill file is plain markdown with an optional first-line HTML-comment
 trigger marker, for example::
@@ -23,9 +22,9 @@ When a chat turn starts, :func:`select_skills` returns the skills whose
 trigger words appear in the last *N* user messages.
 :func:`render_skills_block` wraps the selected skills in a prompt
 fragment that includes the on-disk path of each skill so the operator
-can see *what* was injected (§6.4 — "skill provenance"). The selected
-skills are also recorded as ``skill_active`` history events by the
-chat service for the same reason.
+can see *what* was injected (skill provenance). The selected skills
+are also recorded as ``skill_active`` history events by the chat
+service for the same reason.
 
 Skill content is *never* mutated; it is read verbatim from disk so a
 file-level audit (``ls -l``, ``sha256sum``) reflects what the model

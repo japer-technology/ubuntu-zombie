@@ -65,10 +65,9 @@ cases = {
     "cat data | tee /dev/stderr": "read_only",
     "grep needle file 2>&1 >/dev/null": "read_only",
     "find /tmp -name x -delete": "destructive",
-    # Phase 0 / P0.1 (UPGRADE-TO-PI-PLAN §3): argv-aware classifier
-    # strips leading ``VAR=value`` env prefixes and ``sudo`` flags
-    # before rule matching, so the canonical argv is what gets
-    # classified.
+    # Argv-aware classifier: strips leading ``VAR=value`` env
+    # prefixes and ``sudo`` flags before rule matching, so the
+    # canonical argv is what gets classified.
     "LC_ALL=C ls /etc": "read_only",
     "FOO=bar apt-get install pkg": "system_change",
     "sudo apt install foo": "system_change",
@@ -77,8 +76,8 @@ cases = {
     # Quoted destructive path is now caught because rules see the
     # de-quoted argv (the historical regex-only matcher missed it).
     'rm -rf "/tmp/some file"': "destructive",
-    # Phase 0 / P0.2: unknown commands fall through to the
-    # fail-closed default (``destructive``) instead of auto-running.
+    # Unknown commands fall through to the fail-closed default
+    # (``destructive``) instead of auto-running.
     "foozle --bar": "destructive",
     "sudo foozle --bar": "destructive",
     "echo a && echo b": "destructive",
@@ -88,25 +87,23 @@ for command, want in cases.items():
     if got != want:
         raise SystemExit(f"classify({command!r}) = {got!r}, want {want!r}")
 
-# Phase 0 / P0.3: sudo allow-list keeps common privileged targets at
-# ``system_change`` rather than escalating them via the fail-closed
-# default. ``foozle`` (not in the list) escalates; ``apt`` (in the
-# list) does not.
+# Sudo allow-list keeps common privileged targets at ``system_change``
+# rather than escalating them via the fail-closed default. ``foozle``
+# (not in the list) escalates; ``apt`` (in the list) does not.
 assert "apt" in p.sudo_allow_list, p.sudo_allow_list
 assert "foozle" not in p.sudo_allow_list, p.sudo_allow_list
 if p.default_class != "destructive":
     raise SystemExit(f"fail-closed default class regressed: {p.default_class!r}")
-# An unknown command must require operator approval (the canary that
-# P0.2 calls for).
+# An unknown command must require operator approval.
 if not p.requires_approval(p.classify("foozle --bar")):
     raise SystemExit("fail-closed default no longer requires approval")
 
-# Phase 2 (UPGRADE-TO-PI-PLAN §5): the legacy extract_commands /
-# fenced-bash workflow has been removed; commands now arrive as
-# structured pi-mono tool calls. The policy gate must classify them
-# via classify_tool, and the closed registry must enforce schemas.
+# The legacy extract_commands / fenced-bash workflow has been removed;
+# commands now arrive as structured pi-mono tool calls. The policy
+# gate must classify them via classify_tool, and the closed registry
+# must enforce schemas.
 if hasattr(server, "extract_commands"):
-    raise SystemExit("extract_commands must be removed in Phase 2")
+    raise SystemExit("extract_commands must be removed")
 import tools as _t
 assert set(_t.tool_names()) == {
     "shell.run", "fs.read", "fs.write", "pkg.query", "pkg.install",
@@ -168,10 +165,10 @@ finally:
     if _saved is not None:
         _os.environ["ZOMBIE_SKILLS_DIR"] = _saved
 
-# Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1): skill loader discovers the
-# six built-in skills, parses their trigger markers, selects only on
-# trigger-word match in recent user messages, and renders a block that
-# carries the on-disk path so the UI can show provenance.
+# Skill loader discovers the six built-in skills, parses their
+# trigger markers, selects only on trigger-word match in recent user
+# messages, and renders a block that carries the on-disk path so the
+# UI can show provenance.
 import skill_loader
 from pathlib import Path
 
@@ -207,7 +204,7 @@ sel = skill_loader.select_skills(
 assert sel == [], sel
 
 # Rendered block carries provenance (the file path) so prompt
-# injection via a skill remains visible (§6.4).
+# injection via a skill remains visible.
 sel = skill_loader.select_skills(
     ["please run apt-get update"],
     dirs=[Path("payload/agent/skills")],
@@ -220,10 +217,10 @@ assert "Active skill: apt" in block, block
 # Empty selection -> empty block (no header noise on every turn).
 assert skill_loader.render_skills_block([]) == ""
 
-# Phase 1 (UPGRADE-TO-PI-PLAN §4): providers.py is a thin adapter
-# over @earendil-works/pi-ai. The Python-facing surface must stay
-# import-clean (no third-party deps) and provider selection must
-# honour ZOMBIE_PROVIDER plus the expanded key matrix.
+# providers.py is a thin adapter over @earendil-works/pi-ai. The
+# Python-facing surface must stay import-clean (no third-party deps)
+# and provider selection must honour ZOMBIE_PROVIDER plus the
+# expanded key matrix.
 import os
 import providers as _pr
 
@@ -304,10 +301,10 @@ finally:
             os.environ[k] = v
 PY
 
-  # Phase 2 (UPGRADE-TO-PI-PLAN §5 / P2.6): stubbed end-to-end run of
-  # pi_mono.run_turn against tests/fixtures/stub-pi-mono.mjs. Verifies
-  # the bridge protocol, schema validation, dispatch, and event
-  # accounting without requiring `pi` (or even npm) on the test host.
+  # Stubbed end-to-end run of pi_mono.run_turn against
+  # tests/fixtures/stub-pi-mono.mjs. Verifies the bridge protocol,
+  # schema validation, dispatch, and event accounting without
+  # requiring `pi` (or even npm) on the test host.
   if command -v node >/dev/null 2>&1; then
     echo "  pi-mono stub end-to-end"
     ZOMBIE_PI_MONO_BRIDGE="$(pwd)/tests/fixtures/stub-pi-mono.mjs" \
@@ -353,10 +350,10 @@ if not any(e.get("type") == "final" for e in out["events"]):
     raise SystemExit("no final event recorded")
 PY
 
-    # Phase 4 / P4.1 (UPGRADE-TO-PI-PLAN §7): regression tests for the
-    # per-turn tool-call budgets. Both must produce a soft failure
-    # (synthetic ``budget_exceeded`` observation) once exceeded so the
-    # model ends the turn cleanly rather than looping.
+    # Regression tests for the per-turn tool-call budgets. Both must
+    # produce a soft failure (synthetic ``budget_exceeded``
+    # observation) once exceeded so the model ends the turn cleanly
+    # rather than looping.
     echo "  pi-mono per-turn tool-call budget enforcement"
     ZOMBIE_STUB_PLAN='[
       {"type":"tool_call","id":"1","name":"fs.read","args":{"path":"/etc/os-release","max_bytes":64}},
@@ -590,10 +587,9 @@ run_standards() {
     [[ -s "$f" ]] || { echo "missing required repository file: $f" >&2; exit 1; }
   done
 
-  # Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1): the six built-in skills
-  # ship under payload/agent/skills/ so ``make package`` carries them
-  # into the release bundle and the installer can deploy them to
-  # /opt/ai-zombie/skills/.
+  # The six built-in skills ship under payload/agent/skills/ so
+  # ``make package`` carries them into the release bundle and the
+  # installer can deploy them to /opt/ai-zombie/skills/.
   local s
   for s in apt systemd tailscale ufw docker gui; do
     [[ -s "payload/agent/skills/${s}.md" ]] || \

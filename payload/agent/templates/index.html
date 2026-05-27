@@ -130,9 +130,8 @@ function renderResult(result) {
   return wrap;
 }
 
-// Phase 2 (UPGRADE-TO-PI-PLAN §5 / P2.5): pi-mono emits structured
-// tool events instead of fenced bash. Three bubble types replace the
-// old renderProposal:
+// pi-mono emits structured tool events instead of fenced bash.
+// Three bubble types replace the old renderProposal:
 //
 //   tool_call          — every tool dispatch (auto or queued)
 //   tool_observation   — the recorded result (or denial)

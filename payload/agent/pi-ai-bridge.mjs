@@ -2,10 +2,9 @@
 // pi-ai-bridge.mjs — minimal stdin/stdout bridge from Ubuntu Zombie's
 // Python chat service to the @earendil-works/pi-ai library.
 //
-// Phase 1 (UPGRADE-TO-PI-PLAN.md §4) replaces the bespoke OpenAI and
-// Anthropic clients in payload/agent/providers.py with a thin adapter
-// that shells out to this script. The Python surface (provider.chat)
-// is preserved so server.py is unchanged.
+// The Python surface (provider.chat) shells out to this script so
+// payload/agent/providers.py can avoid maintaining a second LLM
+// client implementation.
 //
 // Wire format
 // -----------

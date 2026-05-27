@@ -1,15 +1,14 @@
 """Provider abstraction — thin adapter over ``@earendil-works/pi-ai``.
 
-Phase 1 of ``docs/UPGRADE-TO-PI-PLAN.md`` deletes the bespoke OpenAI
-and Anthropic clients that used to live here (≈147 lines per
-``UPGRADE-TO-PI.md`` §4.1) and forwards every chat completion through
-the shared `pi-ai`_ library that GMI and ``pi-mono`` already use.
+Every chat completion is forwarded through the shared `pi-ai`_
+library that ``pi-mono`` already uses, instead of maintaining bespoke
+OpenAI and Anthropic clients in-process.
 
-The Python-facing surface is preserved so ``payload/agent/server.py``
-does not need to change:
+The Python-facing surface is intentionally narrow so
+``payload/agent/server.py`` does not need to know about the bridge:
 
-* ``Message`` — same dataclass.
-* ``ProviderError`` / ``NoProviderConfigured`` — same exceptions.
+* ``Message`` — dataclass for chat messages.
+* ``ProviderError`` / ``NoProviderConfigured`` — error types.
 * ``provider_from_env(name=None, model=None) -> BaseProvider``
 * ``provider_status() -> tuple[name, status_text]``
 * ``BaseProvider.chat(messages) -> str``
@@ -30,9 +29,9 @@ the left and supply the matching API key in
     mistral     MISTRAL_API_KEY
     groq        GROQ_API_KEY
 
-Phase 2 will remove ``chat`` entirely when ``pi-mono`` takes over the
-agent loop. Until then this adapter keeps the existing chat UI alive
-without maintaining a second LLM client implementation.
+The ``chat`` surface is retained alongside the pi-mono agent loop so
+the chat UI keeps a working completion path without maintaining a
+second LLM client implementation.
 
 .. _pi-ai: https://github.com/earendil-works/pi
 """

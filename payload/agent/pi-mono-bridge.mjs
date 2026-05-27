@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // payload/agent/pi-mono-bridge.mjs
 //
-// Phase 2 of docs/UPGRADE-TO-PI-PLAN.md. This bridge wraps the
-// `pi` CLI shipped by `@earendil-works/pi-coding-agent` (alias
-// "pi-mono") and re-exports its tool-call stream over a tiny
+// Wraps the `pi` CLI shipped by `@earendil-works/pi-coding-agent`
+// (alias "pi-mono") and re-exports its tool-call stream over a tiny
 // line-delimited JSON protocol that payload/agent/pi_mono.py speaks.
 //
 // Protocol (one JSON object per line, both directions):

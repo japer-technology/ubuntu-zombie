@@ -285,11 +285,11 @@ fi
 # -------------------------------------------------------------------
 # 5b. Remove globally-installed npm packages we own.
 # -------------------------------------------------------------------
-# Phase 1 + Phase 2 (UPGRADE-TO-PI-PLAN §11): the installer pulls
-# @earendil-works/pi-ai and @earendil-works/pi-coding-agent via
-# ``npm install -g``. ``rm -rf /opt/ai-zombie`` removes our source
-# tree but leaves the Node packages installed system-wide.  Uninstall
-# them explicitly so the host is left clean.
+# The installer pulls @earendil-works/pi-ai and
+# @earendil-works/pi-coding-agent via ``npm install -g``.
+# ``rm -rf /opt/ai-zombie`` removes our source tree but leaves the
+# Node packages installed system-wide. Uninstall them explicitly so
+# the host is left clean.
 if command -v npm >/dev/null 2>&1; then
   for _pkg in @earendil-works/pi-coding-agent @earendil-works/pi-ai; do
     if npm ls -g --depth=0 "${_pkg}" >/dev/null 2>&1; then

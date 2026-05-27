@@ -3,13 +3,11 @@
 Every prompt, proposed action, approval decision, command, exit code,
 and verification result is appended as one JSON object per line to
 ``/var/log/ubuntu-zombie/audit.log``. Secrets are redacted before
-write.
-
-Phase 2 of ``docs/UPGRADE-TO-PI-PLAN.md`` (P2.3) extends the redactor
-matrix with the secrets-file path and a list of sensitive environment
-variable names, and adds a structured ``tool_call`` event variant that
-records classification, decision, exit, duration, and SHA-256 digests
-of stdout/stderr.
+write: the redactor matches token-shaped substrings and also scrubs
+the values of a fixed set of sensitive environment variables and the
+secrets-file path. Tool dispatches are recorded as structured
+``tool_call`` events that include classification, decision, exit
+code, duration, and SHA-256 digests of stdout/stderr.
 """
 from __future__ import annotations
 

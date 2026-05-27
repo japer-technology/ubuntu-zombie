@@ -1,12 +1,12 @@
-"""Closed tool registry for the pi-mono runtime (Phase 2).
+"""Closed tool registry for the pi-mono runtime.
 
-Phase 2 of ``docs/UPGRADE-TO-PI-PLAN.md`` removes the parse-fences-and-
-approve flow and replaces it with an explicit, code-controlled tool
-surface. Every ``pi-mono`` tool call is dispatched through this module:
+The chat service runs an explicit, code-controlled tool surface
+instead of parsing and approving free-form shell. Every ``pi-mono``
+tool call is dispatched through this module:
 
 * :data:`TOOL_REGISTRY` lists the only tools the chat service will ever
-  execute. Adding a tool requires a code release (§4.5 — "skills cannot
-  expand the tool surface").
+  execute. Adding a tool requires a code release — skills cannot
+  expand the tool surface.
 * :func:`validate_args` runs a minimal, dependency-free schema check.
   Rejections are recorded as ``tool_call_rejected_schema`` audit events
   by the server before any side effects.
