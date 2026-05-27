@@ -286,17 +286,33 @@ is_supported_agent_username() {
   [[ "$1" != "root" && "$1" != "nobody" ]]
 }
 
+is_safe_absolute_path() {
+  [[ "$1" == /* ]] || return 1
+  [[ "$1" =~ ^/[A-Za-z0-9._/+:-]+$ ]] || return 1
+}
+
+is_valid_tcp_port() {
+  [[ "$1" =~ ^[0-9]+$ ]] || return 1
+  (( "$1" >= 1 && "$1" <= 65535 ))
+}
+
 # Validate user-controlled install settings before they are interpolated into
 # paths, sudoers entries, generated unit files, or shell commands.
 validate_config() {
   if ! is_supported_agent_username "${AGENT_USER}"; then
     die "Invalid agent username '${AGENT_USER}'. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation)." 2
   fi
-  if [[ "${ZOMBIE_DIR}" != /* ]]; then
-    die "ZOMBIE_DIR must be an absolute path." 2
+  if ! is_safe_absolute_path "${ZOMBIE_DIR}"; then
+    die "ZOMBIE_DIR must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
-  if [[ "${LOG_FILE}" != /* ]]; then
-    die "LOG_FILE must be an absolute path." 2
+  if ! is_safe_absolute_path "${LOG_FILE}"; then
+    die "LOG_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
+  fi
+  if ! is_valid_tcp_port "${VNC_PORT}"; then
+    die "VNC_PORT must be an integer from 1 to 65535." 2
+  fi
+  if ! is_valid_tcp_port "${CHAT_PORT}"; then
+    die "ZOMBIE_CHAT_PORT must be an integer from 1 to 65535." 2
   fi
 }
 
@@ -805,13 +821,17 @@ fi
 usermod -aG sudo "${AGENT_USER}"
 
 SUDOERS_FILE="/etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie"
-install -m 0440 /dev/null "${SUDOERS_FILE}"
-cat > "${SUDOERS_FILE}" <<EOF
+SUDOERS_TMP="$(mktemp "${SUDOERS_FILE}.XXXXXX")"
+cat > "${SUDOERS_TMP}" <<EOF
 # Managed by ${SCRIPT_NAME}. Grants ${AGENT_USER} passwordless root.
 ${AGENT_USER} ALL=(ALL) NOPASSWD:ALL
 EOF
-chmod 0440 "${SUDOERS_FILE}"
-visudo -cf "${SUDOERS_FILE}" >/dev/null
+if ! visudo -cf "${SUDOERS_TMP}" >/dev/null; then
+  rm -f "${SUDOERS_TMP}"
+  die "Generated sudoers drop-in failed validation." 1
+fi
+install -m 0440 "${SUDOERS_TMP}" "${SUDOERS_FILE}"
+rm -f "${SUDOERS_TMP}"
 ok "Configured passwordless sudo for ${AGENT_USER}."
 
 # ---------------------------------------------------------------------------

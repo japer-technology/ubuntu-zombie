@@ -107,20 +107,35 @@ is_supported_agent_username() {
   [[ "$1" != "root" && "$1" != "nobody" ]]
 }
 
+is_safe_absolute_path() {
+  [[ "$1" == /* ]] || return 1
+  [[ "$1" =~ ^/[A-Za-z0-9._/+:-]+$ ]] || return 1
+}
+
+is_valid_tcp_port() {
+  [[ "$1" =~ ^[0-9]+$ ]] || return 1
+  (( "$1" >= 1 && "$1" <= 65535 ))
+}
+
 validate_config() {
   if ! is_supported_agent_username "${AGENT_USER}"; then
     printf '%s[x]%s Invalid agent username %q. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation).\n' \
       "${C_RED}" "${C_RESET}" "${AGENT_USER}" >&2
     exit 2
   fi
-  if [[ "${ZOMBIE_DIR}" != /* ]]; then
-    printf '%s[x]%s ZOMBIE_DIR must be an absolute path; got %q\n' \
+  if ! is_safe_absolute_path "${ZOMBIE_DIR}"; then
+    printf '%s[x]%s ZOMBIE_DIR must be an absolute path using only safe path characters; got %q\n' \
       "${C_RED}" "${C_RESET}" "${ZOMBIE_DIR}" >&2
     exit 2
   fi
-  if [[ "${BACKUP_DIR}" != /* ]]; then
-    printf '%s[x]%s BACKUP_DIR must be an absolute path; got %q\n' \
+  if ! is_safe_absolute_path "${BACKUP_DIR}"; then
+    printf '%s[x]%s BACKUP_DIR must be an absolute path using only safe path characters; got %q\n' \
       "${C_RED}" "${C_RESET}" "${BACKUP_DIR}" >&2
+    exit 2
+  fi
+  if ! is_valid_tcp_port "${VNC_PORT}"; then
+    printf '%s[x]%s VNC_PORT must be an integer from 1 to 65535; got %q\n' \
+      "${C_RED}" "${C_RESET}" "${VNC_PORT}" >&2
     exit 2
   fi
 }

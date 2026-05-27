@@ -98,15 +98,24 @@ run_bad_usage() {
   expect_exit_code 2 env 'ZOMBIE_USER=bad-' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_USER=bad_' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_DIR=relative/path' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_DIR=/tmp/zombie;touch /tmp/install-path-pwn' ./scripts/install.sh doctor
   expect_exit_code 2 env 'LOG_FILE=relative.log' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'LOG_FILE=/tmp/zombie log' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'VNC_PORT=bad' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_CHAT_PORT=70000' ./scripts/install.sh doctor
   # FIX-2-01: uninstall.sh must validate ZOMBIE_USER / paths *before*
   # any side-effecting command runs (so a smoke run as non-root still
   # exits 2 rather than 1).
   expect_exit_code 2 env 'ZOMBIE_USER=zombie;touch /tmp/zombie-pwn' ./scripts/uninstall.sh --dry-run
   expect_exit_code 2 env 'ZOMBIE_USER=root' ./scripts/uninstall.sh --dry-run
   expect_exit_code 2 env 'ZOMBIE_DIR=relative/path' ./scripts/uninstall.sh --dry-run
+  expect_exit_code 2 env 'ZOMBIE_DIR=/tmp/zombie;touch /tmp/uninstall-path-pwn' ./scripts/uninstall.sh --dry-run
   expect_exit_code 2 env 'BACKUP_DIR=relative/path' ./scripts/uninstall.sh --dry-run
+  expect_exit_code 2 env 'BACKUP_DIR=/tmp/zombie backup' ./scripts/uninstall.sh --dry-run
+  expect_exit_code 2 env 'VNC_PORT=0' ./scripts/uninstall.sh --dry-run
   [[ ! -e /tmp/zombie-pwn ]] || { echo "FAIL: uninstall.sh ZOMBIE_USER injection created /tmp/zombie-pwn" >&2; exit 1; }
+  [[ ! -e /tmp/install-path-pwn ]] || { echo "FAIL: install.sh ZOMBIE_DIR injection created /tmp/install-path-pwn" >&2; exit 1; }
+  [[ ! -e /tmp/uninstall-path-pwn ]] || { echo "FAIL: uninstall.sh ZOMBIE_DIR injection created /tmp/uninstall-path-pwn" >&2; exit 1; }
   # FIX-2-11: uninstall.sh run() must refuse extra arguments.
   set +e
   out="$(bash -c '
