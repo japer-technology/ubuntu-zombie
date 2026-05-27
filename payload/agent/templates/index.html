@@ -106,14 +106,22 @@ function addMessage(role, content, opts = {}) {
 
 function renderResult(result) {
   const wrap = el("div", { class: "result" });
-  wrap.appendChild(el("div", { text: `exit ${result.exit_code} · ${result.duration_ms} ms` }));
-  if (result.stdout) wrap.appendChild(el("pre", { text: result.stdout }));
-  if (result.stderr) {
+  if (result && typeof result.exit_code !== "undefined") {
+    wrap.appendChild(el("div", {
+      text: `exit ${result.exit_code}` +
+            (typeof result.duration_ms === "number" ? ` · ${result.duration_ms} ms` : "")
+    }));
+  }
+  if (result && result.stdout) wrap.appendChild(el("pre", { text: result.stdout }));
+  if (result && result.stderr) {
     const pre = el("pre", { text: result.stderr });
     pre.style.color = "#e74c3c";
     wrap.appendChild(pre);
   }
-  if (result.follow_up && result.follow_up.length) {
+  if (result && result.content && !result.stdout) {
+    wrap.appendChild(el("pre", { text: result.content }));
+  }
+  if (result && result.follow_up && result.follow_up.length) {
     const f = el("div", {});
     f.appendChild(el("div", { text: "Suggested follow-ups:" }));
     for (const cmd of result.follow_up) f.appendChild(el("code", { text: cmd }));
@@ -122,52 +130,107 @@ function renderResult(result) {
   return wrap;
 }
 
-function renderProposal(p) {
-  const wrap = el("div", { class: `proposal ${p.action_class}` });
-  wrap.appendChild(el("div", { class: "class", text: p.action_class }));
-  wrap.appendChild(el("code", { text: p.command }));
-  if (p.result) {
-    wrap.appendChild(el("div", { text: "(executed automatically — read-only)" }));
-    wrap.appendChild(renderResult(p.result));
-  } else if (p.requires_approval) {
-    const actions = el("div", { class: "actions" });
-    let phraseInput = null;
-    if (p.requires_phrase) {
-      phraseInput = el("input", { type: "text",
-        placeholder: `type: ${p.confirm_phrase}` });
-      actions.appendChild(phraseInput);
-    }
-    const approve = el("button", { class: "primary", text: "Approve" });
-    const deny = el("button", { class: "danger", text: "Deny" });
-    approve.addEventListener("click", async () => {
-      approve.disabled = deny.disabled = true;
-      const body = { proposal_id: p.id, decision: "approve" };
-      if (phraseInput) body.phrase = phraseInput.value;
-      const r = await fetch("/api/approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await r.json();
-      actions.remove();
-      if (data.error) wrap.appendChild(el("div", { class: "system error", text: data.error }));
-      else if (data.result) wrap.appendChild(renderResult(data.result));
-    });
-    deny.addEventListener("click", async () => {
-      approve.disabled = deny.disabled = true;
-      await fetch("/api/approve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ proposal_id: p.id, decision: "deny" }),
-      });
-      actions.remove();
-      wrap.appendChild(el("div", { text: "Denied." }));
-    });
-    actions.appendChild(approve);
-    actions.appendChild(deny);
-    wrap.appendChild(actions);
+// Phase 2 (UPGRADE-TO-PI-PLAN §5 / P2.5): pi-mono emits structured
+// tool events instead of fenced bash. Three bubble types replace the
+// old renderProposal:
+//
+//   tool_call          — every tool dispatch (auto or queued)
+//   tool_observation   — the recorded result (or denial)
+//   pending_tool_call  — operator gate for elevated calls
+//
+// A per-turn counter (see renderTurnCounter below) reminds the
+// operator that the agent is bounded by ``policy.yaml`` budgets.
+function summarizeArgs(args) {
+  if (!args || typeof args !== "object") return "";
+  try { return JSON.stringify(args); }
+  catch (_e) { return String(args); }
+}
+
+function renderToolCall(p) {
+  const wrap = el("div", { class: `proposal ${p.classification || "tool"}` });
+  wrap.appendChild(el("div", { class: "class",
+    text: `${p.tool} · ${p.classification || "?"} · ${p.decision || "?"}` }));
+  wrap.appendChild(el("code", { text: summarizeArgs(p.args) }));
+  if (p.error) wrap.appendChild(el("div", { class: "system error", text: p.error }));
+  return wrap;
+}
+
+function renderToolObservation(p) {
+  const wrap = el("div", { class: "result" });
+  const header = `observation · ${p.tool}` +
+                 (p.decision ? ` · ${p.decision}` : "");
+  wrap.appendChild(el("div", { class: "role", text: header }));
+  if (p.ok === false) {
+    wrap.appendChild(el("div", { class: "system error",
+      text: p.error || "tool failed" }));
+  } else {
+    wrap.appendChild(renderResult(p.result || {}));
   }
   return wrap;
+}
+
+function renderPendingToolCall(p) {
+  const wrap = el("div", { class: `proposal ${p.classification || "tool"}` });
+  wrap.appendChild(el("div", { class: "class",
+    text: `${p.tool} · ${p.classification} · awaiting approval` }));
+  const actions = el("div", { class: "actions" });
+  let phraseInput = null;
+  if (p.requires_phrase) {
+    phraseInput = el("input", { type: "text",
+      placeholder: `type: ${p.confirm_phrase}` });
+    actions.appendChild(phraseInput);
+  }
+  const approve = el("button", { class: "primary", text: "Approve" });
+  const deny = el("button", { class: "danger", text: "Deny" });
+  approve.addEventListener("click", async () => {
+    approve.disabled = deny.disabled = true;
+    const body = { tool_call_id: p.tool_call_id, decision: "approve" };
+    if (phraseInput) body.phrase = phraseInput.value;
+    const r = await fetch("/api/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await r.json();
+    actions.remove();
+    if (data.error) wrap.appendChild(el("div", { class: "system error", text: data.error }));
+    else if (data.result) wrap.appendChild(renderResult(data.result));
+    else wrap.appendChild(el("div", { text: `(${data.status})` }));
+  });
+  deny.addEventListener("click", async () => {
+    approve.disabled = deny.disabled = true;
+    await fetch("/api/approve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tool_call_id: p.tool_call_id, decision: "deny" }),
+    });
+    actions.remove();
+    wrap.appendChild(el("div", { text: "Denied." }));
+  });
+  actions.appendChild(approve);
+  actions.appendChild(deny);
+  wrap.appendChild(actions);
+  return wrap;
+}
+
+function renderTurnCounter(events) {
+  const total = events.length;
+  const elevated = events.filter(e =>
+    e.kind === "tool_call" &&
+    e.payload && e.payload.classification && e.payload.classification !== "read_only"
+  ).length;
+  const wrap = el("div", { class: "system", text:
+    `Turn budget: ${total} tool call${total === 1 ? "" : "s"}` +
+    ` (${elevated} elevated)` });
+  return wrap;
+}
+
+function renderEvent(ev) {
+  const p = ev.payload || {};
+  if (ev.kind === "tool_call") return renderToolCall(p);
+  if (ev.kind === "tool_observation") return renderToolObservation(p);
+  if (ev.kind === "pending_tool_call") return renderPendingToolCall(p);
+  return null;
 }
 
 form.addEventListener("submit", async (event) => {
@@ -187,7 +250,12 @@ form.addEventListener("submit", async (event) => {
     conversationId = data.conversation_id ?? conversationId;
     if (data.error) addMessage("system", data.error, { error: true });
     if (data.reply) addMessage("assistant", data.reply);
-    for (const p of (data.proposals || [])) log.appendChild(renderProposal(p));
+    const events = data.events || [];
+    for (const ev of events) {
+      const node = renderEvent(ev);
+      if (node) log.appendChild(node);
+    }
+    if (events.length) log.appendChild(renderTurnCounter(events));
     log.scrollTop = log.scrollHeight;
   } catch (err) {
     addMessage("system", String(err), { error: true });

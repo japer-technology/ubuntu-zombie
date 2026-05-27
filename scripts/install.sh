@@ -651,6 +651,28 @@ cmd_repair() {
     systemctl restart ubuntu-zombie-chat.service || warn "Chat service failed to restart; see journalctl -u ubuntu-zombie-chat"
     ok "Chat service restarted."
   fi
+
+  # Phase 2 (UPGRADE-TO-PI-PLAN §5 / P2.4): re-render pi-mono runtime
+  # configs from the deployed templates. Operators routinely use
+  # ``install.sh repair`` to recover after manual edits, so the
+  # pi/ tree must be brought back into a known good state.
+  if [[ -d "${ZOMBIE_DIR}/agent/templates" ]]; then
+    install -d -m 755 -o root -g root "${ZOMBIE_DIR}/pi"
+    install -d -m 750 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+      "${ZOMBIE_DIR}/state/logs" "${ZOMBIE_DIR}/state/pi-mono-sessions" 2>/dev/null || true
+    if [[ -f "${ZOMBIE_DIR}/agent/templates/settings.json.tmpl" ]]; then
+      install -m 644 "${ZOMBIE_DIR}/agent/templates/settings.json.tmpl" \
+        "${ZOMBIE_DIR}/pi/settings.json"
+    fi
+    if [[ -f "${ZOMBIE_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl" ]]; then
+      _facts="hostname=$(hostname) os=$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-Linux}")"
+      sed -e "s|__AGENT_USER__|${AGENT_USER}|g" \
+          -e "s|__FACTS__|${_facts}|g" \
+          "${ZOMBIE_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl" \
+        | install -m 644 /dev/stdin "${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md"
+    fi
+    ok "pi-mono runtime configs re-rendered."
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1276,6 +1298,18 @@ fi
 log "Installing @earendil-works/pi-ai@${PI_AI_VERSION} globally."
 retry 4 5 -- npm install -g --ignore-scripts "@earendil-works/pi-ai@${PI_AI_VERSION}"
 
+# Phase 2 (UPGRADE-TO-PI-PLAN §4-§5): pi-mono is the agent loop the
+# chat service drives via payload/agent/pi-mono-bridge.mjs. Pinned the
+# same way as pi-ai — the exact version is in
+# payload/agent/pi-mono.version so version bumps land as deliberate
+# PRs with their own smoke evidence.
+PI_MONO_VERSION="$(tr -d '[:space:]' < "${PAYLOAD_DIR}/agent/pi-mono.version")"
+if [[ -z "${PI_MONO_VERSION}" ]]; then
+  die "payload/agent/pi-mono.version is empty; refusing to install pi-mono unpinned." 1
+fi
+log "Installing @earendil-works/pi-coding-agent@${PI_MONO_VERSION} globally."
+retry 4 5 -- npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_MONO_VERSION}"
+
 # ---------------------------------------------------------------------------
 # Deploy payload: chat service, helpers, policy, systemd, logrotate.
 # ---------------------------------------------------------------------------
@@ -1289,7 +1323,7 @@ fi
 # Chat service source.
 install -d -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${ZOMBIE_DIR}/agent" "${ZOMBIE_DIR}/agent/templates"
-for f in server.py providers.py policy.py audit.py runner.py history.py examples.md; do
+for f in server.py providers.py policy.py audit.py runner.py history.py tools.py pi_mono.py examples.md; do
   install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
     "${PAYLOAD_DIR}/agent/${f}" "${ZOMBIE_DIR}/agent/${f}"
 done
@@ -1300,8 +1334,54 @@ install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/pi-ai-bridge.mjs" "${ZOMBIE_DIR}/agent/pi-ai-bridge.mjs"
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/pi-ai.version" "${ZOMBIE_DIR}/agent/pi-ai.version"
+# Phase 2 (UPGRADE-TO-PI-PLAN §5): pi-mono bridge + version pin live
+# alongside the pi-ai ones for the same reasons.
+install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+  "${PAYLOAD_DIR}/agent/pi-mono-bridge.mjs" "${ZOMBIE_DIR}/agent/pi-mono-bridge.mjs"
+install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+  "${PAYLOAD_DIR}/agent/pi-mono.version" "${ZOMBIE_DIR}/agent/pi-mono.version"
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/templates/index.html" "${ZOMBIE_DIR}/agent/templates/index.html"
+install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+  "${PAYLOAD_DIR}/agent/templates/settings.json.tmpl" "${ZOMBIE_DIR}/agent/templates/settings.json.tmpl"
+install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+  "${PAYLOAD_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl" "${ZOMBIE_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl"
+
+# Phase 2 (UPGRADE-TO-PI-PLAN §4.4): render pi-mono runtime configs
+# into /opt/ai-zombie/pi/. Root-owned, world-readable; the chat
+# service reads them but does not need to mutate them.
+install -d -m 755 -o root -g root "${ZOMBIE_DIR}/pi"
+install -d -m 750 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+  "${ZOMBIE_DIR}/state/logs" "${ZOMBIE_DIR}/state/pi-mono-sessions"
+install -m 644 "${PAYLOAD_DIR}/agent/templates/settings.json.tmpl" \
+  "${ZOMBIE_DIR}/pi/settings.json"
+# Render APPEND_SYSTEM.md via the chat-service helper so a single
+# implementation is the source of truth for the rendered text.
+if (cd "${PAYLOAD_DIR}/agent" && python3 server.py --render-append-system) \
+       > "${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md.tmp" 2>/dev/null; then
+  install -m 644 "${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md.tmp" \
+    "${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md"
+  rm -f "${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md.tmp"
+else
+  # Fallback: substitute placeholders from the template directly.
+  rm -f "${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md.tmp"
+  sed -e "s|__AGENT_USER__|${AGENT_USER}|g" \
+      -e "s|__FACTS__|hostname=$(hostname) os=$(. /etc/os-release && echo "${PRETTY_NAME}")|g" \
+      "${PAYLOAD_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl" \
+    | install -m 644 /dev/stdin "${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md"
+fi
+
+# Phase 2 (P2.3): snapshot the conversations DB *before* the new
+# chat-service binary runs the schema migration. The migration is
+# additive (forward-only, behind PRAGMA user_version) but a snapshot
+# lets operators roll back to the pre-pi-mono build without losing
+# history. The bak file name embeds the timestamp.
+if [[ -f "${ZOMBIE_DIR}/state/conversations.db" ]]; then
+  _ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  cp -a "${ZOMBIE_DIR}/state/conversations.db" \
+        "${ZOMBIE_DIR}/state/conversations.db.bak.${_ts}" \
+    || warn "Could not snapshot conversations.db (continuing)."
+fi
 
 # Operator helpers.
 for f in audit-recent health-check collect-diagnostics secrets-edit zombie-chat setup-agent-venv; do
@@ -1506,6 +1586,7 @@ AGENT_USER="${AGENT_USER}"
 AGENT_HOME="${AGENT_HOME}"
 ZOMBIE_SKIP_TAILSCALE="${ZOMBIE_SKIP_TAILSCALE}"
 PI_AI_VERSION="${PI_AI_VERSION}"
+PI_MONO_VERSION="${PI_MONO_VERSION}"
 
 if [[ -t 1 ]]; then
   C_RESET=\$'\\033[0m'; C_RED=\$'\\033[31m'; C_GREEN=\$'\\033[32m'; C_BOLD=\$'\\033[1m'
@@ -1566,6 +1647,14 @@ check "node and tsc present"               bash -c "command -v node && command -
 check "pi-ai bridge deployed"              test -r \${ZOMBIE_DIR}/agent/pi-ai-bridge.mjs
 check "pi-ai installed (any version)"      bash -c "npm ls -g --depth=0 @earendil-works/pi-ai >/dev/null"
 check "pi-ai pinned to \${PI_AI_VERSION}"     bash -c "npm ls -g --depth=0 @earendil-works/pi-ai 2>/dev/null | grep -q '@earendil-works/pi-ai@\${PI_AI_VERSION}'"
+check "pi-mono bridge deployed"            test -r \${ZOMBIE_DIR}/agent/pi-mono-bridge.mjs
+check "pi-mono installed (any version)"    bash -c "npm ls -g --depth=0 @earendil-works/pi-coding-agent >/dev/null"
+check "pi-mono pinned to \${PI_MONO_VERSION}" bash -c "npm ls -g --depth=0 @earendil-works/pi-coding-agent 2>/dev/null | grep -q '@earendil-works/pi-coding-agent@\${PI_MONO_VERSION}'"
+check "pi-mono settings rendered"          test -r \${ZOMBIE_DIR}/pi/settings.json
+check "pi-mono APPEND_SYSTEM rendered"     test -r \${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md
+check "pi-mono log dir present"            test -d \${ZOMBIE_DIR}/state/logs
+check "agent tools.py compiles"            \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/tools.py
+check "agent pi_mono.py compiles"          \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/pi_mono.py
 echo
 
 echo "Chat service and policy:"

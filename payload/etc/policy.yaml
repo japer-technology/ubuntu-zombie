@@ -204,3 +204,22 @@ rules:
     class: read_only
   - pattern: '^(env|printenv|which|type|command\s+-v)'
     class: read_only
+
+# ---------------------------------------------------------------------------
+# Phase 2 (UPGRADE-TO-PI-PLAN §4-§5): per-tool class overrides for
+# the closed pi-mono tool registry. Each key is a tool name from
+# ``payload/agent/tools.py``; the value must be one of the action
+# classes declared above. Tools without an entry use the
+# registry-shipped default. Use this block to tighten (e.g. move
+# ``fs.write`` to ``system_change``) or loosen (e.g. allow
+# ``svc.status`` against your own services as ``read_only``).
+tool_classes: {}
+
+# Phase 2 (§6 R7): bound runaway agent loops. ``max_tool_calls_per_turn``
+# caps total tool calls per user message; ``max_elevated_calls_per_turn``
+# caps how many of those may be non-``read_only``. Calls beyond the
+# budget receive a synthetic ``budget_exceeded`` observation so the
+# model ends the turn cleanly.
+agent:
+  max_tool_calls_per_turn: 8
+  max_elevated_calls_per_turn: 3

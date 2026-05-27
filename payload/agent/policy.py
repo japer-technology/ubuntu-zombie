@@ -91,6 +91,13 @@ class Policy:
     # ``system_change``. The standard approval prompt still fires; no
     # destructive-phrase ceremony is added.
     sudo_allow_list: tuple[str, ...] = ()
+    # Phase 2 / P2.2: operator overrides of per-tool default classes
+    # (e.g. ``svc.status: read_only``). Empty dict = use the
+    # registry-shipped defaults from ``tools.TOOL_REGISTRY``.
+    tool_classes: dict[str, str] = field(default_factory=dict)
+    # Phase 2 / §6 R7: per-turn agent budgets to bound runaway loops.
+    max_tool_calls_per_turn: int = 8
+    max_elevated_calls_per_turn: int = 3
 
     def classify(self, command: str | Iterable[str]) -> str:
         """Return the most-elevated class implied by ``command``.
@@ -191,7 +198,8 @@ class Policy:
         spec = TOOL_REGISTRY.get(name)
         if spec is None:
             return self.default_class
-        cls = str(spec.get("classification", self.default_class))
+        override = self.tool_classes.get(name)
+        cls = override if override else str(spec.get("classification", self.default_class))
         if cls not in _CLASS_RANK:
             return self.default_class
         return cls
@@ -587,6 +595,17 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
 
     sudo_allow_list = _extract_sudo_allow_list_from_text(text)
 
+    tool_classes_raw = data.get("tool_classes", {}) if isinstance(data, dict) else {}
+    tool_classes: dict[str, str] = {}
+    if isinstance(tool_classes_raw, dict):
+        for k, v in tool_classes_raw.items():
+            if isinstance(k, str) and isinstance(v, str) and v in CLASS_ORDER:
+                tool_classes[k] = v
+
+    agent_raw = data.get("agent", {}) if isinstance(data, dict) else {}
+    if not isinstance(agent_raw, dict):
+        agent_raw = {}
+
     policy = Policy(
         classes=classes,
         rules=rules,
@@ -598,9 +617,20 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
         # if the operator did not pin a value in ``policy.yaml``.
         default_class=str(settings.get("default_class", "destructive")),
         sudo_allow_list=sudo_allow_list,
+        tool_classes=tool_classes,
+        max_tool_calls_per_turn=_coerce_int(agent_raw.get("max_tool_calls_per_turn"), 8),
+        max_elevated_calls_per_turn=_coerce_int(agent_raw.get("max_elevated_calls_per_turn"), 3),
     )
     _cache = (key, policy)
     return policy
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    try:
+        n = int(value)
+        return n if n > 0 else default
+    except (TypeError, ValueError):
+        return default
 
 
 def _default_policy() -> Policy:

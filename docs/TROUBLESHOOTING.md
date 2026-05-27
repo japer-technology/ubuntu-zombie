@@ -115,6 +115,40 @@ Typical causes:
 sudo less /var/log/ubuntu-zombie/audit.log
 ```
 
+## Rolling back the Phase 2 pi-mono cutover
+
+Phase 2 of [`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md)
+replaced the fenced-bash parser with the `pi-mono` agent loop and
+migrated the conversations schema. The cutover is reversible:
+
+1. **Stop the chat service** so nothing writes to history:
+   ```bash
+   sudo systemctl stop ubuntu-zombie-chat.service
+   ```
+2. **Restore the pre-migration snapshot.** The installer copies
+   `state/conversations.db` to `state/conversations.db.bak.<ts>` *before*
+   running the additive schema migration. Pick the most recent
+   timestamp and restore it:
+   ```bash
+   sudo ls /opt/ai-zombie/state/conversations.db.bak.*
+   sudo cp -a /opt/ai-zombie/state/conversations.db.bak.<ts> \
+              /opt/ai-zombie/state/conversations.db
+   ```
+3. **Pin pi-mono to the previous release** (or remove it entirely):
+   ```bash
+   sudo npm uninstall -g @earendil-works/pi-coding-agent
+   # or, to roll forward instead of back:
+   sudo npm install -g @earendil-works/pi-coding-agent@<previous-version>
+   ```
+4. **Check out the previous payload** (the Phase 1 tag in `git`) and
+   re-run `sudo ./scripts/install.sh repair`. The chat service will
+   come back up against the restored DB and the previous binary.
+
+Pi-mono bridge logs live under `/opt/ai-zombie/state/logs/pi-mono.*.log`
+(rotated daily, kept 14 days). They are the first thing to inspect
+when an `operator_approval_required` failure appears unexpectedly or
+when the bridge exits without emitting `final`.
+
 ## Non-interactive install fails immediately
 
 `ZOMBIE_NONINTERACTIVE=1` requires `SSH_PUBLIC_KEY` and `VNC_PASSWORD`

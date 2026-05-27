@@ -125,6 +125,61 @@ program that `sudo` invokes (after `sudo` consumes its own flags), so
 `apt` and `systemctl`. Add entries only after confirming the
 underlying program is safe to elevate.
 
+### Tool classes and per-turn budgets (Phase 2)
+
+Phase 2 of [`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md)
+replaces the fenced-bash parser with the `pi-mono` agent loop
+(`@earendil-works/pi-coding-agent`). The agent now emits structured
+tool calls from a closed 13-tool registry (`shell.run`, `fs.read`,
+`fs.write`, `pkg.query`, `pkg.install`, `svc.status`, `svc.control`,
+`net.status`, `gui.screenshot`, `gui.click`, `gui.type`, `skill.list`,
+`skill.load`). Two new `policy.yaml` blocks control them:
+
+```yaml
+tool_classes:
+  # Override the registry default for a tool. shell.run is always
+  # classified per-argv via classify(); listed tools take the class
+  # below before classify_tool falls back to the registry default.
+  fs.write: user_change
+  pkg.install: system_change
+
+agent:
+  max_tool_calls_per_turn: 8         # hard cap; bridge replies error
+  max_elevated_calls_per_turn: 3     # cap on non read_only calls
+```
+
+`max_tool_calls_per_turn` is enforced by `pi_mono.run_turn` and the
+bridge — once exceeded, the agent receives an `operator_approval_
+required` failure for further calls. `max_elevated_calls_per_turn` is
+the budget surfaced to the operator UI per-turn counter.
+
+### pi-mono runtime
+
+The installer pins `@earendil-works/pi-coding-agent` to the version in
+`payload/agent/pi-mono.version` and renders runtime configs into
+`/opt/ai-zombie/pi/`:
+
+| Path                                   | Purpose                                  |
+| -------------------------------------- | ---------------------------------------- |
+| `/opt/ai-zombie/pi/settings.json`      | pi-mono settings (`--no-builtin-tools`)  |
+| `/opt/ai-zombie/pi/APPEND_SYSTEM.md`   | rendered system-prompt prelude           |
+| `/opt/ai-zombie/agent/pi-mono-bridge.mjs` | Node bridge wrapping `pi --mode json` |
+| `/opt/ai-zombie/state/logs/pi-mono.*.log` | per-turn bridge logs, rotated daily   |
+| `/opt/ai-zombie/state/pi-mono-sessions/`  | pi session/checkpoint state           |
+
+Environment overrides (read by `payload/agent/pi_mono.py`):
+
+| Variable                  | Purpose                                                  |
+| ------------------------- | -------------------------------------------------------- |
+| `ZOMBIE_PI_MONO_BIN`      | Override the `pi` binary path (defaults to `which pi`).  |
+| `ZOMBIE_PI_MONO_BRIDGE`   | Override the bridge script (used by smoke tests).        |
+| `ZOMBIE_PI_MONO_LOG_DIR`  | Override the log directory.                              |
+| `ZOMBIE_PI_MONO_SETTINGS` | Override the settings.json path.                         |
+
+After editing `policy.yaml` or any template under
+`/opt/ai-zombie/agent/templates/`, run `sudo ./scripts/install.sh
+repair` to re-render the `pi/` tree and restart the chat service.
+
 ## Tailscale
 
 By default the installer enrols the machine into your Tailscale tailnet

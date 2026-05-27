@@ -223,6 +223,58 @@ finally:
         else:
             os.environ[k] = v
 PY
+
+  # Phase 2 (UPGRADE-TO-PI-PLAN §5 / P2.6): stubbed end-to-end run of
+  # pi_mono.run_turn against tests/fixtures/stub-pi-mono.mjs. Verifies
+  # the bridge protocol, schema validation, dispatch, and event
+  # accounting without requiring `pi` (or even npm) on the test host.
+  if command -v node >/dev/null 2>&1; then
+    echo "  pi-mono stub end-to-end"
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/tests/fixtures/stub-pi-mono.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import json, os, sys
+import pi_mono, tools, policy
+
+p = policy.load_policy()
+collected = []
+
+def on_tool_call(call_id, name, args):
+    collected.append((name, dict(args)))
+    cls = p.classify_tool(name, args)
+    if p.requires_approval(cls):
+        return {"ok": False, "error": "operator_approval_required: " + cls}
+    try:
+        tools.validate_args(name, args)
+    except tools.SchemaError as exc:
+        return {"ok": False, "error": f"schema: {exc}"}
+    # Don't actually dispatch fs.read inside the test sandbox; the
+    # stub plan only exercises the protocol path. Return a stub
+    # observation that mimics fs.read shape.
+    return {"ok": True, "result": {"path": args.get("path"),
+                                    "content": "STUBBED",
+                                    "size": 7}}
+
+out = pi_mono.run_turn(
+    prompt="hello",
+    system_prompt="you are stubbed",
+    history=[],
+    on_tool_call=on_tool_call,
+    tool_names=tools.tool_names(),
+)
+if out["final"] != "stubbed pi-mono turn complete":
+    raise SystemExit(f"unexpected final: {out['final']!r}")
+if not collected or collected[0][0] != "fs.read":
+    raise SystemExit(f"expected fs.read tool call, got {collected!r}")
+if not any(e.get("type") == "tool_call" for e in out["events"]):
+    raise SystemExit("no tool_call events recorded")
+if not any(e.get("type") == "final" for e in out["events"]):
+    raise SystemExit("no final event recorded")
+PY
+  else
+    echo "  (skipping pi-mono stub end-to-end: node not on PATH)"
+  fi
 }
 
 run_subcommands() {
