@@ -229,12 +229,19 @@ wait_for_apt_lock() {
   return 0
 }
 
-apt_get() {
+_apt_get_once() {
+  # Re-check the dpkg lock before *every* attempt so unattended-upgrades
+  # waking up between retries does not cause spurious failures. See
+  # FIX-2-07.
   wait_for_apt_lock || true
-  retry 4 5 -- env DEBIAN_FRONTEND=noninteractive apt-get \
+  env DEBIAN_FRONTEND=noninteractive apt-get \
     -o Dpkg::Options::=--force-confdef \
     -o Dpkg::Options::=--force-confold \
     "$@"
+}
+
+apt_get() {
+  retry 4 5 -- _apt_get_once "$@"
 }
 
 apt_install() {
@@ -260,7 +267,16 @@ append_line_once() {
 }
 
 is_ssh_pubkey() {
-  [[ "$1" =~ ^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\  ]]
+  # Accept any line that "looks like" an OpenSSH public key
+  # ("<type> <base64> [comment]") and then defer real validation to
+  # ssh-keygen, which knows about every key/certificate type OpenSSH
+  # itself accepts (including sk-* FIDO keys, ssh-ed448, and the
+  # *-cert-v01@openssh.com certificate blobs). See FIX-2-10.
+  [[ "$1" =~ ^[A-Za-z0-9@._+/-]+[[:space:]]+[A-Za-z0-9+/=]+([[:space:]]+.*)?$ ]] || return 1
+  if command -v ssh-keygen >/dev/null 2>&1; then
+    printf '%s\n' "$1" | ssh-keygen -l -f - >/dev/null 2>&1 || return 1
+  fi
+  return 0
 }
 
 is_supported_agent_username() {
@@ -382,12 +398,21 @@ preflight() {
     info "apt/dpkg lock currently held; install will wait up to 5 minutes."
   fi
 
-  # Public-SSH risk: are we connected over a non-Tailscale SSH session?
+  # Public-SSH risk: is the SSH session terminating on a non-Tailscale
+  # local address? SSH_CONNECTION is "<client_ip> <client_port> <local_ip>
+  # <local_port>", so field 3 is the address sshd accepted the connection
+  # on. The previous version greped tailscale0 for the client IP, which by
+  # construction never matched and fired the warning unconditionally
+  # (FIX-2-06).
   if [[ -n "${SSH_CONNECTION:-}" && "${ZOMBIE_SKIP_TAILSCALE}" != "1" ]]; then
-    local from_ip
-    from_ip="$(awk '{print $1}' <<<"${SSH_CONNECTION}")"
-    if ! ip -o addr show dev tailscale0 2>/dev/null | grep -q "${from_ip}"; then
-      warn "Detected SSH session from ${from_ip} that is NOT on tailscale0."
+    local local_ip
+    local_ip="$(awk '{print $3}' <<<"${SSH_CONNECTION}")"
+    local ts_addrs
+    ts_addrs="$(ip -o addr show dev tailscale0 2>/dev/null \
+                  | awk '{print $4}' | cut -d/ -f1)"
+    if [[ -n "${local_ip}" ]] \
+       && ! printf '%s\n' "${ts_addrs}" | grep -qxF "${local_ip}"; then
+      warn "Detected SSH session terminating on ${local_ip}, which is NOT a tailscale0 address."
       warn "Installer restarts sshd and tightens UFW; you risk locking yourself out."
       if [[ "${ZOMBIE_NONINTERACTIVE}" != "1" && "${SUBCOMMAND}" == "install" ]]; then
         warnings=$((warnings + 1))
@@ -436,8 +461,18 @@ preflight() {
 validate_noninteractive() {
   [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] || return 0
 
+  # FIX-2-08: treat an authorized_keys file that only contains blank lines
+  # and comments as if no key was authorized, so non-interactive installs
+  # cannot silently lock the operator out.
+  local existing_keys=0
+  if [[ -r "${AGENT_HOME}/.ssh/authorized_keys" ]]; then
+    existing_keys="$(grep -cvE '^[[:space:]]*(#|$)' \
+                       "${AGENT_HOME}/.ssh/authorized_keys" 2>/dev/null || true)"
+    existing_keys="${existing_keys:-0}"
+  fi
+
   local missing=()
-  if [[ -z "${SSH_PUBLIC_KEY}" && ! -s "${AGENT_HOME}/.ssh/authorized_keys" ]]; then
+  if [[ -z "${SSH_PUBLIC_KEY}" && "${existing_keys}" -eq 0 ]]; then
     missing+=("SSH_PUBLIC_KEY")
   fi
   if [[ -z "${VNC_PASSWORD}" && ! -f "${AGENT_HOME}/.vnc/passwd" ]]; then
@@ -456,11 +491,19 @@ validate_noninteractive() {
 # ---------------------------------------------------------------------------
 
 cmd_verify() {
-  if [[ -x "${ZOMBIE_DIR}/bin/verify" ]]; then
-    "${ZOMBIE_DIR}/bin/verify"
-    return $?
+  if [[ ! -x "${ZOMBIE_DIR}/bin/verify" ]]; then
+    die "${ZOMBIE_DIR}/bin/verify not found. Run 'sudo ./${SCRIPT_NAME} install' first." 1
   fi
-  die "${ZOMBIE_DIR}/bin/verify not found. Run 'sudo ./${SCRIPT_NAME} install' first." 1
+  # The embedded verify script's checks ("running as ${AGENT_USER}",
+  # passwordless sudo, DISPLAY, xdotool against the live X session) only
+  # make sense when run by the agent account. If invoked as root, re-exec
+  # under the agent identity. See FIX-2-09.
+  if [[ ${EUID} -eq 0 ]] && [[ "$(id -un)" != "${AGENT_USER}" ]]; then
+    if id "${AGENT_USER}" >/dev/null 2>&1; then
+      exec runuser -l "${AGENT_USER}" -c "${ZOMBIE_DIR}/bin/verify"
+    fi
+  fi
+  exec "${ZOMBIE_DIR}/bin/verify"
 }
 
 # ---------------------------------------------------------------------------
@@ -789,7 +832,13 @@ fi
 chown "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.ssh/authorized_keys"
 chmod 600 "${AGENT_HOME}/.ssh/authorized_keys"
 
-EXISTING_KEYS="$(awk 'END{print NR}' "${AGENT_HOME}/.ssh/authorized_keys" 2>/dev/null || echo 0)"
+if [[ -r "${AGENT_HOME}/.ssh/authorized_keys" ]]; then
+  EXISTING_KEYS="$(grep -cvE '^[[:space:]]*(#|$)' \
+                     "${AGENT_HOME}/.ssh/authorized_keys" 2>/dev/null || true)"
+  EXISTING_KEYS="${EXISTING_KEYS:-0}"
+else
+  EXISTING_KEYS=0
+fi
 
 if [[ -z "${SSH_PUBLIC_KEY}" && "${ZOMBIE_NONINTERACTIVE}" != "1" ]]; then
   if [[ "${EXISTING_KEYS}" -gt 0 ]]; then
@@ -947,13 +996,26 @@ ok "Automatic security updates enabled (reboots at 04:00 if required)."
 section "Force Xorg session"
 
 install -d -m 755 /etc/gdm3
+# FIX-2-13: only manage the four [daemon] keys we own; preserve any
+# operator-authored content (e.g. [xdmcp] tweaks, greeter logo settings,
+# WaylandEnable overrides on neighbouring keys). The first time the
+# installer runs the file may not exist yet, so we create a minimal
+# scaffold owned by us; on subsequent runs we update in place.
+GDM_CONF="/etc/gdm3/custom.conf"
 if [[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]]; then
-  cat > /etc/gdm3/custom.conf <<EOF
-# Managed by ${SCRIPT_NAME}. Autologin enabled by ZOMBIE_ENABLE_AUTOLOGIN=1.
+  GDM_WAYLAND="false"
+  GDM_AUTOLOGIN_ENABLE="true"
+  GDM_AUTOLOGIN_USER="${AGENT_USER}"
+else
+  GDM_WAYLAND="false"
+  GDM_AUTOLOGIN_ENABLE="false"
+  GDM_AUTOLOGIN_USER=""
+fi
+
+if [[ ! -e "${GDM_CONF}" ]]; then
+  cat > "${GDM_CONF}" <<EOF
+# Managed by ${SCRIPT_NAME}.
 [daemon]
-WaylandEnable=false
-AutomaticLoginEnable=true
-AutomaticLogin=${AGENT_USER}
 
 [security]
 
@@ -963,23 +1025,75 @@ AutomaticLogin=${AGENT_USER}
 
 [debug]
 EOF
+fi
+
+# In-place INI updater: ensure [daemon] exists and set/replace the three
+# keys we own (WaylandEnable, AutomaticLoginEnable, AutomaticLogin).
+# Lines outside [daemon] are passed through verbatim. If AutomaticLogin
+# should be unset (autologin disabled), the key is commented out rather
+# than removed so a curious operator can still find it.
+python3 - "${GDM_CONF}" "${GDM_WAYLAND}" "${GDM_AUTOLOGIN_ENABLE}" "${GDM_AUTOLOGIN_USER}" <<'PYEOF'
+import os, sys
+path, wayland, autologin_enable, autologin_user = sys.argv[1:5]
+with open(path, 'r', encoding='utf-8') as f:
+    lines = f.readlines()
+
+owned = {
+    "WaylandEnable": wayland,
+    "AutomaticLoginEnable": autologin_enable,
+}
+if autologin_user:
+    owned["AutomaticLogin"] = autologin_user
+
+section = None
+seen = {k: False for k in owned}
+out = []
+daemon_idx_end = None
+for ln in lines:
+    stripped = ln.strip()
+    if stripped.startswith('[') and stripped.endswith(']'):
+        if section == 'daemon':
+            for k, v in owned.items():
+                if not seen[k]:
+                    out.append(f"{k}={v}\n")
+                    seen[k] = True
+        section = stripped[1:-1].lower()
+        out.append(ln)
+        continue
+    if section == 'daemon':
+        m = stripped.split('=', 1)
+        key = m[0].lstrip('#').strip() if m else ''
+        if key in owned and '=' in stripped:
+            if not seen[key]:
+                out.append(f"{key}={owned[key]}\n")
+                seen[key] = True
+            continue
+        # If autologin is disabled, comment out any pre-existing
+        # AutomaticLogin=<user> we don't own.
+        if not autologin_user and key == 'AutomaticLogin' and '=' in stripped:
+            out.append('# ' + ln if not ln.lstrip().startswith('#') else ln)
+            continue
+    out.append(ln)
+
+if section == 'daemon':
+    for k, v in owned.items():
+        if not seen[k]:
+            out.append(f"{k}={v}\n")
+            seen[k] = True
+
+# If [daemon] never appeared, append it.
+if not any(s for s in seen.values()):
+    out.append('\n[daemon]\n')
+    for k, v in owned.items():
+        out.append(f"{k}={v}\n")
+
+with open(path, 'w', encoding='utf-8') as f:
+    f.writelines(out)
+PYEOF
+
+if [[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]]; then
   warn "Autologin is enabled. Any physical-access user gets an unlocked desktop as ${AGENT_USER}."
 else
-  cat > /etc/gdm3/custom.conf <<EOF
-# Managed by ${SCRIPT_NAME}. Autologin OFF (default).
-# Set ZOMBIE_ENABLE_AUTOLOGIN=1 to enable; read SECURITY.md first.
-[daemon]
-WaylandEnable=false
-AutomaticLoginEnable=false
-
-[security]
-
-[xdmcp]
-
-[chooser]
-
-[debug]
-EOF
   info "Autologin is disabled. Desktop automation requires a live login as ${AGENT_USER}."
 fi
 

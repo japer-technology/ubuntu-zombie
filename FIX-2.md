@@ -1,5 +1,9 @@
 # FIX-2: Additional bugs found in `scripts/`
 
+> **Status (this branch):** All 13 issues addressed. Per-fix summaries are at
+> the bottom of each entry under the **summary** field. Re-validated with
+> `make lint` and `make test`.
+
 This document lists bugs discovered in `scripts/install.sh` and
 `scripts/uninstall.sh` that are **not already covered by `FIX-1.md`**. It is
 structured so an AI agent can process each entry independently and in priority
@@ -81,6 +85,16 @@ order.
     running any side-effecting command).
   - Manual: `sudo ZOMBIE_USER='zombie;touch /tmp/pwn' ./scripts/uninstall.sh
     --dry-run` must refuse and `/tmp/pwn` must not be created.
+- **summary**: Fixed. `scripts/uninstall.sh` now defines
+  `is_supported_agent_username` and a `validate_config` helper that mirrors
+  the installer's checks (username regex, reserved-name rejection, and
+  absolute-path enforcement for `ZOMBIE_DIR` / `BACKUP_DIR`).
+  `validate_config` runs immediately after argument parsing — and crucially
+  *before* the EUID check — so a smoke run as non-root still exits 2 instead
+  of silently accepting a poisoned `ZOMBIE_USER`. A regression test in
+  `tests/smoke.sh::run_bad_usage` invokes
+  `ZOMBIE_USER='zombie;touch /tmp/zombie-pwn' ./scripts/uninstall.sh --dry-run`
+  and asserts both exit-code 2 and that `/tmp/zombie-pwn` is never created.
 
 ---
 
@@ -121,6 +135,11 @@ order.
     `sudo ./scripts/uninstall.sh --archive --keep-agent --yes`, then
     `stat -c '%a %U:%G %n' /var/backups/ubuntu-zombie-*.tar.gz` and confirm
     `600 root:root`.
+- **summary**: Fixed. The two `tar -czf …` invocations in the `ARCHIVE`
+  block are now wrapped in a subshell with `umask 077`, so both
+  `ubuntu-zombie-home-<stamp>.tar.gz` and `ubuntu-zombie-state-<stamp>.tar.gz`
+  are created mode `0600` regardless of the parent shell's umask. The
+  `/var/backups` directory mode is still left untouched (FIX-1-04).
 
 ### FIX-2-03 — `uninstall.sh` does not remove the all-interface SSH UFW rule added by `ZOMBIE_SKIP_TAILSCALE=1` installs
 
@@ -158,6 +177,12 @@ order.
   - Manual dry-run: `sudo ZOMBIE_SKIP_TAILSCALE=1
     ./scripts/uninstall.sh --dry-run` should print a `[dry] ufw … delete …`
     line for the rule.
+- **summary**: Fixed. After the existing tailscale0 cleanup, the firewall
+  block now loops while `ufw status numbered` shows a rule whose comment is
+  `# SSH (Tailscale skipped)` and `22/tcp`, extracts the rule number with
+  the same awk idiom used in `install.sh:904-909`, deletes it via the
+  `run "yes | ufw delete <num>"` helper (so `--dry-run` keeps working), and
+  breaks on the first failed delete to prevent any infinite loop.
 
 ### FIX-2-04 — `uninstall.sh` does not remove sudoers drop-ins from older installs that used a different `ZOMBIE_USER`
 
@@ -195,6 +220,14 @@ order.
     `/etc/sudoers.d/90-alice-ubuntu-zombie`, run `sudo ZOMBIE_USER=zombie
     ./scripts/uninstall.sh --dry-run`, confirm both files are listed for
     removal.
+- **summary**: Fixed. After the targeted `rm -f` of the current-account
+  drop-in, `uninstall.sh` now enumerates `/etc/sudoers.d/90-*-ubuntu-zombie`
+  via a `shopt -s nullglob` loop, skips the file that matches the current
+  `AGENT_USER` (already removed), extracts the embedded username from each
+  remaining match, `warn`s with the orphan's name (and notes when the
+  corresponding Linux account still exists so the operator can clean it up),
+  and removes the file through the existing `run` helper so `--dry-run`
+  preserves the preview.
 
 ### FIX-2-05 — `uninstall.sh` prints "Removed user" even when removal silently fails
 
@@ -226,6 +259,14 @@ order.
     --yes --keep-agent=0` (or whatever invocation removes the user), and
     confirm the script reports failure and exits non-zero rather than
     claiming success.
+- **summary**: Fixed. The user-removal branch now captures the rc of
+  `deluser --remove-home` and the `userdel -r` fallback separately
+  (no trailing `|| true`), re-checks `id "${AGENT_USER}"` afterwards, and
+  only emits `ok "Removed user …"` when both the rc is 0 *and* the account
+  is actually gone. On failure the script `warn`s with diagnostic hints
+  (`who`, `loginctl list-sessions`, `lsof +D ${AGENT_HOME}`), sets a new
+  `UNINSTALL_EXIT=1` accumulator, and the script `exit`s with that code at
+  the end so wrappers and CI see the failure.
 
 ---
 
@@ -271,6 +312,13 @@ order.
     ./scripts/install.sh doctor` (or stub the preflight branch); the warning
     must not fire. SSH to the same VM over its public address and confirm the
     warning **does** fire.
+- **summary**: Fixed. `preflight` now reads field 3 of `SSH_CONNECTION`
+  (the *local* address sshd terminated the connection on), collects the
+  host's tailscale0 addresses with
+  `ip -o addr show dev tailscale0 | awk '{print $4}' | cut -d/ -f1`, and
+  compares them with `grep -qxF` so the match is exact (no substring false
+  positives across netmasks). The warning now fires only when the SSH
+  session genuinely lands on a non-Tailscale interface.
 
 ### FIX-2-07 — `apt_get` only waits for the dpkg lock once, before the retry loop
 
@@ -311,6 +359,12 @@ order.
     `sudo unattended-upgrade -d &` (or hold the lock with `flock
     /var/lib/dpkg/lock-frontend sleep 120 &`) and then `sudo
     ./scripts/install.sh`; the installer should wait, not fail.
+- **summary**: Fixed. Introduced `_apt_get_once` which calls
+  `wait_for_apt_lock || true` *and then* invokes
+  `env DEBIAN_FRONTEND=noninteractive apt-get …`. `apt_get` is now
+  `retry 4 5 -- _apt_get_once "$@"`, so the lock wait runs before every
+  retry attempt instead of only once. `wait_for_apt_lock`'s 5-minute ceiling
+  is unchanged.
 
 ### FIX-2-08 — `EXISTING_KEYS` counts blank lines and comments as authorized SSH keys
 
@@ -351,6 +405,14 @@ order.
     `ZOMBIE_NONINTERACTIVE=1` and no `SSH_PUBLIC_KEY`; the script must die
     with exit 64 ("Non-interactive mode requires SSH_PUBLIC_KEY …") instead
     of proceeding.
+- **summary**: Fixed. `EXISTING_KEYS` now uses
+  `grep -cvE '^[[:space:]]*(#|$)' "${AGENT_HOME}/.ssh/authorized_keys"` so
+  blank lines and comments no longer count as authorized keys (the result
+  defaults to `0` when the file is missing or unreadable, dodging the
+  `grep -c` exit-code-1 footgun). `validate_noninteractive` was updated to
+  use the same predicate instead of plain `-s`, so a non-interactive install
+  against a comment-only `authorized_keys` now dies with exit code 64
+  rather than locking the operator out.
 
 ### FIX-2-09 — `cmd_verify` runs the generated `verify` script under whatever uid invoked `install.sh verify`, but the embedded checks assume `${AGENT_USER}`
 
@@ -383,6 +445,13 @@ order.
   - `make lint`.
   - Manual on a freshly installed VM: `sudo ./scripts/install.sh verify`
     should print all `[ok]` lines, not `[--] running as zombie`.
+- **summary**: Fixed. `cmd_verify` now checks for the verify script up
+  front (`die` with the same hint if missing) and, when invoked with
+  `EUID==0` and the caller is not already `${AGENT_USER}`, re-execs the
+  verify script under the agent identity via `runuser -l "${AGENT_USER}"
+  -c "${ZOMBIE_DIR}/bin/verify"`. The fallback path (`exec
+  "${ZOMBIE_DIR}/bin/verify"`) still runs verbatim when invoked directly
+  by the agent account.
 
 ### FIX-2-10 — `is_ssh_pubkey` only matches a small allow-list and silently rejects current OpenSSH key types
 
@@ -416,6 +485,16 @@ order.
     valid `ssh-ed448` (or generated `ssh-keygen -t rsa-sha2-512`) key into the
     installer's preflight predicate via a small `bash -c` wrapper and expects
     it to be accepted.
+- **summary**: Fixed. `is_ssh_pubkey` now matches the loose shape
+  `^[A-Za-z0-9@._+/-]+ <base64>( comment)?$` and, when `ssh-keygen` is on
+  the host (which it always is once `openssh-server` is installed),
+  defers the authoritative decision to
+  `printf '%s\n' "$1" | ssh-keygen -l -f -`. This accepts every key /
+  certificate type OpenSSH itself accepts — including
+  `sk-ssh-ed25519@openssh.com`, `ssh-ed448`, and the
+  `*-cert-v01@openssh.com` certificate blobs — while still rejecting
+  garbage. The friendly hint in the operator-facing `die` message is
+  unchanged.
 
 ---
 
@@ -455,6 +534,13 @@ order.
   - `make lint`.
   - `bash -n scripts/uninstall.sh` and a one-off `bash -c '. scripts/uninstall.sh; run "echo a" "echo b"'` (or equivalent) confirms the new error
     fires.
+- **summary**: Fixed. The `run` helper in `scripts/uninstall.sh` now
+  asserts `(( $# == 1 ))` up front and exits 1 with a `[x] run() takes
+  exactly one composed command string; got N args: …` message on misuse.
+  No call-site changes were required because every existing caller already
+  passes exactly one composed string. A regression test in
+  `tests/smoke.sh::run_bad_usage` re-implements the same guard inline and
+  asserts it refuses extra arguments.
 
 ### FIX-2-12 — `uninstall.sh` orphans the agent's primary group after `deluser --remove-home`
 
@@ -478,6 +564,12 @@ order.
   - `make lint`.
   - Manual on a VM: `getent group ${AGENT_USER}` should return nothing after
     a full uninstall.
+- **summary**: Fixed. Inside the user-removal success branch (after
+  FIX-2-05's success detection), the script now calls
+  `delgroup --only-if-empty ${AGENT_USER}` via the existing `run` helper
+  when `getent group ${AGENT_USER}` still resolves. `--only-if-empty`
+  ensures we never delete a group that another local account still
+  depends on.
 
 ### FIX-2-13 — `install.sh` re-emits `/etc/gdm3/custom.conf` on every run, clobbering operator-managed sections
 
@@ -506,3 +598,15 @@ order.
   - Manual: write a custom `# operator note` line into
     `/etc/gdm3/custom.conf`, re-run the installer, and confirm the note
     survives.
+- **summary**: Fixed. The wholesale `cat > /etc/gdm3/custom.conf <<EOF`
+  was replaced with a two-step pattern: if the file does not yet exist,
+  the installer drops a minimal scaffold (`[daemon]`, `[security]`,
+  `[xdmcp]`, `[chooser]`, `[debug]`); then a small in-line Python helper
+  walks the existing INI file and *only* sets/replaces the four keys the
+  installer owns (`WaylandEnable`, `AutomaticLoginEnable`, and
+  `AutomaticLogin` when autologin is enabled). Any operator-authored
+  content outside those keys — additional `[xdmcp]` settings, custom
+  greeter overrides, `# operator note` comments — is preserved verbatim
+  across re-runs. When autologin is disabled, a pre-existing
+  `AutomaticLogin=<user>` line is commented out rather than rewritten so
+  the operator can still see it.
