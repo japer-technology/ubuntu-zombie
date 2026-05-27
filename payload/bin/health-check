@@ -79,7 +79,7 @@ fi
 
 # Provider token presence (without reading the value)
 if [[ -r "${SECRETS_FILE}" ]]; then
-  if grep -Eq '^(OPENAI|ANTHROPIC)_API_KEY=..+' "${SECRETS_FILE}" 2>/dev/null; then
+  if grep -Eq '^[[:space:]]*(export[[:space:]]+)?(OPENAI|ANTHROPIC)_API_KEY[[:space:]]*=[[:space:]]*.+' "${SECRETS_FILE}" 2>/dev/null; then
     check_ok "provider token present in secrets/env"
   else
     check_warn "no provider token in secrets/env (sudo ${ZOMBIE_DIR}/bin/secrets-edit)"

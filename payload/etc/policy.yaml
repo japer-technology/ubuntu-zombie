@@ -104,6 +104,16 @@ rules:
     class: system_change
   - pattern: '>\s*/etc/'
     class: system_change
+  # Commands that execute an interpreter from a pipeline or through sudo
+  # can run arbitrary mutating code even when the command starts with a
+  # read-only tool such as `cat` or `grep`. Require approval before they
+  # reach the shell.
+  - pattern: '(\|\s*(sudo\s+)?(bash|sh|zsh|python3?|perl|ruby|node)\b|\bsudo\s+(bash|sh|zsh|python3?|perl|ruby|node)\b)'
+    class: system_change
+  # `tee` is commonly used to write privileged files from a pipeline and
+  # otherwise mutates a file in place; classify before read_only tools.
+  - pattern: '\btee\s+(-a\s+)?/(etc|usr|var|lib|boot|root)\b'
+    class: system_change
 
   # ----- user_change -----
   - pattern: '\bgit\s+clone\b'
@@ -117,6 +127,13 @@ rules:
   - pattern: '\bpip\s+install\b'
     class: user_change
   - pattern: '\bnpm\s+(install|i|add)\b'
+    class: user_change
+  - pattern: '\btee\s+(-a\s+)?(?!/dev/null\b)\S+'
+    class: user_change
+  # Redirection to a real file mutates state even if the command head is
+  # read-only (`grep x file > out`, `cat <<EOF > /tmp/x`, etc.). Allow
+  # fd duplication and /dev/null, but require approval for file writes.
+  - pattern: '(^|[^\w<])[0-9]*>>?\s*(?!&[0-9]\b|/dev/null\b)'
     class: user_change
 
   # ----- read_only -----
