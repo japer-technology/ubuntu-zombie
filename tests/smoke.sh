@@ -139,6 +139,34 @@ try:
     raise SystemExit("svc.control with bad action must be rejected")
 except _t.SchemaError:
     pass
+# ``bool`` must not satisfy an ``integer`` field. Python treats ``bool``
+# as a subclass of ``int``; without an explicit guard ``shell.run``
+# would accept ``{"timeout": False}`` and ``subprocess`` would coerce
+# it to ``timeout=0`` (instant TimeoutExpired).
+try:
+    _t.validate_args("shell.run", {"argv": ["true"], "timeout": False})
+    raise SystemExit("shell.run timeout=False must be rejected as non-integer")
+except _t.SchemaError:
+    pass
+
+# ``_skills_dirs`` must not silently add the chat service's working
+# directory when ``ZOMBIE_SKILLS_DIR`` is unset or empty.
+import os as _os
+from pathlib import Path as _P
+_saved = _os.environ.pop("ZOMBIE_SKILLS_DIR", None)
+try:
+    dirs = _t._skills_dirs()
+    assert _P(".") not in dirs and _P("") not in dirs, dirs
+    _os.environ["ZOMBIE_SKILLS_DIR"] = ""
+    dirs = _t._skills_dirs()
+    assert _P(".") not in dirs and _P("") not in dirs, dirs
+    _os.environ["ZOMBIE_SKILLS_DIR"] = "/tmp/zombie-extra-skills"
+    dirs = _t._skills_dirs()
+    assert _P("/tmp/zombie-extra-skills") in dirs, dirs
+finally:
+    _os.environ.pop("ZOMBIE_SKILLS_DIR", None)
+    if _saved is not None:
+        _os.environ["ZOMBIE_SKILLS_DIR"] = _saved
 
 # Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1): skill loader discovers the
 # six built-in skills, parses their trigger markers, selects only on
