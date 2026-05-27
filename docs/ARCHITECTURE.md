@@ -4,7 +4,7 @@ Ubuntu Zombie turns an Ubuntu Desktop LTS PC into a workstation with a
 resident AI Systems Administrator. The whole product is deliberately
 small enough to fit in one head: a single installer, a single
 uninstaller, one privileged user account, one loopback HTTP service,
-one policy file, one audit log.
+one policy file, one closed tool registry, one audit log.
 
 This document is the canonical map of what the system *is* — every
 component, file, boundary, and lifecycle — and how the pieces fit
@@ -35,14 +35,18 @@ well-defined, narrow interfaces:
 │                      runs as: zombie  (loopback 127.0.0.1:7878)      │
 │                                                                      │
 │   ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐     │
-│   │ Provider     │  │ Policy gate  │  │ Command runner         │     │
-│   │ OpenAI /     │─▶│ policy.yaml  │─▶│ sudo wrapper, timeout, │     │
-│   │ Anthropic    │  │ classifier   │  │ stdout/err/exit, retry │     │
+│   │ pi-mono      │  │ Closed tool  │  │ Policy gate            │     │
+│   │ agent loop   │─▶│ registry     │─▶│ policy.yaml +          │     │
+│   │ via pi-ai    │  │ (tools.py)   │  │ classify_tool / classify│    │
 │   └──────────────┘  └──────────────┘  └────────────────────────┘     │
 │         │                  │                       │                 │
-│         ▼                  ▼                       ▼                 │
-│    SQLite history     Audit log (JSONL)     Verification follow-ups  │
-│    conversations.db   audit.log + logrotate (read-only suggestions)  │
+│         │                  ▼                       ▼                 │
+│         │           Tool shims (runner.run,        Per-turn budgets  │
+│         │           Path.read_text, xdotool, …)    (12 / 3 elevated) │
+│         ▼                                                            │
+│    Skill catalogue (Markdown)    Audit log (JSONL)    Conversations  │
+│    /opt/ai-zombie/skills/        audit.log + tool_call events        │
+│    /etc/ubuntu-zombie/skills.d/  + logrotate          SQLite history │
 └──────────────────────────────────────────────────────────────────────┘
                               │  sudo (passwordless, log-traced)
                               ▼
@@ -55,6 +59,7 @@ well-defined, narrow interfaces:
 │   Xorg + GDM (optional autologin for zombie)                         │
 │   x11vnc on 127.0.0.1:5900 (loopback only, password-protected)       │
 │   Docker CE  ·  Node toolchain  ·  Python venv at ~zombie/agent-env  │
+│   @earendil-works/pi-ai + pi-coding-agent (pinned versions)          │
 │   Playwright + Chromium (browser automation)                         │
 │   GUI helpers (gui-env, screenshot, click, type-text, key)           │
 │   Health timer: ubuntu-zombie-health.timer  (every 15 min)           │
@@ -66,13 +71,18 @@ Each layer is owned by a different principal:
 | Layer | Principal | Trust |
 |-------|-----------|-------|
 | L3 Operator | the human | full |
-| L2 Chat service | `zombie` user (unprivileged, with `sudo` allow-list) | gated by `policy.yaml` |
+| L2 Chat service | `zombie` user (unprivileged, with `sudo` allow-list) | gated by `policy.yaml` + closed tool registry |
 | L1 Host body | `root` (only at install/uninstall/upgrade time) | bounded by `install.sh` |
 
 There is **no remote API surface**. The chat UI binds to `127.0.0.1`
 only; the only way in from another machine is an SSH tunnel over
 Tailscale, and the only way `root` is exercised is by an operator
 running `scripts/install.sh` or `scripts/uninstall.sh`.
+
+The model never emits free-form shell. Every action it takes is a
+structured **tool call** against the closed registry in
+`payload/agent/tools.py`. Adding a tool requires a code release —
+skills, prompts, and policy edits cannot expand the surface.
 
 ---
 
@@ -87,14 +97,27 @@ ubuntu-zombie/
 │   └── uninstall.sh                  # reverse the installer
 ├── payload/                          # files copied verbatim to disk
 │   ├── agent/                        # → /opt/ai-zombie/agent/
-│   │   ├── server.py                 # HTTP server + request lifecycle
-│   │   ├── providers.py              # OpenAI / Anthropic abstraction
-│   │   ├── policy.py                 # YAML reader + classifier
+│   │   ├── server.py                 # HTTP server + tool-call lifecycle
+│   │   ├── providers.py              # pi-ai bridge wrapper (chat surface)
+│   │   ├── pi_mono.py                # pi-mono bridge driver (agent loop)
+│   │   ├── pi-ai-bridge.mjs          # Node bridge for @earendil-works/pi-ai
+│   │   ├── pi-ai.version             # pinned pi-ai version
+│   │   ├── pi-mono-bridge.mjs        # Node bridge for pi-coding-agent
+│   │   ├── pi-mono.version           # pinned pi-coding-agent version
+│   │   ├── tools.py                  # closed tool registry + shims
+│   │   ├── policy.py                 # YAML reader + classify / classify_tool
+│   │   ├── skill_loader.py           # markdown skill discovery + selection
+│   │   ├── skills/                   # → /opt/ai-zombie/skills/  (root-owned)
+│   │   │   ├── apt.md  docker.md  gui.md
+│   │   │   ├── systemd.md  tailscale.md  ufw.md
 │   │   ├── runner.py                 # subprocess wrapper + follow-ups
-│   │   ├── audit.py                  # JSONL writer + redactor
-│   │   ├── history.py                # SQLite conversation store
+│   │   ├── audit.py                  # JSONL writer + redactor + tool_call events
+│   │   ├── history.py                # SQLite conversations / messages / events
 │   │   ├── examples.md               # prompt library shown in the UI
-│   │   └── templates/index.html      # single-page chat UI
+│   │   └── templates/
+│   │       ├── index.html            # single-page chat UI
+│   │       ├── settings.json.tmpl    # pi-mono runtime settings
+│   │       └── APPEND_SYSTEM.md.tmpl # pi-mono system-prompt suffix
 │   ├── bin/                          # → /opt/ai-zombie/bin/  (shipped)
 │   │   ├── audit-recent              # tail/pretty-print audit.log
 │   │   ├── collect-diagnostics       # redacted bug-report bundle
@@ -108,7 +131,9 @@ ubuntu-zombie/
 │       ├── ubuntu-zombie-chat.service
 │       ├── ubuntu-zombie-health.service
 │       └── ubuntu-zombie-health.timer
-├── tests/smoke.sh                    # non-root syntax / standards checks
+├── tests/
+│   ├── smoke.sh                      # non-root syntax / standards checks
+│   └── fixtures/stub-pi-mono.mjs     # protocol-faithful stub for smoke tests
 ├── docs/                             # this directory
 ├── Makefile                          # lint / test / package targets
 └── VERSION                           # single source of truth
@@ -126,8 +151,14 @@ documentation, tests, and CI metadata stay in the checkout.
 ├── agent/                            # Python chat service source
 │   ├── server.py providers.py policy.py
 │   ├── runner.py audit.py history.py
+│   ├── tools.py pi_mono.py skill_loader.py
+│   ├── pi-ai-bridge.mjs    pi-ai.version
+│   ├── pi-mono-bridge.mjs  pi-mono.version
 │   ├── examples.md
-│   └── templates/index.html
+│   └── templates/
+│       ├── index.html
+│       ├── settings.json.tmpl
+│       └── APPEND_SYSTEM.md.tmpl
 ├── bin/                              # operator + GUI helpers
 │   ├── audit-recent  collect-diagnostics
 │   ├── health-check  secrets-edit
@@ -135,16 +166,25 @@ documentation, tests, and CI metadata stay in the checkout.
 │   ├── gui-env       screenshot      # generated inline by install.sh
 │   ├── click         type-text       # (they wrap xdotool / scrot)
 │   ├── key           agent-shell
+│   └── verify                        # generated inline by install.sh
+├── pi/                               # root-owned pi-mono runtime configs
+│   ├── settings.json                 # rendered from settings.json.tmpl
+│   └── APPEND_SYSTEM.md              # rendered system-prompt suffix
+├── skills/                           # built-in skills (root:root, 0644)
+│   └── *.md                          # one per topic; verbatim markdown
 ├── secrets/                          # mode 0700
 │   └── env                           # mode 0600, AGENT_USER:AGENT_USER
 ├── state/                            # SQLite + scratch (screenshots, etc.)
-│   └── conversations.db
+│   ├── conversations.db
+│   ├── logs/                         # pi-mono per-turn logs (0750)
+│   └── pi-mono-sessions/             # pi session checkpoints (0750)
 ├── tools/                            # smoke utilities (e.g. browser-test.py)
 ├── scripts/                          # reserved for operator add-ons
 └── logs/                             # service stdout archives
 
 /etc/ubuntu-zombie/                   # operator-owned config; survives reinstall
-└── policy.yaml
+├── policy.yaml
+└── skills.d/                         # operator-extensible skills (root:root)
 
 /var/log/ubuntu-zombie/               # mode 0750, AGENT_USER:AGENT_USER
 └── audit.log                         # JSON lines, rotated weekly × 8
@@ -194,7 +234,7 @@ Single installer with explicit subcommands:
 | `install`   | Full install. Idempotent: re-running converges to desired state. |
 | `verify`    | Read-only state check. Never mutates. Exit non-zero on drift. |
 | `doctor`    | Same checks as `verify`, but explains *why* and *how to fix*. |
-| `repair`    | Apply known-safe fixes (re-asserts permissions, restarts the chat service, re-allows SSH on `tailscale0`, retries Tailscale login). |
+| `repair`    | Apply known-safe fixes (re-asserts permissions, restarts the chat service, re-allows SSH on `tailscale0`, retries Tailscale login, re-renders `pi/settings.json` and `pi/APPEND_SYSTEM.md`, re-deploys built-in skills). |
 | `uninstall` | Delegates to `scripts/uninstall.sh`.                        |
 
 Design rules:
@@ -204,6 +244,7 @@ Design rules:
 - **Fail closed.** Missing required env vars under `ZOMBIE_NONINTERACTIVE=1` exit with code 64; bad `secrets/env` permissions abort.
 - **Self-documenting.** The header comment lists every honored env var; `--help` prints the same.
 - **Resumable.** State lives on disk, not in shell memory, so a half-finished run can be completed by re-invoking `install`.
+- **Pin Node packages.** `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` are installed at the exact versions recorded in `payload/agent/pi-ai.version` and `payload/agent/pi-mono.version`; the installer refuses to run if either file is empty.
 
 ### 3.2  `scripts/uninstall.sh`
 
@@ -221,34 +262,46 @@ removes them with `apt` if desired.
 ### 3.3  Chat service (`payload/agent/`)
 
 Run as `AGENT_USER` by `ubuntu-zombie-chat.service`. Bound to
-`127.0.0.1:${ZOMBIE_CHAT_PORT}` (default `7878`). Six modules, each
-under ~500 lines:
+`127.0.0.1:${ZOMBIE_CHAT_PORT}` (default `7878`). The service is a
+thin Python HTTP server that drives an external **agent loop**
+(`pi-mono` / `@earendil-works/pi-coding-agent`) over a small
+line-delimited JSON protocol and mediates every tool call through a
+closed registry. Modules:
 
 | Module | Responsibility |
 |--------|----------------|
-| `server.py`     | `ThreadingHTTPServer` + handler; serves the single-page UI and the `/api/*` routes; orchestrates the request lifecycle. |
-| `providers.py`  | Backend abstraction over OpenAI and Anthropic; chosen by `ZOMBIE_PROVIDER`, otherwise the first provider with a configured key. Model overrides via `ZOMBIE_MODEL` / `ZOMBIE_OPENAI_MODEL` / `ZOMBIE_ANTHROPIC_MODEL`. |
-| `policy.py`     | Dependency-free YAML reader for `policy.yaml`; classifies a command into one of five action classes via ordered `re.search` rules. Re-reads on every classification so the operator can edit without restarting. |
-| `runner.py`     | Subprocess wrapper: timeout (`ZOMBIE_COMMAND_TIMEOUT`, default 300s), stdout/err/exit, duration, and a small set of suggested read-only follow-ups (e.g. propose `systemctl status X` after `systemctl restart X`). |
-| `audit.py`      | Append-only JSON-lines logger with secret redaction (provider keys, Tailscale auth keys, SSH keys, generic `TOKEN=…` / `Authorization:` patterns). Thread-safe; no SIGHUP needed across logrotate. |
-| `history.py`    | SQLite store of conversations and messages, schema created on first run; default path `/opt/ai-zombie/state/conversations.db` (override with `ZOMBIE_HISTORY_DB`). |
+| `server.py`     | `ThreadingHTTPServer` + handler; serves the single-page UI and the `/api/*` routes; orchestrates one chat turn (skill selection, system-prompt rendering, pi-mono spawn, per-turn budget enforcement, queueing of approvals). Also exposes `--render-append-system` so the installer can render `APPEND_SYSTEM.md` through the same code path. |
+| `pi_mono.py`    | Drives the `pi-mono-bridge.mjs` Node subprocess. Sends one `start` message per turn; relays `tool_call` events to the registered Python callback and writes back `tool_result` lines; returns `{"final", "events", "log_path"}`. Synthesises a `budget_exceeded` observation if the bridge exceeds `max_tool_calls`. Bridge path overridable via `ZOMBIE_PI_MONO_BRIDGE`. |
+| `tools.py`      | **Closed tool registry**. `TOOL_REGISTRY` lists every tool the chat service will ever execute; `validate_args` runs a tiny dependency-free schema check; `dispatch` runs the shim. Shims wrap existing helpers (`runner.run`, `Path.read_text`, `xdotool` wrappers) and enforce a path allow-list for `fs.read` / `fs.write`. |
+| `providers.py`  | Backend abstraction over **OpenAI, Anthropic, Gemini, xAI, OpenRouter, Mistral, and Groq** via the shared `@earendil-works/pi-ai` library. `BaseProvider.chat` shells out to `pi-ai-bridge.mjs` instead of maintaining bespoke SDK clients. `provider_status()` summarises which backend the UI is wired to. Provider selected by `ZOMBIE_PROVIDER`, else autodetected from configured keys. Model overrides via `ZOMBIE_MODEL` / `ZOMBIE_{OPENAI,ANTHROPIC,GEMINI,XAI,OPENROUTER,MISTRAL,GROQ}_MODEL`. |
+| `policy.py`     | Dependency-free YAML reader for `policy.yaml`; re-read on every classification so the operator can edit without restarting. `classify` matches argv/shell text against ordered regex rules (argv-aware, with `sudo` flags and `VAR=value` env prefixes stripped); `classify_tool` looks every tool call up in `TOOL_REGISTRY` and honours `policy.yaml`'s `tool_classes:` overrides. `shell.run` falls through to `classify` against the rendered argv. Unknown tools / commands escalate to `default_class` (fail-closed; default `destructive`). |
+| `skill_loader.py` | Loads `*.md` files from `/opt/ai-zombie/skills/` and `/etc/ubuntu-zombie/skills.d/` (overridable via `ZOMBIE_SKILLS_DIR`). Extracts a `<!-- triggers: ... -->` marker from the head of each file; `select_skills` returns the skills whose triggers appear in the last *N* user messages (default 4). `render_skills_block` wraps them with provenance headers (skill path) appended to the system prompt. |
+| `runner.py`     | Subprocess wrapper used by tool shims: timeout (`ZOMBIE_COMMAND_TIMEOUT`, default 300s), stdout/err/exit, duration, and a small set of suggested read-only follow-ups (e.g. propose `systemctl is-active X` after `systemctl restart X`). |
+| `audit.py`      | Append-only JSON-lines logger with secret redaction. Two helpers: `log_event` (free-form fields) and `log_tool_call` (structured `tool` / `classification` / `decision` / `args_summary` / `exit_code` / `duration_ms` / SHA-256 digests of `stdout`+`stderr`). Redactor matches token-shaped substrings (`sk-…`, `sk-ant-…`, `tskey-…`, `ssh-rsa …`, `(API_KEY\|TOKEN\|PASSWORD\|SECRET)\s*[:=]\s*…`, PEM private keys) and additionally scrubs the values of a fixed list of sensitive env-var names (every provider key, `TAILSCALE_AUTHKEY`, `VNC_PASSWORD`, `ZOMBIE_SECRETS`) and the secrets-file path. Thread-safe; no SIGHUP needed across logrotate. |
+| `history.py`    | SQLite store of conversations, messages, and a structured `events` table (`tool_call` / `pending_tool_call` / `tool_observation` / `skill_active`). Schema is forward-only behind `PRAGMA user_version`. Default path `/opt/ai-zombie/state/conversations.db` (override with `ZOMBIE_HISTORY_DB`). The installer snapshots the DB before each install/repair. |
 
 HTTP surface (loopback only):
 
 | Method + path                  | Purpose |
 |--------------------------------|---------|
 | `GET  /` and `/index.html`     | The single-page chat UI. |
-| `GET  /api/health`             | Liveness and configured-provider summary. |
+| `GET  /api/health`             | Liveness + machine facts. |
+| `GET  /api/tools`              | The closed tool registry: name, default classification, description. |
 | `GET  /api/conversations`      | List conversation ids and titles. |
-| `GET  /api/conversation/{id}`  | Fetch one conversation's messages. |
+| `GET  /api/conversation/{id}`  | Fetch one conversation's messages **and** structured events. |
 | `GET  /api/audit`              | Recent audit-log entries for the UI panel. |
-| `POST /api/message`            | Send a user prompt; receive provider reply + proposed actions. |
-| `POST /api/approve`            | Approve a proposed action (with confirmation phrase for `destructive`). |
+| `POST /api/message`            | Send a user prompt; run one pi-mono turn; return reply + events. |
+| `POST /api/approve`            | Approve or deny a queued tool call by `tool_call_id` (with confirmation phrase for `destructive`). The legacy `proposal_id` field is rejected. |
 
-The UI shows proposed commands inline before they run. Auto-classified
-`read_only` commands stream their output back without an extra prompt;
-every other class requires an explicit click (and a typed phrase for
-`destructive`).
+Read-only tool calls execute inline and stream their observation back
+to the model in the same turn. Anything that mutates state is queued
+as a `pending_tool_call`, the model receives an
+`operator_approval_required` synthetic observation that ends the turn
+cleanly, and the UI shows an Approve / Deny button — typed phrase for
+`destructive`. The closed registry is the security boundary: the
+model cannot define new tools, and `shell.run` is still classified
+per-argv so it cannot be used to smuggle privileged commands past the
+gate.
 
 ### 3.4  GUI control helpers (generated inline by `install.sh`)
 
@@ -262,63 +315,133 @@ active GDM session before invoking the underlying tool:
 | `click`       | `xdotool mousemove X Y click 1`    |
 | `type-text`   | `xdotool type --delay 10 "$*"`     |
 | `key`         | `xdotool key "$@"`                 |
-| `agent-shell` | `runuser -l AGENT_USER` shortcut   |
+| `agent-shell` | `tmux new -A -s ubuntu-zombie` after sourcing `secrets/env` |
 
-These let the chat service interact with the actual desktop session
-when Playwright/Chromium is not the right tool — for example,
-controlling a native app the operator has opened.
+The `gui.screenshot`, `gui.click`, and `gui.type` tools in the closed
+registry call these wrappers directly, so the chat service interacts
+with the actual desktop session when Playwright/Chromium is not the
+right tool — for example, controlling a native app the operator has
+opened.
 
 ### 3.5  systemd units (`payload/systemd/`)
 
 - `ubuntu-zombie-chat.service` — long-running. `User=AGENT_USER`,
   `EnvironmentFile=-/opt/ai-zombie/secrets/env`, `Restart=on-failure`,
-  loopback-only port from `ZOMBIE_CHAT_PORT` (default 7878). Hardened
-  with `ProtectSystem=full`, `PrivateTmp=true`,
+  loopback-only port from `ZOMBIE_CHAT_PORT` (default 7878, also set
+  as a fallback `Environment=` so the unit starts even with an empty
+  `secrets/env`). Hardened with `ProtectSystem=full`, `PrivateTmp=true`,
   `ProtectKernelTunables/Modules/ControlGroups`, `RestrictRealtime`,
   `RestrictSUIDSGID`, `LockPersonality`. **`NoNewPrivileges` is
   intentionally absent** because the whole product elevates via
-  passwordless `sudo` once the policy gate has approved a command —
+  passwordless `sudo` once the policy gate has approved a tool call —
   `NoNewPrivileges` would block every approved elevation. The policy
-  gate is the security boundary, not the systemd sandbox.
+  gate plus the closed tool registry is the security boundary, not the
+  systemd sandbox.
 - `ubuntu-zombie-health.service` — oneshot. Runs
   `/opt/ai-zombie/bin/health-check` and exits.
 - `ubuntu-zombie-health.timer` — fires the health service at
   `OnBootSec=5min` and `OnUnitActiveSec=15min`, `Persistent=true`.
 
-The two service unit files use the literal placeholders
+The chat and health service unit files use the literal placeholders
 `__AGENT_USER__` and `__AGENT_HOME__`, which the installer substitutes
-at deploy time via `sed`. Account-name validation in
-`validate_config` (in `install.sh`) refuses the sed-special characters
-`|`, `&`, and `\` so this substitution is safe.
+at deploy time via `sed`. Account-name validation in `validate_config`
+(in `install.sh`) refuses the sed-special characters `|`, `&`, and `\`
+so this substitution is safe.
 
 ### 3.6  Operator helpers (`payload/bin/`)
 
 | Helper                  | Purpose |
 |-------------------------|---------|
-| `health-check`          | Coloured one-shot summary: chat service active, audit log writable, secrets file mode, Tailscale state, UFW posture, GDM/x11vnc autostart, agent venv present. Used both by humans and by the health timer. |
-| `audit-recent`          | Pretty-print the last *N* JSON-lines audit entries (default 25; `--all` for everything). |
+| `health-check`          | Coloured one-shot summary: chat service active, audit log writable, secrets file mode, Tailscale state, UFW posture, GDM/x11vnc autostart, agent venv present, `pi`/`pi-ai` reachable. Used both by humans and by the health timer. |
+| `audit-recent`          | Pretty-print the last *N* JSON-lines audit entries (default 25; `--all` for everything). Renders `tool_call` events with classification and decision so an operator can scan a turn at a glance. |
 | `collect-diagnostics`   | Tar a redacted bundle of logs, unit status, and config for bug reports. Secrets are stripped before write; staging directory is cleaned up under `trap … EXIT` (FIX-3-23). |
 | `secrets-edit`          | Open `secrets/env` in `$EDITOR` and re-assert owner + 0600 on exit, success *or* failure. Creates the file with a commented template if missing. |
 | `setup-agent-venv`      | Build `~AGENT_USER/agent-env`, install Python deps, and unprivileged Playwright browser binaries. Re-runnable; exponential backoff on transient failures. Called by `install.sh` via `runuser -l AGENT_USER`. |
 | `zombie-chat`           | Print local URL and a copy-pasteable SSH local-forward example for remote operators. |
 
-### 3.7  Policy (`payload/etc/policy.yaml`)
+### 3.7  pi-mono runtime configs
+
+The installer renders two files under `/opt/ai-zombie/pi/` (root-owned,
+world-readable; the chat service reads but does not mutate them):
+
+- `settings.json` — derived from `payload/agent/templates/settings.json.tmpl`.
+  Pins `mode: "rpc"`, `noBuiltinTools: true`, the closed tool name
+  list, and the on-disk session and append-system-prompt paths. Operators
+  who need overrides drop a file at `/etc/ubuntu-zombie/settings.json`
+  (referenced from `secrets/env` or the systemd unit) instead of
+  editing the rendered file in place.
+- `APPEND_SYSTEM.md` — derived from `APPEND_SYSTEM.md.tmpl`. Rendered
+  through `server.py --render-append-system` so the same Python helper
+  the runtime uses is the source of truth; the installer falls back to
+  a literal `sed` substitution if the venv is not yet usable. Includes
+  auto-collected machine facts (hostname, kernel, arch, PRETTY_NAME).
+
+Both files are re-rendered on every install/repair, so manual edits do
+not survive — operators customise via `/etc/ubuntu-zombie/` instead.
+
+### 3.8  Skills (`payload/agent/skills/` and `/etc/ubuntu-zombie/skills.d/`)
+
+Each skill is a single `*.md` file. The first 4 KiB of the body is
+scanned for an optional `<!-- triggers: ... -->` HTML comment listing
+the words that auto-activate the skill on a chat turn. Skill content
+is never mutated by the runtime — it is read verbatim from disk so a
+file-level audit (`ls -l`, `sha256sum`) reflects exactly what the model
+saw.
+
+Built-in skills shipped today: `apt`, `docker`, `gui`, `systemd`,
+`tailscale`, `ufw`. The on-disk locations are scanned in this order:
+`ZOMBIE_SKILLS_DIR` (test override), then `/opt/ai-zombie/skills/`
+(root-owned, refreshed by every install), then
+`/etc/ubuntu-zombie/skills.d/` (operator extension; same mode and
+owner contract as `policy.yaml`). The earliest directory wins on
+name collision so a shipped skill cannot be quietly shadowed by a
+typo in `skills.d`.
+
+When `select_skills` matches a skill for a turn:
+
+- the skill body is appended to the system prompt under a provenance
+  header naming the on-disk path;
+- a `skill_active` audit event and history event record the skill
+  name, on-disk path, and triggers so the UI shows *what* was
+  injected.
+
+Two read-only tools (`skill.list`, `skill.load`) let the model fetch
+a skill explicitly when no trigger word fired.
+
+### 3.9  Policy (`payload/etc/policy.yaml`)
 
 Operator-owned, copied into place only when absent so reinstalls
-never clobber custom rules. Two top-level sections:
+never clobber custom rules. Top-level sections:
 
 - `settings.destructive_confirmation` — the exact phrase the operator
-  must type to authorise a `destructive` command. Defaults to
+  must type to authorise a `destructive` tool call. Defaults to
   `"yes, I understand this is destructive"`.
 - `settings.default_class` — the class assigned when no rule matches.
-  Defaults to `system_change` (the safe choice: it requires approval).
+  Defaults to **`destructive`** (fail-closed: unknown commands cannot
+  auto-run and require the typed phrase). Operators may relax this
+  once a workflow is proven safe.
+- `sudo_allow_list` — curated list of `sudo` *target* basenames
+  (e.g. `apt`, `systemctl`, `ufw`, `tailscale`, `chmod`, `mv`) that
+  are pre-classified at `system_change` so the fail-closed default
+  does not silently escalate them to `destructive`. The standard
+  approval prompt still fires.
 - `classes` — per-class metadata (`approval: auto|required`,
   `confirm_phrase: true` for `destructive`, free-text `description`).
 - `rules` — ordered list of `{ pattern, class }`. Patterns are Python
-  `re.search` regexes. **First match wins**, so order matters; see
-  `payload/etc/policy.yaml` for the live rules.
+  `re.search` regexes against both the rendered shell string and the
+  argv of each top-level pipeline segment. **First match wins**, so
+  order matters; the highest-severity matching class across all rules
+  wins for the whole command.
+- `tool_classes` — per-tool overrides keyed by registry name
+  (e.g. `svc.status: read_only`); empty by default. Tools without an
+  entry use the `classification` baked into `TOOL_REGISTRY`.
+- `agent.max_tool_calls_per_turn` (default `12`) and
+  `agent.max_elevated_calls_per_turn` (default `3`) — per-turn budgets
+  enforced by the chat service. Calls beyond either budget receive a
+  synthetic `budget_exceeded` observation so the model ends the turn
+  cleanly instead of looping.
 
-### 3.8  Log rotation (`payload/logrotate/ubuntu-zombie`)
+### 3.10  Log rotation (`payload/logrotate/ubuntu-zombie`)
 
 - `/var/log/ubuntu-zombie/audit.log` — weekly, keep 8, compressed,
   `create 0640 AGENT_USER AGENT_USER`. The `AGENT_USER` is templated
@@ -329,70 +452,88 @@ never clobber custom rules. Two top-level sections:
 
 ---
 
-## 4. Request lifecycle
+## 4. Turn lifecycle
 
 A single chat round-trip is the smallest reasoning unit. Every step
-appears in `audit.log` with a shared `approval_id`, so the operator
-can trace any state change back to a prompt.
+appears in `audit.log`; the `tool_call_id` ties the queued approval to
+the executed observation, so the operator can trace any state change
+back to a prompt.
 
 ```
-Operator                Chat service                            Host
+Operator               Chat service                              Host
    │                          │                                   │
    │ POST /api/message        │                                   │
    │ {prompt}                 │                                   │
    ├─────────────────────────▶│                                   │
-   │                          │ history.append(user, prompt)      │
+   │                          │ history.add_message(user)         │
    │                          │ audit("prompt", …)                │
-   │                          │ providers.complete(prompt)        │
-   │                          │   ─────── LLM ───────▶            │
-   │                          │   ◀── reply + proposed cmds ──    │
-   │                          │ for each proposed cmd:            │
-   │                          │   class = policy.classify(cmd)    │
-   │                          │   audit("proposed", cmd, class)   │
-   │                          │                                   │
-   │   reply + cmd list ◀─────┤                                   │
-   │   (auto-run for          │                                   │
-   │   read_only, else        │                                   │
-   │   show "Approve"         │                                   │
-   │   button)                │                                   │
+   │                          │ skill_loader.select_skills(…)     │
+   │                          │ → append skill bodies + provenance│
+   │                          │ pi_mono.run_turn(prompt, system,  │
+   │                          │   history, on_tool_call, tools)   │
+   │                          │   ────── spawn pi-mono ──────▶    │
+   │                          │   ◀─ {tool_call, name, args, id}  │
+   │                          │ tools.validate_args(name, args)   │
+   │                          │ policy.classify_tool(name, args)  │
+   │                          │ budget check (12 / 3 elevated)    │
+   │                          │ if read_only:                     │
+   │                          │   tools.dispatch(name, args)      │
+   │                          │   audit("tool_call",              │
+   │                          │     decision="executed", …)       │
+   │                          │ else:                             │
+   │                          │   queue pending_tool_call         │
+   │                          │   audit("tool_call",              │
+   │                          │     decision="queued", …)         │
+   │                          │   reply "operator_approval_required"│
+   │                          │ ─── tool_result ──────────────▶   │
+   │                          │ … repeat until pi emits "final"   │
+   │                          │ history.add_message(assistant)    │
+   │   reply + events ◀───────┤                                   │
    │                          │                                   │
    │ POST /api/approve        │                                   │
-   │ {approval_id, phrase?}   │                                   │
+   │ {tool_call_id, decision, │                                   │
+   │  phrase?}                │                                   │
    ├─────────────────────────▶│                                   │
    │                          │ verify approval (+phrase for      │
    │                          │   destructive)                    │
-   │                          │ audit("approved", approval_id)    │
-   │                          │ runner.run(cmd, sudo if needed)   │
+   │                          │ audit("tool_call",                │
+   │                          │   decision="approved", …)         │
+   │                          │ tools.dispatch(name, args)        │
    │                          │   ─── subprocess ───▶             │
    │                          │   ◀── stdout/stderr/exit ──       │
-   │                          │ audit("ran", exit, duration)      │
-   │                          │ history.append(assistant, output) │
-   │                          │ propose verification follow-ups   │
-   │                          │   (always read_only, auto-run)    │
-   │   result + follow-ups ◀──┤                                   │
+   │                          │ audit(exit_code, duration_ms,     │
+   │                          │   stdout_sha256, stderr_sha256)   │
+   │                          │ history.add_event(tool_observation)│
+   │   result ◀───────────────┤                                   │
    │                          │                                   │
 ```
 
-Auto-execution rule: `read_only` commands skip `/api/approve`.
-Everything else *must* round-trip through an explicit operator click.
-For `destructive`, the operator must type the
-`settings.destructive_confirmation` phrase verbatim; the server
-compares it case-sensitively before logging the approval.
+Auto-execution rule: `read_only` tool calls skip the approval
+round-trip. Everything else *must* round-trip through an explicit
+operator click on the next user turn. For `destructive`, the operator
+must type the `settings.destructive_confirmation` phrase verbatim; the
+server compares it case-sensitively before logging the approval.
+
+Schema rejections from `tools.validate_args` are recorded as
+`schema_rejected` decisions and replied to pi-mono as an error
+observation, so the model can self-correct without touching the host.
 
 ---
 
 ## 5. Action classes
 
-| Class             | Examples                                       | Default policy             |
-|-------------------|------------------------------------------------|----------------------------|
-| `read_only`       | `ls`, `cat`, `systemctl status`, `df`, `git status`, `docker ps`, safe `find` (no `-delete`/`-exec`/`-ok`/`-fprint*`) | auto                       |
-| `user_change`     | `mkdir`, `touch`, `git clone`, `git pull/fetch/checkout/reset`, `git rm`/`git mv` (FIX-3-26), `pip install`, `npm install` | approval                   |
-| `system_change`   | `apt install`, `dpkg -i`, `snap install`, `systemctl restart`, `docker run/build`, `chmod`/`chown`, `mv`, plain `rm`, writes under `/etc/` | approval                   |
-| `network_change`  | `ufw`, `iptables`, `nft`, `tailscale up/down/set`, `ip link/addr/route set/add/del`, `systemctl restart ssh/tailscaled/networking` | approval                   |
-| `destructive`     | `rm -rf /`, `mkfs`, `dd of=/dev/…`, `userdel`, `shred`, `docker system prune`, write to `/dev/sdX`, `find … -delete/-exec/-ok/-fprint*` (FIX-3-03) | approval **+ phrase**      |
+| Class             | Examples (shell side)                          | Examples (registry side)                     | Default policy            |
+|-------------------|------------------------------------------------|----------------------------------------------|---------------------------|
+| `read_only`       | `ls`, `cat`, `systemctl status`, `df`, `git status`, `docker ps`, safe `find` (no `-delete`/`-exec`/`-ok`/`-fprint*`) | `fs.read`, `pkg.query`, `svc.status`, `net.status`, `gui.screenshot`, `skill.list`, `skill.load` | auto                      |
+| `user_change`     | `mkdir`, `touch`, `git clone`, `git pull/fetch/checkout/reset`, `git rm`/`git mv` (FIX-3-26), `pip install`, `npm install`, redirects to non-`/dev` files | `fs.write`, `gui.click`, `gui.type`           | approval                  |
+| `system_change`   | `apt install`, `dpkg -i`, `snap install`, `systemctl restart`, `docker run/build`, `chmod`/`chown`, `mv`, plain `rm`, writes under `/etc/`, `sudo`'d allow-list targets | `pkg.install`, `svc.control`, `shell.run` (default, refined by argv) | approval                  |
+| `network_change`  | `ufw`, `iptables`, `nft`, `tailscale up/down/set`, `ip link/addr/route set/add/del`, `systemctl restart ssh/tailscaled/networking` | — (use `shell.run`)                           | approval                  |
+| `destructive`     | `rm -rf /`, `mkfs`, `dd of=/dev/…`, `userdel`, `shred`, `docker system prune`, write to `/dev/sdX`, `find … -delete/-exec/-ok/-fprint*` (FIX-3-03) | — (use `shell.run`); also the **fail-closed default** for unknown commands | approval **+ phrase**     |
 
-Rules are evaluated **in file order**; the first match wins. Two
-ordering subtleties enforced by the shipped policy:
+Rules are evaluated **in file order**; the first match within each
+rule scope wins, and the *highest-severity* class across all matches
+is the class of the whole command. Ordering subtleties enforced by
+the shipped policy:
 
 1. `git rm`/`git mv` are user-level VCS operations and are matched
    *before* the generic `\brm\s+` / `\bmv\s+` system-change rules, so
@@ -401,25 +542,35 @@ ordering subtleties enforced by the shipped policy:
    `-fprint`, `-fprintf`, or `-fls` is forced to `destructive`
    *before* any `read_only` rule sees it (FIX-3-03). Plain `find`
    without those flags falls into `read_only`.
+3. Interpreter pipelines (`… | bash`, `sudo python -c`), `tee` into
+   `/etc`/`/usr`/`/var`/…, and redirects to real files are escalated
+   from any apparently read-only head.
 
-Unknown commands fall into `settings.default_class` (default
-`system_change`), so the safe failure mode is "require approval". Denied
-actions are still recorded in the audit log with the reason.
+Tool calls outside `shell.run` are classified by their registry
+defaults (and `policy.yaml`'s `tool_classes:` overrides). Unknown
+tools and unmatched commands fall into `settings.default_class`
+(default `destructive`), so the safe failure mode is "require approval
+and the typed phrase". Denied actions are still recorded in the audit
+log with the reason.
 
 ---
 
 ## 6. Trust boundaries
 
-The product has five clean trust seams. Each is the smallest possible
+The product has six clean trust seams. Each is the smallest possible
 interface that achieves its purpose.
 
 ### 6.1  Provider boundary
 
-Prompts, selected context, and the text of proposed commands cross to
-the configured cloud provider (OpenAI or Anthropic). Command output
-may be summarised back to the provider on follow-up turns. Provider
+Prompts, selected context (recent history + activated skill bodies),
+and the argument summaries of proposed tool calls cross to the
+configured cloud provider (OpenAI, Anthropic, Gemini, xAI, OpenRouter,
+Mistral, or Groq) via `@earendil-works/pi-ai`. Tool observations may
+be summarised back to the provider on follow-up turns. Provider
 **keys never leave** `secrets/env`: only the chat service reads them,
-and they are redacted from every audit-log line before write.
+they are exported into the bridge subprocess environment, and the
+audit-log redactor scrubs both the key shapes and the named env-var
+values from every line before write.
 
 ### 6.2  Network boundary
 
@@ -427,8 +578,8 @@ and they are redacted from every audit-log line before write.
 - SSH: by default allowed only on the `tailscale0` interface
   (`ZOMBIE_SKIP_TAILSCALE=1` opens SSH on every interface, with a loud
   warning logged by `install.sh`).
-- Chat service: binds to `127.0.0.1` only. There is no TLS because
-  there is no remote listener.
+- Chat service: binds to `127.0.0.1` only — `server.py` refuses any
+  other host. There is no TLS because there is no remote listener.
 - x11vnc: bound to `127.0.0.1:5900` with `-localhost`, password
   required, autostarted in the agent session.
 
@@ -441,45 +592,82 @@ The chat service runs as `AGENT_USER`, which has **passwordless
 action follows the same path:
 
 ```
-proposed cmd → policy.classify → operator approval (UI) → audit("approved")
-             → runner.run(sudo …) → audit("ran", exit_code) → verify
+tool_call → tools.validate_args → policy.classify_tool
+          → operator approval (UI, +phrase for destructive)
+          → audit("tool_call", decision="approved")
+          → tools.dispatch (which may runner.run a sudo'd argv)
+          → audit("tool_call", decision="executed", exit_code, …)
+          → tool_observation echoed back to the model
 ```
 
-The approval ID is recorded in the audit log *before* `sudo` is
-invoked. A human shell that runs `sudo` directly is logged in
-`auth.log` and `audit.log` with **no** approval ID, so AI-initiated
-elevations and human-initiated elevations are always distinguishable
-after the fact.
+The approval is recorded in the audit log *before* `sudo` is invoked.
+A human shell that runs `sudo` directly is logged in `auth.log` and
+appears in `audit.log` only as a free-form prompt — with **no**
+`tool_call_id` — so AI-initiated elevations and human-initiated
+elevations are always distinguishable after the fact.
 
 Defence in depth: operators who want to constrain the agent further
 can layer an AppArmor profile that allows `/usr/bin/sudo` and the
 specific binaries they expect the agent to invoke. The product is
 designed to coexist with that.
 
-### 6.4  Secrets boundary
+### 6.4  Tool-surface boundary
+
+Adding a tool requires a **code release**. Skills, prompts, and
+`policy.yaml` cannot expand `TOOL_REGISTRY`. The model receives the
+tool name list from `pi-mono` (rendered into
+`/opt/ai-zombie/pi/settings.json`); any other name comes back from
+`validate_args` as a schema rejection without side effects.
+
+Skill bodies are read verbatim from disk and the on-disk path of every
+activated skill is appended to the system prompt and recorded as a
+`skill_active` audit/history event — so a malicious or accidental
+prompt injection via a skill remains visible to the operator.
+
+### 6.5  Secrets boundary
 
 - `/opt/ai-zombie/secrets/` — directory, mode 0700, owner `AGENT_USER`.
 - `/opt/ai-zombie/secrets/env` — file, mode 0600, owner `AGENT_USER`.
 - `server.py` **refuses to start** if `secrets/env` is group- or
   world-readable. Fail closed.
-- `audit.py` redacts token-shaped strings on every write: `sk-…`,
-  `sk-ant-…`, `tskey-…`, `ssh-(rsa|ed25519|dss) …`, and
-  `(API_KEY|TOKEN|PASSWORD|SECRET)=…` (case-insensitive). FIX-3-11
-  preserves the original separator (`:` or `=`) on redaction so
-  rewritten lines remain syntactically faithful.
+- `audit.py` redacts on every write: token-shaped strings (`sk-…`,
+  `sk-ant-…`, `tskey-…`, `ssh-(rsa|ed25519|dss) …`, PEM private keys,
+  and `(api_key|token|password|secret)\s*[:=]\s*…` case-insensitive),
+  plus the explicit values of every sensitive env-var name
+  (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+  `XAI_API_KEY`, `OPENROUTER_API_KEY`, `MISTRAL_API_KEY`,
+  `GROQ_API_KEY`, `TAILSCALE_AUTHKEY`, `VNC_PASSWORD`,
+  `ZOMBIE_SECRETS`) and the secrets-file path. FIX-3-11 preserves the
+  original separator (`:` or `=`) on redaction so rewritten lines
+  remain syntactically faithful.
 - `collect-diagnostics` runs the same redactor before bundling any log
   fragment.
 - `secrets-edit` re-asserts mode 0600 and the right owner under
   `trap … EXIT`, even if the editor crashes.
 
-### 6.5  Filesystem boundary
+### 6.6  Filesystem boundary
 
 The installer uses `install -m … -o … -g …` rather than `cp` + `chmod`
 + `chown`, so file modes and owners are set atomically with creation.
-`AGENT_USER` owns everything under `/opt/ai-zombie/` except the
-read-only systemd unit files; `root` owns `/etc/ubuntu-zombie/` and
-the systemd units. `/var/log/ubuntu-zombie/` is mode 0750, owned by
-`AGENT_USER`, so only the agent and `root` can read the audit log.
+`AGENT_USER` owns everything under `/opt/ai-zombie/` except
+`/opt/ai-zombie/pi/` (root-owned: pi-mono runtime configs the agent
+should not mutate), `/opt/ai-zombie/skills/` (root-owned: built-in
+skills), and the read-only systemd unit files. `root` owns
+`/etc/ubuntu-zombie/` (operator-extensible) and the systemd units.
+`/var/log/ubuntu-zombie/` is mode 0750, owned by `AGENT_USER`, so only
+the agent and `root` can read the audit log.
+
+The `fs.read` and `fs.write` tool shims additionally enforce a static
+path allow-list:
+
+- **readable**: `${ZOMBIE_DIR}/state`, `/etc`, `/var/log`, `/proc`,
+  `/sys`, `/usr/share/doc`.
+- **writable**: `${ZOMBIE_DIR}/state`, `/tmp`.
+
+Anything outside the allow-list is a schema rejection — the model
+cannot read or write arbitrary paths even through a structured tool.
+Privileged file edits still go through `shell.run` + `sudo` + the
+policy gate.
 
 ---
 
@@ -526,6 +714,7 @@ plain files read at run time. There is no separate config registry.
 | `ZOMBIE_CHAT_PORT`        | `7878`         | Loopback port for the chat service. |
 | `VNC_PORT`                | `5900`         | Loopback port for x11vnc. |
 | `LOG_FILE`                | `/var/log/ubuntu-zombie-install.log` | Installer log destination. |
+| `PAYLOAD_DIR`             | `${REPO_ROOT}/payload` | Override payload source root (used by `make package`). |
 | `SSH_PUBLIC_KEY`          | —              | The single key written to `~AGENT_USER/.ssh/authorized_keys`. |
 | `VNC_PASSWORD`            | —              | Initial x11vnc password. |
 | `TAILSCALE_AUTHKEY`       | —              | Non-interactive `tailscale up` key; ignored under `ZOMBIE_SKIP_TAILSCALE=1`. |
@@ -538,10 +727,20 @@ Read from `/opt/ai-zombie/secrets/env` via `EnvironmentFile=`:
 |----------------------------|----------------|---------|
 | `OPENAI_API_KEY`           | —              | Enables the OpenAI provider. |
 | `ANTHROPIC_API_KEY`        | —              | Enables the Anthropic provider. |
-| `ZOMBIE_PROVIDER`          | autodetect     | `openai` or `anthropic`. |
-| `ZOMBIE_MODEL`             | per-provider   | Overrides both providers' default models. |
-| `ZOMBIE_OPENAI_MODEL`      | `gpt-4o-mini`  | OpenAI default model. |
-| `ZOMBIE_ANTHROPIC_MODEL`   | `claude-3-5-sonnet-latest` | Anthropic default model. |
+| `GEMINI_API_KEY`           | —              | Enables the Google Gemini provider. |
+| `XAI_API_KEY`              | —              | Enables the xAI (Grok) provider. |
+| `OPENROUTER_API_KEY`       | —              | Enables OpenRouter; `ZOMBIE_MODEL` must be set to a fully-qualified id. |
+| `MISTRAL_API_KEY`          | —              | Enables the Mistral provider. |
+| `GROQ_API_KEY`             | —              | Enables the Groq provider. |
+| `ZOMBIE_PROVIDER`          | autodetect     | Force a specific provider by name. |
+| `ZOMBIE_MODEL`             | per-provider   | Overrides every provider's default model. |
+| `ZOMBIE_OPENAI_MODEL`      | `gpt-4o-mini`  | OpenAI model override. |
+| `ZOMBIE_ANTHROPIC_MODEL`   | `claude-3-5-sonnet-latest` | Anthropic model override. |
+| `ZOMBIE_GEMINI_MODEL`      | `gemini-2.0-flash` | Gemini model override. |
+| `ZOMBIE_XAI_MODEL`         | `grok-2-1212`  | xAI model override. |
+| `ZOMBIE_OPENROUTER_MODEL`  | —              | OpenRouter model override (required). |
+| `ZOMBIE_MISTRAL_MODEL`     | `mistral-small-latest` | Mistral model override. |
+| `ZOMBIE_GROQ_MODEL`        | `llama-3.1-8b-instant` | Groq model override. |
 | `ZOMBIE_USER`              | `zombie`       | Identity exposed in the UI and prompts. |
 | `ZOMBIE_CHAT_PORT`         | `7878`         | Loopback port. |
 | `ZOMBIE_SECRETS`           | `/opt/ai-zombie/secrets/env` | Override path for tests. |
@@ -549,6 +748,11 @@ Read from `/opt/ai-zombie/secrets/env` via `EnvironmentFile=`:
 | `ZOMBIE_AUDIT_LOG`         | `/var/log/ubuntu-zombie/audit.log` | Override path for tests. |
 | `ZOMBIE_HISTORY_DB`        | `/opt/ai-zombie/state/conversations.db` | Override path for tests. |
 | `ZOMBIE_COMMAND_TIMEOUT`   | `300` (seconds) | Per-command runner timeout. |
+| `ZOMBIE_SKILLS_DIR`        | —              | Extra colon-separated skill dirs, prepended to the default search path. |
+| `ZOMBIE_PI_AI_BRIDGE`      | next to `providers.py` | Override path to `pi-ai-bridge.mjs` (tests). |
+| `ZOMBIE_PI_MONO_BRIDGE`    | next to `pi_mono.py`   | Override path or full argv for the pi-mono bridge (tests). |
+| `ZOMBIE_PI_MONO_SETTINGS`  | `/opt/ai-zombie/pi/settings.json` | Override pi-mono settings file. |
+| `ZOMBIE_PI_MONO_LOG_DIR`   | `/opt/ai-zombie/state/logs` | Per-turn pi-mono log directory. |
 
 See `docs/CONFIGURATION.md` for operator-facing detail.
 
@@ -560,14 +764,17 @@ See `docs/CONFIGURATION.md` for operator-facing detail.
 |--------------------------------------------------|--------------------------------------------------------------------------------------------------------|
 | Transient network failure (`apt`/`curl`/`pip`/`npm`/`playwright`) | Retried with exponential backoff inside the installer and `setup-agent-venv`. |
 | Installer crash mid-run                          | Re-run `sudo scripts/install.sh install`; idempotent guards converge to desired state.                 |
-| Drift from desired state                         | `verify` reports; `doctor` explains; `repair` fixes the known-safe set.                                |
-| Provider API outage or auth failure              | Surfaced in the UI as a structured error; the chat service does not crash; other functionality remains. |
+| Drift from desired state                         | `verify` reports; `doctor` explains; `repair` fixes the known-safe set (including re-rendering `pi/settings.json`, `pi/APPEND_SYSTEM.md`, and the built-in skills tree). |
+| Provider API outage or auth failure              | Surfaced in the UI as a structured `provider_error`; the chat service does not crash; the rest of the agent loop unwinds cleanly. |
 | No provider key configured                       | `NoProviderConfigured` raised on first request; UI shows a clear instruction to run `secrets-edit`.    |
 | Bad `secrets/env` permissions                    | Chat service fails to start (fail closed); `health-check` and `verify` both flag it.                   |
+| pi-mono bridge missing or pi CLI unavailable     | `BridgeError` surfaced as a structured error event; the turn ends cleanly without queueing tool calls. |
+| Schema-invalid tool call                         | `tools.validate_args` rejects without side effects; the rejection is recorded as `schema_rejected` and replied to the model so it can self-correct. |
+| Runaway tool-call loop                           | `max_tool_calls_per_turn` / `max_elevated_calls_per_turn` budgets convert further calls into synthetic `budget_exceeded` observations so the turn closes. |
 | Audit log lost to logrotate race                 | `audit.py` reopens on every append; no SIGHUP needed; rotated file is preserved by `delaycompress`.    |
 | x11vnc password missing                          | `install.sh` aborts with a clear error before writing autostart entries.                               |
 | Tailscale logged out                             | `health-check` flags it; `repair` retries `tailscale up`; SSH-on-tailscale0 keeps working until the link drops. |
-| Agent account compromised                        | UFW + Tailscale-only SSH limit blast radius; `secrets/env` is the only credential material on disk; `uninstall.sh --archive` snapshots state before remediation. |
+| Agent account compromised                        | UFW + Tailscale-only SSH limit blast radius; `secrets/env` is the only credential material on disk; the closed tool registry bounds what the agent loop can touch; `uninstall.sh --archive` snapshots state before remediation. |
 
 The health timer runs `/opt/ai-zombie/bin/health-check` every 15
 minutes (and at boot + 5 min), giving the operator a passive trip-wire
@@ -588,10 +795,14 @@ out of scope:
 - **Self-upgrading.** Upgrades are `git pull && sudo
   ./scripts/install.sh install`. There is no autoupdater.
 - **Custom provider plugins at run time.** New providers are added by
-  editing `providers.py` and shipping a release.
+  editing `providers.py` + `pi-ai-bridge.mjs`'s provider map and
+  shipping a release.
+- **Free-form shell from the model.** All agent actions go through the
+  closed tool registry; `shell.run` exists, but is still classified
+  per-argv by `policy.yaml` and runs under the same approval flow.
 - **Generic policy DSL.** `policy.yaml` is intentionally a flat list
-  of ordered regex rules — easy to read in one pass, no Turing-complete
-  surprises.
+  of ordered regex rules plus a sudo allow-list and per-tool
+  overrides — easy to read in one pass, no Turing-complete surprises.
 
 ---
 
@@ -602,13 +813,17 @@ Common changes and where to make them:
 | Change                                | Where                                                   |
 |---------------------------------------|---------------------------------------------------------|
 | Tighten / loosen a command class      | `payload/etc/policy.yaml` (live; re-read per request)   |
-| Add a provider                        | `payload/agent/providers.py` + entry in `select_provider` |
+| Override a tool's default class       | `tool_classes:` in `payload/etc/policy.yaml`            |
+| Add a tool                            | `payload/agent/tools.py` (add a shim + a `TOOL_REGISTRY` entry) **and** `payload/agent/templates/settings.json.tmpl` (add the name to `tools:`) |
+| Add a provider                        | `payload/agent/providers.py` (`_PI_AI_PROVIDERS`) + matching entry in `pi-ai-bridge.mjs` |
 | Add an HTTP route                     | `payload/agent/server.py` → `do_GET` / `do_POST`        |
+| Add a skill                           | Drop a `*.md` with a `<!-- triggers: … -->` header into `payload/agent/skills/` (built-in) or `/etc/ubuntu-zombie/skills.d/` (operator) |
 | Add an operator helper                | `payload/bin/<name>`, then add to the install loop in `scripts/install.sh` and (optionally) symlink under `/usr/local/bin/` |
 | Add a smoke check                     | `tests/smoke.sh` — keep it non-root and fast            |
 | Add a host package                    | `apt_install` line in `scripts/install.sh`              |
 | Add a systemd unit                    | `payload/systemd/<unit>`, then `render_unit` / `install -m 644` block in `scripts/install.sh` |
 | Add a redaction pattern               | `_REDACTORS` in `payload/agent/audit.py` *and* the matching `sed` in `payload/bin/collect-diagnostics` |
+| Bump a pinned Node package            | Update `payload/agent/pi-ai.version` and/or `payload/agent/pi-mono.version`; the installer reads them verbatim |
 | Reserve a new env var                 | Add to the install-time or runtime table in §8 of this document, document in `docs/CONFIGURATION.md`, and read it through `os.environ.get(...)` with a safe default |
 
 The repository's `Makefile` enforces the shared standards:
