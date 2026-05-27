@@ -237,6 +237,34 @@ is_ssh_pubkey() {
   [[ "$1" =~ ^(ssh-ed25519|ssh-rsa|ssh-dss|ecdsa-sha2-nistp(256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com)\  ]]
 }
 
+is_supported_agent_username() {
+  # Either 2-32 chars starting with a letter and ending alphanumeric, with
+  # underscore/hyphen allowed in the middle, or 1-32 alphanumeric chars.
+  [[ "$1" =~ ^[a-z]([a-z0-9_-]{0,30}[a-z0-9]|[a-z0-9]{0,31})$ ]] || return 1
+  [[ "$1" != "root" && "$1" != "nobody" ]]
+}
+
+# Validate user-controlled install settings before they are interpolated into
+# paths, sudoers entries, generated unit files, or shell commands.
+validate_config() {
+  if ! is_supported_agent_username "${AGENT_USER}"; then
+    die "Invalid agent username '${AGENT_USER}'. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation)." 2
+  fi
+  if [[ "${ZOMBIE_DIR}" != /* ]]; then
+    die "ZOMBIE_DIR must be an absolute path." 2
+  fi
+  if [[ "${LOG_FILE}" != /* ]]; then
+    die "LOG_FILE must be an absolute path." 2
+  fi
+}
+
+# Unknown positional arguments are collected in PARSED_ARGS during option
+# parsing; only the uninstall subcommand forwards them to uninstall.sh.
+reject_unexpected_positional_args() {
+  [[ ${#PARSED_ARGS[@]} -eq 0 ]] && return 0
+  die "Unexpected argument(s) for ${SUBCOMMAND}: ${PARSED_ARGS[*]}" 2
+}
+
 # Source /etc/os-release into the current shell.
 load_os_release() {
   # shellcheck disable=SC1091
@@ -525,12 +553,14 @@ cmd_uninstall() {
 
 trap 'on_error ${LINENO}' ERR
 
+validate_config
+
 case "${SUBCOMMAND}" in
-  verify)    cmd_verify; exit $? ;;
-  doctor)    cmd_doctor; exit $? ;;
-  repair)    require_root; cmd_repair; exit $? ;;
+  verify)    reject_unexpected_positional_args; cmd_verify; exit $? ;;
+  doctor)    reject_unexpected_positional_args; cmd_doctor; exit $? ;;
+  repair)    reject_unexpected_positional_args; require_root; cmd_repair; exit $? ;;
   uninstall) require_root; cmd_uninstall; exit $? ;;
-  install)   : ;;
+  install)   reject_unexpected_positional_args ;;
   *)         die "Unknown subcommand: ${SUBCOMMAND}" 2 ;;
 esac
 
@@ -1180,14 +1210,20 @@ chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/tools/browser-test.py"
 
 section "x11vnc loopback-only desktop access"
 
-runuser -l "${AGENT_USER}" -c "mkdir -p ~/.vnc ~/.config/autostart ~/.local/share"
+runuser -l "${AGENT_USER}" -c "mkdir -p ~/.config/autostart ~/.local/share"
+install -d -m 700 -o "${AGENT_USER}" -g "${AGENT_USER}" "${AGENT_HOME}/.vnc"
 
 VNC_PASSWD_FILE="${AGENT_HOME}/.vnc/passwd"
 
 if [[ -f "${VNC_PASSWD_FILE}" ]]; then
   info "VNC password already set; keeping it."
 elif [[ -n "${VNC_PASSWORD}" ]]; then
-  runuser -l "${AGENT_USER}" -c "x11vnc -storepasswd '${VNC_PASSWORD}' ~/.vnc/passwd" >/dev/null
+  if ! printf '%s\n%s\n' "${VNC_PASSWORD}" "${VNC_PASSWORD}" \
+    | runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" x11vnc -storepasswd >/dev/null 2>&1; then
+    die "Failed to store VNC password; check that x11vnc is installed and ${AGENT_HOME}/.vnc is writable." 1
+  fi
+  chown "${AGENT_USER}:${AGENT_USER}" "${VNC_PASSWD_FILE}"
+  chmod 600 "${VNC_PASSWD_FILE}"
   ok "VNC password set from VNC_PASSWORD env var."
 elif [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]]; then
   die "Non-interactive mode requires VNC_PASSWORD when no VNC password is already stored." 64
