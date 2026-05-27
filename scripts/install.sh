@@ -362,7 +362,10 @@ preflight() {
 
   # Tailscale already present?
   if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-    info "Tailscale install/enrolment will be skipped (ZOMBIE_SKIP_TAILSCALE=1)."
+    warn "ZOMBIE_SKIP_TAILSCALE=1: Tailscale will be skipped. Inbound SSH will be"
+    warn "  allowed on every interface instead of only on tailscale0. Only use"
+    warn "  this on a network you control (e.g. behind a NAT/router or VPN)."
+    warnings=$((warnings + 1))
   elif command -v tailscale >/dev/null 2>&1; then
     if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
       info "Tailscale is already installed and logged in."
@@ -837,6 +840,11 @@ if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
   ufw --force default deny incoming
   ufw --force default allow outgoing
 
+  # Remove any prior Tailscale-only SSH rule from a previous (non-skipped) run.
+  while ufw status | grep -q "tailscale0.*22/tcp"; do
+    ufw --force delete allow in on tailscale0 to any port 22 proto tcp >/dev/null 2>&1 || break
+  done
+
   if ! ufw status | grep -qE '(^|[[:space:]])22/tcp([[:space:]]|$)'; then
     ufw allow 22/tcp comment "SSH (Tailscale skipped)"
   fi
@@ -849,6 +857,13 @@ else
 
   ufw --force default deny incoming
   ufw --force default allow outgoing
+
+  # Remove any prior all-interface SSH rule from a previous (skipped-Tailscale) run.
+  while ufw status numbered | grep -E '(^|[[:space:]])22/tcp([[:space:]]|$)' | grep -vq 'tailscale0'; do
+    rule_num="$(ufw status numbered | awk -F'[][]' '/22\/tcp/ && !/tailscale0/ {print $2; exit}')"
+    [[ -z "${rule_num}" ]] && break
+    yes | ufw delete "${rule_num}" >/dev/null 2>&1 || break
+  done
 
   if ! ufw status | grep -q "tailscale0.*22/tcp"; then
     ufw allow in on tailscale0 to any port 22 proto tcp comment "SSH over Tailscale only"
