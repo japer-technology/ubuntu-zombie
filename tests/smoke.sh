@@ -53,6 +53,9 @@ import policy
 import server
 
 p = policy.load_policy()
+
+# Policy classification regressions: read-only command heads must not
+# auto-run when shell syntax would mutate files or execute interpreters.
 cases = {
     "grep needle file > out": "user_change",
     "cat <<EOF > /tmp/out\nhello\nEOF": "user_change",
@@ -68,6 +71,8 @@ for command, want in cases.items():
     if got != want:
         raise SystemExit(f"classify({command!r}) = {got!r}, want {want!r}")
 
+# Fence parsing regressions: CRLF, mixed line endings, and blank
+# language tags should still feed extracted commands to the policy gate.
 if server.extract_commands("```bash\r\nls\r\n```") != ["ls"]:
     raise SystemExit("CRLF fenced command extraction failed")
 if server.extract_commands("```bash\r\nprintf hi\n```") != ["printf hi"]:
