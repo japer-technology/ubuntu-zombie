@@ -19,10 +19,24 @@ Supported variables:
 | -------------------- | ---------------------------------------- |
 | `OPENAI_API_KEY`     | API key for the OpenAI provider          |
 | `ANTHROPIC_API_KEY`  | API key for the Anthropic provider       |
-| `ZOMBIE_PROVIDER`    | `openai` or `anthropic` (default: first key found) |
+| `GEMINI_API_KEY`     | API key for Google Gemini (routed via `pi-ai`'s `google` provider) |
+| `XAI_API_KEY`        | API key for the xAI provider             |
+| `OPENROUTER_API_KEY` | API key for the OpenRouter aggregator. Requires `ZOMBIE_MODEL` to be set to a fully-qualified id such as `anthropic/claude-3.5-sonnet`. |
+| `MISTRAL_API_KEY`    | API key for the Mistral provider         |
+| `GROQ_API_KEY`       | API key for the Groq provider            |
+| `ZOMBIE_PROVIDER`    | One of `openai`, `anthropic`, `gemini`, `xai`, `openrouter`, `mistral`, `groq` (default: first key found, in the order above) |
 | `ZOMBIE_MODEL`       | Override the provider's default model    |
 | `ZOMBIE_CHAT_PORT`   | Loopback port for the chat UI (default `7878`) |
 | `DISPLAY`            | X display for desktop helpers (default `:0`) |
+
+All providers are routed through [`@earendil-works/pi-ai`][pi-ai],
+installed globally by `scripts/install.sh` at the version pinned in
+`payload/agent/pi-ai.version`. The bespoke OpenAI/Anthropic Python
+clients that used to live in `payload/agent/providers.py` were
+removed in the Phase 1 cutover documented in
+[`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md).
+
+[pi-ai]: https://github.com/earendil-works/pi
 
 Restart the chat service after editing:
 
