@@ -1,5 +1,11 @@
 # Ubuntu Zombie
 
+<p align="center">
+  <picture>
+    <img src="https://raw.githubusercontent.com/japer-technology/ubuntu-zombie/main/LOGO.png" alt="Ubuntu Zombie" width="500">
+  </picture>
+</p>
+
 > **Ubuntu Zombie adds a private, root-capable AI Systems
 > Administrator account to supported Ubuntu Desktop LTS machines so an
 > owner can ask the machine to diagnose, explain, configure,
