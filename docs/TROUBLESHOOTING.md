@@ -130,8 +130,9 @@ Typical causes:
 
 - Missing provider token. Add one with
   `sudo /opt/ai-zombie/bin/secrets-edit` (or `sudo secrets-edit`).
-  `doctor` looks for any of `OPENAI`, `ANTHROPIC`, `GEMINI`, `XAI`,
-  `OPENROUTER`, `MISTRAL`, `GROQ` `_API_KEY=`.
+  `doctor` looks for any of `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+  `GEMINI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`,
+  `MISTRAL_API_KEY`, or `GROQ_API_KEY`.
 - Port `7878` taken. Override by setting `ZOMBIE_CHAT_PORT` in
   `secrets/env`; the systemd unit ships `Environment=ZOMBIE_CHAT_PORT=7878`
   as a fallback so the service still starts when `secrets/env` is
