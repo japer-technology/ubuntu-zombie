@@ -8,11 +8,11 @@ The YAML parser is a small dependency-free reader sufficient for the
 flat structure of the shipped policy file. Operators are not expected
 to write arbitrary YAML here; the schema is fixed.
 
-Phase 0 of ``docs/UPGRADE-TO-PI-PLAN.md`` makes classification
-argv-aware (P0.1), fail-closed for unknown commands (P0.2), and adds
-a sudo allow-list (P0.3) so that common ``sudo`` targets keep their
-``system_change`` posture instead of being escalated by the
-fail-closed default.
+Classification is argv-aware (env-prefix and ``sudo`` flags are
+stripped before rule matching), fail-closed for unknown commands
+(they escalate to ``default_class``), and honours a sudo allow-list
+so that common privileged targets keep their ``system_change``
+posture instead of being escalated by the fail-closed default.
 """
 from __future__ import annotations
 
@@ -83,23 +83,21 @@ class Policy:
     classes: dict[str, ClassDef] = field(default_factory=dict)
     rules: list[Rule] = field(default_factory=list)
     destructive_confirmation: str = "yes, I understand this is destructive"
-    # Phase 0 / P0.2: unknown commands classify as the highest gated
+    # Fail-closed: unknown commands classify as the highest gated
     # class so they cannot auto-run. Operators may relax this in
     # ``policy.yaml`` once they have proven a workflow safe.
     default_class: str = "destructive"
-    # Phase 0 / P0.3: curated ``sudo`` targets pre-classified as
-    # ``system_change``. The standard approval prompt still fires; no
-    # destructive-phrase ceremony is added.
+    # Curated ``sudo`` targets pre-classified as ``system_change``.
+    # The standard approval prompt still fires; no destructive-phrase
+    # ceremony is added.
     sudo_allow_list: tuple[str, ...] = ()
-    # Phase 2 / P2.2: operator overrides of per-tool default classes
+    # Operator overrides of per-tool default classes
     # (e.g. ``svc.status: read_only``). Empty dict = use the
     # registry-shipped defaults from ``tools.TOOL_REGISTRY``.
     tool_classes: dict[str, str] = field(default_factory=dict)
-    # Phase 2 / §6 R7: per-turn agent budgets to bound runaway loops.
-    # Phase 4 / P4.1 (UPGRADE-TO-PI-PLAN §7): defaults realigned with
-    # ``docs/UPGRADE-TO-PI.md`` §6.1–§6.2 (12 / 3) to match the
-    # documented contract and the typical turn shape observed once the
-    # Phase 3 skills started landing tool calls in parallel.
+    # Per-turn agent budgets that bound runaway loops. The 12 / 3
+    # defaults match the typical turn shape once parallel
+    # skill-driven tool calls are in play.
     max_tool_calls_per_turn: int = 12
     max_elevated_calls_per_turn: int = 3
 
@@ -167,11 +165,10 @@ class Policy:
     def classify_tool(self, name: str, args: dict[str, Any] | None) -> str:
         """Classify a structured tool call.
 
-        Phase 2 of ``docs/UPGRADE-TO-PI-PLAN.md`` (P2.2) moves the
-        policy gate to the tool layer. Every ``pi-mono`` tool call is
-        passed through this method so the operator-editable
-        ``policy.yaml`` remains the single source of truth, even though
-        the assistant no longer emits free-form shell.
+        Every ``pi-mono`` tool call is passed through this method so
+        the operator-editable ``policy.yaml`` remains the single
+        source of truth, even though the assistant no longer emits
+        free-form shell.
 
         ``shell.run`` falls through to :meth:`classify` against the
         rendered argv so the existing regex/argv ruleset (and the
@@ -180,8 +177,7 @@ class Policy:
         registered default class, then escalated by ``policy.yaml``
         overrides under the ``tool_classes:`` block if present.
 
-        Unknown tools fall through to ``default_class`` (fail-closed
-        per P0.2 / P2.2).
+        Unknown tools fall through to ``default_class`` (fail-closed).
         """
         try:
             from tools import TOOL_REGISTRY  # local import to avoid cycle
@@ -616,9 +612,9 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
         destructive_confirmation=str(
             settings.get("destructive_confirmation", "yes, I understand this is destructive")
         ),
-        # Phase 0 / P0.2: fail-closed default. Falls back to
-        # ``destructive`` (the highest gated class in ``CLASS_ORDER``)
-        # if the operator did not pin a value in ``policy.yaml``.
+        # Fail-closed default. Falls back to ``destructive`` (the
+        # highest gated class in ``CLASS_ORDER``) if the operator did
+        # not pin a value in ``policy.yaml``.
         default_class=str(settings.get("default_class", "destructive")),
         sudo_allow_list=sudo_allow_list,
         tool_classes=tool_classes,
@@ -647,9 +643,8 @@ def _default_policy() -> Policy:
             "destructive": ClassDef("destructive", confirm_phrase=True),
         },
         rules=[],
-        # Phase 0 / P0.2: a missing policy file is treated as
-        # maximally restrictive so a misconfigured host cannot
-        # auto-run anything.
+        # Fail-closed: a missing policy file is treated as maximally
+        # restrictive so a misconfigured host cannot auto-run anything.
         default_class="destructive",
         sudo_allow_list=(),
     )

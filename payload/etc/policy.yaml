@@ -11,20 +11,20 @@
 
 settings:
   destructive_confirmation: "yes, I understand this is destructive"
-  # Phase 0 / P0.2 (UPGRADE-TO-PI-PLAN §3): unknown commands fall
-  # through to the highest gated class so they cannot auto-run.
-  # Operators may relax this once a workflow is proven safe; the
-  # ``sudo_allow_list:`` block below keeps common privileged commands
-  # at ``system_change`` despite the conservative default.
+  # Fail-closed default: unknown commands classify at the highest
+  # gated class so they cannot auto-run. Operators may relax this
+  # once a workflow is proven safe; the ``sudo_allow_list:`` block
+  # below keeps common privileged commands at ``system_change``
+  # despite the conservative default.
   default_class: destructive
 
-# Phase 0 / P0.3 (UPGRADE-TO-PI-PLAN §3): curated ``sudo`` targets
-# pre-classified as ``system_change``. The standard approval prompt
-# still fires for these — they do not auto-run — but they are not
-# escalated to ``destructive`` by the fail-closed default above. Add
-# entries only after confirming the underlying program is safe to
-# elevate. Entries are matched against the basename of the program
-# that ``sudo`` invokes (after its own flags are stripped).
+# Curated ``sudo`` targets pre-classified as ``system_change``. The
+# standard approval prompt still fires for these — they do not
+# auto-run — but they are not escalated to ``destructive`` by the
+# fail-closed default above. Add entries only after confirming the
+# underlying program is safe to elevate. Entries are matched against
+# the basename of the program that ``sudo`` invokes (after its own
+# flags are stripped).
 sudo_allow_list:
   - apt
   - apt-get
@@ -206,24 +206,21 @@ rules:
     class: read_only
 
 # ---------------------------------------------------------------------------
-# Phase 2 (UPGRADE-TO-PI-PLAN §4-§5): per-tool class overrides for
-# the closed pi-mono tool registry. Each key is a tool name from
-# ``payload/agent/tools.py``; the value must be one of the action
-# classes declared above. Tools without an entry use the
-# registry-shipped default. Use this block to tighten (e.g. move
-# ``fs.write`` to ``system_change``) or loosen (e.g. allow
+# Per-tool class overrides for the closed pi-mono tool registry.
+# Each key is a tool name from ``payload/agent/tools.py``; the value
+# must be one of the action classes declared above. Tools without an
+# entry use the registry-shipped default. Use this block to tighten
+# (e.g. move ``fs.write`` to ``system_change``) or loosen (e.g. allow
 # ``svc.status`` against your own services as ``read_only``).
 tool_classes: {}
 
-# Phase 2 (§6 R7) / Phase 4 P4.1 (UPGRADE-TO-PI-PLAN §7): bound runaway
-# agent loops. ``max_tool_calls_per_turn`` caps total tool calls per
-# user message; ``max_elevated_calls_per_turn`` caps how many of those
-# may be non-``read_only``. Calls beyond either budget receive a
-# synthetic ``budget_exceeded`` observation so the model ends the turn
-# cleanly. Defaults are aligned with ``docs/UPGRADE-TO-PI.md`` §6.1–§6.2
-# (12 / 3) to match the documented contract and the typical turn shape
-# observed once the Phase 3 skills started landing tool calls in
-# parallel.
+# Per-turn agent budgets that bound runaway loops.
+# ``max_tool_calls_per_turn`` caps total tool calls per user message;
+# ``max_elevated_calls_per_turn`` caps how many of those may be
+# non-``read_only``. Calls beyond either budget receive a synthetic
+# ``budget_exceeded`` observation so the model ends the turn cleanly.
+# The 12 / 3 defaults match the typical turn shape observed once
+# parallel skill-driven tool calls are in play.
 agent:
   max_tool_calls_per_turn: 12
   max_elevated_calls_per_turn: 3

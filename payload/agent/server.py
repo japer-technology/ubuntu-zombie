@@ -13,11 +13,11 @@ A small loopback-only HTTP server that:
 - persists conversations + structured tool events to SQLite.
 
 The server binds to ``127.0.0.1`` only. Remote access is by SSH tunnel
-over Tailscale; see ``CONFIGURATION.md``.
+over Tailscale.
 
-Phase 2 of ``docs/UPGRADE-TO-PI-PLAN.md`` removed the previous
-``extract_commands`` fenced-bash workflow and the ``SYSTEM_PROMPT_TEMPLATE``
-that asked the model to propose commands in markdown fences. The
+The legacy ``extract_commands`` fenced-bash workflow and its
+``SYSTEM_PROMPT_TEMPLATE`` have been removed; the model now drives
+the pi-mono agent loop via structured tool calls. The
 prompt-formatting helpers are still exposed for the installer
 (``server.py --render-append-system``) and for tests.
 """
@@ -197,11 +197,10 @@ class App:
             if m["role"] in {"user", "assistant"}
         ]
 
-        # Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1): select skills whose
-        # trigger words appear in the operator's recent prompts and
-        # append them to the system prompt. ``skill_active`` history
-        # events record the provenance so the UI can show *what* was
-        # injected (§6.4 — "skill provenance").
+        # Select skills whose trigger words appear in the operator's
+        # recent prompts and append them to the system prompt.
+        # ``skill_active`` history events record the provenance so the
+        # UI can show *what* was injected.
         recent_user = [m["content"] for m in self.history.get_messages(conv_id)
                        if m["role"] == "user"]
         active_skills = skill_loader.select_skills(recent_user)
@@ -219,13 +218,13 @@ class App:
 
         policy = load_policy()
         max_calls = int(getattr(policy, "max_tool_calls_per_turn", 12) or 12)
-        # Phase 4 / P4.1 (UPGRADE-TO-PI-PLAN §7): also enforce the
-        # elevated (non ``read_only``) per-turn budget. Read-only tools
-        # auto-run and are cheap; elevated tools queue an operator
-        # prompt and mutate state, so they are bounded separately to
-        # cap the blast radius of a runaway loop. Calls beyond the
-        # budget receive a synthetic ``budget_exceeded`` observation
-        # (see ``payload/etc/policy.yaml``) so the model ends the turn
+        # Also enforce the elevated (non ``read_only``) per-turn
+        # budget. Read-only tools auto-run and are cheap; elevated
+        # tools queue an operator prompt and mutate state, so they
+        # are bounded separately to cap the blast radius of a runaway
+        # loop. Calls beyond the budget receive a synthetic
+        # ``budget_exceeded`` observation (see
+        # ``payload/etc/policy.yaml``) so the model ends the turn
         # cleanly.
         max_elevated = int(
             getattr(policy, "max_elevated_calls_per_turn", 3) or 3

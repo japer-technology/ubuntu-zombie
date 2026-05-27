@@ -1,10 +1,9 @@
 """SQLite-backed conversation history.
 
-Phase 2 (``docs/UPGRADE-TO-PI-PLAN.md`` P2.3) adds a forward-only
-schema migration tracked via ``PRAGMA user_version`` and a structured
-``events`` table for ``tool_call`` / ``tool_observation`` /
-``pending_tool_call`` records that the new UI renders alongside chat
-messages.
+The schema is forward-only and tracked via ``PRAGMA user_version``.
+A structured ``events`` table stores ``tool_call`` /
+``tool_observation`` / ``pending_tool_call`` records that the UI
+renders alongside chat messages.
 """
 from __future__ import annotations
 

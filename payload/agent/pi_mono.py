@@ -1,11 +1,11 @@
 """Python client for the ``pi-mono`` bridge.
 
-Phase 2 of ``docs/UPGRADE-TO-PI-PLAN.md`` replaces the fenced-bash
-parser with the ``pi`` agent loop (``@earendil-works/pi-coding-agent``).
-``pi`` runs as a Node subprocess wrapped by ``pi-mono-bridge.mjs`` and
-speaks a small line-delimited JSON protocol over stdio so the Python
-server can mediate every tool call through the closed registry in
-``tools.py``.
+The chat service drives the ``pi`` agent loop
+(``@earendil-works/pi-coding-agent``) instead of parsing fenced-bash
+proposals. ``pi`` runs as a Node subprocess wrapped by
+``pi-mono-bridge.mjs`` and speaks a small line-delimited JSON protocol
+over stdio so the Python server can mediate every tool call through
+the closed registry in ``tools.py``.
 
 Protocol (Python ↔ bridge, one JSON object per line):
 
@@ -154,10 +154,9 @@ def run_turn(
             if kind == "tool_call":
                 calls_made += 1
                 if calls_made > max_tool_calls:
-                    # Phase 4 / P4.1 (UPGRADE-TO-PI-PLAN §7): synthetic
-                    # ``budget_exceeded`` observation so the model
-                    # closes the turn instead of looping. Mirrors the
-                    # elevated-budget enforcement in ``server.py``.
+                    # Synthetic ``budget_exceeded`` observation so the
+                    # model closes the turn instead of looping. Mirrors
+                    # the elevated-budget enforcement in ``server.py``.
                     reply = {"type": "tool_result", "id": event.get("id"),
                              "ok": False,
                              "error": (f"budget_exceeded: per-turn tool-call "

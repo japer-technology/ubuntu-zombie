@@ -8,7 +8,7 @@
 # AI Systems Administrator, authenticated by the configured token
 # provider, contactable through a private loopback chat UI.
 #
-# Read README.md and docs/QUICKSTART.md before running.
+# Read README.md before running.
 #
 # Subcommands:
 #   install     Full install (default). Idempotent.
@@ -17,7 +17,7 @@
 #   repair      Apply known-safe fixes for common drift.
 #   uninstall   Delegate to uninstall.sh.
 #
-# Common env vars (see docs/CONFIGURATION.md for the full list):
+# Common env vars (run `install.sh --help` for the full list):
 #   ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
 #                               VNC_PASSWORD must be set unless already
 #                               configured on disk).
@@ -652,10 +652,10 @@ cmd_repair() {
     ok "Chat service restarted."
   fi
 
-  # Phase 2 (UPGRADE-TO-PI-PLAN §5 / P2.4): re-render pi-mono runtime
-  # configs from the deployed templates. Operators routinely use
-  # ``install.sh repair`` to recover after manual edits, so the
-  # pi/ tree must be brought back into a known good state.
+  # Re-render pi-mono runtime configs from the deployed templates.
+  # Operators routinely use ``install.sh repair`` to recover after
+  # manual edits, so the pi/ tree must be brought back into a known
+  # good state.
   if [[ -d "${ZOMBIE_DIR}/agent/templates" ]]; then
     install -d -m 755 -o root -g root "${ZOMBIE_DIR}/pi"
     install -d -m 750 -o "${AGENT_USER}" -g "${AGENT_USER}" \
@@ -674,11 +674,10 @@ cmd_repair() {
     ok "pi-mono runtime configs re-rendered."
   fi
 
-  # Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1+P3.2): repair re-deploys the
-  # built-in skill catalogue from the payload tree so manual edits to
-  # /opt/ai-zombie/skills/ are reverted, and ensures
-  # /etc/ubuntu-zombie/skills.d/ exists so operator skills survive a
-  # repair run.
+  # Repair re-deploys the built-in skill catalogue from the payload
+  # tree so manual edits to /opt/ai-zombie/skills/ are reverted, and
+  # ensures /etc/ubuntu-zombie/skills.d/ exists so operator skills
+  # survive a repair run.
   if [[ -d "${PAYLOAD_DIR}/agent/skills" ]]; then
     install -d -m 755 -o root -g root "${ZOMBIE_DIR}/skills"
     shopt -s nullglob
@@ -1194,7 +1193,7 @@ if [[ ! -f "${ZOMBIE_DIR}/secrets/env" ]]; then
   cat > "${ZOMBIE_DIR}/secrets/env" <<EOF
 # Token provider credentials and runtime environment for the AI Systems Administrator.
 # Pick ONE provider line and paste the key. All providers are routed
-# through @earendil-works/pi-ai; see docs/CONFIGURATION.md.
+# through @earendil-works/pi-ai.
 #   OPENAI_API_KEY=sk-...
 #   ANTHROPIC_API_KEY=sk-ant-...
 #   GEMINI_API_KEY=...
@@ -1303,10 +1302,9 @@ section "Node runtime"
 retry 4 5 -- npm install -g npm@latest
 retry 4 5 -- npm install -g yarn pnpm typescript ts-node
 
-# pi-ai is the unified LLM client for the chat service (UPGRADE-TO-PI-PLAN
-# Phase 1). Pinned to the exact version recorded in
-# payload/agent/pi-ai.version so bumps are deliberate PRs with smoke
-# evidence.
+# pi-ai is the unified LLM client for the chat service. Pinned to the
+# exact version recorded in payload/agent/pi-ai.version so bumps are
+# deliberate PRs with smoke evidence.
 PI_AI_VERSION="$(tr -d '[:space:]' < "${PAYLOAD_DIR}/agent/pi-ai.version")"
 if [[ -z "${PI_AI_VERSION}" ]]; then
   die "payload/agent/pi-ai.version is empty; refusing to install pi-ai unpinned." 1
@@ -1314,11 +1312,10 @@ fi
 log "Installing @earendil-works/pi-ai@${PI_AI_VERSION} globally."
 retry 4 5 -- npm install -g --ignore-scripts "@earendil-works/pi-ai@${PI_AI_VERSION}"
 
-# Phase 2 (UPGRADE-TO-PI-PLAN §4-§5): pi-mono is the agent loop the
-# chat service drives via payload/agent/pi-mono-bridge.mjs. Pinned the
-# same way as pi-ai — the exact version is in
-# payload/agent/pi-mono.version so version bumps land as deliberate
-# PRs with their own smoke evidence.
+# pi-mono is the agent loop the chat service drives via
+# payload/agent/pi-mono-bridge.mjs. Pinned the same way as pi-ai —
+# the exact version is in payload/agent/pi-mono.version so version
+# bumps land as deliberate PRs with their own smoke evidence.
 PI_MONO_VERSION="$(tr -d '[:space:]' < "${PAYLOAD_DIR}/agent/pi-mono.version")"
 if [[ -z "${PI_MONO_VERSION}" ]]; then
   die "payload/agent/pi-mono.version is empty; refusing to install pi-mono unpinned." 1
@@ -1343,15 +1340,15 @@ for f in server.py providers.py policy.py audit.py runner.py history.py tools.py
   install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
     "${PAYLOAD_DIR}/agent/${f}" "${ZOMBIE_DIR}/agent/${f}"
 done
-# Phase 1 (UPGRADE-TO-PI-PLAN §4): the pi-ai bridge and its version pin
-# travel with the Python sources so providers.py can find them at the
-# default path. Bridge is read-only; only root mutates the agent tree.
+# The pi-ai bridge and its version pin travel with the Python sources
+# so providers.py can find them at the default path. Bridge is
+# read-only; only root mutates the agent tree.
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/pi-ai-bridge.mjs" "${ZOMBIE_DIR}/agent/pi-ai-bridge.mjs"
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/pi-ai.version" "${ZOMBIE_DIR}/agent/pi-ai.version"
-# Phase 2 (UPGRADE-TO-PI-PLAN §5): pi-mono bridge + version pin live
-# alongside the pi-ai ones for the same reasons.
+# pi-mono bridge + version pin live alongside the pi-ai ones for the
+# same reasons.
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/pi-mono-bridge.mjs" "${ZOMBIE_DIR}/agent/pi-mono-bridge.mjs"
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
@@ -1363,9 +1360,9 @@ install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl" "${ZOMBIE_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl"
 
-# Phase 2 (UPGRADE-TO-PI-PLAN §4.4): render pi-mono runtime configs
-# into /opt/ai-zombie/pi/. Root-owned, world-readable; the chat
-# service reads them but does not need to mutate them.
+# Render pi-mono runtime configs into /opt/ai-zombie/pi/. Root-owned,
+# world-readable; the chat service reads them but does not need to
+# mutate them.
 install -d -m 755 -o root -g root "${ZOMBIE_DIR}/pi"
 install -d -m 750 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${ZOMBIE_DIR}/state/logs" "${ZOMBIE_DIR}/state/pi-mono-sessions"
@@ -1387,11 +1384,10 @@ else
     | install -m 644 /dev/stdin "${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md"
 fi
 
-# Phase 2 (P2.3): snapshot the conversations DB *before* the new
-# chat-service binary runs the schema migration. The migration is
-# additive (forward-only, behind PRAGMA user_version) but a snapshot
-# lets operators roll back to the pre-pi-mono build without losing
-# history. The bak file name embeds the timestamp.
+# Snapshot the conversations DB *before* the chat-service binary runs
+# the schema migration. The migration is additive (forward-only,
+# behind PRAGMA user_version) but a snapshot lets operators roll back
+# without losing history. The bak file name embeds the timestamp.
 if [[ -f "${ZOMBIE_DIR}/state/conversations.db" ]]; then
   _ts="$(date -u +%Y%m%dT%H%M%SZ)"
   cp -a "${ZOMBIE_DIR}/state/conversations.db" \
@@ -1419,11 +1415,11 @@ else
   info "Preserving existing ${ZOMBIE_ETC}/policy.yaml."
 fi
 
-# Phase 3 (UPGRADE-TO-PI-PLAN §6 / P3.1+P3.2): ship the built-in skill
-# catalogue to /opt/ai-zombie/skills/ (root-owned, world-readable) and
-# provision the operator-extensible /etc/ubuntu-zombie/skills.d/ tree
-# with the same mode/owner contract as policy.yaml. Skills are static
-# markdown read at chat-turn time; the loader never mutates them.
+# Ship the built-in skill catalogue to /opt/ai-zombie/skills/
+# (root-owned, world-readable) and provision the operator-extensible
+# /etc/ubuntu-zombie/skills.d/ tree with the same mode/owner contract
+# as policy.yaml. Skills are static markdown read at chat-turn time;
+# the loader never mutates them.
 install -d -m 755 -o root -g root "${ZOMBIE_DIR}/skills"
 if [[ -d "${PAYLOAD_DIR}/agent/skills" ]]; then
   shopt -s nullglob
