@@ -10,6 +10,10 @@ file under `payload/etc/`, and the logrotate config under
 It is structured so an AI agent can process each entry independently
 and in priority order.
 
+> **Status:** all entries in this document have been remediated. Each
+> entry now ends with a short **fix summary** describing the
+> committed change. See the commit history for the exact diff.
+
 ## How to use this document
 
 - Process items in the order they appear (highest impact first).
@@ -68,6 +72,10 @@ and in priority order.
   - From the UI, approve any `sudo` command (e.g. `sudo apt update`)
     and confirm `exit 0` plus real output in the result panel.
   - `make lint` (no shell scripts changed, but keep the gate green).
+- **fix summary**: Removed `NoNewPrivileges=true` from
+  `payload/systemd/ubuntu-zombie-chat.service`. Replaced it with a
+  comment block explaining that sudo elevation is required by design
+  and the policy gate is the security boundary.
 
 ### FIX-3-02 — Service fails to start when `ZOMBIE_CHAT_PORT` is unset
 
@@ -98,6 +106,10 @@ and in priority order.
     ubuntu-zombie-chat`.
   - `systemctl is-active ubuntu-zombie-chat` returns `active` and the
     UI is reachable on `http://127.0.0.1:7878/`.
+- **fix summary**: Added `Environment=ZOMBIE_CHAT_PORT=7878` to the
+  `[Service]` block so the unit starts even when the operator has not
+  set the variable in `/opt/ai-zombie/secrets/env`. The explicit
+  `--port` argument is kept.
 
 ### FIX-3-03 — `find` is classified as `read_only` and auto-executes destructive variants
 
@@ -133,6 +145,13 @@ and in priority order.
     find" and confirm an approval prompt appears (with the
     destructive-confirmation phrase) instead of immediate execution.
   - `make test` (smoke tests still pass).
+- **fix summary**: Removed `find` from the `read_only` regex group in
+  `payload/etc/policy.yaml`. Added a `destructive` rule that matches
+  `find` with `-delete`, `-exec*`, `-ok*`, or `-fprint*` flags (ahead
+  of every other `find` rule), and a `read_only` rule for `^find\b`
+  guarded by a negative-look-ahead that excludes those same flags.
+  Verified `classify("find / -name '*.log' -delete") == "destructive"`
+  and `classify("find . -type f") == "read_only"`.
 
 ---
 
@@ -164,6 +183,10 @@ and in priority order.
     and confirm `echo $?` is non-zero.
   - `make lint` (shellcheck stays clean).
   - On a healthy machine, re-run and confirm `echo $?` is 0.
+- **fix summary**: On the giving-up path the script now writes a
+  sentinel file at `${HOME}/.cache/ubuntu-zombie/playwright-failed`
+  and `exit 1`s. On a successful install (any iteration) the sentinel
+  is cleared. Failure messages now go to `stderr`.
 
 ### FIX-3-05 — `runner.run()` crashes on commands with unbalanced quotes
 
@@ -191,6 +214,11 @@ and in priority order.
     returns a `CommandResult` with `exit_code != 0` and no exception
     bubbling out.
   - `make test`.
+- **fix summary**: Wrapped the `shlex.split` call in
+  `_propose_follow_ups` in `try/except ValueError`; on failure it
+  falls back to a plain whitespace split. The function never raises
+  now, so `run()` always returns a `CommandResult` even for malformed
+  input.
 
 ### FIX-3-06 — Logrotate config hard-codes `agent` user/group
 
@@ -221,6 +249,11 @@ and in priority order.
     /etc/logrotate.d/ubuntu-zombie` and confirm
     `/var/log/ubuntu-zombie/audit.log` is owned by `zombie:zombie`.
   - Generate any chat event and confirm a new line is appended.
+- **fix summary**: Changed the `create` directive to use the
+  `__AGENT_USER__` placeholder. Updated `scripts/install.sh` to run
+  the same `sed` substitution over `payload/logrotate/ubuntu-zombie`
+  that it already runs over the systemd units before installing into
+  `/etc/logrotate.d/ubuntu-zombie`.
 
 ### FIX-3-07 — `_render_index` instantiates a provider client on every page load
 
@@ -251,6 +284,11 @@ and in priority order.
   - `time curl -s http://127.0.0.1:7878/ > /dev/null` is consistently
     < 50 ms after the change.
   - `make test`.
+- **fix summary**: Added a side-effect-free `provider_status()` helper
+  to `payload/agent/providers.py` that returns `(name, status_text)`
+  by inspecting environment variables only (no SDK client
+  construction). `_render_index` now calls it instead of
+  `provider_from_env()`.
 
 ### FIX-3-08 — Secrets are loaded into the process environment before the safe-mode check
 
@@ -274,6 +312,9 @@ and in priority order.
     refusal-to-start message and no environment dump containing
     `OPENAI_API_KEY=…`.
   - Restore `chmod 0600` and confirm normal startup.
+- **fix summary**: Swapped the call order in `main()` so
+  `assert_secrets_safe()` runs before `load_secrets_env()`. Secrets
+  are no longer pushed into `os.environ` on the refusal-to-start path.
 
 ---
 
@@ -302,6 +343,10 @@ and in priority order.
   - Add a `tests/smoke.sh python` check or a quick REPL run:
     `extract_commands("```bash\r\nls\r\n```")` returns `["ls"]`.
   - `make test`.
+- **fix summary**: Combined with FIX-3-24. The `_BASH_BLOCK` regex is
+  now `r"```(?:bash|sh|shell|console|text)?[ \t]*\r?\n(.*?)```"` —
+  accepts CRLF, optional trailing whitespace, and a wider language
+  allow-list (or none). Verified with `extract_commands("```bash\r\nls\r\n```")`.
 
 ### FIX-3-10 — `extract_commands` splits multi-line commands across line continuations
 
@@ -330,6 +375,11 @@ and in priority order.
     `extract_commands("```bash\necho a \\\\\n  b\n```")` returns
     `["echo a   b"]` (or whatever the chosen contract is).
   - `make test`.
+- **fix summary**: Chose the join-lines contract. Added
+  `_join_continuations()` in `payload/agent/server.py` that (1) folds
+  trailing-`\` continuations, and (2) treats any block containing a
+  here-doc (`<<EOF` style) as a single logical command sent through
+  the policy gate as a unit. `extract_commands` now delegates to it.
 
 ### FIX-3-11 — `audit.redact` rewrites `:` separators as `=`
 
@@ -353,6 +403,11 @@ and in priority order.
   - REPL: `redact("Authorization: ******")` returns
     `"Authorization: ***REDACTED***"` (colon preserved).
   - `make test`.
+- **fix summary**: Pulled the separator into its own capture group:
+  `r"(?i)(api[_-]?key|token|password|secret)(\s*[:=]\s*)\S+"` with
+  replacement `r"\1\2***REDACTED***"`. Verified that `password: hunter2`
+  becomes `password: ***REDACTED***` (colon and space preserved) and
+  `api_key=sk-…` becomes `api_key=***REDACTED***`.
 
 ### FIX-3-12 — `extract_commands` always strips leading `#` lines, even inside multi-line bodies
 
@@ -377,6 +432,10 @@ and in priority order.
   comments.
 - **validation**: Covered by FIX-3-10's regression tests once the
   contract is decided.
+- **fix summary**: With the multi-line contract from FIX-3-10, the
+  `#` filter in `_join_continuations` only fires for single-line
+  commands. A multi-line block that begins with `#!/usr/bin/env bash`
+  is therefore preserved verbatim instead of being silently stripped.
 
 ### FIX-3-13 — `load_secrets_env` does not understand `export FOO=bar` or trailing comments
 
@@ -403,6 +462,11 @@ and in priority order.
     # for testing` results in `os.environ["OPENAI_API_KEY"] ==
     "sk-test"`.
   - `make test`.
+- **fix summary**: `load_secrets_env` now strips a leading `export `
+  token before partitioning on `=`, and trims an unquoted trailing
+  `# …` comment from the value. Values opened with `'`/`"` are
+  delimited by the matching quote, so `#` inside quoted values is
+  preserved. Verified with an env file that mixes both shapes.
 
 ### FIX-3-14 — Policy mtime cache loses sub-second edits
 
@@ -425,6 +489,10 @@ and in priority order.
   - REPL: write file, `load_policy()`, write again immediately,
     `load_policy()` reflects the second write.
   - `make test`.
+- **fix summary**: Cache key is now `(st.st_mtime_ns, st.st_size)`
+  instead of `st.st_mtime` (seconds). Two writes inside the same FS
+  tick are distinguished as long as the size changes or the
+  nanosecond mtime advances.
 
 ### FIX-3-15 — `audit._ensure_log` permission depends on the process umask
 
@@ -451,6 +519,11 @@ and in priority order.
     `stat -c %a /var/log/ubuntu-zombie/audit.log` returns `640`
     irrespective of `umask`.
   - `make test`.
+- **fix summary**: `_ensure_log` now explicitly `os.chmod(AUDIT_PATH,
+  0o640)` after the `touch`, wrapped in a try/except so a chmod
+  failure on a foreign-owned file (post-rotate) does not break
+  logging — the open-for-append below will surface a clearer error
+  if the file really is unwritable.
 
 ### FIX-3-16 — `runner.run` uses a login shell (`bash -lc`), which is heavy and noisy
 
@@ -476,6 +549,9 @@ and in priority order.
     MOTD leakage on a machine that has `/etc/motd` configured.
   - Time `run("true")` before and after; expect a noticeable drop.
   - `make test`.
+- **fix summary**: Switched `subprocess.run` to use `["bash", "-c",
+  command]`. The agent's environment is already constructed
+  explicitly via `env={...}`, so no profile sourcing is needed.
 
 ### FIX-3-17 — `history.add_message` commits twice and leaves a window where the row has no title
 
@@ -502,6 +578,11 @@ and in priority order.
     `/api/conversations` repeatedly during the request; the new
     conversation should never appear with an empty title.
   - `make test`.
+- **fix summary**: Rewrote `History.add_message` to take the lock
+  once, run the INSERT and (for `role == "user"`) the conditional
+  `UPDATE conversations SET title = …` through the same connection,
+  and commit once at the end. The intermediate `_execute` (which
+  always commits) is no longer used on this path.
 
 ### FIX-3-18 — `audit.tail` reads the entire audit log into memory
 
@@ -523,6 +604,9 @@ and in priority order.
     lines, time `curl /api/audit`; expect O(n) instead of O(file
     size).
   - `make test`.
+- **fix summary**: `tail()` now streams the file through
+  `collections.deque(fh, maxlen=n)`, keeping at most `n` lines in
+  memory regardless of file size.
 
 ---
 
@@ -552,6 +636,11 @@ and in priority order.
   - REPL: set `ZOMBIE_USER='{bad}'`, import `server`, send a
     `post_message` call; it should not raise.
   - `make test`.
+- **fix summary**: Replaced the two-stage `.format` with a single
+  `render_system_prompt(facts)` helper that performs one
+  `.format(agent_user=AGENT_USER, facts=facts)` call. The template
+  retains both placeholders, no escape-discipline is required, and
+  `AGENT_USER` may contain literal `{`/`}` without raising.
 
 ### FIX-3-20 — `Handler.app` is set as a class attribute, sharing state across servers
 
@@ -573,6 +662,11 @@ and in priority order.
   - Unit-level: construct two `make_handler(app)` instances with
     different apps and confirm each handler class sees its own app.
   - `make test`.
+- **fix summary**: `make_handler` now defines a fresh
+  `class _Handler(Handler): pass` per call and sets `_Handler.app =
+  app` on that subclass. Two `App` instances no longer share handler
+  state. Verified by constructing two apps and asserting
+  `h1 is not h2` and each handler's `app` attribute.
 
 ### FIX-3-21 — `audit-recent -n` does not validate its argument
 
@@ -588,6 +682,11 @@ and in priority order.
   >&2; exit 2; }` before reaching `tail`.
 - **validation**: `audit-recent -n foo` exits 2 with a useful message;
   `audit-recent -n 5` still works.
+- **fix summary**: The `-n` arm of the option parser now requires a
+  positive integer argument and emits a friendly error + usage
+  banner + exit 2 when the value is missing or non-numeric. Verified
+  `audit-recent -n foo` exits 2 with `audit-recent: -n requires a
+  positive integer, got 'foo'`.
 
 ### FIX-3-22 — `health-check` swallows the exit status of the `gui-env xdotool` probe
 
@@ -609,6 +708,10 @@ and in priority order.
   - Rename `${ZOMBIE_DIR}/bin/gui-env` aside, re-run
     `health-check`, confirm the new specific message appears.
   - Restore and re-run.
+- **fix summary**: The desktop check now tests `[[ -x
+  "${ZOMBIE_DIR}/bin/gui-env" ]]` first. When the helper is missing
+  it emits `gui-env helper missing at … (re-run scripts/install.sh)`
+  and skips the xdotool probe entirely.
 
 ### FIX-3-23 — `collect-diagnostics` leaks the bundle directory if `tar` fails
 
@@ -629,6 +732,10 @@ and in priority order.
     force tar failure); the script exits non-zero and leaves no
     `ubuntu-zombie-diagnostics-*` directory behind.
   - `make lint`.
+- **fix summary**: Added `trap 'rm -rf "${BUNDLE_DIR}"' EXIT`
+  immediately after `BUNDLE_DIR=…` and dropped the explicit cleanup
+  at the bottom. The staging directory is now removed on success,
+  signal, and tar failure alike.
 
 ### FIX-3-24 — `extract_commands` regex does not anchor the language tag
 
@@ -647,6 +754,12 @@ and in priority order.
   prompt that the assistant should still prefer ` ```bash `.
 - **validation**: REPL — `extract_commands("```\nls\n```")` returns
   `["ls"]`; `extract_commands("```console\nls\n```")` returns `["ls"]`.
+- **fix summary**: Folded into the FIX-3-09 edit. The fence regex is
+  now `r"```(?:bash|sh|shell|console|text)?[ \t]*\r?\n(.*?)```"` —
+  the language tag is optional and includes `console`/`text` in
+  addition to the existing shell variants. Verified
+  `extract_commands("```\nls\n```")` and
+  `extract_commands("```console\nls\n```")` both return `["ls"]`.
 
 ### FIX-3-25 — `policy.classify` falls back to `system_change` for commands containing newlines
 
@@ -672,6 +785,10 @@ and in priority order.
   - REPL: `policy.classify("ls\nwhoami") == "read_only"` (or whatever
     the chosen contract dictates).
   - `make test`.
+- **fix summary**: Both `_coerce_rules` and `_extract_rules_from_text`
+  now compile their patterns with `re.MULTILINE`, so `^…` anchors in
+  `policy.yaml` match at the start of every line of a multi-line
+  proposal. Verified `classify("ls\nwhoami") == "read_only"`.
 
 ### FIX-3-26 — Bare `rm` / `mv` rules in `policy.yaml` fire on harmless commands
 
@@ -695,6 +812,11 @@ and in priority order.
   - REPL: `policy.classify("git rm foo") == "user_change"`,
     `policy.classify("rm -rf foo") == "system_change"`.
   - `make test`.
+- **fix summary**: Inserted an explicit `\bgit\s+(rm|mv)\b →
+  user_change` rule into `payload/etc/policy.yaml` immediately
+  *before* the bare `\bmv\s+` / `\brm\s+` rules. First-match-wins
+  ordering keeps `git rm`/`git mv` out of `system_change` without
+  changing the classification of plain `rm`. Verified.
 
 ---
 

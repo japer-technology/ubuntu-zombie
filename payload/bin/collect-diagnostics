@@ -8,6 +8,11 @@ STAMP="$(date -u +%Y%m%d-%H%M%S)"
 BUNDLE_DIR="$(mktemp -d "${OUT_DIR}/ubuntu-zombie-diagnostics-${STAMP}.XXXX")"
 TARBALL="${OUT_DIR}/ubuntu-zombie-diagnostics-${STAMP}.tar.gz"
 
+# FIX-3-23: clean up the staging directory on every exit path (tar
+# failure, signal, success), not just when the explicit `rm -rf` at
+# the bottom is reached.
+trap 'rm -rf "${BUNDLE_DIR}"' EXIT
+
 redact() {
   # Strip token-shaped values from stdin to stdout.
   sed -E \
@@ -64,7 +69,7 @@ fi
 } | redact > "${BUNDLE_DIR}/packages.txt"
 
 tar -czf "${TARBALL}" -C "$(dirname "${BUNDLE_DIR}")" "$(basename "${BUNDLE_DIR}")"
-rm -rf "${BUNDLE_DIR}"
+# FIX-3-23: the EXIT trap removes BUNDLE_DIR; no explicit rm here.
 
 echo
 echo "Diagnostic bundle: ${TARBALL}"

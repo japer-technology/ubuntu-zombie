@@ -13,6 +13,7 @@ import re
 import threading
 import time
 import uuid
+from collections import deque
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -24,8 +25,12 @@ _REDACTORS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{12,}"), "sk-ant-***REDACTED***"),
     (re.compile(r"tskey-[A-Za-z0-9_-]{12,}"), "tskey-***REDACTED***"),
     (re.compile(r"ssh-(rsa|ed25519|dss)\s+[A-Za-z0-9+/=]{20,}"), "ssh-*** REDACTED ***"),
-    (re.compile(r"(?i)(api[_-]?key|token|password|secret)\s*[:=]\s*\S+"),
-     r"\1=***REDACTED***"),
+    # FIX-3-11: capture the separator (``:`` or ``=``) so the
+    # redacted line preserves the original syntax — otherwise
+    # ``Authorization: ...`` gets rewritten to ``Authorization=...``
+    # and audit-log greps for ``Authorization: Bearer`` find nothing.
+    (re.compile(r"(?i)(api[_-]?key|token|password|secret)(\s*[:=]\s*)\S+"),
+     r"\1\2***REDACTED***"),
     (re.compile(r"-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]+?-----END [A-Z ]+PRIVATE KEY-----"),
      "***REDACTED PRIVATE KEY***"),
 )
@@ -51,6 +56,17 @@ def _ensure_log() -> None:
     AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
     if not AUDIT_PATH.exists():
         AUDIT_PATH.touch(mode=0o640)
+    # FIX-3-15: ``Path.touch(mode=...)`` is masked by the process
+    # umask, so a fresh file under a stock ``umask 022`` ends up at
+    # 0o620 (group-writable but not readable). Force the intended mode
+    # explicitly. Ownership is the operator's job (systemd ``User=``).
+    try:
+        os.chmod(AUDIT_PATH, 0o640)
+    except OSError:
+        # The log may be owned by another user (post-rotate). The
+        # write below will fail with a clearer error if it really is
+        # unwritable; do not raise from the permission tweak itself.
+        pass
 
 
 def log_event(event_type: str, **fields: Any) -> str:
@@ -74,10 +90,14 @@ def tail(n: int = 25) -> list[dict[str, Any]]:
     """Return up to ``n`` most recent audit entries as parsed dicts."""
     if not AUDIT_PATH.exists():
         return []
+    # FIX-3-18: stream the file through a bounded ``deque`` rather than
+    # slurping the whole thing into memory. The audit log can be tens
+    # of MB on a busy machine and ``/api/audit`` hits this on every
+    # page load.
     with AUDIT_PATH.open("r", encoding="utf-8", errors="replace") as fh:
-        lines = fh.readlines()
+        lines = list(deque(fh, maxlen=max(n, 0)))
     out: list[dict[str, Any]] = []
-    for raw in lines[-n:]:
+    for raw in lines:
         raw = raw.strip()
         if not raw:
             continue

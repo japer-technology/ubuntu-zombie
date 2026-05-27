@@ -62,7 +62,13 @@ fi
 
 # Desktop / display
 if [[ -n "${DISPLAY:-}" ]]; then
-  if "${ZOMBIE_DIR}/bin/gui-env" xdotool getdisplaygeometry >/dev/null 2>&1; then
+  # FIX-3-22: distinguish "gui-env helper missing" (installer never
+  # ran / payload only) from "helper present but xdotool failed" so
+  # the operator gets a useful pointer instead of a misleading
+  # xdotool message.
+  if [[ ! -x "${ZOMBIE_DIR}/bin/gui-env" ]]; then
+    check_warn "gui-env helper missing at ${ZOMBIE_DIR}/bin/gui-env (re-run scripts/install.sh)"
+  elif "${ZOMBIE_DIR}/bin/gui-env" xdotool getdisplaygeometry >/dev/null 2>&1; then
     check_ok "desktop reachable on ${DISPLAY}"
   else
     check_warn "DISPLAY=${DISPLAY} but xdotool failed (desktop session may not be live)"

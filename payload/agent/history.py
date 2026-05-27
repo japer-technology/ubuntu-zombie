@@ -70,25 +70,31 @@ class History:
 
     def add_message(self, conversation_id: int, role: str, content: str,
                     meta: dict[str, Any] | None = None) -> int:
-        cur = self._execute(
-            "INSERT INTO messages(conversation_id, created_at, role, content, meta) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (conversation_id, time.time(), role, content,
-             json.dumps(meta or {}, ensure_ascii=False)),
-        )
-        # Auto-title from first user message if untitled.
+        # FIX-3-17: insert + (conditional) title update must run in a
+        # single transaction. Otherwise another reader can land between
+        # the two commits and see a conversation with messages but
+        # ``title = ''`` — which the UI then caches forever as
+        # "(untitled)".
+        meta_json = json.dumps(meta or {}, ensure_ascii=False)
         with self._lock:
-            row = self._conn.execute(
-                "SELECT title FROM conversations WHERE id = ?",
-                (conversation_id,),
-            ).fetchone()
-            if row and not row[0] and role == "user":
-                self._conn.execute(
-                    "UPDATE conversations SET title = ? WHERE id = ?",
-                    (content[:60], conversation_id),
-                )
-                self._conn.commit()
-        return int(cur.lastrowid or 0)
+            cur = self._conn.execute(
+                "INSERT INTO messages(conversation_id, created_at, role, "
+                "content, meta) VALUES (?, ?, ?, ?, ?)",
+                (conversation_id, time.time(), role, content, meta_json),
+            )
+            message_id = int(cur.lastrowid or 0)
+            if role == "user":
+                row = self._conn.execute(
+                    "SELECT title FROM conversations WHERE id = ?",
+                    (conversation_id,),
+                ).fetchone()
+                if row and not row[0]:
+                    self._conn.execute(
+                        "UPDATE conversations SET title = ? WHERE id = ?",
+                        (content[:60], conversation_id),
+                    )
+            self._conn.commit()
+        return message_id
 
     def get_messages(self, conversation_id: int) -> list[dict[str, Any]]:
         with self._lock:

@@ -26,7 +26,14 @@ def _propose_follow_ups(command: str, exit_code: int) -> list[str]:
     the result of ``command``."""
     follow_ups: list[str] = []
     head = command.split(None, 1)[0] if command.strip() else ""
-    tokens = shlex.split(command, posix=True) if command.strip() else []
+    try:
+        # FIX-3-05: shlex.split raises ValueError on unbalanced quotes
+        # (e.g. ``apt install "foo``). _propose_follow_ups must never
+        # raise — fall back to a naive whitespace split so the audit
+        # event still records something useful.
+        tokens = shlex.split(command, posix=True) if command.strip() else []
+    except ValueError:
+        tokens = command.split() if command.strip() else []
 
     if head in {"apt", "apt-get"} and len(tokens) > 1 and tokens[1] in {"install", "remove", "purge"}:
         for pkg in tokens[2:]:
@@ -64,7 +71,13 @@ def run(command: str, *, timeout: int = DEFAULT_TIMEOUT, cwd: str | None = None,
     start = time.monotonic()
     try:
         completed = subprocess.run(  # noqa: S602 - the policy gate vetted this
-            ["bash", "-lc", command],
+            # FIX-3-16: use ``-c`` not ``-lc``. A login shell sources
+            # /etc/profile, profile.d/*, and ~/.bash_profile for every
+            # command — adds 50-200 ms, can change PATH unexpectedly,
+            # and leaks MOTD lines into stderr (and thus the
+            # assistant's context). The environment is already
+            # constructed explicitly below.
+            ["bash", "-c", command],
             capture_output=True,
             text=True,
             timeout=timeout,
