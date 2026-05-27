@@ -65,11 +65,41 @@ cases = {
     "cat data | tee /dev/stderr": "read_only",
     "grep needle file 2>&1 >/dev/null": "read_only",
     "find /tmp -name x -delete": "destructive",
+    # Phase 0 / P0.1 (UPGRADE-TO-PI-PLAN §3): argv-aware classifier
+    # strips leading ``VAR=value`` env prefixes and ``sudo`` flags
+    # before rule matching, so the canonical argv is what gets
+    # classified.
+    "LC_ALL=C ls /etc": "read_only",
+    "FOO=bar apt-get install pkg": "system_change",
+    "sudo apt install foo": "system_change",
+    "sudo -u zombie ls /tmp": "read_only",
+    "sudo -E systemctl restart sshd": "network_change",
+    # Quoted destructive path is now caught because rules see the
+    # de-quoted argv (the historical regex-only matcher missed it).
+    'rm -rf "/tmp/some file"': "destructive",
+    # Phase 0 / P0.2: unknown commands fall through to the
+    # fail-closed default (``destructive``) instead of auto-running.
+    "foozle --bar": "destructive",
+    "sudo foozle --bar": "destructive",
+    "echo a && echo b": "destructive",
 }
 for command, want in cases.items():
     got = p.classify(command)
     if got != want:
         raise SystemExit(f"classify({command!r}) = {got!r}, want {want!r}")
+
+# Phase 0 / P0.3: sudo allow-list keeps common privileged targets at
+# ``system_change`` rather than escalating them via the fail-closed
+# default. ``foozle`` (not in the list) escalates; ``apt`` (in the
+# list) does not.
+assert "apt" in p.sudo_allow_list, p.sudo_allow_list
+assert "foozle" not in p.sudo_allow_list, p.sudo_allow_list
+if p.default_class != "destructive":
+    raise SystemExit(f"fail-closed default class regressed: {p.default_class!r}")
+# An unknown command must require operator approval (the canary that
+# P0.2 calls for).
+if not p.requires_approval(p.classify("foozle --bar")):
+    raise SystemExit("fail-closed default no longer requires approval")
 
 # Fence parsing regressions: CRLF, mixed line endings, and blank
 # language tags should still feed extracted commands to the policy gate.

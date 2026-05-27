@@ -11,7 +11,41 @@
 
 settings:
   destructive_confirmation: "yes, I understand this is destructive"
-  default_class: system_change  # used when no rule matches
+  # Phase 0 / P0.2 (UPGRADE-TO-PI-PLAN §3): unknown commands fall
+  # through to the highest gated class so they cannot auto-run.
+  # Operators may relax this once a workflow is proven safe; the
+  # ``sudo_allow_list:`` block below keeps common privileged commands
+  # at ``system_change`` despite the conservative default.
+  default_class: destructive
+
+# Phase 0 / P0.3 (UPGRADE-TO-PI-PLAN §3): curated ``sudo`` targets
+# pre-classified as ``system_change``. The standard approval prompt
+# still fires for these — they do not auto-run — but they are not
+# escalated to ``destructive`` by the fail-closed default above. Add
+# entries only after confirming the underlying program is safe to
+# elevate. Entries are matched against the basename of the program
+# that ``sudo`` invokes (after its own flags are stripped).
+sudo_allow_list:
+  - apt
+  - apt-get
+  - dpkg
+  - snap
+  - systemctl
+  - service
+  - journalctl
+  - ufw
+  - tailscale
+  - mkdir
+  - mv
+  - cp
+  - chmod
+  - chown
+  - chgrp
+  - tee
+  - sed
+  - install
+  - update-grub
+  - update-initramfs
 
 classes:
   read_only:

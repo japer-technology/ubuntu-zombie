@@ -103,6 +103,28 @@ destructive confirmation phrase. See `ARCHITECTURE.md` for the action
 classes. The chat service reloads the policy on every request — no
 restart needed.
 
+### Fail-closed default
+
+`settings.default_class` is the classification used when no rule
+matches a proposed command. Starting with Phase 0 of
+[`docs/UPGRADE-TO-PI-PLAN.md`](UPGRADE-TO-PI-PLAN.md), the shipped
+default is `destructive` — the highest gated class — so unknown
+commands cannot auto-run. Operators may relax this to a lower class
+once a workflow is proven safe.
+
+### Sudo allow-list
+
+`sudo_allow_list:` (a top-level list of program names) keeps common
+privileged commands at `system_change` despite the conservative
+fail-closed default. The standard approval prompt still fires for
+these — they do not auto-run — but they are not escalated to
+`destructive`. Entries are matched against the basename of the
+program that `sudo` invokes (after `sudo` consumes its own flags), so
+`sudo apt install foo`, `sudo -u root systemctl restart sshd`, and
+`sudo -E /usr/bin/apt update` are all classified by the entries for
+`apt` and `systemctl`. Add entries only after confirming the
+underlying program is safe to elevate.
+
 ## Tailscale
 
 By default the installer enrols the machine into your Tailscale tailnet

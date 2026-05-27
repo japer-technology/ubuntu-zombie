@@ -15,6 +15,22 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `ZOMBIE_USER` env var to choose the local Linux account name used as
   the operating identity of the AI Systems Administrator. The legacy
   `AGENT_USER` is still honoured as a backward-compatible alias.
+- Phase 0 of `docs/UPGRADE-TO-PI-PLAN.md` (the security prerequisites
+  Phase 2 depends on):
+  - **P0.1** Argv-aware classifier in `payload/agent/policy.py`. The
+    classifier now splits pipelines/sequences, strips leading
+    `VAR=value` env prefixes and `sudo` flags, and re-applies every
+    rule to the canonical argv in addition to the rendered whole
+    command. This catches `LC_ALL=C ls`, `sudo -u root systemctl …`,
+    and `rm -rf "/quoted path"` that the legacy regex-only matcher
+    missed.
+  - **P0.2** Fail-closed default: `settings.default_class` ships as
+    `destructive` so unknown commands cannot auto-run. Documented in
+    `docs/CONFIGURATION.md`.
+  - **P0.3** `sudo_allow_list:` in `payload/etc/policy.yaml` keeps
+    common privileged targets (`apt`, `systemctl`, `ufw`, `tailscale`,
+    …) at `system_change` despite the conservative default. Documented
+    in `docs/CONFIGURATION.md`.
 
 ### Changed
 - The agent account created by the installer is now called `zombie` by
