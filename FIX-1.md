@@ -52,6 +52,13 @@ independently and in priority order.
   - `make lint` (shellcheck stays clean).
   - On a fresh Ubuntu 24.04 VM, run `sudo ./scripts/install.sh` end-to-end and
     confirm `${ZOMBIE_DIR}/tools/browser-test.py` prints a page title.
+- **status**: **fixed**. The Python runtime section in `scripts/install.sh`
+  (around lines 1045–1121) now runs `python -m playwright install-deps chromium`
+  as root via the agent venv's interpreter (`${AGENT_HOME}/agent-env/bin/python`)
+  with retry/backoff, _before_ the unprivileged `runuser` block. The
+  `runuser`-as-${AGENT_USER} block then only calls `python -m playwright install
+  chromium` (no `--with-deps`), so apt-get is no longer invoked as a non-root
+  user. `make lint` and `make test` both pass.
 
 ---
 
@@ -75,6 +82,11 @@ independently and in priority order.
     sources the function and calls it against a temp file without trailing
     newline; assert two distinct lines result.
   - `make test`.
+- **status**: **fixed**. `append_line_once` in `scripts/install.sh` (lines
+  240–252) now checks `tail -c1 "$file"` and prepends a `printf '\n'` when the
+  file is non-empty and does not already end in a newline, then writes the new
+  entry with `printf '%s\n'` (no `echo`). A previously truncated last key can no
+  longer be glued to the newly added key. `make lint` and `make test` pass.
 
 ---
 
@@ -96,6 +108,13 @@ independently and in priority order.
     `\n` and re-run the SSH-key block (or a targeted test) — confirm the
     "already authorized" path is taken.
   - `make test`.
+- **status**: **fixed**. `scripts/install.sh` line 762 now computes
+  `EXISTING_KEYS="$(awk 'END{print NR}' "${AGENT_HOME}/.ssh/authorized_keys"
+  2>/dev/null || echo 0)"`, so a single key without a trailing newline is
+  correctly counted as 1. The interactive prompt now reports "already
+  authorized" instead of asking for a fresh key, and `ZOMBIE_NONINTERACTIVE=1`
+  no longer aborts with exit 64 when a usable key is already on disk. `make
+  lint` and `make test` pass.
 
 ---
 
