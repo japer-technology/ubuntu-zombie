@@ -1354,12 +1354,15 @@ apt_install nodejs
 # `require('lib/commands/install.js')`: modern npm loads reify-finish /
 # reify-output / arborist lazily inside the install command's `exec()`,
 # so a top-level require of install.js resolves cleanly even when the
-# transitive bundled deps are missing. Probe directly instead by reading
-# the bundled `bundleDependencies` list from npm's own package.json and
-# confirming every entry has a real directory under node_modules/. That
-# matches the real failure mode (see error logs referencing
-# `Cannot find module 'promise-retry'` from reify-output.js) and catches
-# any other missing bundled module the same way.
+# transitive bundled deps are missing. Probe directly instead by walking
+# every package under npm's bundled node_modules tree and confirming
+# each one's `dependencies` are resolvable via Node's module resolution
+# from the depending package's directory. That matches the real failure
+# mode (see error logs referencing `Cannot find module 'promise-retry'`
+# loaded from @npmcli/arborist/lib/arborist/rebuild.js, where
+# `promise-retry` is a *transitive* bundled dep — not in npm's top-level
+# `bundleDependencies`) and catches any other missing bundled module
+# anywhere in the bundled tree the same way.
 npm_bundled_broken() {
   if ! npm --version >/dev/null 2>&1; then
     return 0
@@ -1370,18 +1373,57 @@ npm_bundled_broken() {
   node -e '
     const fs = require("fs");
     const path = require("path");
+    const Module = require("module");
     const root = process.argv[1];
-    const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
-    const deps = pkg.bundleDependencies || pkg.bundledDependencies || [];
-    const list = Array.isArray(deps) ? deps : Object.keys(deps);
-    const missing = list.filter(name => {
+    const missing = [];
+    function walk(dir) {
+      let entries;
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch (_) {
+        return;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (entry.name.startsWith("@")) {
+          walk(path.join(dir, entry.name));
+          continue;
+        }
+        const pkgDir = path.join(dir, entry.name);
+        const pkgJson = path.join(pkgDir, "package.json");
+        let pkg;
+        try {
+          pkg = JSON.parse(fs.readFileSync(pkgJson, "utf8"));
+        } catch (_) {
+          continue;
+        }
+        const deps = Object.keys(pkg.dependencies || {});
+        for (const dep of deps) {
+          try {
+            Module.createRequire(path.join(pkgDir, "package.json")).resolve(dep);
+          } catch (_) {
+            missing.push(pkg.name + " -> " + dep);
+          }
+        }
+        const nested = path.join(pkgDir, "node_modules");
+        if (fs.existsSync(nested)) walk(nested);
+      }
+    }
+    walk(path.join(root, "node_modules"));
+    // Also verify npms own top-level bundleDependencies actually exist
+    // on disk; createRequire from npm/package.json would pick up
+    // globally-installed siblings in /usr/lib/node_modules, masking the
+    // missing-bundled-dir case.
+    const npmPkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+    const bundle = npmPkg.bundleDependencies || npmPkg.bundledDependencies || [];
+    const bundleList = Array.isArray(bundle) ? bundle : Object.keys(bundle);
+    for (const name of bundleList) {
       try {
         fs.statSync(path.join(root, "node_modules", name, "package.json"));
-        return false;
       } catch (_) {
-        return true;
+        missing.push("npm -> " + name);
       }
-    });
+    }
     if (missing.length) {
       console.error("missing bundled npm modules: " + missing.join(", "));
       process.exit(1);
