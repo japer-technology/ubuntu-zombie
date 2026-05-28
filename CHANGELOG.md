@@ -7,6 +7,78 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **`install.sh --dry-run`.** Prints the agent user, install root,
+  package groups, file paths, and firewall rules that a real
+  `install` would change, then exits without modifying the host.
+  Works without `sudo`. Usable for change review before granting
+  privilege.
+- **Step-trace log on installer failure.** A failed
+  `scripts/install.sh install` now records the completed sections in
+  `<log-file>.steps` and prints the last five plus a recovery hint
+  in the error footer, so an operator pasting the failure into an
+  issue has both the line number and the install phase.
+- **`.deb` packaging.** `make deb` (or `bash scripts/build-deb.sh`)
+  produces an installable `ubuntu-zombie_<version>_all.deb` under
+  `dist/`. The package stages the source tree under
+  `/usr/share/ubuntu-zombie/` and exposes a wrapper at
+  `/usr/sbin/ubuntu-zombie`. It deliberately does NOT run the
+  installer at apt time. The `prerm` refuses to remove the package
+  while the host is still set up (override with
+  `UBUNTU_ZOMBIE_FORCE_REMOVE=1`). `debian/` skeleton committed.
+- **Signed releases.** `.github/workflows/release.yml` builds the
+  source tarball, the `.deb`, an SPDX-JSON SBOM (Syft), per-artifact
+  cosign keyless signatures, and `SHA256SUMS`, and uploads everything
+  to the matching GitHub Release. Release notes include the cosign
+  verify-blob snippet.
+- **OpenSSF Scorecard, CodeQL, dependency-review.** New
+  `.github/workflows/{codeql,dependency-review,scorecard}.yml`
+  cover the Python agent code, the npm bridges, and PR-time
+  dependency checks. Scorecard publishes the SARIF for the badge in
+  README.
+- **CI matrix.** `ci.yml` now runs lint + smoke + pytest on both
+  Ubuntu 22.04 (Python 3.10) and Ubuntu 24.04 (Python 3.12). All
+  third-party actions are pinned to commit SHAs with the
+  human-readable tag in a trailing comment.
+- **Integration workflow.** `.github/workflows/integration.yml`
+  exercises `scripts/install.sh install --dry-run` on
+  `ubuntu-22.04` and `ubuntu-24.04` runners nightly and on demand,
+  plus a container-based smoke run.
+- **`secrets-edit` backup-on-edit.** A timestamped backup of
+  `/opt/ai-zombie/secrets/env` (mode 600, owned by the agent user)
+  is written to `/opt/ai-zombie/secrets/backups/` every time the
+  editor is opened. The ten most recent are kept; older backups are
+  pruned. Empty saves trigger a roll-back hint.
+- **Pre-commit hooks.** `.pre-commit-config.yaml` wires up
+  shellcheck, shfmt, ruff (+ formatter), standard hygiene hooks,
+  and the smoke `syntax`/`python`/`standards` blocks so local
+  commits get the same checks CI runs. `ruff.toml` lives at the
+  repository root.
+- **`pytest` regression suite.** `tests/python/` mirrors the policy
+  classification and audit-redaction blocks from `tests/smoke.sh
+  python` with a real pytest layout so individual cases can be run
+  with `-k`. Both runners stay in CI: smoke is the safety net,
+  pytest is the readable surface.
+- **Docs.**
+  - [`docs/PLATFORMS.md`](docs/PLATFORMS.md) — supported Ubuntu
+    versions, architectures, and what is explicitly unsupported.
+  - [`docs/FAQ.md`](docs/FAQ.md) — quick answers distilled from
+    TROUBLESHOOTING and SECURITY.
+  - [`docs/UPGRADING.md`](docs/UPGRADING.md) — version-by-version
+    upgrade notes.
+  - [`SUPPORT.md`](SUPPORT.md) — discussions vs. issues vs.
+    security disclosure routing.
+  - [`RELEASE.md`](RELEASE.md) — release cut process for
+    maintainers.
+  - Research notes under `docs/ALTERNATIVE-*.md`,
+    `docs/ALTERNATIVES*.md`, and `docs/SIMILAR.md` moved to
+    `docs/research/` with a stub README so the user-facing TOC is
+    shorter.
+  - README gains CI, CodeQL, Scorecard, Latest-release, and
+    Ubuntu-LTS badges and a `.deb` install snippet.
+  - TROUBLESHOOTING gains a table mapping symptoms to
+    `repair`-vs-`install` fixes.
+
 ### Fixed
 - **Installer Node runtime.** `scripts/install.sh` now installs
   Node.js 22.x from the official NodeSource apt repository instead

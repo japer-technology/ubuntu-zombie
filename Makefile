@@ -5,7 +5,7 @@ SHELL := bash
 
 VERSION := $(shell cat VERSION)
 
-.PHONY: help lint test install-local verify package clean
+.PHONY: help lint test install-local verify package deb clean
 
 help:
 	@echo "Targets:"
@@ -14,6 +14,7 @@ help:
 	@echo "  install-local  sudo ./scripts/install.sh install (RUN ON A VM)"
 	@echo "  verify         sudo ./scripts/install.sh verify"
 	@echo "  package        tar a release bundle into dist/"
+	@echo "  deb            build a .deb package into dist/"
 	@echo "  clean          remove dist/ and python caches"
 
 lint:
@@ -46,8 +47,12 @@ package:
 	     scripts payload tests Makefile VERSION \
 	     README.md CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md \
 	     LICENSE .editorconfig \
-	     SECURITY.md docs
+	     SECURITY.md docs debian
 	@echo "Wrote dist/ubuntu-zombie-$(VERSION).tar.gz"
+
+deb:
+	@command -v dpkg-deb >/dev/null || { echo 'install dpkg-dev first (sudo apt install dpkg-dev)' >&2; exit 1; }
+	bash scripts/build-deb.sh
 
 clean:
 	rm -rf dist

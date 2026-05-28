@@ -22,6 +22,35 @@ A timer (`ubuntu-zombie-health.timer`) runs `health-check` 5 minutes
 after boot and every 15 minutes thereafter; its last run is visible in
 `systemctl status ubuntu-zombie-health.service`.
 
+### What does `repair` fix vs. what needs a full `install`?
+
+| Symptom                                                    | Fix                       |
+| ---------------------------------------------------------- | ------------------------- |
+| `secrets/env` owned by root, or mode 0644                  | `sudo install.sh repair`  |
+| `/opt/ai-zombie/` ownership drifted                        | `sudo install.sh repair`  |
+| UFW disabled, or SSH rule missing                          | `sudo install.sh repair`  |
+| `tailscale` logged out (with `TAILSCALE_AUTHKEY` exported) | `sudo install.sh repair`  |
+| `ubuntu-zombie-chat.service` failed                        | `sudo install.sh repair`  |
+| `/opt/ai-zombie/pi/{settings.json,APPEND_SYSTEM.md}` edited or deleted | `sudo install.sh repair`  |
+| `/opt/ai-zombie/skills/*.md` edited or deleted             | `sudo install.sh repair`  |
+| `/etc/ubuntu-zombie/skills.d/` directory removed           | `sudo install.sh repair`  |
+| Agent user missing                                         | `sudo install.sh install` |
+| Sudoers drop-in missing                                    | `sudo install.sh install` |
+| `/opt/ai-zombie/` missing entirely                         | `sudo install.sh install` |
+| `ubuntu-zombie-chat.service` unit file missing             | `sudo install.sh install` |
+| Tailscale binary missing                                   | `sudo install.sh install` |
+| Node, Docker, or apt-managed packages missing              | `sudo install.sh install` |
+| sshd / GDM drop-ins deleted                                | `sudo install.sh install` |
+
+`install` is idempotent and a strict super-set of `repair`: when in
+doubt, run `install`. Use `install --dry-run` first to preview what it
+would do.
+
+`secrets-edit` writes a timestamped backup of `secrets/env` to
+`/opt/ai-zombie/secrets/backups/` before opening the editor and keeps
+the ten most recent. To roll back after a bad edit, see
+[`docs/FAQ.md`](FAQ.md#my-api-key-broke-after-editing--how-do-i-recover).
+
 ---
 
 ## `apt`/`dpkg` is locked
