@@ -1360,11 +1360,38 @@ apt_install nodejs
 # matches the real failure mode (see error logs referencing
 # `Cannot find module 'promise-retry'` from reify-output.js) and catches
 # any other missing bundled module the same way.
+npm_install_root() {
+  local npm_cmd="$1"
+  node -e '
+    const fs = require("fs");
+    const path = require("path");
+    let dir;
+    try {
+      dir = path.dirname(fs.realpathSync(process.argv[1]));
+    } catch (_) {
+      process.exit(1);
+    }
+    while (true) {
+      if (path.basename(dir) === "npm" &&
+          fs.existsSync(path.join(dir, "package.json"))) {
+        console.log(dir);
+        process.exit(0);
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) {
+        process.exit(1);
+      }
+      dir = parent;
+    }
+  ' "${npm_cmd}"
+}
+
 npm_bundled_broken() {
-  if ! npm --version >/dev/null 2>&1; then
+  local npm_cmd npm_root
+  if ! npm_cmd="$(command -v npm)" || ! npm --version >/dev/null 2>&1; then
     return 0
   fi
-  local npm_root="/usr/lib/node_modules/npm"
+  npm_root="$(npm_install_root "${npm_cmd}")" || return 0
   local pkg_json="${npm_root}/package.json"
   [[ -f "${pkg_json}" ]] || return 0
   node -e '
@@ -1391,6 +1418,10 @@ npm_bundled_broken() {
 }
 if npm_bundled_broken; then
   log "Bundled npm is broken (likely missing modules); repairing from nodejs.org tarball."
+  NPM_REPAIR_CMD="$(command -v npm)" || die "npm command missing after nodejs install." 1
+  if ! NPM_REPAIR_ROOT="$(npm_install_root "${NPM_REPAIR_CMD}")"; then
+    die "Could not resolve npm install root for ${NPM_REPAIR_CMD}." 1
+  fi
   NODE_FULL_VERSION="$(node --version | sed 's/^v//')"
   case "${NODE_ARCH}" in
     amd64) NODE_TARBALL_ARCH="x64" ;;
@@ -1409,14 +1440,13 @@ if npm_bundled_broken; then
   ( cd "${NODE_TMP}" && grep " ${NODE_TARBALL}\$" SHASUMS256.txt | sha256sum -c - ) \
     || die "Checksum mismatch for ${NODE_TARBALL} from nodejs.org." 1
   tar -xJf "${NODE_TMP}/${NODE_TARBALL}" -C "${NODE_TMP}"
-  rm -rf /usr/lib/node_modules/npm
-  cp -a "${NODE_TMP}/${NODE_TARBALL_DIR}/lib/node_modules/npm" \
-    /usr/lib/node_modules/npm
+  rm -rf "${NPM_REPAIR_ROOT}"
+  mkdir -p "$(dirname "${NPM_REPAIR_ROOT}")"
+  cp -a "${NODE_TMP}/${NODE_TARBALL_DIR}/lib/node_modules/npm" "${NPM_REPAIR_ROOT}"
   rm -rf "${NODE_TMP}"
   npm --version >/dev/null \
     || die "npm still broken after repair from nodejs.org tarball." 1
-  npm_bundled_broken \
-    && die "npm bundled modules still incomplete after repair from nodejs.org tarball." 1
+  npm_bundled_broken && die "npm bundled modules still incomplete after repair from nodejs.org tarball." 1
 fi
 
 retry 4 5 -- npm install -g npm@latest
