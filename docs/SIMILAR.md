@@ -35,7 +35,7 @@ Best direct comparables to **Ubuntu Zombie**: **Missy**, **LinuxAgent**, **SysKn
 [9]: https://www.techradar.com/pro/what-is-openclaw?utm_source=chatgpt.com "What is OpenClaw? Agentic AI that can automate any task"
 [10]: https://github.com/MissyLabs/missy "GitHub - MissyLabs/missy: Security-first, self-hosted AI assistant for Linux"
 [11]: https://github.com/OpenInterpreter/open-interpreter "GitHub - OpenInterpreter/open-interpreter: A natural language interface for computers"
-[12]: https://github.com/block/goose "GitHub - block/goose (moved to aaif-goose/goose): a general-purpose AI agent that runs on your machine"
+[12]: https://github.com/aaif-goose/goose "GitHub - aaif-goose/goose (formerly block/goose): a general-purpose AI agent that runs on your machine"
 [13]: https://github.com/cline/cline "GitHub - cline/cline: The open source coding agent in your IDE and terminal"
 [14]: https://github.com/bakks/butterfish "GitHub - bakks/butterfish: A shell with AI superpowers"
 [15]: https://github.com/Cosmicjedi/linux-administration-mcp "GitHub - Cosmicjedi/linux-administration-mcp: SSH-based Linux server management MCP server with audit trails"
