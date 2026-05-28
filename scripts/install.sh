@@ -1454,33 +1454,25 @@ EOF
 apt_get update
 apt_install nodejs
 
-# NodeSource has shipped at least one nodejs package (22.22.2-1nodesource1)
-# whose bundled npm is missing transitive dependencies (e.g. `promise-retry`,
-# required by arborist's rebuild/binlink step), so `npm install -g npm@latest`
-# dies with MODULE_NOT_FOUND before it can self-upgrade
+# Upgrading npm in place is booby-trapped on recent Node releases:
+# `npm install -g npm@latest` makes npm reinstall *itself*, and partway
+# through the reify pipeline it removes its own `node_modules` (including
+# transitive deps such as `promise-retry`) before arborist's rebuild step
+# lazily `require()`s them — so the command dies with
+#   MODULE_NOT_FOUND / Cannot find module 'promise-retry'
 # (see nodejs/node#62425, npm/cli#9151, actions/runner-images#13883).
 #
-# We repair this by overwriting the incomplete bundled npm with the complete
-# one from the official nodejs.org tarball for the exact running Node version,
-# then letting the self-upgrade proceed.
+# This is NOT merely an incomplete-bundle problem: the self-upgrade crashes
+# even when the running npm is complete (verified against the official
+# nodejs.org tarball, which does ship promise-retry). Repairing the bundle
+# and re-running the self-upgrade therefore just re-triggers the same race.
 #
-# The hard part is detecting the breakage reliably. Earlier attempts tried to
-# predict it ahead of time — `npm --version`, requiring the files in the
-# failure stack, or running an inert empty-manifest `--offline` install — but
-# every such probe is fragile: npm requires the missing module only at
-# runtime, deep inside the reify pipeline's rebuild/binlink phase, and only
-# when a real package is actually written to disk. A static `require()` walk,
-# a `--dry-run`, and an empty/offline install can all resolve cleanly while
-# the very next real global install still blows up. Predicting the failure is
-# therefore inherently unreliable.
-#
-# So we stop predicting and instead use the real operation as its own
-# detector: attempt `npm install -g npm@latest`, and if it fails with the
-# unmistakable incomplete-bundle signature (MODULE_NOT_FOUND / "Cannot find
-# module"), repair npm from the tarball and retry. This cannot false-negative,
-# because the thing we are guarding is the thing we run. The crash happens
-# mid-reify, before the new npm is moved into place, so a failed attempt
-# leaves nothing global half-written.
+# So we never ask npm to upgrade itself. Instead we fetch the latest npm
+# release straight from the npm registry — whose published tarball bundles
+# all of npm's dependencies — verify its Subresource Integrity hash, and drop
+# it into the global node_modules ourselves. No reify, no self-deletion race,
+# and the result is a complete, current npm. The retry wrapper around this
+# only has to cover transient network failures.
 npm_install_root() {
   local npm_cmd="$1"
   node -e '
@@ -1507,68 +1499,64 @@ npm_install_root() {
   ' "${npm_cmd}"
 }
 
-# Overwrite the (possibly incomplete) bundled npm with the complete one from
-# the official nodejs.org tarball for the exact running Node version. The
-# tarball is checksum-verified against the Node release team's signed
-# SHASUMS256.txt before it is extracted as root into /usr/lib/node_modules.
-repair_npm_from_tarball() {
-  local npm_cmd npm_root node_version tarball_arch tarball_dir tarball tmp_dir
+# Install the latest npm release from the npm registry without going through
+# npm's self-upgrade (see the long note above for why that self-destructs).
+# The registry's published tarball bundles every npm dependency, so unpacking
+# it straight into the global node_modules yields a complete, current npm with
+# no reify step. We verify the registry-provided Subresource Integrity hash
+# before extracting as root, and parse the packument with node (already
+# installed) to avoid pulling in a jq dependency. Transient network errors
+# bubble up as a non-zero return so the retry wrapper can try again.
+install_npm_latest() {
+  local npm_cmd npm_root tmp_dir version tarball_url integrity tarball
   npm_cmd="$(command -v npm)" || die "npm command missing after nodejs install." 1
   npm_root="$(npm_install_root "${npm_cmd}")" \
     || die "Could not resolve npm install root for ${npm_cmd}." 1
-  node_version="$(node --version | sed 's/^v//')"
-  case "${NODE_ARCH}" in
-    amd64) tarball_arch="x64" ;;
-    arm64) tarball_arch="arm64" ;;
-    *) die "Unsupported arch for npm repair: ${NODE_ARCH}" 65 ;;
-  esac
-  tarball_dir="node-v${node_version}-linux-${tarball_arch}"
-  tarball="${tarball_dir}.tar.xz"
   tmp_dir="$(mktemp -d)"
-  curl_get "https://nodejs.org/dist/v${node_version}/${tarball}" \
-    -o "${tmp_dir}/${tarball}"
-  curl_get "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" \
-    -o "${tmp_dir}/SHASUMS256.txt"
-  ( cd "${tmp_dir}" && grep " ${tarball}\$" SHASUMS256.txt | sha256sum -c - ) \
-    || die "Checksum mismatch for ${tarball} from nodejs.org." 1
-  tar -xJf "${tmp_dir}/${tarball}" -C "${tmp_dir}"
+  curl_get "https://registry.npmjs.org/npm/latest" -o "${tmp_dir}/latest.json" \
+    || { rm -rf "${tmp_dir}"; return 1; }
+  node -e '
+    const m = require(process.argv[1]);
+    if (!m.version || !m.dist || !m.dist.tarball) process.exit(1);
+    process.stdout.write([m.version, m.dist.tarball, m.dist.integrity || ""].join("\n") + "\n");
+  ' "${tmp_dir}/latest.json" > "${tmp_dir}/meta.txt" \
+    || { rm -rf "${tmp_dir}"; return 1; }
+  version="$(sed -n 1p "${tmp_dir}/meta.txt")"
+  tarball_url="$(sed -n 2p "${tmp_dir}/meta.txt")"
+  integrity="$(sed -n 3p "${tmp_dir}/meta.txt")"
+  if [[ -z "${version}" || -z "${tarball_url}" ]]; then
+    rm -rf "${tmp_dir}"
+    return 1
+  fi
+  tarball="${tmp_dir}/npm.tgz"
+  curl_get "${tarball_url}" -o "${tarball}" \
+    || { rm -rf "${tmp_dir}"; return 1; }
+  # Verify the registry's SRI hash (e.g. "sha512-<base64>") before trusting the
+  # archive. A mismatch means a corrupt or tampered download, so we abort hard
+  # rather than retrying a request that would keep failing the same way.
+  if [[ -n "${integrity}" ]]; then
+    node -e '
+      const fs = require("fs"), crypto = require("crypto");
+      const sri = process.argv[1], file = process.argv[2];
+      const i = sri.indexOf("-");
+      if (i === -1) process.exit(1);
+      const algo = sri.slice(0, i);
+      const expected = sri.slice(i + 1);
+      const got = crypto.createHash(algo).update(fs.readFileSync(file)).digest("base64");
+      process.exit(got === expected ? 0 : 1);
+    ' "${integrity}" "${tarball}" \
+      || { rm -rf "${tmp_dir}"; die "Integrity check failed for npm@${version} from the npm registry." 1; }
+  fi
+  tar -xzf "${tarball}" -C "${tmp_dir}"
+  [[ -d "${tmp_dir}/package" ]] \
+    || { rm -rf "${tmp_dir}"; die "npm registry tarball for npm@${version} had an unexpected layout." 1; }
   rm -rf "${npm_root}"
   mkdir -p "$(dirname "${npm_root}")"
-  cp -a "${tmp_dir}/${tarball_dir}/lib/node_modules/npm" "${npm_root}"
+  cp -a "${tmp_dir}/package" "${npm_root}"
   rm -rf "${tmp_dir}"
   npm --version >/dev/null \
-    || die "npm still broken after repair from nodejs.org tarball." 1
-}
-
-# Upgrade npm to the latest release, self-healing the incomplete-bundle case.
-# This runs the real global install (the operation we actually need) and lets
-# it double as the breakage detector: if it dies with the unmistakable missing
-# -module signature, repair npm from the tarball before the retry wrapper runs
-# us again. Output is streamed live for the install log and captured so we can
-# inspect the failure reason. We repair at most once — after a successful
-# repair the next attempt runs against a complete npm.
-npm_repair_attempted=0
-install_npm_latest() {
-  local log_file
-  log_file="$(mktemp)"
-  if npm install -g npm@latest 2>&1 | tee "${log_file}"; then
-    rm -f "${log_file}"
-    return 0
-  fi
-  # Match npm's missing-module signature. These are English strings rather
-  # than a stable exit code (npm exits 1 for almost everything), so we key
-  # off the message text. If a future npm changes the wording we simply
-  # retry without repairing — no worse than having no repair at all.
-  if (( npm_repair_attempted == 0 )) \
-    && grep -Eq 'MODULE_NOT_FOUND|Cannot find module' "${log_file}"; then
-    rm -f "${log_file}"
-    log "Bundled npm crashed with a missing module; repairing from the nodejs.org tarball before retrying."
-    repair_npm_from_tarball
-    npm_repair_attempted=1
-  else
-    rm -f "${log_file}"
-  fi
-  return 1
+    || die "npm broken after installing npm@${version} from the registry." 1
+  log "Installed npm@${version} from the npm registry."
 }
 retry 4 5 -- install_npm_latest
 retry 4 5 -- npm install -g yarn pnpm typescript ts-node
