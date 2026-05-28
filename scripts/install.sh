@@ -1341,6 +1341,41 @@ EOF
 apt_get update
 apt_install nodejs
 
+# NodeSource has shipped at least one nodejs package (22.22.2-1nodesource1)
+# whose bundled npm is missing dependencies (e.g. `promise-retry`), which
+# makes `npm` crash with MODULE_NOT_FOUND before it can even self-upgrade
+# (see nodejs/node#62425, npm/cli#9151, actions/runner-images#13883).
+# Detect that broken state and repair it by overwriting the bundled npm
+# with the complete one from the official nodejs.org tarball for the same
+# Node version, so the `npm install -g npm@latest` below can succeed.
+if ! npm --version >/dev/null 2>&1; then
+  log "Bundled npm is broken (likely missing modules); repairing from nodejs.org tarball."
+  NODE_FULL_VERSION="$(node --version | sed 's/^v//')"
+  case "${NODE_ARCH}" in
+    amd64) NODE_TARBALL_ARCH="x64" ;;
+    arm64) NODE_TARBALL_ARCH="arm64" ;;
+    *) die "Unsupported arch for npm repair: ${NODE_ARCH}" 65 ;;
+  esac
+  NODE_TARBALL_DIR="node-v${NODE_FULL_VERSION}-linux-${NODE_TARBALL_ARCH}"
+  NODE_TARBALL="${NODE_TARBALL_DIR}.tar.xz"
+  NODE_TMP="$(mktemp -d)"
+  curl_get "https://nodejs.org/dist/v${NODE_FULL_VERSION}/${NODE_TARBALL}" \
+    -o "${NODE_TMP}/${NODE_TARBALL}"
+  # Verify the tarball against the signed-by-Node-release-team SHASUMS256.txt
+  # before extracting it as root into /usr/lib/node_modules.
+  curl_get "https://nodejs.org/dist/v${NODE_FULL_VERSION}/SHASUMS256.txt" \
+    -o "${NODE_TMP}/SHASUMS256.txt"
+  ( cd "${NODE_TMP}" && grep " ${NODE_TARBALL}\$" SHASUMS256.txt | sha256sum -c - ) \
+    || die "Checksum mismatch for ${NODE_TARBALL} from nodejs.org." 1
+  tar -xJf "${NODE_TMP}/${NODE_TARBALL}" -C "${NODE_TMP}"
+  rm -rf /usr/lib/node_modules/npm
+  cp -a "${NODE_TMP}/${NODE_TARBALL_DIR}/lib/node_modules/npm" \
+    /usr/lib/node_modules/npm
+  rm -rf "${NODE_TMP}"
+  npm --version >/dev/null \
+    || die "npm still broken after repair from nodejs.org tarball." 1
+fi
+
 retry 4 5 -- npm install -g npm@latest
 retry 4 5 -- npm install -g yarn pnpm typescript ts-node
 
