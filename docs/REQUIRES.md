@@ -75,7 +75,7 @@ Installed in the "Base packages" section of `scripts/install.sh`:
 `git`, `vim`, `nano`, `tmux`, `htop`, `unzip`, `zip`, `jq`,
 `net-tools`, `dnsutils`, `iputils-ping`, `ufw`, `fail2ban`,
 `unattended-upgrades`, `logrotate`, `python3`, `python3-pip`,
-`python3-venv`, `python3-tk`, `pipx`, `nodejs`, `npm`,
+`python3-venv`, `python3-tk`, `pipx`,
 `build-essential`, `ripgrep`, `fd-find`, `tree`, `rsync`, `cron`,
 `dbus-x11`, `dconf-cli`, `pwgen`, `psmisc`.
 
@@ -97,7 +97,18 @@ Installed in the "Base packages" section of `scripts/install.sh`:
 - `docker-buildx-plugin`
 - `docker-compose-plugin`
 
-### 4.5 Pulled implicitly by `playwright install-deps chromium`
+### 4.5 From the NodeSource apt repo
+
+- `nodejs` — Node.js 22.x. Added via a `signed-by` keyring at
+  `/usr/share/keyrings/nodesource.gpg` and a `deb822`-style sources
+  file at `/etc/apt/sources.list.d/nodesource.sources` pointing at
+  `https://deb.nodesource.com/node_22.x` (suite `nodistro`). The
+  Ubuntu-archive `nodejs` (Node 18 on 22.04 / 24.04) is too old for
+  `npm@latest`, which now requires Node `^20.17.0 || >=22.9.0`, so
+  `install.sh` pins the `nodejs` package to the NodeSource origin via
+  `/etc/apt/preferences.d/nodejs`.
+
+### 4.6 Pulled implicitly by `playwright install-deps chromium`
 
 The agent venv runs `playwright install-deps chromium` as root, which
 shells out to `apt-get` and installs the Chromium system libraries
@@ -127,8 +138,12 @@ pinned-by-latest releases of:
 
 ## 6. Node runtime and global npm packages
 
-After the apt-provided `nodejs`/`npm` are in place, `install.sh`
-upgrades npm itself and installs the following globally:
+`install.sh` installs Node.js 22.x from the NodeSource apt repository
+(see § 4.5) instead of the Ubuntu-archive `nodejs`/`npm` packages,
+because the bundled npm on Ubuntu 22.04 / 24.04 cannot self-upgrade
+to `npm@latest` (which requires Node `^20.17.0 || >=22.9.0`). With
+Node 22 in place, `install.sh` upgrades npm itself and installs the
+following globally:
 
 - `npm@latest`
 - `yarn`

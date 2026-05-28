@@ -7,6 +7,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- **Installer Node runtime.** `scripts/install.sh` now installs
+  Node.js 22.x from the official NodeSource apt repository instead
+  of the Ubuntu-archive `nodejs`/`npm` packages. The bundled npm on
+  Ubuntu 22.04 / 24.04 (npm 9.x on Node 18) could not self-upgrade to
+  `npm@latest`, which now requires Node `^20.17.0 || >=22.9.0`, so
+  the "Node runtime" section failed with `EBADENGINE` and aborted
+  the install after retries. The NodeSource source is configured
+  with a `signed-by` keyring at `/usr/share/keyrings/nodesource.gpg`
+  and the `nodejs` package is pinned to the NodeSource origin via
+  `/etc/apt/preferences.d/nodejs`. `docs/REQUIRES.md` updated.
+
 ### Added
 - **Verbose scribe (opt-in debugging).** `payload/agent/audit.py`
   honours `ZOMBIE_AUDIT_VERBOSE=1` to attach a redacted
