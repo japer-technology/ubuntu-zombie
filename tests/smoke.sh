@@ -627,14 +627,31 @@ run_standards() {
     LICENSE
     CODE_OF_CONDUCT.md
     SECURITY.md
+    SUPPORT.md
+    RELEASE.md
     CONTRIBUTING.md
     CHANGELOG.md
     VERSION
     Makefile
     .editorconfig
+    .pre-commit-config.yaml
     .github/CODEOWNERS
     .github/PULL_REQUEST_TEMPLATE.md
     .github/workflows/ci.yml
+    .github/workflows/codeql.yml
+    .github/workflows/dependency-review.yml
+    .github/workflows/scorecard.yml
+    .github/workflows/release.yml
+    .github/workflows/integration.yml
+    docs/PLATFORMS.md
+    docs/UPGRADING.md
+    docs/FAQ.md
+    docs/research/README.md
+    debian/control.in
+    debian/postinst
+    debian/prerm
+    debian/copyright
+    scripts/build-deb.sh
   )
   local f
   for f in "${required[@]}"; do
@@ -656,7 +673,7 @@ run_standards() {
       scripts payload tests Makefile VERSION \
       README.md CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md \
       LICENSE .editorconfig \
-      SECURITY.md docs
+      SECURITY.md docs debian
   rm -f /tmp/ubuntu-zombie-smoke-package.tar.gz
 }
 

@@ -1,6 +1,11 @@
 # Ubuntu Zombie
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/japer-technology/ubuntu-zombie/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/japer-technology/ubuntu-zombie/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/japer-technology/ubuntu-zombie/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/japer-technology/ubuntu-zombie/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/japer-technology/ubuntu-zombie/badge)](https://securityscorecards.dev/viewer/?uri=github.com/japer-technology/ubuntu-zombie)
+[![Latest release](https://img.shields.io/github/v/release/japer-technology/ubuntu-zombie?sort=semver)](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
+[![Ubuntu LTS 22.04 | 24.04](https://img.shields.io/badge/Ubuntu_LTS-22.04%20%7C%2024.04-E95420?logo=ubuntu&logoColor=white)](docs/PLATFORMS.md)
 [![AI](https://img.shields.io/badge/Assisted-Development-2b2bff?logo=openai&logoColor=white)](https://www.japer.technology)
 
 <p align="center">
@@ -29,6 +34,7 @@ key, the API key, and the kill switch.
 git clone https://github.com/japer-technology/ubuntu-zombie.git
 cd ubuntu-zombie
 chmod +x scripts/install.sh
+sudo ./scripts/install.sh install --dry-run   # preview the plan (no changes)
 sudo ./scripts/install.sh install
 sudo reboot
 # after reboot:
@@ -38,6 +44,13 @@ sudo systemctl restart ubuntu-zombie-chat.service
 # open http://127.0.0.1:7878/ locally, or tunnel over Tailscale:
 ssh -L 7878:127.0.0.1:7878 zombie@<tailscale-name-or-ip>
 ```
+
+Prefer a `.deb`? Each [GitHub Release](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
+ships `ubuntu-zombie_<version>_all.deb` plus a SHA-256 checksum file and
+keyless cosign signatures. After `sudo apt install ./ubuntu-zombie_<ver>_all.deb`,
+the `ubuntu-zombie` wrapper accepts the same subcommands as
+`scripts/install.sh`. See [`docs/UPGRADING.md`](docs/UPGRADING.md) and
+[`docs/FAQ.md`](docs/FAQ.md) for verification commands.
 
 Full walkthrough with expected output and failure branches:
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md).
@@ -74,15 +87,20 @@ Non-interactive variants and every environment variable: see
 | -------------------------------------------------------------- | ------------------------------------------------- |
 | [`docs/VISION.md`](docs/VISION.md)                             | What this project promises (and does not)         |
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md)                     | First successful install in ten steps             |
+| [`docs/PLATFORMS.md`](docs/PLATFORMS.md)                       | Supported Ubuntu versions and architectures       |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)               | Provider keys, Tailscale, VNC, chat, policy       |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)           | Common failures and their fixes                   |
+| [`docs/FAQ.md`](docs/FAQ.md)                                   | Quick answers distilled from the above            |
+| [`docs/UPGRADING.md`](docs/UPGRADING.md)                       | Version-by-version upgrade notes                  |
 | [`SECURITY.md`](SECURITY.md)                                   | Trust model, what the provider sees, disclosure   |
+| [`SUPPORT.md`](SUPPORT.md)                                     | Where to ask questions, file bugs, get help       |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)                 | Components, action classes, trust boundaries      |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md)                           | How to test and change the installer              |
+| [`RELEASE.md`](RELEASE.md)                                     | How maintainers cut a release                     |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)                     | Community expectations                            |
 | [`LICENSE`](LICENSE)                                           | MIT license terms                                 |
 | [`CHANGELOG.md`](CHANGELOG.md)                                 | Versioned release history                         |
-| [`docs/POSSIBILITIES.md`](docs/POSSIBILITIES.md)               | Exploratory analysis: many named personas on one PC |
+| [`docs/research/`](docs/research/)                             | Background notes on alternatives we evaluated     |
 
 ## Trust model in one paragraph
 
