@@ -1455,36 +1455,32 @@ apt_get update
 apt_install nodejs
 
 # NodeSource has shipped at least one nodejs package (22.22.2-1nodesource1)
-# whose bundled npm is missing dependencies (e.g. `promise-retry`), which
-# makes `npm` crash with MODULE_NOT_FOUND before it can even self-upgrade
+# whose bundled npm is missing transitive dependencies (e.g. `promise-retry`,
+# required by arborist's rebuild/binlink step), so `npm install -g npm@latest`
+# dies with MODULE_NOT_FOUND before it can self-upgrade
 # (see nodejs/node#62425, npm/cli#9151, actions/runner-images#13883).
-# Detect that broken state and repair it by overwriting the bundled npm
-# with the complete one from the official nodejs.org tarball for the same
-# Node version, so the `npm install -g npm@latest` below can succeed.
-# `npm --version` only loads npm/lib/npm.js, which is the lightweight entry
-# point and resolves fine even when the bundled dependency tree is missing
-# modules like `promise-retry`. The breakage also does not surface from
-# `require('lib/commands/install.js')`: modern npm loads reify-finish /
-# reify-output / arborist lazily inside the install command's `exec()`,
-# so a top-level require of install.js resolves cleanly even when the
-# transitive bundled deps are missing. Checking npm's own
-# `bundleDependencies` list is also insufficient because the missing
-# modules (e.g. `promise-retry`) are transitive deps that live under
-# nested `node_modules/` directories and are not necessarily named in
-# the top-level bundle manifest. Probe directly using two complementary
-# checks: (1) eagerly require the exact files reported in the real
-# failure stack (lib/utils/reify-output.js -> libnpmfund -> arborist
-# -> arborist/rebuild -> promise-retry); (2) run a real-but-inert
-# `npm install` (empty manifest, throwaway prefix, --offline) so npm
-# walks the same lib/commands/install.js -> pacote/arborist path as the
-# global install we are about to invoke, and treat any MODULE_NOT_FOUND
-# in its output as evidence of an incomplete bundle. The second probe
-# catches breakage in modules that the bundled npm loads lazily at
-# install time (i.e. modules that resolve cleanly under a static
-# `require()` walk but still blow up the moment npm's reify pipeline
-# actually runs); a `--dry-run` would miss them because it skips reify
-# entirely. If either probe reports the tree as broken, repair it from
-# the nodejs.org tarball.
+#
+# We repair this by overwriting the incomplete bundled npm with the complete
+# one from the official nodejs.org tarball for the exact running Node version,
+# then letting the self-upgrade proceed.
+#
+# The hard part is detecting the breakage reliably. Earlier attempts tried to
+# predict it ahead of time — `npm --version`, requiring the files in the
+# failure stack, or running an inert empty-manifest `--offline` install — but
+# every such probe is fragile: npm requires the missing module only at
+# runtime, deep inside the reify pipeline's rebuild/binlink phase, and only
+# when a real package is actually written to disk. A static `require()` walk,
+# a `--dry-run`, and an empty/offline install can all resolve cleanly while
+# the very next real global install still blows up. Predicting the failure is
+# therefore inherently unreliable.
+#
+# So we stop predicting and instead use the real operation as its own
+# detector: attempt `npm install -g npm@latest`, and if it fails with the
+# unmistakable incomplete-bundle signature (MODULE_NOT_FOUND / "Cannot find
+# module"), repair npm from the tarball and retry. This cannot false-negative,
+# because the thing we are guarding is the thing we run. The crash happens
+# mid-reify, before the new npm is moved into place, so a failed attempt
+# leaves nothing global half-written.
 npm_install_root() {
   local npm_cmd="$1"
   node -e '
@@ -1511,103 +1507,66 @@ npm_install_root() {
   ' "${npm_cmd}"
 }
 
-npm_bundled_broken() {
-  local npm_cmd npm_root probe
-  if ! npm_cmd="$(command -v npm)" || ! npm --version >/dev/null 2>&1; then
+# Overwrite the (possibly incomplete) bundled npm with the complete one from
+# the official nodejs.org tarball for the exact running Node version. The
+# tarball is checksum-verified against the Node release team's signed
+# SHASUMS256.txt before it is extracted as root into /usr/lib/node_modules.
+repair_npm_from_tarball() {
+  local npm_cmd npm_root node_version tarball_arch tarball_dir tarball tmp_dir
+  npm_cmd="$(command -v npm)" || die "npm command missing after nodejs install." 1
+  npm_root="$(npm_install_root "${npm_cmd}")" \
+    || die "Could not resolve npm install root for ${npm_cmd}." 1
+  node_version="$(node --version | sed 's/^v//')"
+  case "${NODE_ARCH}" in
+    amd64) tarball_arch="x64" ;;
+    arm64) tarball_arch="arm64" ;;
+    *) die "Unsupported arch for npm repair: ${NODE_ARCH}" 65 ;;
+  esac
+  tarball_dir="node-v${node_version}-linux-${tarball_arch}"
+  tarball="${tarball_dir}.tar.xz"
+  tmp_dir="$(mktemp -d)"
+  curl_get "https://nodejs.org/dist/v${node_version}/${tarball}" \
+    -o "${tmp_dir}/${tarball}"
+  curl_get "https://nodejs.org/dist/v${node_version}/SHASUMS256.txt" \
+    -o "${tmp_dir}/SHASUMS256.txt"
+  ( cd "${tmp_dir}" && grep " ${tarball}\$" SHASUMS256.txt | sha256sum -c - ) \
+    || die "Checksum mismatch for ${tarball} from nodejs.org." 1
+  tar -xJf "${tmp_dir}/${tarball}" -C "${tmp_dir}"
+  rm -rf "${npm_root}"
+  mkdir -p "$(dirname "${npm_root}")"
+  cp -a "${tmp_dir}/${tarball_dir}/lib/node_modules/npm" "${npm_root}"
+  rm -rf "${tmp_dir}"
+  npm --version >/dev/null \
+    || die "npm still broken after repair from nodejs.org tarball." 1
+}
+
+# Upgrade npm to the latest release, self-healing the incomplete-bundle case.
+# This runs the real global install (the operation we actually need) and lets
+# it double as the breakage detector: if it dies with the unmistakable missing
+# -module signature, repair npm from the tarball before the retry wrapper runs
+# us again. Output is streamed live for the install log and captured so we can
+# inspect the failure reason. We repair at most once — after a successful
+# repair the next attempt runs against a complete npm.
+npm_repaired=0
+install_npm_latest() {
+  local log_file
+  log_file="$(mktemp)"
+  if npm install -g npm@latest 2>&1 | tee "${log_file}"; then
+    rm -f "${log_file}"
     return 0
   fi
-  npm_root="$(npm_install_root "${npm_cmd}")" || return 0
-  [[ -f "${npm_root}/package.json" ]] || return 0
-  # 1) Cheap static probe. Eagerly require the exact files in the
-  # broken require chain. If any link is missing (e.g. the nested
-  # `promise-retry` under arborist), the node invocation exits non-zero
-  # and we report the tree as broken without any network round-trip.
-  if ! node -e '
-    const path = require("path");
-    const root = process.argv[1];
-    const targets = [
-      "lib/utils/reify-output.js",
-      "lib/utils/reify-finish.js",
-      "node_modules/@npmcli/arborist/lib/index.js",
-      "node_modules/@npmcli/arborist/lib/arborist/index.js",
-      "node_modules/@npmcli/arborist/lib/arborist/rebuild.js",
-      "node_modules/libnpmfund/lib/index.js",
-    ];
-    for (const rel of targets) {
-      try {
-        require(path.join(root, rel));
-      } catch (err) {
-        console.error("npm bundled tree broken at " + rel + ": " + err.message);
-        process.exit(1);
-      }
-    }
-  ' "${npm_root}" >/dev/null 2>&1; then
-    return 0
-  fi
-  # 2) Dynamic probe. Even when every file in the hard-coded chain
-  # above resolves, npm can still blow up at install time because the
-  # real `npm install` path loads more modules lazily (inside command
-  # exec() bodies, not at file top-level) and a different missing
-  # transitive dep won't surface from a static `require()` walk.
-  # A `--dry-run` is NOT sufficient here: it only computes the ideal
-  # tree and deliberately skips the reify pipeline, so the very modules
-  # that break in production (e.g. `promise-retry`, pulled in eagerly by
-  # lib/commands/install.js -> pacote the moment a real install runs) are
-  # never required and the breakage slips through undetected. Instead,
-  # drive npm through a real-but-inert install: an empty private manifest
-  # in a throwaway prefix installed with `--offline`. This loads
-  # lib/commands/install.js and the pacote/arborist machinery exactly like
-  # the global install we are about to run, yet needs no network and
-  # writes nothing outside the temp dir. An empty manifest has no
-  # dependencies to fetch, so a healthy npm completes cleanly offline and
-  # we never false-positive; any `MODULE_NOT_FOUND` / "Cannot find module"
-  # in the output is unambiguous evidence the bundled tree is incomplete.
-  local probe_dir
-  probe_dir="$(mktemp -d)"
-  printf '{"name":"_npm-bundle-probe","version":"1.0.0","private":true}\n' \
-    > "${probe_dir}/package.json"
-  probe="$(cd "${probe_dir}" && npm install --offline --no-audit --no-fund \
-                                  --no-progress 2>&1 || true)"
-  rm -rf "${probe_dir}"
-  if grep -Eq 'MODULE_NOT_FOUND|Cannot find module' <<<"${probe}"; then
-    return 0
+  if (( npm_repaired == 0 )) \
+    && grep -Eq 'MODULE_NOT_FOUND|Cannot find module' "${log_file}"; then
+    rm -f "${log_file}"
+    log "Bundled npm crashed with a missing module; repairing from the nodejs.org tarball before retrying."
+    repair_npm_from_tarball
+    npm_repaired=1
+  else
+    rm -f "${log_file}"
   fi
   return 1
 }
-if npm_bundled_broken; then
-  log "Bundled npm is broken (likely missing modules); repairing from nodejs.org tarball."
-  NPM_REPAIR_CMD="$(command -v npm)" || die "npm command missing after nodejs install." 1
-  if ! NPM_REPAIR_ROOT="$(npm_install_root "${NPM_REPAIR_CMD}")"; then
-    die "Could not resolve npm install root for ${NPM_REPAIR_CMD}." 1
-  fi
-  NODE_FULL_VERSION="$(node --version | sed 's/^v//')"
-  case "${NODE_ARCH}" in
-    amd64) NODE_TARBALL_ARCH="x64" ;;
-    arm64) NODE_TARBALL_ARCH="arm64" ;;
-    *) die "Unsupported arch for npm repair: ${NODE_ARCH}" 65 ;;
-  esac
-  NODE_TARBALL_DIR="node-v${NODE_FULL_VERSION}-linux-${NODE_TARBALL_ARCH}"
-  NODE_TARBALL="${NODE_TARBALL_DIR}.tar.xz"
-  NODE_TMP="$(mktemp -d)"
-  curl_get "https://nodejs.org/dist/v${NODE_FULL_VERSION}/${NODE_TARBALL}" \
-    -o "${NODE_TMP}/${NODE_TARBALL}"
-  # Verify the tarball against the signed-by-Node-release-team SHASUMS256.txt
-  # before extracting it as root into /usr/lib/node_modules.
-  curl_get "https://nodejs.org/dist/v${NODE_FULL_VERSION}/SHASUMS256.txt" \
-    -o "${NODE_TMP}/SHASUMS256.txt"
-  ( cd "${NODE_TMP}" && grep " ${NODE_TARBALL}\$" SHASUMS256.txt | sha256sum -c - ) \
-    || die "Checksum mismatch for ${NODE_TARBALL} from nodejs.org." 1
-  tar -xJf "${NODE_TMP}/${NODE_TARBALL}" -C "${NODE_TMP}"
-  rm -rf "${NPM_REPAIR_ROOT}"
-  mkdir -p "$(dirname "${NPM_REPAIR_ROOT}")"
-  cp -a "${NODE_TMP}/${NODE_TARBALL_DIR}/lib/node_modules/npm" "${NPM_REPAIR_ROOT}"
-  rm -rf "${NODE_TMP}"
-  npm --version >/dev/null \
-    || die "npm still broken after repair from nodejs.org tarball." 1
-  npm_bundled_broken && die "npm bundled modules still incomplete after repair from nodejs.org tarball." 1
-fi
-
-retry 4 5 -- npm install -g npm@latest
+retry 4 5 -- install_npm_latest
 retry 4 5 -- npm install -g yarn pnpm typescript ts-node
 
 # pi-ai is the unified LLM client for the chat service. Pinned to the
