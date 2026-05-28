@@ -82,6 +82,7 @@ Non-interactive variants and every environment variable: see
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)                     | Community expectations                            |
 | [`LICENSE`](LICENSE)                                           | MIT license terms                                 |
 | [`CHANGELOG.md`](CHANGELOG.md)                                 | Versioned release history                         |
+| [`docs/POSSIBILITIES.md`](docs/POSSIBILITIES.md)               | Exploratory analysis: many named personas on one PC |
 
 ## Trust model in one paragraph
 
