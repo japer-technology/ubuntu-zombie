@@ -1317,6 +1317,8 @@ case "${NODE_ARCH}" in
   *) die "NodeSource supports only amd64/arm64; detected '${NODE_ARCH}'." 65 ;;
 esac
 install -d -m 755 "$(dirname "${NODESOURCE_KEYRING}")"
+# Remove any legacy one-line NodeSource list left by an older install
+# or manual setup; we now manage the source via the deb822 file below.
 rm -f /etc/apt/sources.list.d/nodesource.list
 curl_get https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
   | gpg --dearmor --yes -o "${NODESOURCE_KEYRING}"
