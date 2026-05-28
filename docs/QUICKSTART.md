@@ -32,6 +32,52 @@ You need:
 Do **not** run the installer over a public SSH session. The installer
 restarts `sshd` and tightens the firewall; you can lock yourself out.
 
+### How to get an SSH key
+
+If you do not already have an SSH key on the workstation you will use
+to control this PC, generate one there (not on the Ubuntu Zombie box):
+
+```bash
+ssh-keygen -t ed25519 -C "you@workstation"
+```
+
+Accept the default path (`~/.ssh/id_ed25519`) and pick a passphrase.
+Two files are created:
+
+- `~/.ssh/id_ed25519` — the **private** key. Never copy this off the
+  workstation and never paste it into the installer.
+- `~/.ssh/id_ed25519.pub` — the **public** key. This is the single
+  line (starting with `ssh-ed25519 …`) that you pass to the installer
+  as `SSH_PUBLIC_KEY` or paste when the interactive installer asks.
+
+Print the public key so you can copy it:
+
+```bash
+cat ~/.ssh/id_ed25519.pub
+```
+
+On macOS you can pipe it straight to the clipboard:
+
+```bash
+pbcopy < ~/.ssh/id_ed25519.pub
+```
+
+On a Linux workstation with `xclip` or `wl-copy`:
+
+```bash
+xclip -selection clipboard < ~/.ssh/id_ed25519.pub   # X11
+wl-copy < ~/.ssh/id_ed25519.pub                       # Wayland
+```
+
+If you already manage keys through GitHub, any key listed at
+<https://github.com/settings/keys> works; fetch them with
+`curl https://github.com/<your-username>.keys` and pick the
+`ssh-ed25519 …` line you recognise.
+
+Older RSA keys (`ssh-rsa …`, 3072-bit or larger) are accepted, but
+`ed25519` is preferred: shorter, faster, and the default on modern
+OpenSSH.
+
 ---
 
 ## 1. Install
