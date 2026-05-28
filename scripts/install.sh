@@ -1547,7 +1547,7 @@ repair_npm_from_tarball() {
 # us again. Output is streamed live for the install log and captured so we can
 # inspect the failure reason. We repair at most once — after a successful
 # repair the next attempt runs against a complete npm.
-npm_repaired=0
+npm_repair_attempted=0
 install_npm_latest() {
   local log_file
   log_file="$(mktemp)"
@@ -1555,12 +1555,16 @@ install_npm_latest() {
     rm -f "${log_file}"
     return 0
   fi
-  if (( npm_repaired == 0 )) \
+  # Match npm's missing-module signature. These are English strings rather
+  # than a stable exit code (npm exits 1 for almost everything), so we key
+  # off the message text. If a future npm changes the wording we simply
+  # retry without repairing — no worse than having no repair at all.
+  if (( npm_repair_attempted == 0 )) \
     && grep -Eq 'MODULE_NOT_FOUND|Cannot find module' "${log_file}"; then
     rm -f "${log_file}"
     log "Bundled npm crashed with a missing module; repairing from the nodejs.org tarball before retrying."
     repair_npm_from_tarball
-    npm_repaired=1
+    npm_repair_attempted=1
   else
     rm -f "${log_file}"
   fi
