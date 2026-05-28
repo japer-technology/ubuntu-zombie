@@ -1474,14 +1474,17 @@ apt_install nodejs
 # the top-level bundle manifest. Probe directly using two complementary
 # checks: (1) eagerly require the exact files reported in the real
 # failure stack (lib/utils/reify-output.js -> libnpmfund -> arborist
-# -> arborist/rebuild -> promise-retry); (2) ask npm itself to dry-run
-# the same `npm install -g npm@latest` we are about to invoke, and
-# treat any MODULE_NOT_FOUND in its output as evidence of an incomplete
-# bundle. The second probe catches breakage in modules that the
-# bundled npm loads lazily at install time (i.e. modules that resolve
-# cleanly under a static `require()` walk but still blow up the moment
-# npm's reify pipeline actually runs). If either probe reports the
-# tree as broken, repair it from the nodejs.org tarball.
+# -> arborist/rebuild -> promise-retry); (2) run a real-but-inert
+# `npm install` (empty manifest, throwaway prefix, --offline) so npm
+# walks the same lib/commands/install.js -> pacote/arborist path as the
+# global install we are about to invoke, and treat any MODULE_NOT_FOUND
+# in its output as evidence of an incomplete bundle. The second probe
+# catches breakage in modules that the bundled npm loads lazily at
+# install time (i.e. modules that resolve cleanly under a static
+# `require()` walk but still blow up the moment npm's reify pipeline
+# actually runs); a `--dry-run` would miss them because it skips reify
+# entirely. If either probe reports the tree as broken, repair it from
+# the nodejs.org tarball.
 npm_install_root() {
   local npm_cmd="$1"
   node -e '
@@ -1546,15 +1549,26 @@ npm_bundled_broken() {
   # real `npm install` path loads more modules lazily (inside command
   # exec() bodies, not at file top-level) and a different missing
   # transitive dep won't surface from a static `require()` walk.
-  # Ask npm itself to dry-run the exact operation that has been
-  # failing in production. Dry-run computes the ideal tree (which
-  # exercises arborist end-to-end) without writing to disk, and any
-  # `MODULE_NOT_FOUND` / "Cannot find module" in the output is
-  # unambiguous evidence the bundled tree is incomplete. Genuine
-  # network / registry errors are ignored on purpose so we do not
-  # trigger a repair (and a ~25 MB download) on healthy offline hosts.
-  probe="$(npm install --global --dry-run --no-audit --no-fund \
-                       --no-progress --silent npm@latest 2>&1 || true)"
+  # A `--dry-run` is NOT sufficient here: it only computes the ideal
+  # tree and deliberately skips the reify pipeline, so the very modules
+  # that break in production (e.g. `promise-retry`, pulled in eagerly by
+  # lib/commands/install.js -> pacote the moment a real install runs) are
+  # never required and the breakage slips through undetected. Instead,
+  # drive npm through a real-but-inert install: an empty private manifest
+  # in a throwaway prefix installed with `--offline`. This loads
+  # lib/commands/install.js and the pacote/arborist machinery exactly like
+  # the global install we are about to run, yet needs no network and
+  # writes nothing outside the temp dir. An empty manifest has no
+  # dependencies to fetch, so a healthy npm completes cleanly offline and
+  # we never false-positive; any `MODULE_NOT_FOUND` / "Cannot find module"
+  # in the output is unambiguous evidence the bundled tree is incomplete.
+  local probe_dir
+  probe_dir="$(mktemp -d)"
+  printf '{"name":"_npm-bundle-probe","version":"1.0.0","private":true}\n' \
+    > "${probe_dir}/package.json"
+  probe="$(cd "${probe_dir}" && npm install --offline --no-audit --no-fund \
+                                  --no-progress 2>&1 || true)"
+  rm -rf "${probe_dir}"
   if grep -Eq 'MODULE_NOT_FOUND|Cannot find module' <<<"${probe}"; then
     return 0
   fi
