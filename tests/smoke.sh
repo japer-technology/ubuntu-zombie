@@ -464,6 +464,60 @@ PY
   else
     echo "  (skipping pi-mono stub end-to-end: node not on PATH)"
   fi
+
+  echo "  audit redaction + verbose preview round-trip"
+  _AUDIT_TMP="$(mktemp -d)"
+  ZOMBIE_AUDIT_LOG="${_AUDIT_TMP}/audit.log" \
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import json
+import os
+
+import audit
+
+# Default mode: no stdout_preview in tool_call entries, but every
+# entry must carry pid + ts_utc so testers can correlate audit lines
+# with journalctl.
+audit.log_event("prompt", prompt="hello sk-abcdefghijklmnop world")
+audit.log_tool_call(
+    tool="shell.run", classification="read_only", decision="executed",
+    stdout="line1\nAPI_KEY=secretsesame\nline2", stderr="boom",
+    exit_code=0, duration_ms=12,
+)
+
+# Verbose mode: previews appear and are redacted by the same rules
+# applied to every other field.
+os.environ["ZOMBIE_AUDIT_VERBOSE"] = "1"
+try:
+    audit.log_tool_call(
+        tool="shell.run", classification="read_only", decision="executed",
+        stdout="visible\nAPI_KEY=secretsesame\nbye",
+        stderr="ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ secret",
+        exit_code=0, duration_ms=8,
+    )
+finally:
+    del os.environ["ZOMBIE_AUDIT_VERBOSE"]
+
+path = os.environ["ZOMBIE_AUDIT_LOG"]
+lines = [json.loads(l) for l in open(path, encoding="utf-8") if l.strip()]
+assert len(lines) == 3, lines
+
+for entry in lines:
+    for required in ("id", "ts", "ts_utc", "pid", "type"):
+        assert required in entry, (required, entry)
+    assert entry["ts_utc"].endswith("Z"), entry["ts_utc"]
+    assert isinstance(entry["pid"], int) and entry["pid"] > 0, entry["pid"]
+
+prompt_entry, default_tool, verbose_tool = lines
+assert prompt_entry["prompt"] == "hello sk-***REDACTED*** world", prompt_entry
+assert "stdout_preview" not in default_tool, default_tool
+assert "stderr_preview" not in default_tool, default_tool
+assert default_tool["stdout_sha256"], default_tool
+assert "stdout_preview" in verbose_tool, verbose_tool
+assert "API_KEY=***REDACTED***" in verbose_tool["stdout_preview"], verbose_tool
+assert "secretsesame" not in verbose_tool["stdout_preview"], verbose_tool
+assert "REDACTED" in verbose_tool["stderr_preview"], verbose_tool
+PY
+  rm -rf "${_AUDIT_TMP}"
 }
 
 run_subcommands() {

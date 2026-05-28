@@ -8,6 +8,25 @@ the values of a fixed set of sensitive environment variables and the
 secrets-file path. Tool dispatches are recorded as structured
 ``tool_call`` events that include classification, decision, exit
 code, duration, and SHA-256 digests of stdout/stderr.
+
+Two environment variables tune verbosity (off by default, opt-in for
+testing and debugging):
+
+``ZOMBIE_AUDIT_VERBOSE=1``
+    Adds redacted ``stdout_preview`` / ``stderr_preview`` snippets to
+    ``tool_call`` entries (capped to ``ZOMBIE_AUDIT_PREVIEW_BYTES``,
+    default 2048 bytes each). The SHA-256 digests still ship so the
+    integrity contract is unchanged. The preview goes through the same
+    secret redactor as every other field.
+
+``ZOMBIE_AUDIT_PREVIEW_BYTES=N``
+    Override the per-stream preview cap (only honoured when
+    ``ZOMBIE_AUDIT_VERBOSE=1``). Hard ceiling is 16 KiB to keep the
+    log bounded.
+
+Every audit entry also carries ``ts_utc`` (ISO-8601 UTC) and ``pid``
+so a tester can correlate lines across processes and journalctl
+without parsing the local-time ``ts`` field.
 """
 from __future__ import annotations
 
@@ -23,6 +42,45 @@ from pathlib import Path
 from typing import Any, Mapping
 
 AUDIT_PATH = Path(os.environ.get("ZOMBIE_AUDIT_LOG", "/var/log/ubuntu-zombie/audit.log"))
+
+# Hard ceiling on preview length even when ``ZOMBIE_AUDIT_PREVIEW_BYTES``
+# is set higher — keeps the log bounded and matches the per-stream cap
+# already enforced by ``runner.py``.
+_MAX_PREVIEW_BYTES = 16_384
+_DEFAULT_PREVIEW_BYTES = 2_048
+
+
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _verbose() -> bool:
+    """Re-read the env var each call so tests can flip the flag mid-run."""
+    return _truthy(os.environ.get("ZOMBIE_AUDIT_VERBOSE"))
+
+
+def _preview_cap() -> int:
+    raw = os.environ.get("ZOMBIE_AUDIT_PREVIEW_BYTES")
+    if not raw:
+        return _DEFAULT_PREVIEW_BYTES
+    try:
+        n = int(raw)
+    except ValueError:
+        return _DEFAULT_PREVIEW_BYTES
+    if n <= 0:
+        return 0
+    return min(n, _MAX_PREVIEW_BYTES)
+
+
+def _preview(text: str, cap: int) -> str:
+    """Trim ``text`` to ``cap`` bytes (UTF-8) with a truncation marker."""
+    if cap <= 0 or not text:
+        return ""
+    encoded = text.encode("utf-8", "replace")
+    if len(encoded) <= cap:
+        return text
+    truncated = encoded[:cap].decode("utf-8", "replace")
+    return truncated + f"\n…[truncated {len(encoded) - cap} bytes]"
 
 # Sensitive env-var names whose values must never appear in the audit
 # log even outside their token-shaped substrings (e.g. an operator
@@ -105,9 +163,17 @@ def _ensure_log() -> None:
 def log_event(event_type: str, **fields: Any) -> str:
     """Append one audit entry. Returns the entry's ``id``."""
     entry_id = uuid.uuid4().hex
+    now = time.time()
     entry: dict[str, Any] = {
         "id": entry_id,
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime()),
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(now)),
+        # FIX: always emit a UTC timestamp alongside the local-time
+        # ``ts`` so testers correlating audit lines with journalctl
+        # (UTC) do not have to do timezone math in their heads.
+        "ts_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now)),
+        # FIX: ``pid`` is cheap and lets a tester join audit lines
+        # with ``journalctl _PID=...`` output for the chat service.
+        "pid": os.getpid(),
         "type": event_type,
     }
     entry.update(redact(fields))
@@ -137,6 +203,14 @@ def log_tool_call(
     Stdout/stderr are recorded as length + SHA-256 digest so the audit
     log stays bounded and never persists tool output verbatim (per the
     Phase 2 plan §6 risk register, R5/R6).
+
+    When ``ZOMBIE_AUDIT_VERBOSE=1`` is set, a redacted preview of each
+    stream (capped at ``ZOMBIE_AUDIT_PREVIEW_BYTES``, default 2048) is
+    additionally captured as ``stdout_preview`` / ``stderr_preview``.
+    The digests still ship unchanged. Verbose mode is intended for
+    pre-release testing and operator debugging; leave it off in
+    production deployments where the audit log is the long-lived
+    forensic trail.
     """
     fields: dict[str, Any] = {
         "tool": tool,
@@ -151,12 +225,18 @@ def log_tool_call(
         fields["duration_ms"] = duration_ms
     if error is not None:
         fields["error"] = error
+    verbose = _verbose()
+    cap = _preview_cap() if verbose else 0
     if stdout is not None:
         fields["stdout_sha256"] = hashlib.sha256(stdout.encode("utf-8", "replace")).hexdigest()
         fields["stdout_bytes"] = len(stdout.encode("utf-8", "replace"))
+        if verbose and cap > 0:
+            fields["stdout_preview"] = _preview(stdout, cap)
     if stderr is not None:
         fields["stderr_sha256"] = hashlib.sha256(stderr.encode("utf-8", "replace")).hexdigest()
         fields["stderr_bytes"] = len(stderr.encode("utf-8", "replace"))
+        if verbose and cap > 0:
+            fields["stderr_preview"] = _preview(stderr, cap)
     fields.update(extra)
     return log_event("tool_call", **fields)
 

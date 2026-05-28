@@ -8,6 +8,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Verbose scribe (opt-in debugging).** `payload/agent/audit.py`
+  honours `ZOMBIE_AUDIT_VERBOSE=1` to attach a redacted
+  `stdout_preview` / `stderr_preview` (default 2 KiB, tunable via
+  `ZOMBIE_AUDIT_PREVIEW_BYTES`, hard-capped at 16 KiB) to every
+  `tool_call` entry. Existing SHA-256 digests are unchanged so the
+  integrity contract holds. Every audit entry now also carries
+  `ts_utc` (ISO-8601 UTC) and `pid` so testers can correlate audit
+  lines with `journalctl` without timezone math. `payload/bin/audit-recent`
+  gained `--follow`/`-f` (tail -F across logrotate) and `-t TYPE`
+  filters and now surfaces previews when present. Smoke tests cover
+  the redaction round-trip and the always-on `pid` / `ts_utc` fields.
+  Documented in `docs/CONFIGURATION.md` and `docs/TROUBLESHOOTING.md`.
 - Phase 4 of `docs/UPGRADE-TO-PI-PLAN.md` — hardening pass:
   - **P4.1** Per-turn budget defaults realigned with
     `docs/UPGRADE-TO-PI.md` §6.1–§6.2 (`max_tool_calls_per_turn` 12,
