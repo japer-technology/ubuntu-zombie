@@ -1361,6 +1361,12 @@ if ! npm --version >/dev/null 2>&1; then
   NODE_TMP="$(mktemp -d)"
   curl_get "https://nodejs.org/dist/v${NODE_FULL_VERSION}/${NODE_TARBALL}" \
     -o "${NODE_TMP}/${NODE_TARBALL}"
+  # Verify the tarball against the signed-by-Node-release-team SHASUMS256.txt
+  # before extracting it as root into /usr/lib/node_modules.
+  curl_get "https://nodejs.org/dist/v${NODE_FULL_VERSION}/SHASUMS256.txt" \
+    -o "${NODE_TMP}/SHASUMS256.txt"
+  ( cd "${NODE_TMP}" && grep " ${NODE_TARBALL}\$" SHASUMS256.txt | sha256sum -c - ) \
+    || die "Checksum mismatch for ${NODE_TARBALL} from nodejs.org." 1
   tar -xJf "${NODE_TMP}/${NODE_TARBALL}" -C "${NODE_TMP}"
   rm -rf /usr/lib/node_modules/npm
   cp -a "${NODE_TMP}/${NODE_TARBALL_DIR}/lib/node_modules/npm" \
