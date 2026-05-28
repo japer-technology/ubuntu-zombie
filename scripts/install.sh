@@ -941,6 +941,9 @@ X11Forwarding yes
 AllowUsers ${AGENT_USER}
 EOF
 
+# sshd -t requires the privilege separation directory to exist; on fresh
+# installs (or containers where /run is a tmpfs) it may be missing.
+install -d -m 0755 /run/sshd
 sshd -t
 systemctl enable --now ssh >/dev/null
 systemctl restart ssh
