@@ -14,16 +14,14 @@
 > owner can ask the machine to diagnose, explain, configure,
 > repair, and operate itself.**
 
+# An AI SysAdmin
+
 It is a normal Ubuntu PC with an administrator inside it. Any local
 user can open a private chat, ask the machine to do something, see
 exactly what is proposed, approve it, and watch it happen. Everything
 the AI does is audit-logged. Inbound network access is restricted to a
 private Tailscale tailnet. The operator owns the machine, the SSH
 key, the API key, and the kill switch.
-
-This is not a locked appliance, a hosted service, or an autonomous
-agent that decides what the PC is for. See [`docs/VISION.md`](docs/VISION.md)
-for the exact promise and what is intentionally out of scope.
 
 ## Quickstart
 
