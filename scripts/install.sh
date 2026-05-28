@@ -1354,12 +1354,15 @@ apt_install nodejs
 # `require('lib/commands/install.js')`: modern npm loads reify-finish /
 # reify-output / arborist lazily inside the install command's `exec()`,
 # so a top-level require of install.js resolves cleanly even when the
-# transitive bundled deps are missing. Probe directly instead by reading
-# the bundled `bundleDependencies` list from npm's own package.json and
-# confirming every entry has a real directory under node_modules/. That
-# matches the real failure mode (see error logs referencing
-# `Cannot find module 'promise-retry'` from reify-output.js) and catches
-# any other missing bundled module the same way.
+# transitive bundled deps are missing. Checking npm's own
+# `bundleDependencies` list is also insufficient because the missing
+# modules (e.g. `promise-retry`) are transitive deps that live under
+# nested `node_modules/` directories and are not necessarily named in
+# the top-level bundle manifest. Probe directly by eagerly requiring the
+# exact files reported in the real failure stack
+# (lib/utils/reify-output.js -> libnpmfund -> arborist -> arborist/rebuild
+# -> promise-retry); if any of them fails to resolve, treat the bundled
+# npm tree as broken and repair it from the nodejs.org tarball.
 npm_install_root() {
   local npm_cmd="$1"
   node -e '
@@ -1392,26 +1395,28 @@ npm_bundled_broken() {
     return 0
   fi
   npm_root="$(npm_install_root "${npm_cmd}")" || return 0
-  local pkg_json="${npm_root}/package.json"
-  [[ -f "${pkg_json}" ]] || return 0
+  [[ -f "${npm_root}/package.json" ]] || return 0
+  # Eagerly require the exact files in the broken require chain. If any
+  # link is missing (e.g. the nested `promise-retry` under arborist), the
+  # node invocation exits non-zero and we report the tree as broken.
   node -e '
-    const fs = require("fs");
     const path = require("path");
     const root = process.argv[1];
-    const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
-    const deps = pkg.bundleDependencies || pkg.bundledDependencies || [];
-    const list = Array.isArray(deps) ? deps : Object.keys(deps);
-    const missing = list.filter(name => {
+    const targets = [
+      "lib/utils/reify-output.js",
+      "lib/utils/reify-finish.js",
+      "node_modules/@npmcli/arborist/lib/index.js",
+      "node_modules/@npmcli/arborist/lib/arborist/index.js",
+      "node_modules/@npmcli/arborist/lib/arborist/rebuild.js",
+      "node_modules/libnpmfund/lib/index.js",
+    ];
+    for (const rel of targets) {
       try {
-        fs.statSync(path.join(root, "node_modules", name, "package.json"));
-        return false;
-      } catch (_) {
-        return true;
+        require(path.join(root, rel));
+      } catch (err) {
+        console.error("npm bundled tree broken at " + rel + ": " + err.message);
+        process.exit(1);
       }
-    });
-    if (missing.length) {
-      console.error("missing bundled npm modules: " + missing.join(", "));
-      process.exit(1);
     }
   ' "${npm_root}" >/dev/null && return 1
   return 0
