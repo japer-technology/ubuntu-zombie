@@ -1350,15 +1350,44 @@ apt_install nodejs
 # Node version, so the `npm install -g npm@latest` below can succeed.
 # `npm --version` only loads npm/lib/npm.js, which is the lightweight entry
 # point and resolves fine even when the bundled dependency tree is missing
-# modules like `promise-retry`. The breakage only surfaces when npm actually
-# runs a command such as `install`, which transitively requires arborist /
-# libnpmfund / reify-output. Probe that full require chain with node so the
-# detection matches the real failure mode below (see error logs referencing
-# `Cannot find module 'promise-retry'` from reify-output.js).
+# modules like `promise-retry`. The breakage also does not surface from
+# `require('lib/commands/install.js')`: modern npm loads reify-finish /
+# reify-output / arborist lazily inside the install command's `exec()`,
+# so a top-level require of install.js resolves cleanly even when the
+# transitive bundled deps are missing. Probe directly instead by reading
+# the bundled `bundleDependencies` list from npm's own package.json and
+# confirming every entry has a real directory under node_modules/. That
+# matches the real failure mode (see error logs referencing
+# `Cannot find module 'promise-retry'` from reify-output.js) and catches
+# any other missing bundled module the same way.
 npm_bundled_broken() {
-  ! npm --version >/dev/null 2>&1 \
-    || ! node -e "require('/usr/lib/node_modules/npm/lib/commands/install.js')" \
-         >/dev/null 2>&1
+  if ! npm --version >/dev/null 2>&1; then
+    return 0
+  fi
+  local npm_root="/usr/lib/node_modules/npm"
+  local pkg_json="${npm_root}/package.json"
+  [[ -f "${pkg_json}" ]] || return 0
+  node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const root = process.argv[1];
+    const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+    const deps = pkg.bundleDependencies || pkg.bundledDependencies || [];
+    const list = Array.isArray(deps) ? deps : Object.keys(deps);
+    const missing = list.filter(name => {
+      try {
+        fs.statSync(path.join(root, "node_modules", name, "package.json"));
+        return false;
+      } catch (_) {
+        return true;
+      }
+    });
+    if (missing.length) {
+      console.error("missing bundled npm modules: " + missing.join(", "));
+      process.exit(1);
+    }
+  ' "${npm_root}" >/dev/null && return 1
+  return 0
 }
 if npm_bundled_broken; then
   log "Bundled npm is broken (likely missing modules); repairing from nodejs.org tarball."
