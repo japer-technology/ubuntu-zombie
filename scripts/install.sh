@@ -1348,7 +1348,19 @@ apt_install nodejs
 # Detect that broken state and repair it by overwriting the bundled npm
 # with the complete one from the official nodejs.org tarball for the same
 # Node version, so the `npm install -g npm@latest` below can succeed.
-if ! npm --version >/dev/null 2>&1; then
+# `npm --version` only loads npm/lib/npm.js, which is the lightweight entry
+# point and resolves fine even when the bundled dependency tree is missing
+# modules like `promise-retry`. The breakage only surfaces when npm actually
+# runs a command such as `install`, which transitively requires arborist /
+# libnpmfund / reify-output. Probe that full require chain with node so the
+# detection matches the real failure mode below (see error logs referencing
+# `Cannot find module 'promise-retry'` from reify-output.js).
+npm_bundled_broken() {
+  ! npm --version >/dev/null 2>&1 \
+    || ! node -e "require('/usr/lib/node_modules/npm/lib/commands/install.js')" \
+         >/dev/null 2>&1
+}
+if npm_bundled_broken; then
   log "Bundled npm is broken (likely missing modules); repairing from nodejs.org tarball."
   NODE_FULL_VERSION="$(node --version | sed 's/^v//')"
   case "${NODE_ARCH}" in
@@ -1374,6 +1386,8 @@ if ! npm --version >/dev/null 2>&1; then
   rm -rf "${NODE_TMP}"
   npm --version >/dev/null \
     || die "npm still broken after repair from nodejs.org tarball." 1
+  npm_bundled_broken \
+    && die "npm bundled modules still incomplete after repair from nodejs.org tarball." 1
 fi
 
 retry 4 5 -- npm install -g npm@latest
