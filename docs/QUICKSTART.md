@@ -72,6 +72,37 @@ session), run:
 sudo ./scripts/install.sh repair
 ```
 
+### Upgrade / refresh from GitHub
+
+The same `install` subcommand is also the upgrade path. There is no
+separate `upgrade` command — pulling the latest source and re-running
+`install` is the supported way to move to a newer version, and it is
+also the inner loop while debugging a problem you have just fixed
+upstream:
+
+```bash
+cd ubuntu-zombie
+git pull                                   # refresh from GitHub
+sudo ./scripts/install.sh install          # re-apply, idempotent
+# (or, for a non-interactive box, re-use the same env vars as the
+#  initial install — SSH_PUBLIC_KEY, VNC_PASSWORD, etc. are read from
+#  the existing /opt/ai-zombie/state on subsequent runs, so usually
+#  only ZOMBIE_NONINTERACTIVE=1 is required.)
+sudo ZOMBIE_NONINTERACTIVE=1 ./scripts/install.sh install
+```
+
+After the re-run, restart the chat service to pick up any new payload
+or service-unit changes, then re-verify:
+
+```bash
+sudo systemctl restart ubuntu-zombie-chat.service
+/opt/ai-zombie/bin/verify
+```
+
+A reboot is only required if the upgrade touches kernel packages,
+GDM/autologin, or Docker group membership — `verify` will say so. For
+a documentation- or payload-only refresh, the restart above is enough.
+
 ## 2. Reboot
 
 ```bash

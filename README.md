@@ -45,12 +45,25 @@ Full walkthrough with expected output and failure branches:
 ## Subcommands
 
 ```
-sudo ./scripts/install.sh install     # full install, idempotent
+sudo ./scripts/install.sh install     # full install or upgrade, idempotent
 sudo ./scripts/install.sh verify      # read-only state check
 sudo ./scripts/install.sh doctor      # explain failures
 sudo ./scripts/install.sh repair      # fix known-safe drift
 sudo ./scripts/install.sh uninstall   # reverse the install
 ```
+
+To upgrade an existing host (or refresh after fixing a bug upstream),
+pull the latest source and re-run `install`:
+
+```bash
+cd ubuntu-zombie
+git pull
+sudo ./scripts/install.sh install
+sudo systemctl restart ubuntu-zombie-chat.service
+```
+
+See [`docs/QUICKSTART.md`](docs/QUICKSTART.md#upgrade--refresh-from-github)
+for the non-interactive variant and when a reboot is required.
 
 Non-interactive variants and every environment variable: see
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) and `--help`.
