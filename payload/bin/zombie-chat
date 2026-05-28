@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# zombie-chat — print the chat URL and a remote-tunnel example.
+# zombie-chat — print the chat URL, a remote-tunnel example, and the
+# operator's debugging entry points. This is the single command a
+# tester should run to discover every diagnostic surface the payload
+# ships with.
 set -euo pipefail
 
 PORT="${ZOMBIE_CHAT_PORT:-7878}"
@@ -21,7 +24,22 @@ Service control:
   sudo systemctl restart ubuntu-zombie-chat.service
   sudo journalctl -u ubuntu-zombie-chat.service -f
 
+Health and diagnostics:
+  zombie-health                       # one-shot health summary
+  zombie-diagnostics                  # bundle redacted logs + state for bug reports
+  sudo ${ZOMBIE_DIR:-/opt/ai-zombie}/bin/secrets-edit    # safely edit provider keys
+
 Audit log:
-  /opt/ai-zombie/bin/audit-recent
+  audit-recent                        # last 25 entries (pretty)
+  audit-recent -f                     # stream new entries (tail -F)
+  audit-recent -t tool_call -t provider_error
+  audit-recent --all                  # full log
+
+Verbose audit (for testing only — opt in on the chat service):
+  sudo systemctl edit ubuntu-zombie-chat.service
+    # add: [Service]
+    #      Environment=ZOMBIE_AUDIT_VERBOSE=1
+  sudo systemctl restart ubuntu-zombie-chat.service
+  # tool_call entries then include redacted stdout/stderr previews.
 
 EOF
