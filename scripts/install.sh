@@ -131,7 +131,7 @@ ${SCRIPT_NAME} ${SCRIPT_VERSION}
 Ubuntu Zombie baseline installer + AI Systems Administrator chat service.
 
 Usage:
-  sudo ./${SCRIPT_NAME} [SUBCOMMAND] [--help] [--version]
+  sudo ./${SCRIPT_NAME} [SUBCOMMAND] [--dry-run] [--help] [--version]
 
 Subcommands:
   install     Full install (default). Idempotent.
@@ -140,6 +140,12 @@ Subcommands:
   repair      Apply known-safe fixes (re-assert permissions, retry
               Tailscale login, restart the chat service).
   uninstall   Reverse the install (delegates to uninstall.sh).
+
+Flags:
+  -n, --dry-run   Print the install plan (apt packages, systemd units,
+                  files written) without modifying the host. Useful for
+                  reviewing what 'install' would do before granting sudo.
+                  Only meaningful with the 'install' subcommand.
 
 Environment variables (selected; see CONFIGURATION.md for all):
   ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
@@ -164,11 +170,13 @@ EOF
 
 SUBCOMMAND="install"
 SUBCOMMAND_SEEN=0
+DRY_RUN=0
 PARSED_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)    usage; exit 0 ;;
     -v|--version) printf '%s %s\n' "${SCRIPT_NAME}" "${SCRIPT_VERSION}"; exit 0 ;;
+    -n|--dry-run) DRY_RUN=1; shift ;;
     install|verify|doctor|repair|uninstall)
                   if (( SUBCOMMAND_SEEN )); then
                     # A second subcommand token (e.g. `install install`) is
@@ -183,6 +191,7 @@ while [[ $# -gt 0 ]]; do
     *)  PARSED_ARGS+=("$1"); shift ;;
   esac
 done
+readonly DRY_RUN
 
 # ---------------------------------------------------------------------------
 # Helpers shared across subcommands
@@ -702,6 +711,67 @@ cmd_uninstall() {
 }
 
 # ---------------------------------------------------------------------------
+# Dry-run summary (no host mutation; safe without sudo).
+# ---------------------------------------------------------------------------
+
+print_dry_run_plan() {
+  load_os_release
+  cat <<EOF
+${SCRIPT_NAME} ${SCRIPT_VERSION}  —  dry-run
+
+A real 'install' run with the current environment would:
+
+  Host:           ${ID:-?} ${VERSION_ID:-?} on $(dpkg --print-architecture 2>/dev/null || uname -m)
+  Agent user:     ${AGENT_USER}  (home: ${AGENT_HOME})
+  Install root:   ${ZOMBIE_DIR}
+  Etc dir:        ${ZOMBIE_ETC}
+  Log dir:        ${ZOMBIE_LOG_DIR}
+  Transcript:     ${LOG_FILE}
+  Chat port:      ${CHAT_PORT}/tcp (loopback only)
+  VNC port:       ${VNC_PORT}/tcp (loopback only)
+  Tailscale:      $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "SKIPPED (ZOMBIE_SKIP_TAILSCALE=1)" || echo "installed and enrolled")
+  Autologin:      $([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo enabled || echo disabled)
+  Mode:           $([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)
+
+Apt package groups installed:
+  base            openssh-server, sudo, curl, ufw, fail2ban, unattended-upgrades, git,
+                  python3*, build-essential, ripgrep, jq, …
+  desktop         ubuntu-desktop-minimal, gdm3, xorg, x11vnc, xdotool, scrot, …
+  nodejs          Node 22.x from deb.nodesource.com (signed-by keyring)
+  docker          docker-ce, docker-ce-cli, containerd.io (official Docker apt)
+  $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "(tailscale skipped)" || echo "tailscale       tailscale (official Tailscale apt)")
+
+Files & directories created / re-asserted:
+  /etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie   (NOPASSWD: ALL for ${AGENT_USER})
+  ${AGENT_HOME}/.ssh/authorized_keys              (700 dir, 600 file, ${AGENT_USER}:${AGENT_USER})
+  /etc/ssh/sshd_config.d/                         (key-only auth drop-in)
+  /etc/gdm3/custom.conf                           (Xorg, optional autologin)
+  ${ZOMBIE_DIR}/                                  (755, ${AGENT_USER}:${AGENT_USER})
+  ${ZOMBIE_DIR}/secrets/                          (700, env file 600)
+  ${ZOMBIE_DIR}/bin/                              (verify, health-check, secrets-edit, audit-recent, …)
+  ${ZOMBIE_DIR}/agent/                            (Python package + templates + skills + pi bridge)
+  ${ZOMBIE_DIR}/pi/                               (rendered pi-mono settings + APPEND_SYSTEM.md)
+  ${ZOMBIE_DIR}/skills/                           (built-in markdown skills)
+  ${ZOMBIE_ETC}/skills.d/                         (operator-supplied skills)
+  ${ZOMBIE_LOG_DIR}/                              (750, ${AGENT_USER}:${AGENT_USER}, logrotate'd)
+  /etc/systemd/system/ubuntu-zombie-chat.service
+  /etc/systemd/system/ubuntu-zombie-health.service
+  /etc/systemd/system/ubuntu-zombie-health.timer
+  /etc/logrotate.d/ubuntu-zombie
+
+Firewall (ufw):
+  default          deny incoming / allow outgoing
+  $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "ssh             ALLOW IN 22/tcp from any (Tailscale skipped)" || echo "ssh             ALLOW IN 22/tcp on tailscale0 only")
+
+Nothing has been changed. To proceed for real:
+
+  sudo ./${SCRIPT_NAME} install
+
+See docs/QUICKSTART.md and docs/ARCHITECTURE.md for the full picture.
+EOF
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch non-install subcommands early.
 # ---------------------------------------------------------------------------
 
@@ -718,6 +788,14 @@ case "${SUBCOMMAND}" in
   *)         die "Unknown subcommand: ${SUBCOMMAND}" 2 ;;
 esac
 
+# Dry-run short-circuits the entire install path. It does not require
+# root: the whole point is to let an operator preview what would happen
+# before they grant sudo.
+if (( DRY_RUN )); then
+  print_dry_run_plan
+  exit 0
+fi
+
 # =============================================================================
 # install — the rest of the file
 # =============================================================================
@@ -731,6 +809,41 @@ mkdir -p "$(dirname "${LOG_FILE}")"
 touch "${LOG_FILE}"
 chmod 600 "${LOG_FILE}"
 exec > >(tee -a "${LOG_FILE}") 2>&1
+
+# Step-trace breadcrumb: every section() call writes to this file so a
+# crashed install leaves a clear trail of which step failed and which
+# steps preceded it. on_error() includes the tail in its diagnostic.
+STEP_LOG="${LOG_FILE%.log}.steps"
+mkdir -p "$(dirname "${STEP_LOG}")"
+: > "${STEP_LOG}"
+chmod 600 "${STEP_LOG}" 2>/dev/null || true
+
+# Re-define section() to record the breadcrumb in addition to printing.
+section() {
+  printf '%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "${STEP_LOG}" || true
+  printf '\n%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
+  printf '%s%s%s\n' "${C_BOLD}" "$*" "${C_RESET}"
+  printf '%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
+}
+
+# Augment on_error() with the step trail so an operator pasting the
+# failure into an issue has both the line number AND the last few
+# completed install phases.
+on_error() {
+  local exit_code=$?
+  local line=$1
+  printf '\n%s[x] %s failed on line %s with exit code %s.%s\n' \
+    "${C_RED}" "${SCRIPT_NAME}" "${line}" "${exit_code}" "${C_RESET}" >&2
+  printf '%s    Full transcript: %s%s\n' "${C_RED}" "${LOG_FILE}" "${C_RESET}" >&2
+  if [[ -s "${STEP_LOG}" ]]; then
+    printf '%s    Steps completed before failure (last 5):%s\n' "${C_RED}" "${C_RESET}" >&2
+    tail -n 5 "${STEP_LOG}" | sed 's/^/      /' >&2 || true
+    printf '%s    Full step trail: %s%s\n' "${C_RED}" "${STEP_LOG}" "${C_RESET}" >&2
+  fi
+  printf '%s    Recovery: re-run the installer (it is idempotent), or %ssudo ./%s doctor%s for guidance.%s\n' \
+    "${C_RED}" "${C_BOLD}" "${SCRIPT_NAME}" "${C_RESET}${C_RED}" "${C_RESET}" >&2
+  exit "${exit_code}"
+}
 
 section "${SCRIPT_NAME} ${SCRIPT_VERSION}  —  install"
 
