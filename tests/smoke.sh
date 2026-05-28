@@ -650,6 +650,12 @@ run_standards() {
       { echo "missing built-in skill: payload/agent/skills/${s}.md" >&2; exit 1; }
   done
 
+  # The npm repair probe must validate the npm package root belonging to
+  # the executable on PATH, rather than a distro-specific hard-coded path.
+  grep -q 'npm_root="$(npm_install_root "${npm_cmd}")"' scripts/install.sh
+  ! grep -q 'local npm_root="/usr/lib/node_modules/npm"' scripts/install.sh
+  ! grep -q 'npm_bundled_broken[[:space:]]*\\$' scripts/install.sh
+
   # Keep the release bundle source list honest without creating dist/.
   tar --exclude-vcs --exclude='dist' --exclude='__pycache__' \
       -czf /tmp/ubuntu-zombie-smoke-package.tar.gz \
