@@ -301,6 +301,31 @@ if command -v npm >/dev/null 2>&1; then
 fi
 
 # -------------------------------------------------------------------
+# 5c. Remove /usr/local/bin symlinks installed by install.sh.
+# -------------------------------------------------------------------
+# install.sh adds these as `ln -sf ${ZOMBIE_DIR}/bin/...` shims so the
+# CLI is on PATH for the operator. Without explicit cleanup they become
+# dangling symlinks after step 5 removes ${ZOMBIE_DIR}. Only remove a
+# link if it is a symlink whose target lives under ${ZOMBIE_DIR}, so we
+# never delete an operator-owned binary of the same name.
+info "Removing /usr/local/bin shims that point into ${ZOMBIE_DIR}"
+for _shim in zombie-chat audit-recent secrets-edit zombie-health zombie-diagnostics zombie-verify; do
+  _path="/usr/local/bin/${_shim}"
+  if [[ -L "${_path}" ]]; then
+    _target="$(readlink -f "${_path}" 2>/dev/null || true)"
+    case "${_target}" in
+      "${ZOMBIE_DIR}"/*) run "rm -f ${_path}" ;;
+      "") # broken symlink; check the literal target instead.
+        _literal="$(readlink "${_path}" 2>/dev/null || true)"
+        case "${_literal}" in
+          "${ZOMBIE_DIR}"/*) run "rm -f ${_path}" ;;
+        esac
+        ;;
+    esac
+  fi
+done
+
+# -------------------------------------------------------------------
 # 6. Remove /etc/ubuntu-zombie policy config.
 # -------------------------------------------------------------------
 if [[ -d /etc/ubuntu-zombie ]]; then
@@ -343,6 +368,13 @@ elif id "${AGENT_USER}" >/dev/null 2>&1; then
         # ownership. --only-if-empty makes this safe.
         if getent group "${AGENT_USER}" >/dev/null 2>&1; then
           run "delgroup --only-if-empty ${AGENT_USER} >/dev/null 2>&1 || true"
+        fi
+        # install.sh writes /var/lib/AccountsService/users/${AGENT_USER}
+        # to pin the XSession to ubuntu-xorg; userdel does not clean it
+        # up, leaving a stale AccountsService entry referencing a missing
+        # account. Remove it once the user is actually gone.
+        if [[ -f "/var/lib/AccountsService/users/${AGENT_USER}" ]]; then
+          run "rm -f /var/lib/AccountsService/users/${AGENT_USER}"
         fi
       else
         warn "Failed to remove user ${AGENT_USER}; see 'who', 'loginctl list-sessions',"
