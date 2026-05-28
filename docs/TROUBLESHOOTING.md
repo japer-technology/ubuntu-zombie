@@ -147,10 +147,25 @@ Typical causes:
 ```bash
 /opt/ai-zombie/bin/audit-recent           # last 25 entries
 /opt/ai-zombie/bin/audit-recent --all     # full log
+/opt/ai-zombie/bin/audit-recent -f        # tail -F, useful during testing
+/opt/ai-zombie/bin/audit-recent -t tool_call -t provider_error  # filter by type
 sudo less /var/log/ubuntu-zombie/audit.log
 ```
 
 `audit-recent` is also reachable on `PATH` as `audit-recent`.
+
+For deeper debugging during testing, set `ZOMBIE_AUDIT_VERBOSE=1` on
+the chat service (e.g. via the systemd drop-in or by editing
+`/opt/ai-zombie/secrets/env`) and restart `ubuntu-zombie-chat.service`.
+The scribe will then attach a redacted `stdout_preview` /
+`stderr_preview` (default 2 KiB each, capped at 16 KiB and tunable
+via `ZOMBIE_AUDIT_PREVIEW_BYTES`) to every `tool_call` entry so you
+can read what the AI saw without re-running the command. The
+SHA-256 digests still ship unchanged so the existing integrity
+contract holds. Turn it back off (or unset it) before handing the
+machine over to a long-running operator — verbose mode makes the
+audit log noisier and slightly less privacy-preserving.
+
 Companion shortcuts installed by the installer:
 
 | Symlink                            | Target                                      |
