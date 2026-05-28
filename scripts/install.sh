@@ -811,8 +811,6 @@ apt_install \
   python3-venv \
   python3-tk \
   pipx \
-  nodejs \
-  npm \
   build-essential \
   ripgrep \
   fd-find \
@@ -1301,6 +1299,45 @@ ok "Python venv ready at ${AGENT_HOME}/agent-env."
 # ---------------------------------------------------------------------------
 
 section "Node runtime"
+
+# The npm bundled with Ubuntu's apt-provided `nodejs` (Node 18 on
+# 22.04/24.04) is too old to self-upgrade to npm@latest, which now
+# requires Node ^20.17.0 || >=22.9.0. Install Node 22.x from the
+# official NodeSource apt repository so the global npm install below —
+# and the pi-ai / pi-coding-agent globals that follow — see a Node
+# runtime they actually support. Pattern mirrors the Tailscale and
+# Docker repo setup above (signed-by keyring + sources.list.d drop-in).
+NODESOURCE_KEYRING="/usr/share/keyrings/nodesource.gpg"
+NODESOURCE_SOURCES="/etc/apt/sources.list.d/nodesource.sources"
+NODESOURCE_PREF="/etc/apt/preferences.d/nodejs"
+NODE_MAJOR="22"
+NODE_ARCH="$(dpkg --print-architecture)"
+case "${NODE_ARCH}" in
+  amd64|arm64) : ;;
+  *) die "NodeSource supports only amd64/arm64; detected '${NODE_ARCH}'." 65 ;;
+esac
+install -d -m 755 "$(dirname "${NODESOURCE_KEYRING}")"
+rm -f /etc/apt/sources.list.d/nodesource.list
+curl_get https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+  | gpg --dearmor --yes -o "${NODESOURCE_KEYRING}"
+chmod 0644 "${NODESOURCE_KEYRING}"
+cat > "${NODESOURCE_SOURCES}" <<EOF
+Types: deb
+URIs: https://deb.nodesource.com/node_${NODE_MAJOR}.x
+Suites: nodistro
+Components: main
+Architectures: ${NODE_ARCH}
+Signed-By: ${NODESOURCE_KEYRING}
+EOF
+# Pin nodejs to the NodeSource origin so apt always prefers it over the
+# older Ubuntu archive package on subsequent upgrades.
+cat > "${NODESOURCE_PREF}" <<EOF
+Package: nodejs
+Pin: origin deb.nodesource.com
+Pin-Priority: 600
+EOF
+apt_get update
+apt_install nodejs
 
 retry 4 5 -- npm install -g npm@latest
 retry 4 5 -- npm install -g yarn pnpm typescript ts-node
