@@ -1358,11 +1358,17 @@ apt_install nodejs
 # `bundleDependencies` list is also insufficient because the missing
 # modules (e.g. `promise-retry`) are transitive deps that live under
 # nested `node_modules/` directories and are not necessarily named in
-# the top-level bundle manifest. Probe directly by eagerly requiring the
-# exact files reported in the real failure stack
-# (lib/utils/reify-output.js -> libnpmfund -> arborist -> arborist/rebuild
-# -> promise-retry); if any of them fails to resolve, treat the bundled
-# npm tree as broken and repair it from the nodejs.org tarball.
+# the top-level bundle manifest. Probe directly using two complementary
+# checks: (1) eagerly require the exact files reported in the real
+# failure stack (lib/utils/reify-output.js -> libnpmfund -> arborist
+# -> arborist/rebuild -> promise-retry); (2) ask npm itself to dry-run
+# the same `npm install -g npm@latest` we are about to invoke, and
+# treat any MODULE_NOT_FOUND in its output as evidence of an incomplete
+# bundle. The second probe catches breakage in modules that the
+# bundled npm loads lazily at install time (i.e. modules that resolve
+# cleanly under a static `require()` walk but still blow up the moment
+# npm's reify pipeline actually runs). If either probe reports the
+# tree as broken, repair it from the nodejs.org tarball.
 npm_install_root() {
   local npm_cmd="$1"
   node -e '
@@ -1390,16 +1396,17 @@ npm_install_root() {
 }
 
 npm_bundled_broken() {
-  local npm_cmd npm_root
+  local npm_cmd npm_root probe
   if ! npm_cmd="$(command -v npm)" || ! npm --version >/dev/null 2>&1; then
     return 0
   fi
   npm_root="$(npm_install_root "${npm_cmd}")" || return 0
   [[ -f "${npm_root}/package.json" ]] || return 0
-  # Eagerly require the exact files in the broken require chain. If any
-  # link is missing (e.g. the nested `promise-retry` under arborist), the
-  # node invocation exits non-zero and we report the tree as broken.
-  node -e '
+  # 1) Cheap static probe. Eagerly require the exact files in the
+  # broken require chain. If any link is missing (e.g. the nested
+  # `promise-retry` under arborist), the node invocation exits non-zero
+  # and we report the tree as broken without any network round-trip.
+  if ! node -e '
     const path = require("path");
     const root = process.argv[1];
     const targets = [
@@ -1418,8 +1425,27 @@ npm_bundled_broken() {
         process.exit(1);
       }
     }
-  ' "${npm_root}" >/dev/null && return 1
-  return 0
+  ' "${npm_root}" >/dev/null 2>&1; then
+    return 0
+  fi
+  # 2) Dynamic probe. Even when every file in the hard-coded chain
+  # above resolves, npm can still blow up at install time because the
+  # real `npm install` path loads more modules lazily (inside command
+  # exec() bodies, not at file top-level) and a different missing
+  # transitive dep won't surface from a static `require()` walk.
+  # Ask npm itself to dry-run the exact operation that has been
+  # failing in production. Dry-run computes the ideal tree (which
+  # exercises arborist end-to-end) without writing to disk, and any
+  # `MODULE_NOT_FOUND` / "Cannot find module" in the output is
+  # unambiguous evidence the bundled tree is incomplete. Genuine
+  # network / registry errors are ignored on purpose so we do not
+  # trigger a repair (and a ~25 MB download) on healthy offline hosts.
+  probe="$(npm install --global --dry-run --no-audit --no-fund \
+                       --no-progress --silent npm@latest 2>&1 || true)"
+  if grep -Eq 'MODULE_NOT_FOUND|Cannot find module' <<<"${probe}"; then
+    return 0
+  fi
+  return 1
 }
 if npm_bundled_broken; then
   log "Bundled npm is broken (likely missing modules); repairing from nodejs.org tarball."
