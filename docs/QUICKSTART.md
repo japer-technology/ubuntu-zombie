@@ -205,14 +205,20 @@ Keep running: do nothing.
 Uninstall:
 
 ```bash
-sudo ./scripts/install.sh uninstall --dry-run      # preview
-sudo ./scripts/install.sh uninstall                # remove (interactive)
-sudo ./scripts/install.sh uninstall --archive      # archive /home/<agent> and
-                                                   # /opt/ai-zombie/state/ to
-                                                   # /var/backups/ before removal
-sudo ./scripts/install.sh uninstall --yes          # skip confirmations
-sudo ./scripts/install.sh uninstall --keep-agent   # leave the local user in place
+sudo ./scripts/uninstall.sh --dry-run      # preview
+sudo ./scripts/install.sh uninstall        # remove (interactive)
+sudo ./scripts/uninstall.sh --archive      # archive /home/<agent> and
+                                           # /opt/ai-zombie/state/ to
+                                           # /var/backups/ before removal
+sudo ./scripts/uninstall.sh --yes          # skip confirmations
+sudo ./scripts/uninstall.sh --keep-agent   # leave the local user in place
 ```
+
+Flags must be passed to `scripts/uninstall.sh` directly. The
+`scripts/install.sh uninstall` subcommand has no flags of its own and
+its argument parser will reject any unknown flags (e.g.
+`Unknown flag: --dry-run`); use it only for a plain interactive
+uninstall.
 
 Uninstall removes the chat service, sudoers drop-in, SSH drop-in,
 x11vnc autostart, generated helpers, policy, logrotate rule, and
