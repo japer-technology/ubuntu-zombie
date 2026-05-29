@@ -13,6 +13,15 @@ set -Eeuo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
+# shellcheck source=scripts/lib.sh
+if [[ -r "${ROOT}/scripts/lib.sh" ]]; then
+  . "${ROOT}/scripts/lib.sh"
+  lib_setup_colors
+else
+  printf 'build-deb.sh: cannot find required library %s\n' "${ROOT}/scripts/lib.sh" >&2
+  exit 1
+fi
+
 VERSION="$(tr -d '[:space:]' < VERSION)"
 PKG="ubuntu-zombie"
 ARCH="all"
@@ -21,7 +30,7 @@ STAGE="$(mktemp -d -t "${PKG}-deb.XXXXXX")"
 trap 'rm -rf "${STAGE}"' EXIT
 
 mkdir -p "${OUT_DIR}"
-echo "Building ${PKG} ${VERSION} in ${STAGE}"
+info "Building ${PKG} ${VERSION} in ${STAGE}"
 
 # ---------------------------------------------------------------------------
 # Lay out the file tree
@@ -96,10 +105,10 @@ DEB_NAME="${PKG}_${VERSION}_${ARCH}.deb"
 dpkg-deb --root-owner-group --build "${STAGE}" "${OUT_DIR}/${DEB_NAME}"
 
 echo
-echo "Wrote ${OUT_DIR}/${DEB_NAME}"
+ok "Wrote ${OUT_DIR}/${DEB_NAME}"
 dpkg-deb --info  "${OUT_DIR}/${DEB_NAME}" | head -30 || true
 echo
-echo "Contents (first 20):"
+info "Contents (first 20):"
 # Pipe to cat first so dpkg-deb sees an unbroken pipe even when head
 # closes early — otherwise SIGPIPE kills dpkg-deb under `set -o pipefail`.
 dpkg-deb --contents "${OUT_DIR}/${DEB_NAME}" 2>/dev/null | head -20 || true

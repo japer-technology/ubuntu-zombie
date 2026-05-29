@@ -96,6 +96,13 @@ STRICT="${ZOMBIE_STRICT:-0}"
 JSON_OUTPUT=0
 VERBOSE="${ZOMBIE_VERBOSE:-0}"
 
+# Idempotency transparency: count how many idempotent steps were already in
+# place versus newly applied, so a re-run does not look like a fresh install.
+STEPS_SATISFIED=0
+STEPS_CHANGED=0
+note_satisfied() { STEPS_SATISFIED=$((STEPS_SATISFIED + 1)); }
+note_changed()   { STEPS_CHANGED=$((STEPS_CHANGED + 1)); }
+
 PAYLOAD_DIR="${PAYLOAD_DIR:-${REPO_ROOT}/payload}"
 
 # Exit codes:
@@ -330,6 +337,7 @@ append_line_once() {
   local line="$1"
   local file="$2"
   if grep -qxF "$line" "$file" 2>/dev/null; then
+    note_satisfied
     return 0
   fi
   # Ensure the file ends with a newline before appending, so we don't
@@ -338,6 +346,7 @@ append_line_once() {
     printf '\n' >> "$file"
   fi
   printf '%s\n' "$line" >> "$file"
+  note_changed
 }
 
 is_ssh_pubkey() {
@@ -1584,8 +1593,17 @@ section "Python cloud-agent runtime"
 install -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/bin/setup-agent-venv" "${ZOMBIE_DIR}/bin/setup-agent-venv"
 
-# Build the venv and install python packages as the agent user.
-runuser -l "${AGENT_USER}" -- "${ZOMBIE_DIR}/bin/setup-agent-venv"
+# Build the venv and install python packages as the agent user. This step
+# downloads Chromium and can run for minutes; on an interactive TTY show a
+# heartbeat spinner and route the (noisy) detail to the transcript, while
+# non-interactive/CI runs keep the full output streaming as before.
+if [[ -t 2 ]] && ! (( ZOMBIE_QUIET )); then
+  run_step "Building Python venv + browser (this can take a few minutes)" -- \
+    bash -c 'runuser -l "$1" -- "$2" >>"$3" 2>&1' \
+    _ "${AGENT_USER}" "${ZOMBIE_DIR}/bin/setup-agent-venv" "${LOG_FILE}"
+else
+  runuser -l "${AGENT_USER}" -- "${ZOMBIE_DIR}/bin/setup-agent-venv"
+fi
 
 # Install Chromium system dependencies as root (apt-get requires it). The
 # unprivileged playwright browser download in setup-agent-venv above will
@@ -2284,9 +2302,9 @@ fi
 bullet() {
   local ok="$1" label="$2"
   if [[ "${ok}" == "1" ]]; then
-    printf '  %s[ok]%s %s\n' "${C_GREEN}" "${C_RESET}" "${label}"
+    status ok "${label}"
   else
-    printf '  %s[--]%s %s\n' "${C_YELLOW}" "${C_RESET}" "${label}"
+    status warn "${label}"
   fi
 }
 
@@ -2378,4 +2396,8 @@ echo "A reboot is required: sudo reboot"
 
 if [[ -n "${INSTALL_T0:-}" ]]; then
   ok "Install took $(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")."
+fi
+
+if (( STEPS_SATISFIED + STEPS_CHANGED > 0 )); then
+  info "Idempotent steps: ${STEPS_SATISFIED} already satisfied, ${STEPS_CHANGED} applied this run."
 fi

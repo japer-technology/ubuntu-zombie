@@ -13,9 +13,9 @@ else
 fi
 
 PASS=0; FAIL=0; WARN=0
-check_ok()   { printf '  %s[ok]%s   %s\n' "${C_GREEN}" "${C_RESET}" "$*"; PASS=$((PASS+1)); }
-check_warn() { printf '  %s[warn]%s %s\n' "${C_YEL}"   "${C_RESET}" "$*"; WARN=$((WARN+1)); }
-check_fail() { printf '  %s[--]%s   %s\n' "${C_RED}"   "${C_RESET}" "$*"; FAIL=$((FAIL+1)); }
+check_ok()   { printf '  %s[ok]%s %s\n' "${C_GREEN}" "${C_RESET}" "$*"; PASS=$((PASS+1)); }
+check_warn() { printf '  %s[!]%s  %s\n' "${C_YEL}"   "${C_RESET}" "$*"; WARN=$((WARN+1)); }
+check_fail() { printf '  %s[x]%s  %s\n' "${C_RED}"   "${C_RESET}" "$*"; FAIL=$((FAIL+1)); }
 
 printf '%s== ubuntu-zombie health ==%s\n\n' "${C_BOLD}" "${C_RESET}"
 
