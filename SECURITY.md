@@ -69,14 +69,19 @@ require a confirmation phrase. See `ARCHITECTURE.md` for the classes.
 ## Network exposure
 
 - UFW default: deny inbound, allow outbound.
-- SSH (port 22): allowed on `tailscale0` only.
+- SSH (port 22): by default allowed on **every** interface (key-only,
+  root-disabled). Opt in to Tailscale (`ZOMBIE_SKIP_TAILSCALE=0`) to
+  restrict it to `tailscale0` only.
 - VNC (port 5900): bound to `127.0.0.1` only.
 - Chat (default port 7878): bound to `127.0.0.1` only.
 - Tailscale SSH (`tailscale up --ssh`) is **not** enabled by the
   installer; ingress goes through the standard `sshd` so audit
   trails follow Ubuntu conventions.
 
-To use the chat or VNC remotely, SSH-tunnel the port over Tailscale.
+Tailscale is off by default. With the default, SSH is reachable from
+any network the host can be addressed on, so run the host only on a
+network you control (NAT/router or another VPN). To use the chat or
+VNC remotely, SSH-tunnel the port (over Tailscale if you enabled it).
 
 ## Rotating credentials
 
@@ -102,8 +107,8 @@ state.
 ## Known risks
 
 - **Passwordless sudo.** Intentional, but it means compromise of
-  `agent` is compromise of root. Mitigated by Tailscale-only ingress,
-  key-only SSH, policy gate, and audit logging.
+  `agent` is compromise of root. Mitigated by key-only SSH, the policy
+  gate, audit logging, and (when enabled) Tailscale-only ingress.
 - **Docker group access.** `agent` is in `docker`, which is
   effectively root. The policy classifies `docker` commands as
   `system_change` or `destructive` depending on the verb.

@@ -21,7 +21,8 @@ map is in [`docs/ARCHITECTURE.md`](ARCHITECTURE.md).
 A single operator who owns the physical machine, wants to delegate
 routine sysadmin to an LLM, and is comfortable granting the LLM
 passwordless `sudo` behind a local approval gate, an audit log, and
-a Tailscale-only inbound network surface.
+key-only SSH (optionally confined to a Tailscale-only inbound network
+surface).
 
 ## What does the LLM see?
 
@@ -51,9 +52,11 @@ will be unused. It is not supported. See
 
 ## Can I run this without Tailscale?
 
-Yes. Set `ZOMBIE_SKIP_TAILSCALE=1` at install time. SSH is then
-allowed on every interface and you are responsible for the
-perimeter. See [`docs/CONFIGURATION.md`](CONFIGURATION.md).
+Yes — that is the default. Tailscale is off unless you opt in with
+`ZOMBIE_SKIP_TAILSCALE=0`. With the default, SSH is allowed on every
+interface and you are responsible for the perimeter. To confine
+inbound SSH to a private tailnet, install with
+`ZOMBIE_SKIP_TAILSCALE=0`. See [`docs/CONFIGURATION.md`](CONFIGURATION.md).
 
 ## How do I preview what `install.sh` will do?
 

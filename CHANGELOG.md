@@ -79,6 +79,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   - TROUBLESHOOTING gains a table mapping symptoms to
     `repair`-vs-`install` fixes.
 
+### Changed
+- **Tailscale is now off by default.** `scripts/install.sh` no longer
+  installs or enrols Tailscale unless you opt in with
+  `ZOMBIE_SKIP_TAILSCALE=0`. With the default, inbound SSH is allowed
+  on every interface (still key-only and root-disabled); opting in
+  restricts inbound SSH to the `tailscale0` interface as before.
+  `TAILSCALE_AUTHKEY` is used only when `ZOMBIE_SKIP_TAILSCALE=0`.
+  `README.md`, `docs/QUICKSTART.md`, `docs/CONFIGURATION.md`,
+  `SECURITY.md`, `docs/FAQ.md`, and `docs/REQUIRES.md` updated, and
+  `docs/QUICKSTART.md`/`README.md` now document every parameter the
+  installer requires to proceed.
+
 ### Fixed
 - **`collect-diagnostics` aborted before writing its bundle.** The
   `capture` helper ran each diagnostic command under `set -euo
