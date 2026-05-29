@@ -1503,10 +1503,10 @@ npm_install_root() {
 # npm's self-upgrade (see the long note above for why that self-destructs).
 # The registry's published tarball bundles every npm dependency, so unpacking
 # it straight into the global node_modules yields a complete, current npm with
-# no reify step. We verify the registry-provided Subresource Integrity hash
-# before extracting as root, and parse the packument with node (already
-# installed) to avoid pulling in a jq dependency. Transient network errors
-# bubble up as a non-zero return so the retry wrapper can try again.
+# no reify step. We require and verify the registry-provided Subresource
+# Integrity hash before extracting as root, and parse the packument with node
+# (already installed) to avoid pulling in a jq dependency. Transient network
+# errors bubble up as a non-zero return so the retry wrapper can try again.
 install_npm_latest() {
   local npm_cmd npm_root tmp_dir version tarball_url integrity tarball
   npm_cmd="$(command -v npm)" || die "npm command missing after nodejs install." 1
@@ -1517,37 +1517,37 @@ install_npm_latest() {
     || { rm -rf "${tmp_dir}"; return 1; }
   node -e '
     const m = require(process.argv[1]);
-    if (!m.version || !m.dist || !m.dist.tarball) process.exit(1);
-    process.stdout.write([m.version, m.dist.tarball, m.dist.integrity || ""].join("\n") + "\n");
+    if (!m.version || !m.dist || !m.dist.tarball || typeof m.dist.integrity !== "string") process.exit(1);
+    const sri = m.dist.integrity;
+    const i = sri.indexOf("-");
+    if (i <= 0 || i === sri.length - 1) process.exit(1);
+    process.stdout.write([m.version, m.dist.tarball, sri].join("\n") + "\n");
   ' "${tmp_dir}/latest.json" > "${tmp_dir}/meta.txt" \
-    || { rm -rf "${tmp_dir}"; return 1; }
+    || { rm -rf "${tmp_dir}"; die "npm registry metadata for the latest npm release was missing a valid integrity hash." 1; }
   version="$(sed -n 1p "${tmp_dir}/meta.txt")"
   tarball_url="$(sed -n 2p "${tmp_dir}/meta.txt")"
   integrity="$(sed -n 3p "${tmp_dir}/meta.txt")"
-  if [[ -z "${version}" || -z "${tarball_url}" ]]; then
-    rm -rf "${tmp_dir}"
-    return 1
-  fi
+  [[ -n "${version}" && -n "${tarball_url}" && -n "${integrity}" ]] \
+    || { rm -rf "${tmp_dir}"; die "npm registry metadata for the latest npm release was incomplete." 1; }
   tarball="${tmp_dir}/npm.tgz"
   curl_get "${tarball_url}" -o "${tarball}" \
     || { rm -rf "${tmp_dir}"; return 1; }
   # Verify the registry's SRI hash (e.g. "sha512-<base64>") before trusting the
   # archive. A mismatch means a corrupt or tampered download, so we abort hard
   # rather than retrying a request that would keep failing the same way.
-  if [[ -n "${integrity}" ]]; then
-    node -e '
-      const fs = require("fs"), crypto = require("crypto");
-      const sri = process.argv[1], file = process.argv[2];
-      const i = sri.indexOf("-");
-      if (i === -1) process.exit(1);
-      const algo = sri.slice(0, i);
-      const expected = sri.slice(i + 1);
-      const got = crypto.createHash(algo).update(fs.readFileSync(file)).digest("base64");
-      process.exit(got === expected ? 0 : 1);
-    ' "${integrity}" "${tarball}" \
-      || { rm -rf "${tmp_dir}"; die "Integrity check failed for npm@${version} from the npm registry." 1; }
-  fi
-  tar -xzf "${tarball}" -C "${tmp_dir}"
+  node -e '
+    const fs = require("fs"), crypto = require("crypto");
+    const sri = process.argv[1], file = process.argv[2];
+    const i = sri.indexOf("-");
+    if (i <= 0 || i === sri.length - 1) process.exit(1);
+    const algo = sri.slice(0, i);
+    const expected = sri.slice(i + 1);
+    const got = crypto.createHash(algo).update(fs.readFileSync(file)).digest("base64");
+    process.exit(got === expected ? 0 : 1);
+  ' "${integrity}" "${tarball}" \
+    || { rm -rf "${tmp_dir}"; die "Integrity check failed for npm@${version} from the npm registry." 1; }
+  tar -xzf "${tarball}" -C "${tmp_dir}" \
+    || { rm -rf "${tmp_dir}"; return 1; }
   [[ -d "${tmp_dir}/package" ]] \
     || { rm -rf "${tmp_dir}"; die "npm registry tarball for npm@${version} had an unexpected layout." 1; }
   rm -rf "${npm_root}"
