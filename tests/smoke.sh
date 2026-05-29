@@ -718,11 +718,60 @@ run_standards() {
   rm -f /tmp/ubuntu-zombie-smoke-package.tar.gz
 }
 
+run_flags() {
+  echo "[smoke] UX flags"
+  # --help / --version / dry-run must stay exit 0 and never mutate the host.
+  ./scripts/install.sh --help    >/dev/null
+  ./scripts/install.sh --version >/dev/null
+  expect_exit_code 0 ./scripts/install.sh install --dry-run
+  expect_exit_code 0 ./scripts/install.sh install --yes --dry-run
+
+  # --help must advertise the new examples and completion section.
+  ./scripts/install.sh --help | grep -q "Examples:"
+  ./scripts/install.sh --help | grep -q "completion"
+
+  # --no-color must strip ANSI escapes from output.
+  set +e
+  out="$(./scripts/install.sh doctor --no-color 2>&1)"
+  set -e
+  if printf '%s' "${out}" | grep -q $'\033'; then
+    echo "FAIL: --no-color still emitted ANSI escapes" >&2
+    exit 1
+  fi
+
+  # --quiet must suppress [i]/[+] info lines (warnings/errors only).
+  set +e
+  out="$(./scripts/install.sh doctor --quiet 2>/dev/null)"
+  set -e
+  if printf '%s\n' "${out}" | grep -qE '^\[i\]|^\[\+\]'; then
+    echo "FAIL: --quiet still printed info/ok lines" >&2
+    exit 1
+  fi
+
+  # --json must emit valid JSON for doctor (machine-readable mode).
+  set +e
+  out="$(./scripts/install.sh doctor --json 2>/dev/null)"
+  set -e
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "${out}" | python3 -c 'import sys,json; json.load(sys.stdin)' \
+      || { echo "FAIL: doctor --json did not produce valid JSON" >&2; exit 1; }
+  fi
+
+  # Completion files referenced by --help must exist and parse.
+  [[ -r scripts/completions/install.bash ]] \
+    || { echo "FAIL: scripts/completions/install.bash missing" >&2; exit 1; }
+  bash -n scripts/completions/install.bash \
+    || { echo "FAIL: install.bash completion has a syntax error" >&2; exit 1; }
+  [[ -r scripts/completions/_install.sh ]] \
+    || { echo "FAIL: scripts/completions/_install.sh missing" >&2; exit 1; }
+}
+
 case "${cmd}" in
   syntax)         run_syntax ;;
   python)         run_python ;;
   subcommands)    run_subcommands ;;
   bad-usage)      run_bad_usage ;;
+  flags)          run_flags ;;
   noninteractive) run_noninteractive ;;
   diagnostics)    run_diagnostics ;;
   standards)      run_standards ;;
@@ -731,6 +780,7 @@ case "${cmd}" in
     run_python
     run_subcommands
     run_bad_usage
+    run_flags
     run_noninteractive
     run_diagnostics
     run_standards

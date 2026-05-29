@@ -29,6 +29,15 @@
 
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+# shellcheck source=scripts/lib.sh
+if [[ -r "${SCRIPT_DIR}/lib.sh" ]]; then
+  . "${SCRIPT_DIR}/lib.sh"
+else
+  printf 'uninstall.sh: cannot find required library %s\n' "${SCRIPT_DIR}/lib.sh" >&2
+  exit 1
+fi
+
 AGENT_USER="${ZOMBIE_USER:-${AGENT_USER:-zombie}}"
 AGENT_HOME="/home/${AGENT_USER}"
 ZOMBIE_DIR="${ZOMBIE_DIR:-/opt/ai-zombie}"
@@ -40,17 +49,10 @@ ARCHIVE=0
 ASSUME_YES=0
 KEEP_AGENT=0
 
-if [[ -t 1 ]]; then
-  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'
-  C_RED=$'\033[31m'; C_GREEN=$'\033[32m'; C_YEL=$'\033[33m'; C_CYAN=$'\033[36m'
-else
-  C_RESET=""; C_BOLD=""; C_RED=""; C_GREEN=""; C_YEL=""; C_CYAN=""
-fi
-
-info() { printf '%s[i]%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
-warn() { printf '%s[!]%s %s\n' "${C_YEL}"  "${C_RESET}" "$*" >&2; }
-ok()   { printf '%s[+]%s %s\n' "${C_GREEN}" "${C_RESET}" "$*"; }
-die()  { printf '%s[x]%s %s\n' "${C_RED}"  "${C_RESET}" "$*" >&2; exit 1; }
+# Shared colours/logging come from lib.sh. Keep the legacy C_YEL alias so the
+# inline printf calls below (e.g. the [dry] glyph) need no churn.
+lib_setup_colors
+C_YEL="${C_YELLOW}"
 
 usage() {
   # Heredoc instead of `sed -n '2,30p' "$0"` so the help output cannot

@@ -51,6 +51,17 @@ readonly SCRIPT_DIR
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly REPO_ROOT
 
+# Shared UX helpers (colours, status vocabulary, retry, timing, spinner,
+# prompt loops). Sourced so install.sh, uninstall.sh, and build-deb.sh
+# present an identical look and behaviour.
+# shellcheck source=scripts/lib.sh
+if [[ -r "${SCRIPT_DIR}/lib.sh" ]]; then
+  . "${SCRIPT_DIR}/lib.sh"
+else
+  printf 'install.sh: required library %s/lib.sh not found.\n' "${SCRIPT_DIR}" >&2
+  exit 1
+fi
+
 if [[ -f "${REPO_ROOT}/VERSION" ]]; then
   SCRIPT_VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
 else
@@ -74,6 +85,24 @@ SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
 VNC_PASSWORD="${VNC_PASSWORD:-}"
 TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
 
+# UX flags (set by argument parsing below; env provides the defaults).
+#   ASSUME_YES   skip the interactive "Type YES" confirmation but keep
+#                interactive prompts for any still-missing inputs.
+#   STRICT       treat preflight warnings as fatal.
+#   JSON_OUTPUT  emit machine-readable JSON from verify/doctor.
+#   VERBOSE      enable xtrace into the transcript.
+ASSUME_YES="${ZOMBIE_ASSUME_YES:-0}"
+STRICT="${ZOMBIE_STRICT:-0}"
+JSON_OUTPUT=0
+VERBOSE="${ZOMBIE_VERBOSE:-0}"
+
+# Idempotency transparency: count how many idempotent steps were already in
+# place versus newly applied, so a re-run does not look like a fresh install.
+STEPS_SATISFIED=0
+STEPS_CHANGED=0
+note_satisfied() { STEPS_SATISFIED=$((STEPS_SATISFIED + 1)); }
+note_changed()   { STEPS_CHANGED=$((STEPS_CHANGED + 1)); }
+
 PAYLOAD_DIR="${PAYLOAD_DIR:-${REPO_ROOT}/payload}"
 
 # Exit codes:
@@ -87,28 +116,41 @@ PAYLOAD_DIR="${PAYLOAD_DIR:-${REPO_ROOT}/payload}"
 # ---------------------------------------------------------------------------
 # Output helpers
 # ---------------------------------------------------------------------------
+#
+# The colour/TTY logic and the log/info/warn/ok/die/section/status/retry/
+# run_step/prompt_until_valid helpers all live in scripts/lib.sh, sourced
+# above, so every script in the suite shares one vocabulary.
 
-if [[ -t 1 ]]; then
-  C_RESET=$'\033[0m'
-  C_BOLD=$'\033[1m'
-  C_RED=$'\033[31m'
-  C_YELLOW=$'\033[33m'
-  C_GREEN=$'\033[32m'
-  C_CYAN=$'\033[36m'
-else
-  C_RESET=""; C_BOLD=""; C_RED=""; C_YELLOW=""; C_GREEN=""; C_CYAN=""
-fi
-
-log()   { printf '%s\n' "$*"; }
-info()  { printf '%s[i]%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
-warn()  { printf '%s[!]%s %s\n' "${C_YELLOW}" "${C_RESET}" "$*" >&2; }
-ok()    { printf '%s[+]%s %s\n' "${C_GREEN}" "${C_RESET}" "$*"; }
-die()   { printf '%s[x]%s %s\n' "${C_RED}" "${C_RESET}" "$*" >&2; exit "${2:-1}"; }
-
-section() {
-  printf '\n%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
-  printf '%s%s%s\n' "${C_BOLD}" "$*" "${C_RESET}"
-  printf '%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
+# diagnose_failure <exit_code> — map a few common failure signatures onto a
+# single targeted, copy-pasteable hint. Best-effort: every probe is guarded
+# so this never itself aborts the error handler.
+diagnose_failure() {
+  local code="${1:-1}"
+  case "${code}" in
+    66) printf '    Likely cause: network/DNS preflight. Check connectivity and re-run.\n' >&2; return ;;
+    64) printf '    Likely cause: missing required environment for non-interactive mode (see hints above).\n' >&2; return ;;
+    65) printf '    Likely cause: unsupported host (need Ubuntu 22.04/24.04 LTS on amd64/arm64).\n' >&2; return ;;
+  esac
+  if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
+     || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 \
+     || fuser /var/lib/dpkg/lock >/dev/null 2>&1; then
+    printf '    Likely cause: apt/dpkg is locked by another process (e.g. unattended-upgrades).\n' >&2
+    printf '    Fix: wait for it to finish, then re-run the installer (it is idempotent).\n' >&2
+    return
+  fi
+  local avail_kb
+  avail_kb="$(df -P / 2>/dev/null | awk 'NR==2 {print $4}')"
+  if [[ -n "${avail_kb:-}" && "${avail_kb}" -lt 1000000 ]]; then
+    printf '    Likely cause: the root filesystem is nearly full (%s MB free).\n' "$((avail_kb/1024))" >&2
+    printf '    Fix: free up space (e.g. `sudo apt-get clean`, `docker system prune`) and re-run.\n' >&2
+    return
+  fi
+  if ! getent hosts archive.ubuntu.com >/dev/null 2>&1 \
+     && ! getent hosts deb.debian.org >/dev/null 2>&1; then
+    printf '    Likely cause: DNS resolution looks broken (cannot resolve archive.ubuntu.com).\n' >&2
+    printf '    Fix: check /etc/resolv.conf and outbound connectivity, then re-run.\n' >&2
+    return
+  fi
 }
 
 on_error() {
@@ -117,6 +159,9 @@ on_error() {
   printf '\n%s[x] %s failed on line %s with exit code %s.%s\n' \
     "${C_RED}" "${SCRIPT_NAME}" "${line}" "${exit_code}" "${C_RESET}" >&2
   printf '%s    Full transcript: %s%s\n' "${C_RED}" "${LOG_FILE}" "${C_RESET}" >&2
+  diagnose_failure "${exit_code}" || true
+  printf '%s    Exit codes: 1 generic · 2 usage · 64 missing env · 65 bad host · 66 network.%s\n' \
+    "${C_RED}" "${C_RESET}" >&2
   exit "${exit_code}"
 }
 
@@ -131,7 +176,7 @@ ${SCRIPT_NAME} ${SCRIPT_VERSION}
 Ubuntu Zombie baseline installer + AI Systems Administrator chat service.
 
 Usage:
-  sudo ./${SCRIPT_NAME} [SUBCOMMAND] [--dry-run] [--help] [--version]
+  sudo ./${SCRIPT_NAME} [SUBCOMMAND] [FLAGS]
 
 Subcommands:
   install     Full install (default). Idempotent.
@@ -142,12 +187,24 @@ Subcommands:
   uninstall   Reverse the install (delegates to uninstall.sh).
 
 Flags:
-  -n, --dry-run   Print the install plan (apt packages, systemd units,
-                  files written) without modifying the host. Useful for
-                  reviewing what 'install' would do before granting sudo.
-                  Only meaningful with the 'install' subcommand.
+  Behaviour
+    -n, --dry-run     Print the install plan without touching the host.
+                      Only meaningful with the 'install' subcommand.
+    -y, --yes         Skip the "Type YES" confirmation. Still prompts for
+                      any missing inputs (use ZOMBIE_NONINTERACTIVE=1 to
+                      skip every prompt for fully unattended installs).
+        --strict      Treat preflight warnings as fatal.
+  Output
+    -q, --quiet       Only show warnings and errors.
+        --verbose,
+        --debug       Write shell xtrace to the transcript for debugging.
+        --no-color    Disable ANSI colour (NO_COLOR is also honoured).
+        --json        Machine-readable JSON output (verify, doctor only).
+  Other
+    -h, --help        Show this help and exit.
+    -v, --version     Print the version and exit.
 
-Environment variables (selected; see CONFIGURATION.md for all):
+Environment variables (selected; see docs/CONFIGURATION.md for all):
   ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
                               VNC_PASSWORD must be set unless already
                               configured on disk).
@@ -159,12 +216,40 @@ Environment variables (selected; see CONFIGURATION.md for all):
   ZOMBIE_SKIP_TAILSCALE=1     skip installing/enrolling Tailscale. Inbound
                               SSH is then allowed on every interface
                               rather than only on tailscale0.
+  ZOMBIE_COLOR=auto|always|never   colour policy (default auto).
   SSH_PUBLIC_KEY              SSH public key string.
   VNC_PASSWORD                Loopback-only VNC password.
   TAILSCALE_AUTHKEY           Pre-auth key for unattended Tailscale
                               (ignored when ZOMBIE_SKIP_TAILSCALE=1).
 
-See README.md, QUICKSTART.md, and SECURITY.md.
+Examples:
+  # Preview the plan before granting anything:
+  sudo ./${SCRIPT_NAME} install --dry-run
+
+  # Minimal interactive install (prompts for SSH key + VNC password):
+  sudo ./${SCRIPT_NAME} install
+
+  # Attended, but skip the YES gate:
+  sudo ./${SCRIPT_NAME} install --yes
+
+  # No Tailscale (SSH allowed on every interface — only on a trusted LAN):
+  sudo ZOMBIE_SKIP_TAILSCALE=1 ./${SCRIPT_NAME} install
+
+  # Fully unattended (CI / cloud-init):
+  sudo ZOMBIE_NONINTERACTIVE=1 \\
+       SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host" \\
+       VNC_PASSWORD="s3cret" \\
+       TAILSCALE_AUTHKEY="tskey-auth-..." \\
+       ./${SCRIPT_NAME} install
+
+  # Machine-readable health for monitoring:
+  ./${SCRIPT_NAME} verify --json
+
+Shell completion:
+  Bash:  source scripts/completions/install.bash
+  Zsh:   add scripts/completions/ to \$fpath, then: autoload -U compinit && compinit
+
+See README.md, docs/QUICKSTART.md, and SECURITY.md.
 EOF
 }
 
@@ -177,6 +262,12 @@ while [[ $# -gt 0 ]]; do
     -h|--help)    usage; exit 0 ;;
     -v|--version) printf '%s %s\n' "${SCRIPT_NAME}" "${SCRIPT_VERSION}"; exit 0 ;;
     -n|--dry-run) DRY_RUN=1; shift ;;
+    -y|--yes)     ASSUME_YES=1; shift ;;
+    -q|--quiet)   ZOMBIE_QUIET=1; shift ;;
+    --verbose|--debug) VERBOSE=1; shift ;;
+    --no-color|--no-colour) export ZOMBIE_COLOR=never; lib_setup_colors; shift ;;
+    --strict)     STRICT=1; shift ;;
+    --json)       JSON_OUTPUT=1; shift ;;
     install|verify|doctor|repair|uninstall)
                   if (( SUBCOMMAND_SEEN )); then
                     # A second subcommand token (e.g. `install install`) is
@@ -201,26 +292,7 @@ require_root() {
   [[ ${EUID} -eq 0 ]] || die "Run with sudo: sudo ./${SCRIPT_NAME} ${SUBCOMMAND}" 2
 }
 
-# Retry with exponential backoff. Usage: retry <attempts> <sleep_base> -- cmd args...
-retry() {
-  local attempts="$1"; shift
-  local base="$1"; shift
-  [[ "$1" == "--" ]] && shift
-  local n=1 delay="${base}"
-  while true; do
-    if "$@"; then
-      return 0
-    fi
-    if (( n >= attempts )); then
-      warn "Command failed after ${n} attempts: $*"
-      return 1
-    fi
-    warn "Attempt ${n} failed, retrying in ${delay}s: $*"
-    sleep "${delay}"
-    n=$((n + 1))
-    delay=$((delay * 2))
-  done
-}
+# `retry` (exponential backoff) is provided by scripts/lib.sh.
 
 wait_for_apt_lock() {
   local waited=0 max=300
@@ -265,6 +337,7 @@ append_line_once() {
   local line="$1"
   local file="$2"
   if grep -qxF "$line" "$file" 2>/dev/null; then
+    note_satisfied
     return 0
   fi
   # Ensure the file ends with a newline before appending, so we don't
@@ -273,6 +346,7 @@ append_line_once() {
     printf '\n' >> "$file"
   fi
   printf '%s\n' "$line" >> "$file"
+  note_changed
 }
 
 is_ssh_pubkey() {
@@ -365,23 +439,31 @@ preflight() {
   load_os_release
   local errors=0 warnings=0
 
+  # Compact result table: parallel arrays of status (ok|warn|fail|info) and
+  # a short label, rendered as a glance-able summary before the YES prompt.
+  local -a pf_status=() pf_label=()
+  pf() { pf_status+=("$1"); pf_label+=("$2"); }
+
   if [[ "${ID:-}" != "ubuntu" ]]; then
     warn "Not Ubuntu. Detected: ${PRETTY_NAME:-unknown}. Unsupported."
-    warnings=$((warnings + 1))
+    warnings=$((warnings + 1)); pf warn "OS is Ubuntu"
+  else
+    pf ok "OS is Ubuntu"
   fi
   case "${VERSION_ID:-}" in
-    22.04|24.04) : ;;
-    "")          warn "Could not detect Ubuntu version."; warnings=$((warnings + 1)) ;;
+    22.04|24.04) pf ok "Ubuntu version ${VERSION_ID} (LTS)" ;;
+    "")          warn "Could not detect Ubuntu version."; warnings=$((warnings + 1))
+                 pf warn "Ubuntu version detected" ;;
     *)           warn "Recommended versions: 22.04 LTS or 24.04 LTS. Detected: ${VERSION_ID}."
-                 warnings=$((warnings + 1)) ;;
+                 warnings=$((warnings + 1)); pf warn "Ubuntu version ${VERSION_ID} (recommend LTS)" ;;
   esac
 
   local arch
   arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
   case "${arch}" in
-    amd64|arm64) : ;;
+    amd64|arm64) pf ok "Architecture ${arch}" ;;
     *) warn "Unusual architecture ${arch}; Docker/Tailscale apt repos may not match."
-       warnings=$((warnings + 1)) ;;
+       warnings=$((warnings + 1)); pf warn "Architecture ${arch}" ;;
   esac
 
   # Disk: need ~5 GB free under / for runtime + Chromium + Docker layers.
@@ -389,7 +471,9 @@ preflight() {
   avail_kb="$(df -P / | awk 'NR==2 {print $4}')"
   if [[ "${avail_kb:-0}" -lt 5000000 ]]; then
     warn "Less than 5 GB free under / ($((avail_kb/1024)) MB). Install may fail."
-    warnings=$((warnings + 1))
+    warnings=$((warnings + 1)); pf warn "Disk >= 5 GB free ($((avail_kb/1024)) MB)"
+  else
+    pf ok "Disk free $((avail_kb/1024)) MB"
   fi
 
   # Memory: 2 GB minimum recommended.
@@ -397,14 +481,18 @@ preflight() {
   mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
   if [[ "${mem_kb:-0}" -lt 2000000 ]]; then
     warn "Less than 2 GB RAM ($((mem_kb/1024)) MB). Desktop + Chromium will be tight."
-    warnings=$((warnings + 1))
+    warnings=$((warnings + 1)); pf warn "RAM >= 2 GB ($((mem_kb/1024)) MB)"
+  else
+    pf ok "RAM $((mem_kb/1024)) MB"
   fi
 
   # DNS
   if ! getent hosts deb.debian.org >/dev/null 2>&1 \
      && ! getent hosts archive.ubuntu.com >/dev/null 2>&1; then
     warn "DNS resolution looks broken (cannot resolve archive.ubuntu.com)."
-    warnings=$((warnings + 1))
+    warnings=$((warnings + 1)); pf warn "DNS resolution"
+  else
+    pf ok "DNS resolution"
   fi
 
   # Outbound connectivity
@@ -413,14 +501,19 @@ preflight() {
      && ! ping -c1 -W2 8.8.8.8 >/dev/null 2>&1; then
     warn "No outbound connectivity detected. Package installation will fail."
     if [[ "${SUBCOMMAND}" == "install" ]]; then
-      errors=$((errors + 1))
+      errors=$((errors + 1)); pf fail "Outbound connectivity"
+    else
+      pf warn "Outbound connectivity"
     fi
+  else
+    pf ok "Outbound connectivity"
   fi
 
   # apt/dpkg lock
   if fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \
      || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
     info "apt/dpkg lock currently held; install will wait up to 5 minutes."
+    pf info "apt/dpkg lock (will wait)"
   fi
 
   # Public-SSH risk: is the SSH session terminating on a non-Tailscale
@@ -440,7 +533,7 @@ preflight() {
       warn "Detected SSH session terminating on ${local_ip}, which is NOT a tailscale0 address."
       warn "Installer restarts sshd and tightens UFW; you risk locking yourself out."
       if [[ "${ZOMBIE_NONINTERACTIVE}" != "1" && "${SUBCOMMAND}" == "install" ]]; then
-        warnings=$((warnings + 1))
+        warnings=$((warnings + 1)); pf warn "SSH session on tailscale0"
       fi
     fi
   fi
@@ -450,12 +543,14 @@ preflight() {
     warn "ZOMBIE_SKIP_TAILSCALE=1: Tailscale will be skipped. Inbound SSH will be"
     warn "  allowed on every interface instead of only on tailscale0. Only use"
     warn "  this on a network you control (e.g. behind a NAT/router or VPN)."
-    warnings=$((warnings + 1))
+    warnings=$((warnings + 1)); pf warn "Tailscale skipped (SSH on every interface)"
   elif command -v tailscale >/dev/null 2>&1; then
     if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
       info "Tailscale is already installed and logged in."
+      pf ok "Tailscale logged in"
     else
       info "Tailscale is installed but not logged in."
+      pf info "Tailscale installed (not logged in)"
     fi
   fi
 
@@ -465,8 +560,26 @@ preflight() {
     dm="$(tr -d '[:space:]' < /etc/X11/default-display-manager)"
     if [[ "${dm}" != *gdm* ]]; then
       warn "Active display manager is ${dm}, not GDM. The installer enables GDM autologin/Xorg via /etc/gdm3/."
-      warnings=$((warnings + 1))
+      warnings=$((warnings + 1)); pf warn "Display manager is GDM (found ${dm})"
+    else
+      pf ok "Display manager is GDM"
     fi
+  fi
+
+  # Render the compact summary table.
+  if ! (( ZOMBIE_QUIET )); then
+    printf '\n%sPreflight summary:%s\n' "${C_BOLD}" "${C_RESET}"
+    local i
+    for (( i = 0; i < ${#pf_status[@]}; i++ )); do
+      status "${pf_status[i]}" "${pf_label[i]}"
+    done
+    echo
+  fi
+
+  # --strict turns warnings into hard failures so unattended pipelines can
+  # refuse to continue on a marginal host.
+  if (( STRICT )) && (( warnings > 0 )); then
+    die "Preflight: ${warnings} warning(s) and --strict is set. Aborting." 66
   fi
 
   if (( errors > 0 )); then
@@ -507,6 +620,18 @@ validate_noninteractive() {
     die "SSH_PUBLIC_KEY does not look like an OpenSSH public key." 64
   fi
   if (( ${#missing[@]} > 0 )); then
+    warn "Non-interactive mode requires the following to be set:"
+    local var
+    for var in "${missing[@]}"; do
+      case "${var}" in
+        SSH_PUBLIC_KEY)
+          warn "  export SSH_PUBLIC_KEY=\"ssh-ed25519 AAAA... you@host\"" ;;
+        VNC_PASSWORD)
+          warn "  export VNC_PASSWORD=\"<a-loopback-only-password>\"" ;;
+        *)
+          warn "  export ${var}=..." ;;
+      esac
+    done
     die "Non-interactive mode requires: ${missing[*]}" 64
   fi
 }
@@ -519,13 +644,17 @@ cmd_verify() {
   if [[ ! -x "${ZOMBIE_DIR}/bin/verify" ]]; then
     die "${ZOMBIE_DIR}/bin/verify not found. Run 'sudo ./${SCRIPT_NAME} install' first." 1
   fi
+  # Propagate --json to the deployed verify script.
+  if (( JSON_OUTPUT )); then
+    export ZOMBIE_JSON=1
+  fi
   # The embedded verify script's checks ("running as ${AGENT_USER}",
   # passwordless sudo, DISPLAY, xdotool against the live X session) only
   # make sense when run by the agent account. If invoked as root, re-exec
   # under the agent identity. See FIX-2-09.
   if [[ ${EUID} -eq 0 ]] && [[ "$(id -un)" != "${AGENT_USER}" ]]; then
     if id "${AGENT_USER}" >/dev/null 2>&1; then
-      exec runuser -l "${AGENT_USER}" -c "${ZOMBIE_DIR}/bin/verify"
+      exec runuser -l "${AGENT_USER}" -c "ZOMBIE_JSON=${ZOMBIE_JSON:-0} ${ZOMBIE_DIR}/bin/verify"
     fi
   fi
   exec "${ZOMBIE_DIR}/bin/verify"
@@ -537,84 +666,121 @@ cmd_verify() {
 
 cmd_doctor() {
   load_os_release
-  printf '%s== ubuntu-zombie doctor ==%s\n\n' "${C_BOLD}" "${C_RESET}"
 
-  printf '%sHost:%s %s %s on %s\n\n' "${C_BOLD}" "${C_RESET}" \
-    "${ID:-?}" "${VERSION_ID:-?}" "$(dpkg --print-architecture 2>/dev/null || uname -m)"
+  # Collected results: parallel arrays of status (ok|warn|info),
+  # human message, and machine-readable check id.
+  local -a d_status=() d_msg=() d_id=()
+  dr() { d_status+=("$1"); d_id+=("$2"); d_msg+=("$3"); }
+
+  local host_arch
+  host_arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 
   if id "${AGENT_USER}" >/dev/null 2>&1; then
-    ok "User ${AGENT_USER} exists."
+    dr ok user "User ${AGENT_USER} exists."
   else
-    warn "User ${AGENT_USER} missing. Fix: sudo ./${SCRIPT_NAME} install"
+    dr warn user "User ${AGENT_USER} missing. Fix: sudo ./${SCRIPT_NAME} install"
   fi
 
   if [[ -f "/etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie" ]]; then
-    ok "Sudoers drop-in present."
+    dr ok sudoers "Sudoers drop-in present."
   else
-    warn "Sudoers drop-in missing. Fix: sudo ./${SCRIPT_NAME} repair"
+    dr warn sudoers "Sudoers drop-in missing. Fix: sudo ./${SCRIPT_NAME} repair"
   fi
 
   if [[ -d "${ZOMBIE_DIR}" ]]; then
-    ok "${ZOMBIE_DIR} present."
+    dr ok install_root "${ZOMBIE_DIR} present."
   else
-    warn "${ZOMBIE_DIR} missing. Fix: sudo ./${SCRIPT_NAME} install"
+    dr warn install_root "${ZOMBIE_DIR} missing. Fix: sudo ./${SCRIPT_NAME} install"
   fi
 
   if [[ -f "${ZOMBIE_DIR}/secrets/env" ]]; then
     local perms
     perms="$(stat -c %a "${ZOMBIE_DIR}/secrets/env" 2>/dev/null || echo ???)"
     if [[ "${perms}" == "600" ]]; then
-      ok "secrets/env permissions 600."
+      dr ok secrets_perms "secrets/env permissions 600."
     else
-      warn "secrets/env permissions ${perms} (must be 600). Fix: sudo ./${SCRIPT_NAME} repair"
+      dr warn secrets_perms "secrets/env permissions ${perms} (must be 600). Fix: sudo ./${SCRIPT_NAME} repair"
     fi
     if grep -Eq '^(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
-      ok "Provider token present."
+      dr ok provider_token "Provider token present."
     else
-      warn "No provider token. Fix: sudo ${ZOMBIE_DIR}/bin/secrets-edit"
+      dr warn provider_token "No provider token. Fix: sudo ${ZOMBIE_DIR}/bin/secrets-edit"
     fi
   else
-    warn "secrets/env missing. Fix: sudo ./${SCRIPT_NAME} install"
+    dr warn secrets_env "secrets/env missing. Fix: sudo ./${SCRIPT_NAME} install"
   fi
 
   if systemctl list-unit-files ubuntu-zombie-chat.service >/dev/null 2>&1; then
     if systemctl is-active --quiet ubuntu-zombie-chat.service; then
-      ok "Chat service active."
+      dr ok chat_service "Chat service active."
     else
-      warn "Chat service installed but not running. Fix: sudo systemctl start ubuntu-zombie-chat"
+      dr warn chat_service "Chat service installed but not running. Fix: sudo systemctl start ubuntu-zombie-chat"
     fi
   else
-    warn "Chat service unit missing. Fix: sudo ./${SCRIPT_NAME} install"
+    dr warn chat_service "Chat service unit missing. Fix: sudo ./${SCRIPT_NAME} install"
   fi
 
   if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-    info "Tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)."
+    dr info tailscale "Tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)."
   elif command -v tailscale >/dev/null 2>&1; then
     if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
-      ok "Tailscale logged in."
+      dr ok tailscale "Tailscale logged in."
     else
-      warn "Tailscale logged out. Fix: sudo tailscale up"
+      dr warn tailscale "Tailscale logged out. Fix: sudo tailscale up"
     fi
   else
-    warn "Tailscale missing. Fix: sudo ./${SCRIPT_NAME} install (or set ZOMBIE_SKIP_TAILSCALE=1)"
+    dr warn tailscale "Tailscale missing. Fix: sudo ./${SCRIPT_NAME} install (or set ZOMBIE_SKIP_TAILSCALE=1)"
   fi
 
   if ufw status 2>/dev/null | grep -q "Status: active"; then
-    ok "UFW active."
+    dr ok ufw "UFW active."
   else
-    warn "UFW not active. Fix: sudo ./${SCRIPT_NAME} repair"
+    dr warn ufw "UFW not active. Fix: sudo ./${SCRIPT_NAME} repair"
   fi
 
   if [[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]]; then
     if grep -q "AutomaticLoginEnable=true" /etc/gdm3/custom.conf 2>/dev/null; then
-      ok "Autologin enabled (ZOMBIE_ENABLE_AUTOLOGIN=1)."
+      dr ok autologin "Autologin enabled (ZOMBIE_ENABLE_AUTOLOGIN=1)."
     else
-      warn "Autologin requested but not configured. Fix: sudo ZOMBIE_ENABLE_AUTOLOGIN=1 ./${SCRIPT_NAME} install"
+      dr warn autologin "Autologin requested but not configured. Fix: sudo ZOMBIE_ENABLE_AUTOLOGIN=1 ./${SCRIPT_NAME} install"
     fi
   fi
 
+  local n="${#d_status[@]}" i warns=0
+  for (( i = 0; i < n; i++ )); do
+    [[ "${d_status[i]}" == "warn" ]] && warns=$((warns + 1))
+  done
+
+  if (( JSON_OUTPUT )); then
+    printf '{\n'
+    printf '  "tool": "doctor",\n'
+    printf '  "host": {"id": "%s", "version": "%s", "arch": "%s"},\n' \
+      "$(json_escape "${ID:-}")" "$(json_escape "${VERSION_ID:-}")" "$(json_escape "${host_arch}")"
+    printf '  "warnings": %d,\n' "${warns}"
+    printf '  "checks": [\n'
+    for (( i = 0; i < n; i++ )); do
+      printf '    {"id": "%s", "status": "%s", "message": "%s"}' \
+        "$(json_escape "${d_id[i]}")" "${d_status[i]}" "$(json_escape "${d_msg[i]}")"
+      [[ $i -lt $((n - 1)) ]] && printf ','
+      printf '\n'
+    done
+    printf '  ]\n'
+    printf '}\n'
+    return 0
+  fi
+
+  printf '%s== ubuntu-zombie doctor ==%s\n\n' "${C_BOLD}" "${C_RESET}"
+  printf '%sHost:%s %s %s on %s\n\n' "${C_BOLD}" "${C_RESET}" \
+    "${ID:-?}" "${VERSION_ID:-?}" "${host_arch}"
+  for (( i = 0; i < n; i++ )); do
+    case "${d_status[i]}" in
+      ok)   ok   "${d_msg[i]}" ;;
+      warn) warn "${d_msg[i]}" ;;
+      *)    info "${d_msg[i]}" ;;
+    esac
+  done
   echo
-  info "For a runtime health summary: /opt/ai-zombie/bin/health-check"
+  info "For a runtime health summary: ${ZOMBIE_DIR}/bin/health-check"
 }
 
 # ---------------------------------------------------------------------------
@@ -818,11 +984,47 @@ mkdir -p "$(dirname "${STEP_LOG}")"
 : > "${STEP_LOG}"
 chmod 600 "${STEP_LOG}" 2>/dev/null || true
 
-# Re-define section() to record the breadcrumb in addition to printing.
+# Enable shell xtrace into the transcript only (not the console) when the
+# operator asked for --verbose/--debug. BASH_XTRACEFD keeps the noisy trace
+# out of the live terminal while preserving it for post-mortem debugging.
+if (( VERBOSE )); then
+  exec {_TRACE_FD}>>"${LOG_FILE}"
+  BASH_XTRACEFD="${_TRACE_FD}"
+  set -x
+fi
+
+# Phase counter: count the install-path section banners so each one can be
+# numbered "[n/total]". Derived from this file so it stays correct as
+# phases are added or removed.
+ZOMBIE_PHASE=0
+ZOMBIE_PHASE_TOTAL="$(awk '/^# install — the rest of the file/{f=1} f && /^section "/{c++} END{print c+0}' "${BASH_SOURCE[0]}" 2>/dev/null || echo 0)"
+# The count is derived by scanning this file, so guard against a 0/empty
+# result (e.g. if the marker comment is ever moved) — fall back to an
+# un-totalled "[n]" counter rather than printing a confusing "[n/0]".
+[[ "${ZOMBIE_PHASE_TOTAL}" =~ ^[0-9]+$ ]] || ZOMBIE_PHASE_TOTAL=0
+_SECTION_T0=""
+
+# Re-define section() to: record a step breadcrumb, number the phase, and
+# report how long the previous phase took so a long silent step is visibly
+# making progress rather than appearing hung.
 section() {
+  local now; now="$(date +%s)"
+  if [[ -n "${_SECTION_T0}" ]]; then
+    (( ZOMBIE_QUIET )) || printf '%s    (previous step took %s)%s\n' \
+      "${C_CYAN}" "$(fmt_duration "$(( now - _SECTION_T0 ))")" "${C_RESET}"
+  fi
+  _SECTION_T0="${now}"
+  ZOMBIE_PHASE=$(( ZOMBIE_PHASE + 1 ))
   printf '%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "${STEP_LOG}" || true
+  (( ZOMBIE_QUIET )) && return 0
+  local counter
+  if (( ZOMBIE_PHASE_TOTAL > 0 )); then
+    counter="[${ZOMBIE_PHASE}/${ZOMBIE_PHASE_TOTAL}]"
+  else
+    counter="[${ZOMBIE_PHASE}]"
+  fi
   printf '\n%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
-  printf '%s%s%s\n' "${C_BOLD}" "$*" "${C_RESET}"
+  printf '%s%s %s%s\n' "${C_BOLD}" "${counter}" "$*" "${C_RESET}"
   printf '%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
 }
 
@@ -840,12 +1042,23 @@ on_error() {
     tail -n 5 "${STEP_LOG}" | sed 's/^/      /' >&2 || true
     printf '%s    Full step trail: %s%s\n' "${C_RED}" "${STEP_LOG}" "${C_RESET}" >&2
   fi
+  diagnose_failure "${exit_code}" || true
+  printf '%s    Exit codes: 1 generic · 2 usage · 64 missing env · 65 bad host · 66 network.%s\n' \
+    "${C_RED}" "${C_RESET}" >&2
   printf '%s    Recovery: re-run the installer (it is idempotent), or %ssudo ./%s doctor%s for guidance.%s\n' \
     "${C_RED}" "${C_BOLD}" "${SCRIPT_NAME}" "${C_RESET}${C_RED}" "${C_RESET}" >&2
   exit "${exit_code}"
 }
 
-section "${SCRIPT_NAME} ${SCRIPT_VERSION}  —  install"
+# Record the install start so the run can report total elapsed time at the
+# end. The title is printed as a plain banner so it is not counted as a
+# numbered phase.
+INSTALL_T0="$(date +%s)"
+if ! (( ZOMBIE_QUIET )); then
+  printf '\n%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
+  printf '%s%s %s  —  install%s\n' "${C_BOLD}" "${SCRIPT_NAME}" "${SCRIPT_VERSION}" "${C_RESET}"
+  printf '%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
+fi
 
 info "Log file: ${LOG_FILE}"
 info "Agent user: ${AGENT_USER}"
@@ -853,6 +1066,11 @@ info "Install root: ${ZOMBIE_DIR}"
 info "Chat port: ${CHAT_PORT} (loopback only)"
 info "Autologin: $([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo enabled || echo disabled)"
 info "Mode: $([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)"
+if (( ZOMBIE_PHASE_TOTAL > 0 )); then
+  info "Phases: ${ZOMBIE_PHASE_TOTAL}. Typical run takes ~10–20 min depending on network speed."
+else
+  info "Typical run takes ~10–20 min depending on network speed."
+fi
 
 cat <<EOF
 
@@ -876,11 +1094,13 @@ Run this from the physical Ubuntu machine, not over public SSH.
 
 EOF
 
-if [[ "${ZOMBIE_NONINTERACTIVE}" != "1" ]]; then
+if [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]]; then
+  info "Non-interactive mode: proceeding without confirmation."
+elif (( ASSUME_YES )); then
+  info "--yes: proceeding without confirmation."
+else
   read -r -p "Continue? Type YES to proceed: " CONFIRM
   [[ "${CONFIRM}" == "YES" ]] || { info "Cancelled."; exit 0; }
-else
-  info "Non-interactive mode: proceeding without confirmation."
 fi
 
 # ---------------------------------------------------------------------------
@@ -1011,13 +1231,17 @@ fi
 if [[ -z "${SSH_PUBLIC_KEY}" && "${ZOMBIE_NONINTERACTIVE}" != "1" ]]; then
   if [[ "${EXISTING_KEYS}" -gt 0 ]]; then
     info "${EXISTING_KEYS} SSH key(s) already authorized for ${AGENT_USER}."
-    read -r -p "Add another public key? Leave blank to skip: " SSH_PUBLIC_KEY || true
+    # Re-prompts on a malformed key instead of aborting the whole install;
+    # blank is accepted to skip adding another key.
+    prompt_until_valid "Add another public key? Leave blank to skip: " \
+      is_ssh_pubkey SSH_PUBLIC_KEY 1 || true
   else
     log
     log "Paste the SSH public key that will be allowed to control this machine."
     log "Example: ssh-ed25519 AAAAC3... you@workstation"
     log "Leave blank only if you will add it manually after install."
-    read -r -p "SSH public key: " SSH_PUBLIC_KEY || true
+    prompt_until_valid "SSH public key (blank to add manually later): " \
+      is_ssh_pubkey SSH_PUBLIC_KEY 1 || true
   fi
 fi
 
@@ -1383,8 +1607,23 @@ section "Python cloud-agent runtime"
 install -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/bin/setup-agent-venv" "${ZOMBIE_DIR}/bin/setup-agent-venv"
 
-# Build the venv and install python packages as the agent user.
-runuser -l "${AGENT_USER}" -- "${ZOMBIE_DIR}/bin/setup-agent-venv"
+# Build the venv and install python packages as the agent user. This step
+# downloads Chromium and can run for minutes; on an interactive TTY show a
+# heartbeat spinner and route the (noisy) detail to the transcript, while
+# non-interactive/CI runs keep the full output streaming as before.
+#
+# run_step needs a single command, so we wrap the redirection in `bash -c`.
+# The arguments after the script are positional parameters for that inner
+# shell: `_` is the throwaway $0, then $1=agent user, $2=helper path,
+# $3=log file. We redirect the helper's stdout+stderr to the transcript so
+# only the spinner shows on the console.
+if [[ -t 2 ]] && ! (( ZOMBIE_QUIET )); then
+  run_step "Building Python venv + browser (this can take a few minutes)" -- \
+    bash -c 'runuser -l "$1" -- "$2" >>"$3" 2>&1' \
+    _ "${AGENT_USER}" "${ZOMBIE_DIR}/bin/setup-agent-venv" "${LOG_FILE}"
+else
+  runuser -l "${AGENT_USER}" -- "${ZOMBIE_DIR}/bin/setup-agent-venv"
+fi
 
 # Install Chromium system dependencies as root (apt-get requires it). The
 # unprivileged playwright browser download in setup-agent-venv above will
@@ -1844,7 +2083,17 @@ else
   log
   log "Set a VNC password. This is only used for emergency desktop access"
   log "over an SSH tunnel. VNC binds to 127.0.0.1, never to the network."
-  runuser -l "${AGENT_USER}" -c "x11vnc -storepasswd"
+  # x11vnc -storepasswd prompts twice and masks input; on a mismatch it
+  # exits non-zero. Retry a few times instead of aborting the whole install
+  # on a single typo.
+  vnc_attempt=0
+  until runuser -l "${AGENT_USER}" -c "x11vnc -storepasswd"; do
+    vnc_attempt=$((vnc_attempt + 1))
+    if (( vnc_attempt >= 3 )); then
+      die "Failed to set a VNC password after ${vnc_attempt} attempts." 1
+    fi
+    warn "That didn't work (passwords may not have matched). Try again."
+  done
 fi
 
 cat > "${AGENT_HOME}/.config/autostart/x11vnc.desktop" <<EOF
@@ -1875,21 +2124,47 @@ ZOMBIE_SKIP_TAILSCALE="${ZOMBIE_SKIP_TAILSCALE}"
 PI_AI_VERSION="${PI_AI_VERSION}"
 PI_MONO_VERSION="${PI_MONO_VERSION}"
 
-if [[ -t 1 ]]; then
-  C_RESET=\$'\\033[0m'; C_RED=\$'\\033[31m'; C_GREEN=\$'\\033[32m'; C_BOLD=\$'\\033[1m'
+JSON="\${ZOMBIE_JSON:-0}"
+
+if [[ -t 1 && "\${JSON}" != "1" ]]; then
+  C_RESET=\$'\\033[0m'; C_RED=\$'\\033[31m'; C_GREEN=\$'\\033[32m'; C_BOLD=\$'\\033[1m'; C_YEL=\$'\\033[33m'
 else
-  C_RESET=""; C_RED=""; C_GREEN=""; C_BOLD=""
+  C_RESET=""; C_RED=""; C_GREEN=""; C_BOLD=""; C_YEL=""
 fi
 
 PASS=0; FAIL=0
+JSON_ITEMS=""
+
+json_escape() {
+  local s="\$1"
+  s="\${s//\\\\/\\\\\\\\}"
+  s="\${s//\\"/\\\\\\"}"
+  printf '%s' "\${s}"
+}
+
+record() {
+  # record <ok|fail|skip> <label>
+  local st="\$1" label="\$2"
+  case "\${st}" in
+    ok)   PASS=\$((PASS+1)) ;;
+    fail) FAIL=\$((FAIL+1)) ;;
+  esac
+  local item
+  item="{\\"status\\": \\"\${st}\\", \\"label\\": \\"\$(json_escape "\${label}")\\"}"
+  if [[ -z "\${JSON_ITEMS}" ]]; then JSON_ITEMS="\${item}"; else JSON_ITEMS="\${JSON_ITEMS},\${item}"; fi
+}
+
+# hd <text> — print a human-readable group header (suppressed in JSON mode).
+hd() { [[ "\${JSON}" == "1" ]] || printf '%s\\n' "\$1"; }
+
 check() {
   local label="\$1"; shift
   if "\$@" >/dev/null 2>&1; then
-    printf '  %s[ok]%s %s\\n' "\${C_GREEN}" "\${C_RESET}" "\${label}"
-    PASS=\$((PASS+1))
+    record ok "\${label}"
+    [[ "\${JSON}" == "1" ]] || printf '  %s[ok]%s %s\\n' "\${C_GREEN}" "\${C_RESET}" "\${label}"
   else
-    printf '  %s[--]%s %s\\n' "\${C_RED}" "\${C_RESET}" "\${label}"
-    FAIL=\$((FAIL+1))
+    record fail "\${label}"
+    [[ "\${JSON}" == "1" ]] || printf '  %s[x]%s  %s\\n' "\${C_RED}" "\${C_RESET}" "\${label}"
   fi
 }
 
@@ -1900,34 +2175,35 @@ if [[ -f \${ZOMBIE_DIR}/secrets/env ]]; then
   set +a
 fi
 
-printf '\\n%s== ubuntu-zombie verify ==%s\\n' "\${C_BOLD}" "\${C_RESET}"
-echo
+[[ "\${JSON}" == "1" ]] || printf '\\n%s== ubuntu-zombie verify ==%s\\n' "\${C_BOLD}" "\${C_RESET}"
+[[ "\${JSON}" == "1" ]] || echo
 
-echo "User and sudo:"
+hd "User and sudo:"
 check "running as \${AGENT_USER}"          test "\$(id -un)" = "\${AGENT_USER}"
 check "passwordless sudo"                  sudo -n true
-echo
+[[ "\${JSON}" == "1" ]] || echo
 
-echo "Network and services:"
+hd "Network and services:"
 check "ssh service active"                 systemctl is-active ssh
 check "ufw active"                         bash -c "sudo ufw status | grep -q 'Status: active'"
 if [[ "\${ZOMBIE_SKIP_TAILSCALE}" != "1" ]]; then
   check "tailscale binary present"           command -v tailscale
   check "tailscale is logged in"             bash -c "tailscale status >/dev/null 2>&1 && ! tailscale status | grep -q 'Logged out'"
 else
-  printf '  %s[--]%s tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)\\n' "\${C_BOLD}" "\${C_RESET}"
+  record skip "tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)"
+  [[ "\${JSON}" == "1" ]] || printf '  %s[~]%s  tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)\\n' "\${C_YEL}" "\${C_RESET}"
 fi
 check "docker engine reachable"            docker version
-echo
+[[ "\${JSON}" == "1" ]] || echo
 
-echo "Desktop and GUI control:"
+hd "Desktop and GUI control:"
 check "Xorg session forced for \${AGENT_USER}"  bash -c "grep -q 'XSession=ubuntu-xorg' /var/lib/AccountsService/users/\${AGENT_USER}"
 check "x11vnc autostart present"           test -f \${AGENT_HOME}/.config/autostart/x11vnc.desktop
 check "DISPLAY is set"                     test -n "\${DISPLAY:-}"
 check "xdotool reachable on \${DISPLAY:-:0}" \${ZOMBIE_DIR}/bin/gui-env xdotool getdisplaygeometry
-echo
+[[ "\${JSON}" == "1" ]] || echo
 
-echo "Runtime:"
+hd "Runtime:"
 check "Python venv exists"                 test -x \${AGENT_HOME}/agent-env/bin/python
 check "playwright importable"              \${AGENT_HOME}/agent-env/bin/python -c "from playwright.sync_api import sync_playwright"
 check "node and tsc present"               bash -c "command -v node && command -v tsc"
@@ -1951,24 +2227,30 @@ check "operator skills.d/ present"         test -d /etc/ubuntu-zombie/skills.d
 check "agent tools.py compiles"            \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/tools.py
 check "agent pi_mono.py compiles"          \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/pi_mono.py
 check "agent skill_loader.py compiles"     \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/skill_loader.py
-echo
+[[ "\${JSON}" == "1" ]] || echo
 
-echo "Chat service and policy:"
+hd "Chat service and policy:"
 check "policy.yaml present"                test -r /etc/ubuntu-zombie/policy.yaml
 check "audit log writable for ${AGENT_USER}"  bash -c "test -w /var/log/ubuntu-zombie/audit.log || sudo -n test -w /var/log/ubuntu-zombie/audit.log"
 check "ubuntu-zombie-chat.service active"  systemctl is-active ubuntu-zombie-chat.service
 check "chat listening on 127.0.0.1:${CHAT_PORT}" bash -c "ss -ltn 'sport = :${CHAT_PORT}' | grep -q 127.0.0.1"
 check "agent server.py compiles"           \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/server.py
-echo
+[[ "\${JSON}" == "1" ]] || echo
 
-echo "Screenshot:"
+hd "Screenshot:"
 SHOT="\${ZOMBIE_DIR}/state/screen.png"
 if \${ZOMBIE_DIR}/bin/screenshot "\$SHOT" >/dev/null 2>&1 && [[ -s "\$SHOT" ]]; then
-  printf '  %s[ok]%s screenshot saved to %s\\n' "\${C_GREEN}" "\${C_RESET}" "\$SHOT"
-  PASS=\$((PASS+1))
+  record ok "screenshot saved to \$SHOT"
+  [[ "\${JSON}" == "1" ]] || printf '  %s[ok]%s screenshot saved to %s\\n' "\${C_GREEN}" "\${C_RESET}" "\$SHOT"
 else
-  printf '  %s[--]%s screenshot failed (desktop session may not be active yet)\\n' "\${C_RED}" "\${C_RESET}"
-  FAIL=\$((FAIL+1))
+  record fail "screenshot failed (desktop session may not be active yet)"
+  [[ "\${JSON}" == "1" ]] || printf '  %s[x]%s  screenshot failed (desktop session may not be active yet)\\n' "\${C_RED}" "\${C_RESET}"
+fi
+
+if [[ "\${JSON}" == "1" ]]; then
+  printf '{"tool": "verify", "passed": %d, "failed": %d, "checks": [%s]}\\n' "\$PASS" "\$FAIL" "\${JSON_ITEMS}"
+  [[ \$FAIL -gt 0 ]] && exit 1
+  exit 0
 fi
 
 echo
@@ -2040,9 +2322,9 @@ fi
 bullet() {
   local ok="$1" label="$2"
   if [[ "${ok}" == "1" ]]; then
-    printf '  %s[ok]%s %s\n' "${C_GREEN}" "${C_RESET}" "${label}"
+    status ok "${label}"
   else
-    printf '  %s[--]%s %s\n' "${C_YELLOW}" "${C_RESET}" "${label}"
+    status warn "${label}"
   fi
 }
 
@@ -2131,3 +2413,11 @@ fi
 
 echo
 echo "A reboot is required: sudo reboot"
+
+if [[ -n "${INSTALL_T0:-}" ]]; then
+  ok "Install took $(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")."
+fi
+
+if (( STEPS_SATISFIED + STEPS_CHANGED > 0 )); then
+  info "Idempotent steps: ${STEPS_SATISFIED} already satisfied, ${STEPS_CHANGED} applied this run."
+fi
