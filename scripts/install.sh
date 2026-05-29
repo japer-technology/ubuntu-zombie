@@ -998,6 +998,10 @@ fi
 # phases are added or removed.
 ZOMBIE_PHASE=0
 ZOMBIE_PHASE_TOTAL="$(awk '/^# install — the rest of the file/{f=1} f && /^section "/{c++} END{print c+0}' "${BASH_SOURCE[0]}" 2>/dev/null || echo 0)"
+# The count is derived by scanning this file, so guard against a 0/empty
+# result (e.g. if the marker comment is ever moved) — fall back to an
+# un-totalled "[n]" counter rather than printing a confusing "[n/0]".
+[[ "${ZOMBIE_PHASE_TOTAL}" =~ ^[0-9]+$ ]] || ZOMBIE_PHASE_TOTAL=0
 _SECTION_T0=""
 
 # Re-define section() to: record a step breadcrumb, number the phase, and
@@ -1013,8 +1017,14 @@ section() {
   ZOMBIE_PHASE=$(( ZOMBIE_PHASE + 1 ))
   printf '%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*" >> "${STEP_LOG}" || true
   (( ZOMBIE_QUIET )) && return 0
+  local counter
+  if (( ZOMBIE_PHASE_TOTAL > 0 )); then
+    counter="[${ZOMBIE_PHASE}/${ZOMBIE_PHASE_TOTAL}]"
+  else
+    counter="[${ZOMBIE_PHASE}]"
+  fi
   printf '\n%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
-  printf '%s[%d/%d] %s%s\n' "${C_BOLD}" "${ZOMBIE_PHASE}" "${ZOMBIE_PHASE_TOTAL}" "$*" "${C_RESET}"
+  printf '%s%s %s%s\n' "${C_BOLD}" "${counter}" "$*" "${C_RESET}"
   printf '%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
 }
 
@@ -1056,7 +1066,11 @@ info "Install root: ${ZOMBIE_DIR}"
 info "Chat port: ${CHAT_PORT} (loopback only)"
 info "Autologin: $([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo enabled || echo disabled)"
 info "Mode: $([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)"
-info "Phases: ${ZOMBIE_PHASE_TOTAL}. Typical run takes ~10–20 min depending on network speed."
+if (( ZOMBIE_PHASE_TOTAL > 0 )); then
+  info "Phases: ${ZOMBIE_PHASE_TOTAL}. Typical run takes ~10–20 min depending on network speed."
+else
+  info "Typical run takes ~10–20 min depending on network speed."
+fi
 
 cat <<EOF
 
@@ -1597,6 +1611,12 @@ install -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
 # downloads Chromium and can run for minutes; on an interactive TTY show a
 # heartbeat spinner and route the (noisy) detail to the transcript, while
 # non-interactive/CI runs keep the full output streaming as before.
+#
+# run_step needs a single command, so we wrap the redirection in `bash -c`.
+# The arguments after the script are positional parameters for that inner
+# shell: `_` is the throwaway $0, then $1=agent user, $2=helper path,
+# $3=log file. We redirect the helper's stdout+stderr to the transcript so
+# only the spinner shows on the console.
 if [[ -t 2 ]] && ! (( ZOMBIE_QUIET )); then
   run_step "Building Python venv + browser (this can take a few minutes)" -- \
     bash -c 'runuser -l "$1" -- "$2" >>"$3" 2>&1' \
