@@ -637,11 +637,18 @@ run_diagnostics() {
     echo "FAIL: collect-diagnostics exited non-zero (best-effort capture regressed)" >&2
     exit 1
   fi
-  local tarball
-  tarball=$(find "${td}" -maxdepth 1 -name 'ubuntu-zombie-diagnostics-*.tar.gz' -print -quit)
-  if [[ -z "${tarball}" || ! -s "${tarball}" ]]; then
+  local -a tarballs
+  mapfile -t tarballs < <(find "${td}" -maxdepth 1 -name 'ubuntu-zombie-diagnostics-*.tar.gz' -print)
+  if [[ "${#tarballs[@]}" -ne 1 ]]; then
     rm -rf "${td}"
-    echo "FAIL: collect-diagnostics produced no tarball" >&2
+    echo "FAIL: collect-diagnostics must produce exactly one tarball (found ${#tarballs[@]})" >&2
+    exit 1
+  fi
+  local tarball
+  tarball="${tarballs[0]}"
+  if [[ ! -s "${tarball}" ]]; then
+    rm -rf "${td}"
+    echo "FAIL: collect-diagnostics produced an empty tarball" >&2
     exit 1
   fi
   # The staging directory must be cleaned up by the EXIT trap, leaving
