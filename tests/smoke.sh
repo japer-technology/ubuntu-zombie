@@ -620,6 +620,40 @@ run_noninteractive() {
   ./scripts/install.sh --help | grep -q ZOMBIE_NONINTERACTIVE
 }
 
+run_diagnostics() {
+  echo "[smoke] collect-diagnostics best-effort"
+  # FIX-3-24: collect-diagnostics must finish and write its tarball
+  # even when individual captured commands return non-zero (e.g.
+  # `systemctl status` of an inactive unit, `docker version` with no
+  # daemon, a `tailscale` binary that is not installed). Before the
+  # fix, `set -euo pipefail` aborted the run on the first such failure
+  # and the EXIT trap then deleted the partial bundle, so no tarball
+  # was produced. Run the real script in an isolated TMPDIR and assert
+  # it exits 0 and leaves exactly one tarball behind.
+  local td
+  td="$(mktemp -d)"
+  if ! TMPDIR="${td}" bash payload/bin/collect-diagnostics >/dev/null 2>&1; then
+    rm -rf "${td}"
+    echo "FAIL: collect-diagnostics exited non-zero (best-effort capture regressed)" >&2
+    exit 1
+  fi
+  local tarball
+  tarball=$(find "${td}" -maxdepth 1 -name 'ubuntu-zombie-diagnostics-*.tar.gz' -print -quit)
+  if [[ -z "${tarball}" || ! -s "${tarball}" ]]; then
+    rm -rf "${td}"
+    echo "FAIL: collect-diagnostics produced no tarball" >&2
+    exit 1
+  fi
+  # The staging directory must be cleaned up by the EXIT trap, leaving
+  # only the tarball behind.
+  if find "${td}" -maxdepth 1 -type d -name 'ubuntu-zombie-diagnostics-*' | grep -q .; then
+    rm -rf "${td}"
+    echo "FAIL: collect-diagnostics left its staging directory behind" >&2
+    exit 1
+  fi
+  rm -rf "${td}"
+}
+
 run_standards() {
   echo "[smoke] repository standards"
   local required=(
@@ -683,6 +717,7 @@ case "${cmd}" in
   subcommands)    run_subcommands ;;
   bad-usage)      run_bad_usage ;;
   noninteractive) run_noninteractive ;;
+  diagnostics)    run_diagnostics ;;
   standards)      run_standards ;;
   all)
     run_syntax
@@ -690,6 +725,7 @@ case "${cmd}" in
     run_subcommands
     run_bad_usage
     run_noninteractive
+    run_diagnostics
     run_standards
     echo "[smoke] all checks passed"
     ;;
