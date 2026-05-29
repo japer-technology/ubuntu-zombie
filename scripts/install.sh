@@ -1517,14 +1517,14 @@ install_npm_latest() {
     || { rm -rf "${tmp_dir}"; return 1; }
   node -e '
     const m = require(process.argv[1]);
-    if (!m.version || !m.dist || !m.dist.tarball) process.exit(1);
-    process.stdout.write([m.version, m.dist.tarball, m.dist.integrity || ""].join("\n") + "\n");
+    if (!m.version || !m.dist || !m.dist.tarball || !m.dist.integrity) process.exit(1);
+    process.stdout.write([m.version, m.dist.tarball, m.dist.integrity].join("\n") + "\n");
   ' "${tmp_dir}/latest.json" > "${tmp_dir}/meta.txt" \
     || { rm -rf "${tmp_dir}"; return 1; }
   version="$(sed -n 1p "${tmp_dir}/meta.txt")"
   tarball_url="$(sed -n 2p "${tmp_dir}/meta.txt")"
   integrity="$(sed -n 3p "${tmp_dir}/meta.txt")"
-  if [[ -z "${version}" || -z "${tarball_url}" ]]; then
+  if [[ -z "${version}" || -z "${tarball_url}" || -z "${integrity}" ]]; then
     rm -rf "${tmp_dir}"
     return 1
   fi
@@ -1532,22 +1532,23 @@ install_npm_latest() {
   curl_get "${tarball_url}" -o "${tarball}" \
     || { rm -rf "${tmp_dir}"; return 1; }
   # Verify the registry's SRI hash (e.g. "sha512-<base64>") before trusting the
-  # archive. A mismatch means a corrupt or tampered download, so we abort hard
-  # rather than retrying a request that would keep failing the same way.
-  if [[ -n "${integrity}" ]]; then
-    node -e '
-      const fs = require("fs"), crypto = require("crypto");
-      const sri = process.argv[1], file = process.argv[2];
-      const i = sri.indexOf("-");
-      if (i === -1) process.exit(1);
-      const algo = sri.slice(0, i);
-      const expected = sri.slice(i + 1);
-      const got = crypto.createHash(algo).update(fs.readFileSync(file)).digest("base64");
-      process.exit(got === expected ? 0 : 1);
-    ' "${integrity}" "${tarball}" \
-      || { rm -rf "${tmp_dir}"; die "Integrity check failed for npm@${version} from the npm registry." 1; }
-  fi
-  tar -xzf "${tarball}" -C "${tmp_dir}"
+  # archive. The hash is mandatory: if it is missing, malformed, or does not
+  # match, we abort rather than installing an unverified tarball. A mismatch
+  # means a corrupt or tampered download, so retrying the same request would
+  # keep failing the same way.
+  node -e '
+    const fs = require("fs"), crypto = require("crypto");
+    const sri = process.argv[1], file = process.argv[2];
+    const i = sri.indexOf("-");
+    if (i === -1) process.exit(1);
+    const algo = sri.slice(0, i);
+    const expected = sri.slice(i + 1);
+    const got = crypto.createHash(algo).update(fs.readFileSync(file)).digest("base64");
+    process.exit(got === expected ? 0 : 1);
+  ' "${integrity}" "${tarball}" \
+    || { rm -rf "${tmp_dir}"; die "Integrity check failed for npm@${version} from the npm registry." 1; }
+  tar -xzf "${tarball}" -C "${tmp_dir}" \
+    || { rm -rf "${tmp_dir}"; return 1; }
   [[ -d "${tmp_dir}/package" ]] \
     || { rm -rf "${tmp_dir}"; die "npm registry tarball for npm@${version} had an unexpected layout." 1; }
   rm -rf "${npm_root}"
