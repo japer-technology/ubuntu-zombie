@@ -349,6 +349,39 @@ After editing `policy.yaml` or any template under
 `/opt/ai-zombie/agent/templates/`, run `sudo ./scripts/install.sh
 repair` to re-render the `pi/` tree and restart the chat service.
 
+## Command-line flags
+
+`scripts/install.sh` accepts these flags in addition to the subcommands
+above. They can be combined (e.g. `install --yes --strict`):
+
+| Flag                 | Effect                                                                       |
+| -------------------- | ---------------------------------------------------------------------------- |
+| `-h`, `--help`       | Grouped help with end-to-end example recipes, then exit.                     |
+| `-v`, `--version`    | Print the version and exit.                                                  |
+| `-n`, `--dry-run`    | Print every action; mutate nothing.                                          |
+| `-y`, `--yes`        | Skip the interactive `Type YES` gate (attended scripted runs). Still prompts for any missing inputs unless `ZOMBIE_NONINTERACTIVE=1`. |
+| `-q`, `--quiet`      | Only print warnings and errors.                                              |
+| `--verbose`, `--debug` | Write shell xtrace to the install transcript (not the console).            |
+| `--no-color`         | Disable coloured output (also honours `NO_COLOR` and `ZOMBIE_COLOR=never`).  |
+| `--strict`           | Treat preflight warnings as fatal.                                           |
+| `--json`             | Emit machine-readable JSON from `verify` / `doctor` (human output is default). |
+
+Colour follows the `ZOMBIE_COLOR=auto|always|never` policy and the
+widely-supported [`NO_COLOR`](https://no-color.org/) convention; output
+is plain when not writing to a TTY.
+
+### Shell completion
+
+Completion scripts live under `scripts/completions/`:
+
+```bash
+# bash
+source scripts/completions/install.bash
+
+# zsh — add the directory to $fpath, then:
+autoload -U compinit && compinit
+```
+
 ## Skills
 
 Skill files are short markdown briefs the agent loads via `skill.list`
