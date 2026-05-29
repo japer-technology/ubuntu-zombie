@@ -14,11 +14,12 @@ You need:
 
 - A physical Ubuntu Desktop **22.04 LTS** or **24.04 LTS** machine,
   freshly installed and updated.
-- A Tailscale account and a [pre-auth key](https://login.tailscale.com/admin/settings/keys)
-  (recommended) or a working browser to log in interactively.
 - One SSH public key (`ssh-ed25519 …` is preferred) from the machine
   you will use to control this PC.
-- One LLM API key from a supported provider. All providers are routed
+- A VNC password you choose, for emergency loopback-only desktop access
+  over an SSH tunnel.
+- One LLM API key from a supported provider (added **after** install in
+  step 4, not required to start the installer). All providers are routed
   through `@earendil-works/pi-ai`; pick exactly one:
   - `OPENAI_API_KEY=sk-…`
   - `ANTHROPIC_API_KEY=sk-ant-…`
@@ -28,6 +29,34 @@ You need:
   - `MISTRAL_API_KEY=…`
   - `GROQ_API_KEY=…`
 - A keyboard physically attached to the PC for the first run.
+- **Optional:** a Tailscale account and a [pre-auth key](https://login.tailscale.com/admin/settings/keys).
+  Tailscale is **off by default**. Opt in with `ZOMBIE_SKIP_TAILSCALE=0`
+  to restrict inbound SSH to your tailnet (see step 1).
+
+### Parameters required to allow the install to proceed
+
+The installer only needs two inputs from you before it will run to
+completion. In an interactive run it prompts for both; in a
+non-interactive run (`ZOMBIE_NONINTERACTIVE=1`) you must supply them as
+environment variables unless they are already configured on disk:
+
+| Parameter        | How it is supplied                                                       | Required |
+| ---------------- | ------------------------------------------------------------------------ | -------- |
+| `SSH_PUBLIC_KEY` | Prompted interactively, or set as an env var. Skippable interactively if a key is already authorized; mandatory in non-interactive mode when no key exists. | Yes      |
+| `VNC_PASSWORD`   | Prompted interactively, or set as an env var. Mandatory in non-interactive mode when no VNC password is already stored. | Yes      |
+
+Everything else has a safe default:
+
+| Parameter                | Default        | Purpose                                                            |
+| ------------------------ | -------------- | ------------------------------------------------------------------ |
+| `ZOMBIE_USER`            | `zombie`       | Name of the local AI Systems Administrator account.                |
+| `ZOMBIE_SKIP_TAILSCALE`  | `1` (off)      | Set to `0` to install/enrol Tailscale and restrict SSH to it.      |
+| `TAILSCALE_AUTHKEY`      | *(unset)*      | Pre-auth key for unattended Tailscale; used only when `ZOMBIE_SKIP_TAILSCALE=0`. |
+| `ZOMBIE_ENABLE_AUTOLOGIN`| `0` (off)      | Set to `1` to enable graphical autologin for the agent account.    |
+| `ZOMBIE_CHAT_PORT`       | `7878`         | Loopback port for the chat UI.                                     |
+
+An LLM API key is **not** required to run the installer; you add it in
+step 4 after the first reboot.
 
 Do **not** run the installer over a public SSH session. The installer
 restarts `sshd` and tightens the firewall; you can lock yourself out.
@@ -96,19 +125,38 @@ sudo ZOMBIE_NONINTERACTIVE=1 \
      ZOMBIE_USER=zombie \
      SSH_PUBLIC_KEY="ssh-ed25519 AAAA… you@workstation" \
      VNC_PASSWORD="replace-me" \
-     TAILSCALE_AUTHKEY="tskey-auth-…" \
      ZOMBIE_ENABLE_AUTOLOGIN=0 \
      ./scripts/install.sh install
 ```
+
+`SSH_PUBLIC_KEY` and `VNC_PASSWORD` are the only inputs the installer
+requires to proceed (see [Parameters required to allow the install to
+proceed](#parameters-required-to-allow-the-install-to-proceed) above).
+In non-interactive mode they must be set unless a key/password is
+already configured on disk.
 
 `ZOMBIE_USER` is optional; omit it to get the default account name
 `zombie`. Set it to any valid local username if you would rather the
 AI Systems Administrator live in (for example) `admin` or `ai`.
 
-Set `ZOMBIE_SKIP_TAILSCALE=1` to skip installing and enrolling
-Tailscale (in which case inbound SSH is allowed on every interface
-instead of being restricted to the `tailscale0` interface, and
-`TAILSCALE_AUTHKEY` is ignored).
+Tailscale is **off by default**: the installer does not install or
+enrol it, and inbound SSH is allowed on every interface (still
+key-only, root-disabled). To opt in — install and enrol Tailscale and
+restrict inbound SSH to the `tailscale0` interface — set
+`ZOMBIE_SKIP_TAILSCALE=0`:
+
+```bash
+# interactive enrolment (opens a browser login URL):
+sudo ZOMBIE_SKIP_TAILSCALE=0 ./scripts/install.sh install
+
+# unattended enrolment with a pre-auth key:
+sudo ZOMBIE_NONINTERACTIVE=1 \
+     ZOMBIE_SKIP_TAILSCALE=0 \
+     SSH_PUBLIC_KEY="ssh-ed25519 AAAA… you@workstation" \
+     VNC_PASSWORD="replace-me" \
+     TAILSCALE_AUTHKEY="tskey-auth-…" \
+     ./scripts/install.sh install
+```
 
 Re-running `install` is safe. The script is idempotent. If something
 drifts later (file permissions, missing service, dropped Tailscale
@@ -161,7 +209,8 @@ and Docker group membership take effect.
 ## 3. Verify
 
 After reboot, log in as `zombie` (or whatever name you passed via
-`ZOMBIE_USER` at install time, or SSH in over Tailscale) and run:
+`ZOMBIE_USER` at install time, or SSH in — over Tailscale if you opted
+in, otherwise over your LAN) and run:
 
 ```bash
 /opt/ai-zombie/bin/verify
@@ -223,11 +272,12 @@ http://127.0.0.1:7878/
 
 (Override the port at install time with `ZOMBIE_CHAT_PORT=<port>`.)
 
-Remotely over Tailscale (SSH tunnel; the chat never binds to a public
-interface):
+Remotely (SSH tunnel; the chat never binds to a public interface). Use
+the host's Tailscale name/IP if you opted in to Tailscale, otherwise its
+LAN address:
 
 ```bash
-ssh -L 7878:127.0.0.1:7878 zombie@<tailscale-name-or-ip>
+ssh -L 7878:127.0.0.1:7878 zombie@<host-name-or-ip>
 # then open http://127.0.0.1:7878/ in your local browser
 ```
 

@@ -24,8 +24,9 @@
 It is a normal Ubuntu PC with an administrator inside it. Any local
 user can open a private chat, ask the machine to do something, see
 exactly what is proposed, approve it, and watch it happen. Everything
-the AI does is audit-logged. Inbound network access is restricted to a
-private Tailscale tailnet. The operator owns the machine, the SSH
+the AI does is audit-logged. SSH is key-only and root-disabled;
+optionally restrict inbound access to a private Tailscale tailnet by
+opting in at install time. The operator owns the machine, the SSH
 key, the API key, and the kill switch.
 
 ## Quickstart
@@ -41,9 +42,18 @@ sudo reboot
 /opt/ai-zombie/bin/verify
 sudo /opt/ai-zombie/bin/secrets-edit   # add an LLM API key
 sudo systemctl restart ubuntu-zombie-chat.service
-# open http://127.0.0.1:7878/ locally, or tunnel over Tailscale:
-ssh -L 7878:127.0.0.1:7878 zombie@<tailscale-name-or-ip>
+# open http://127.0.0.1:7878/ locally, or tunnel over SSH:
+ssh -L 7878:127.0.0.1:7878 zombie@<host-name-or-ip>
 ```
+
+The installer needs only two inputs from you to proceed: an
+`SSH_PUBLIC_KEY` and a `VNC_PASSWORD`. It prompts for both
+interactively, or reads them from the environment in non-interactive
+mode (`ZOMBIE_NONINTERACTIVE=1`). An LLM API key is added *after*
+install. Tailscale is **off by default**; opt in with
+`ZOMBIE_SKIP_TAILSCALE=0` to restrict inbound SSH to your tailnet. The
+full list of inputs and their defaults is in
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md#parameters-required-to-allow-the-install-to-proceed).
 
 Prefer a `.deb`? Each [GitHub Release](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
 ships `ubuntu-zombie_<version>_all.deb` plus a SHA-256 checksum file and
@@ -108,12 +118,13 @@ The local `zombie` Linux user (renameable at install time with
 `ZOMBIE_USER=<name>`) is the operating identity of the AI
 Systems Administrator and holds passwordless `sudo`. The configured
 cloud LLM provider authenticates the administrator. The operator owns
-the machine, the SSH private key, the API key, and the Tailscale
-account, and can rotate, revoke, or uninstall any of them at any
-time. Privileged actions go through a local policy gate before
-`sudo`. Every action is audit-logged. There is no public inbound
-exposure. Read [`SECURITY.md`](SECURITY.md) before running the
-installer.
+the machine, the SSH private key, the API key, and (if Tailscale is
+enabled) the Tailscale account, and can rotate, revoke, or uninstall
+any of them at any time. Privileged actions go through a local policy
+gate before `sudo`. Every action is audit-logged. The chat and VNC
+services bind to `127.0.0.1` only. Tailscale is off by default; opt in
+with `ZOMBIE_SKIP_TAILSCALE=0` to confine inbound SSH to your tailnet.
+Read [`SECURITY.md`](SECURITY.md) before running the installer.
 
 ## License
 

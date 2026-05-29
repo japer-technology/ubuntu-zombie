@@ -211,33 +211,42 @@ below (look for the `ZOMBIE_PI_MONO_*` variables).
 
 ## Tailscale
 
-By default the installer enrols the machine into your Tailscale tailnet
-and restricts inbound SSH to the `tailscale0` interface via UFW. To
-re-enrol or change accounts:
+By default the installer does **not** install or enrol Tailscale, and
+inbound SSH is allowed on **every** interface (key-only, root-disabled).
+See [Opting in to Tailscale](#opting-in-to-tailscale) below to enable
+the Tailscale-only ingress posture.
+
+### Opting in to Tailscale
+
+Set `ZOMBIE_SKIP_TAILSCALE=0` to install Tailscale, enrol the machine
+into your tailnet, and restrict inbound SSH to the `tailscale0`
+interface via UFW:
+
+```bash
+sudo ZOMBIE_SKIP_TAILSCALE=0 ./scripts/install.sh install
+```
+
+When opting in interactively the installer runs `tailscale up`, which
+prints a login URL you must open in a browser to authenticate. To
+re-enrol or change accounts later:
 
 ```bash
 sudo tailscale logout
 sudo tailscale up
 ```
 
-For unattended installs, set `TAILSCALE_AUTHKEY` to a Tailscale
+For unattended installs, also set `TAILSCALE_AUTHKEY` to a Tailscale
 pre-auth key before running `install`; the installer will run
 `tailscale up --ssh=false --authkey "$TAILSCALE_AUTHKEY"` for you.
-The variable is ignored when `ZOMBIE_SKIP_TAILSCALE=1`.
+`TAILSCALE_AUTHKEY` is used only when `ZOMBIE_SKIP_TAILSCALE=0`.
 
 The chat service never binds outside `127.0.0.1`; remote access is by
 SSH tunnel only.
 
-### Skipping Tailscale (no Tailscale account)
+### Default: no Tailscale
 
-If you do not have (or do not want to use) a Tailscale account, run the
-installer with `ZOMBIE_SKIP_TAILSCALE=1`:
-
-```bash
-sudo ZOMBIE_SKIP_TAILSCALE=1 ./scripts/install.sh install
-```
-
-When set, the installer will:
+With the default (`ZOMBIE_SKIP_TAILSCALE=1`, no Tailscale), the
+installer will:
 
 - skip installing the Tailscale apt repo, `tailscale` package, and
   `tailscaled` enablement;
@@ -246,14 +255,13 @@ When set, the installer will:
 - configure UFW to allow inbound SSH on **every** interface instead of
   only `tailscale0`.
 
-This trades the Tailscale-only ingress posture for reachability on
-whatever network the machine sits on. SSH is still key-only and
-root-disabled, and the chat/VNC services still bind to `127.0.0.1`
-only, but anyone who can route to port 22 on the host can attempt to
-authenticate. Use this mode only on a network you control (e.g. behind
-a home router/NAT) or behind another VPN.
+This means anyone who can route to port 22 on the host can attempt to
+authenticate. SSH is still key-only and root-disabled, and the
+chat/VNC services still bind to `127.0.0.1` only. Use the default only
+on a network you control (e.g. behind a home router/NAT) or behind
+another VPN, or opt in to Tailscale as above.
 
-Re-run the installer without `ZOMBIE_SKIP_TAILSCALE` at any time to
+Re-run the installer with `ZOMBIE_SKIP_TAILSCALE=0` at any time to
 enrol the machine into Tailscale and re-tighten UFW.
 
 ## Autologin

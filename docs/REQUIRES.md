@@ -3,10 +3,11 @@
 What Ubuntu Zombie needs in order to install and run. Everything on
 this page is provisioned automatically by `scripts/install.sh`, with
 the exception of the **operator-supplied** items in the first section
-(SSH key, LLM API key, Tailscale account). This document is a
-reference so operators and reviewers can see at a glance which
-external repositories, packages, runtimes, and services the installer
-will pull onto the machine.
+(SSH key, VNC password, LLM API key, and — only if you opt in to
+Tailscale — a Tailscale account). This document is a reference so
+operators and reviewers can see at a glance which external
+repositories, packages, runtimes, and services the installer will pull
+onto the machine.
 
 If any item below changes, update this file in the same commit so it
 stays a faithful inventory.
@@ -48,8 +49,10 @@ These are **not** installed by the script; the operator brings them.
   - `MISTRAL_API_KEY`
   - `GROQ_API_KEY`
 - **Tailscale account** and (recommended) a pre-auth key
-  (`TAILSCALE_AUTHKEY=…`). Skip with `ZOMBIE_SKIP_TAILSCALE=1` only
-  if you understand the loss of the tailnet trust boundary.
+  (`TAILSCALE_AUTHKEY=…`) — **only if you opt in** to Tailscale with
+  `ZOMBIE_SKIP_TAILSCALE=0`. Tailscale is off by default; with the
+  default there is no tailnet trust boundary and SSH is reachable on
+  every interface.
 
 ## 3. Third-party apt repositories
 
@@ -58,7 +61,7 @@ keys under `/usr/share/keyrings` and `/etc/apt/keyrings`.
 
 | Repository | Source | Used for |
 | ---------- | ------ | -------- |
-| Tailscale  | `https://pkgs.tailscale.com/stable/ubuntu` (`jammy`/`noble`) signed by `pkgs.tailscale.com/.../noarmor.gpg` | `tailscale`, `tailscaled` |
+| Tailscale  | `https://pkgs.tailscale.com/stable/ubuntu` (`jammy`/`noble`) signed by `pkgs.tailscale.com/.../noarmor.gpg` | `tailscale`, `tailscaled` — **only when `ZOMBIE_SKIP_TAILSCALE=0`** |
 | Docker CE  | `https://download.docker.com/linux/ubuntu` (`jammy`/`noble`) signed by `download.docker.com/linux/ubuntu/gpg` | `docker-ce`, `docker-ce-cli`, `containerd.io`, `docker-buildx-plugin`, `docker-compose-plugin` |
 
 The stock Ubuntu archive (`archive.ubuntu.com`) and the Ubuntu
@@ -86,6 +89,8 @@ Installed in the "Base packages" section of `scripts/install.sh`:
 `xsel`, `xterm`, `at-spi2-core`, `x11-utils`.
 
 ### 4.3 From the Tailscale apt repo
+
+Installed **only when you opt in** with `ZOMBIE_SKIP_TAILSCALE=0`:
 
 - `tailscale` (provides the `tailscaled` daemon)
 
@@ -176,9 +181,10 @@ Provided by this repository's `payload/` tree and installed by
 - **LLM provider API** — exactly one of the providers listed in §2,
   reached over HTTPS from the chat service.
 - **Tailscale coordination server** (`controlplane.tailscale.com`) and
-  the operator's tailnet, unless `ZOMBIE_SKIP_TAILSCALE=1`.
-- **Ubuntu, Tailscale, Docker, PyPI, and npm registries** for
-  install and upgrade only.
+  the operator's tailnet, only when you opt in with
+  `ZOMBIE_SKIP_TAILSCALE=0` (Tailscale is off by default).
+- **Ubuntu, Docker, PyPI, and npm registries** (plus the Tailscale
+  registry when Tailscale is enabled) for install and upgrade only.
 
 ## 9. Local accounts, groups, and firewall
 
@@ -189,8 +195,8 @@ Created or modified by `scripts/install.sh`:
   `NOPASSWD: ALL` at
   `/etc/sudoers.d/90-<user>-ubuntu-zombie`.
 - `ufw` enabled with default-deny inbound, default-allow outbound,
-  and SSH (`22/tcp`) allowed **only** on `tailscale0` (or on every
-  interface if `ZOMBIE_SKIP_TAILSCALE=1`).
+  and SSH (`22/tcp`) allowed on **every** interface by default (or
+  only on `tailscale0` when `ZOMBIE_SKIP_TAILSCALE=0`).
 - `fail2ban` enabled for `sshd`.
 
 ---

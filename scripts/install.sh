@@ -29,13 +29,16 @@
 #   ZOMBIE_ENABLE_AUTOLOGIN=1   enable graphical autologin for the
 #                               agent account (off by default).
 #   ZOMBIE_SKIP_TAILSCALE=1     skip installing and enrolling Tailscale.
-#                               When set, inbound SSH is allowed on every
-#                               interface instead of being restricted to
-#                               tailscale0. A Tailscale account is then
-#                               not required.
+#                               This is the default. Inbound SSH is then
+#                               allowed on every interface instead of being
+#                               restricted to tailscale0, and a Tailscale
+#                               account is not required.
+#   ZOMBIE_SKIP_TAILSCALE=0     opt in to installing and enrolling Tailscale
+#                               and restricting inbound SSH to tailscale0.
+#                               Requires a Tailscale account.
 #   SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host"
 #   VNC_PASSWORD="..."
-#   TAILSCALE_AUTHKEY="tskey-auth-..."  (ignored when ZOMBIE_SKIP_TAILSCALE=1)
+#   TAILSCALE_AUTHKEY="tskey-auth-..."  (used only when ZOMBIE_SKIP_TAILSCALE=0)
 
 set -Eeuo pipefail
 
@@ -80,7 +83,9 @@ LOG_FILE="${LOG_FILE:-/var/log/ubuntu-zombie-install.log}"
 
 ZOMBIE_NONINTERACTIVE="${ZOMBIE_NONINTERACTIVE:-0}"
 ZOMBIE_ENABLE_AUTOLOGIN="${ZOMBIE_ENABLE_AUTOLOGIN:-0}"
-ZOMBIE_SKIP_TAILSCALE="${ZOMBIE_SKIP_TAILSCALE:-0}"
+# Tailscale is OFF by default. Opt in by setting ZOMBIE_SKIP_TAILSCALE=0
+# (install and enrol Tailscale, restricting inbound SSH to tailscale0).
+ZOMBIE_SKIP_TAILSCALE="${ZOMBIE_SKIP_TAILSCALE:-1}"
 SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
 VNC_PASSWORD="${VNC_PASSWORD:-}"
 TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
@@ -213,14 +218,17 @@ Environment variables (selected; see docs/CONFIGURATION.md for all):
                               install/verify/doctor/repair/uninstall
                               run that targets a non-default account.
   ZOMBIE_ENABLE_AUTOLOGIN=1   enable graphical autologin (off by default).
-  ZOMBIE_SKIP_TAILSCALE=1     skip installing/enrolling Tailscale. Inbound
-                              SSH is then allowed on every interface
-                              rather than only on tailscale0.
+  ZOMBIE_SKIP_TAILSCALE=1     skip installing/enrolling Tailscale. This is
+                              the default. Inbound SSH is then allowed on
+                              every interface rather than only on tailscale0.
+  ZOMBIE_SKIP_TAILSCALE=0     opt in to Tailscale: install/enrol it and
+                              restrict inbound SSH to tailscale0 (needs a
+                              Tailscale account).
   ZOMBIE_COLOR=auto|always|never   colour policy (default auto).
   SSH_PUBLIC_KEY              SSH public key string.
   VNC_PASSWORD                Loopback-only VNC password.
   TAILSCALE_AUTHKEY           Pre-auth key for unattended Tailscale
-                              (ignored when ZOMBIE_SKIP_TAILSCALE=1).
+                              (used only when ZOMBIE_SKIP_TAILSCALE=0).
 
 Examples:
   # Preview the plan before granting anything:
@@ -232,11 +240,18 @@ Examples:
   # Attended, but skip the YES gate:
   sudo ./${SCRIPT_NAME} install --yes
 
-  # No Tailscale (SSH allowed on every interface — only on a trusted LAN):
-  sudo ZOMBIE_SKIP_TAILSCALE=1 ./${SCRIPT_NAME} install
+  # Opt in to Tailscale (install/enrol it; SSH restricted to tailscale0):
+  sudo ZOMBIE_SKIP_TAILSCALE=0 ./${SCRIPT_NAME} install
 
   # Fully unattended (CI / cloud-init):
   sudo ZOMBIE_NONINTERACTIVE=1 \\
+       SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host" \\
+       VNC_PASSWORD="s3cret" \\
+       ./${SCRIPT_NAME} install
+
+  # Fully unattended, with Tailscale enrolment via a pre-auth key:
+  sudo ZOMBIE_NONINTERACTIVE=1 \\
+       ZOMBIE_SKIP_TAILSCALE=0 \\
        SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host" \\
        VNC_PASSWORD="s3cret" \\
        TAILSCALE_AUTHKEY="tskey-auth-..." \\
@@ -540,9 +555,10 @@ preflight() {
 
   # Tailscale already present?
   if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-    warn "ZOMBIE_SKIP_TAILSCALE=1: Tailscale will be skipped. Inbound SSH will be"
-    warn "  allowed on every interface instead of only on tailscale0. Only use"
-    warn "  this on a network you control (e.g. behind a NAT/router or VPN)."
+    warn "Tailscale is disabled (default; opt in with ZOMBIE_SKIP_TAILSCALE=0)."
+    warn "  Inbound SSH will be allowed on every interface instead of only on"
+    warn "  tailscale0. Only use this on a network you control (e.g. behind a"
+    warn "  NAT/router or VPN)."
     warnings=$((warnings + 1)); pf warn "Tailscale skipped (SSH on every interface)"
   elif command -v tailscale >/dev/null 2>&1; then
     if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
