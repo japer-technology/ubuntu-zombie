@@ -80,6 +80,18 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     `repair`-vs-`install` fixes.
 
 ### Fixed
+- **`collect-diagnostics` aborted before writing its bundle.** The
+  `capture` helper ran each diagnostic command under `set -euo
+  pipefail` without guarding its exit status, so the first tool that
+  returned non-zero — `systemctl status` of an inactive unit (exit
+  3), `docker version` with no daemon, or a `tailscale` binary that
+  is not installed — aborted the whole script. The EXIT trap then
+  deleted the partial staging directory, leaving no tarball. These
+  failures are exactly the broken states an operator runs diagnostics
+  to capture. `capture` now swallows the command's exit status (its
+  output is still recorded via `2>&1`), so every section is collected
+  regardless of individual failures. A smoke test
+  (`tests/smoke.sh diagnostics`) guards the behaviour.
 - **Installer Node runtime.** `scripts/install.sh` now installs
   Node.js 22.x from the official NodeSource apt repository instead
   of the Ubuntu-archive `nodejs`/`npm` packages. The bundled npm on

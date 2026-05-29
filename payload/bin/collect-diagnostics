@@ -25,7 +25,16 @@ redact() {
 
 capture() {
   local name="$1"; shift
-  { echo "## $* (saved $(date -u +%FT%TZ))"; "$@" 2>&1; } | redact > "${BUNDLE_DIR}/${name}"
+  # FIX-3-24: diagnostics collection is best-effort. Many captured
+  # commands return non-zero in exactly the broken states we want to
+  # diagnose (`systemctl status` of an inactive unit exits 3, `docker
+  # version` fails when the daemon is down, `tailscale status` fails
+  # when logged out). Under `set -euo pipefail` an unguarded failure
+  # here would abort the whole script before the tarball is written —
+  # and the EXIT trap would then delete the partial bundle. Swallow
+  # the command's exit status (its output is still captured via 2>&1)
+  # so every section is collected regardless of individual failures.
+  { echo "## $* (saved $(date -u +%FT%TZ))"; "$@" 2>&1 || true; } | redact > "${BUNDLE_DIR}/${name}"
 }
 
 echo "Collecting diagnostics into ${BUNDLE_DIR}/ ..."
