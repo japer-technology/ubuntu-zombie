@@ -299,12 +299,10 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = promptEl.value.trim();
   if (!prompt) return;
-  if (prompt.startsWith("/")) {
-    if (handleSlashCommand(prompt)) {
-      promptEl.value = "";
-      promptEl.focus();
-      return;
-    }
+  if (handleSlashCommand(prompt)) {
+    promptEl.value = "";
+    promptEl.focus();
+    return;
   }
   addMessage("user", prompt);
   promptEl.value = "";
