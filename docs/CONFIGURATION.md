@@ -25,7 +25,7 @@ Supported variables:
 | `MISTRAL_API_KEY`    | API key for the Mistral provider         |
 | `GROQ_API_KEY`       | API key for the Groq provider            |
 | `ZOMBIE_PROVIDER`    | One of `openai`, `anthropic`, `gemini`, `xai`, `mistral`, `groq`, `openrouter` (default: first key found, in that order) |
-| `ZOMBIE_MODEL`       | Model used by both the agent loop and the chat surface (required for `openrouter`); overrides the provider's default |
+| `ZOMBIE_MODEL`       | Model used by both the agent loop and the chat surface; required for `openrouter` unless `ZOMBIE_OPENROUTER_MODEL` is set; overrides the provider's default |
 | `ZOMBIE_OPENAI_MODEL`     | Override the default model used when the active provider is `openai` |
 | `ZOMBIE_ANTHROPIC_MODEL`  | Override the default model used when the active provider is `anthropic` |
 | `ZOMBIE_GEMINI_MODEL`     | Override the default model used when the active provider is `gemini` |
