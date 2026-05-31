@@ -292,6 +292,10 @@ Try one of the safe examples shipped with the chat:
 
 Read-only questions are answered without prompting for approval.
 
+The chat also understands a few client-side commands. Type `/help` to
+list them; `/clear` clears the view, and `/new` (alias `/reset`) starts
+a fresh conversation.
+
 ## 7. Approve a safe command
 
 When the assistant proposes a command in a non-read-only class, the UI

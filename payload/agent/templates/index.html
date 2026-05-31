@@ -69,7 +69,7 @@
 </details>
 <footer>
   <form id="form">
-    <textarea id="prompt" placeholder="Ask the administrator..." required></textarea>
+    <textarea id="prompt" placeholder="Ask the administrator...  (type /help for commands)" required></textarea>
     <button type="submit" class="primary">Send</button>
   </form>
 </footer>
@@ -242,10 +242,70 @@ function renderEvent(ev) {
   return null;
 }
 
+// Client-side slash commands. These are handled entirely in the
+// browser and never reach the agent — they manage the local view and
+// conversation state. ``handleSlashCommand`` returns true when the
+// input was a recognised command (so the caller skips the network
+// round-trip) and false otherwise.
+const SLASH_COMMANDS = [
+  ["/help", "List the available chat commands."],
+  ["/clear", "Clear the messages from this view."],
+  ["/new", "Start a new conversation (alias: /reset)."],
+  ["/examples", "Show the safe example prompts."],
+];
+
+function handleSlashCommand(input) {
+  const cmd = input.split(/\s+/, 1)[0].toLowerCase();
+  if (!cmd.startsWith("/")) return false;
+  switch (cmd) {
+    case "/help": {
+      addMessage("user", input);
+      const lines = SLASH_COMMANDS.map(([c, d]) => `${c} — ${d}`);
+      addMessage("system", "Available commands:\n" + lines.join("\n"));
+      return true;
+    }
+    case "/clear": {
+      log.replaceChildren();
+      return true;
+    }
+    case "/new":
+    case "/reset": {
+      conversationId = null;
+      log.replaceChildren();
+      addMessage("system", "Started a new conversation.");
+      return true;
+    }
+    case "/examples": {
+      addMessage("user", input);
+      const details = document.querySelector("details.examples");
+      if (details) details.open = true;
+      const pre = details ? details.querySelector("pre") : null;
+      addMessage("system", pre && pre.textContent.trim()
+        ? pre.textContent
+        : "No example prompts are available.");
+      return true;
+    }
+    default: {
+      addMessage("user", input);
+      addMessage("system",
+        `Unknown command: ${cmd}. Type /help to see the available commands.`,
+        { error: true });
+      return true;
+    }
+  }
+}
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = promptEl.value.trim();
   if (!prompt) return;
+  if (prompt.startsWith("/")) {
+    if (handleSlashCommand(prompt)) {
+      promptEl.value = "";
+      promptEl.focus();
+      return;
+    }
+  }
   addMessage("user", prompt);
   promptEl.value = "";
   promptEl.disabled = true;
