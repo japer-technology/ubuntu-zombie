@@ -316,7 +316,10 @@ try:
     if g.pi_provider != "google" or g.key_env != "GEMINI_API_KEY":
         raise SystemExit(f"gemini pi_provider/key_env wrong: "
                          f"{g.pi_provider!r}/{g.key_env!r}")
-    if _pr.ALL_KEY_ENVS[0] != "OPENAI_API_KEY" or "GEMINI_API_KEY" not in _pr.ALL_KEY_ENVS:
+    if set(_pr.ALL_KEY_ENVS) != {
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY",
+        "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY",
+    }:
         raise SystemExit(f"ALL_KEY_ENVS unexpected: {_pr.ALL_KEY_ENVS!r}")
 finally:
     for k, v in _saved.items():
