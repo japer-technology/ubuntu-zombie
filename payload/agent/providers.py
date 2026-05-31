@@ -305,7 +305,7 @@ def provider_status() -> tuple[str, str]:
     def _ok(spec: _ProviderSpec) -> tuple[str, str]:
         model = _resolve_model(spec)
         if not model:
-            return (spec.name, "model not set (set ZOMBIE_MODEL)")
+            return (spec.name, "model not set (set ZOMBIE_MODEL" + (f" or {spec.model_env}" if spec.model_env else "") + ")")
         return (spec.name, f"model {model}")
 
     explicit = (os.environ.get("ZOMBIE_PROVIDER") or "").strip().lower()
