@@ -1,4 +1,4 @@
-# Raising the OpenSSF Scorecard above 6
+# Raising the OpenSSF Scorecard
 
 This note theorises how Ubuntu Zombie could earn a higher aggregate
 [OpenSSF Scorecard](https://securityscorecards.dev/viewer/?uri=github.com/japer-technology/ubuntu-zombie)
