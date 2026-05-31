@@ -242,20 +242,51 @@ function renderEvent(ev) {
   return null;
 }
 
-// Client-side slash commands. These are handled entirely in the
-// browser and never reach the agent — they manage the local view and
-// conversation state. ``handleSlashCommand`` returns true when the
-// input was a recognised command (so the caller skips the network
-// round-trip) and false otherwise.
+// Client-side slash commands. Most are handled entirely in the
+// browser; the diagnostic commands fetch a read-only backend endpoint
+// (the same data the chat-service CLI exposes) and render it locally
+// without ever reaching the agent. ``handleSlashCommand`` resolves to
+// true when the input was a recognised command (so the caller skips
+// the network round-trip to the model) and false otherwise.
 const SLASH_COMMANDS = [
   ["/help", "List the available chat commands."],
   ["/clear", "Clear the messages from this view."],
   ["/new", "Start a new conversation (alias: /reset)."],
   ["/examples", "Show the safe example prompts."],
+  ["/tools", "List the agent tools and their risk classification."],
+  ["/health", "Show this machine's facts (hostname, OS, kernel, arch)."],
+  ["/status", "Show a compact host + provider status line."],
+  ["/version", "Show the payload and provider-bridge versions."],
+  ["/audit", "Show the most recent audit-log entries."],
+  ["/conversations", "List recent conversations (alias: /history)."],
+  ["/load", "Load a past conversation: /load <id>."],
+  ["/shortcuts", "Show the keyboard shortcuts."],
 ];
 
-function handleSlashCommand(input) {
-  const cmd = input.split(/\s+/, 1)[0].toLowerCase();
+async function fetchJson(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
+  return r.json();
+}
+
+function timestamp(value) {
+  if (typeof value === "number" && isFinite(value)) {
+    return new Date(value * 1000).toLocaleString();
+  }
+  return value ? String(value) : "";
+}
+
+function renderEvents(events) {
+  for (const ev of events || []) {
+    const node = renderEvent(ev);
+    if (node) log.appendChild(node);
+  }
+}
+
+async function handleSlashCommand(input) {
+  const parts = input.split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+  const arg = parts.slice(1).join(" ").trim();
   if (!cmd.startsWith("/")) return false;
   switch (cmd) {
     case "/help": {
@@ -285,6 +316,130 @@ function handleSlashCommand(input) {
         : "No example prompts are available.");
       return true;
     }
+    case "/shortcuts": {
+      addMessage("user", input);
+      addMessage("system",
+        "Keyboard shortcuts:\n" +
+        "Ctrl+Enter (or Cmd+Enter) — send the current message");
+      return true;
+    }
+    case "/tools": {
+      addMessage("user", input);
+      try {
+        const data = await fetchJson("/api/tools");
+        const tools = data.tools || [];
+        if (!tools.length) { addMessage("system", "No tools are registered."); return true; }
+        const lines = tools.map(t =>
+          `${t.name} · ${t.classification}` +
+          (t.description ? ` — ${t.description}` : ""));
+        addMessage("system", "Agent tools:\n" + lines.join("\n"));
+      } catch (err) {
+        addMessage("system", String(err), { error: true });
+      }
+      return true;
+    }
+    case "/health": {
+      addMessage("user", input);
+      try {
+        const data = await fetchJson("/api/health");
+        const facts = data.facts || {};
+        const lines = Object.entries(facts).map(([k, v]) => `${k}: ${v}`);
+        addMessage("system", lines.length
+          ? "Machine facts:\n" + lines.join("\n")
+          : "No machine facts are available.");
+      } catch (err) {
+        addMessage("system", String(err), { error: true });
+      }
+      return true;
+    }
+    case "/status": {
+      addMessage("user", input);
+      try {
+        const data = await fetchJson("/api/health");
+        const f = data.facts || {};
+        const provider = document.querySelector("header .status");
+        const providerText = provider ? provider.textContent : "";
+        addMessage("system",
+          `${f.hostname || "?"} · ${f.os || "Ubuntu"} · ${f.kernel || "?"} ` +
+          `(${f.arch || "?"})` + (providerText ? ` · ${providerText}` : ""));
+      } catch (err) {
+        addMessage("system", String(err), { error: true });
+      }
+      return true;
+    }
+    case "/version": {
+      addMessage("user", input);
+      try {
+        const data = await fetchJson("/api/version");
+        const lines = [`payload: ${data.version || "unknown"}`];
+        if (data.pi_mono) lines.push(`pi-mono: ${data.pi_mono}`);
+        if (data.pi_ai) lines.push(`pi-ai: ${data.pi_ai}`);
+        addMessage("system", lines.join("\n"));
+      } catch (err) {
+        addMessage("system", String(err), { error: true });
+      }
+      return true;
+    }
+    case "/audit": {
+      addMessage("user", input);
+      try {
+        const data = await fetchJson("/api/audit");
+        const entries = data.entries || [];
+        if (!entries.length) { addMessage("system", "The audit log is empty."); return true; }
+        const lines = entries.slice(-25).map(e => {
+          const head = `${e.ts || ""} ${e.type || "?"}`.trim();
+          const detail = [e.tool, e.decision, e.classification,
+            (typeof e.exit_code !== "undefined" ? `exit ${e.exit_code}` : null)]
+            .filter(Boolean).join(" · ");
+          return detail ? `${head} — ${detail}` : head;
+        });
+        addMessage("system", "Recent audit entries:\n" + lines.join("\n"));
+      } catch (err) {
+        addMessage("system", String(err), { error: true });
+      }
+      return true;
+    }
+    case "/conversations":
+    case "/history": {
+      addMessage("user", input);
+      try {
+        const data = await fetchJson("/api/conversations");
+        const convs = data.conversations || [];
+        if (!convs.length) { addMessage("system", "No conversations yet."); return true; }
+        const lines = convs.map(c =>
+          `#${c.id} · ${timestamp(c.created_at)} · ${c.title || "(untitled)"}`);
+        addMessage("system",
+          "Recent conversations (use /load <id>):\n" + lines.join("\n"));
+      } catch (err) {
+        addMessage("system", String(err), { error: true });
+      }
+      return true;
+    }
+    case "/load": {
+      addMessage("user", input);
+      const id = parseInt(arg, 10);
+      if (!arg || isNaN(id)) {
+        addMessage("system", "Usage: /load <id>", { error: true });
+        return true;
+      }
+      try {
+        const data = await fetchJson(`/api/conversation/${id}`);
+        if (data.error) { addMessage("system", data.error, { error: true }); return true; }
+        log.replaceChildren();
+        conversationId = id;
+        addMessage("system", `Loaded conversation #${id}.`);
+        for (const m of data.messages || []) {
+          if (m.role === "user" || m.role === "assistant") {
+            addMessage(m.role, m.content);
+          }
+        }
+        renderEvents(data.events);
+        log.scrollTop = log.scrollHeight;
+      } catch (err) {
+        addMessage("system", String(err), { error: true });
+      }
+      return true;
+    }
     default: {
       addMessage("user", input);
       addMessage("system",
@@ -299,7 +454,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const prompt = promptEl.value.trim();
   if (!prompt) return;
-  if (handleSlashCommand(prompt)) {
+  if (await handleSlashCommand(prompt)) {
     promptEl.value = "";
     promptEl.focus();
     return;

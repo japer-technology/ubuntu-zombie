@@ -518,6 +518,20 @@ assert "secretsesame" not in verbose_tool["stdout_preview"], verbose_tool
 assert "REDACTED" in verbose_tool["stderr_preview"], verbose_tool
 PY
   rm -rf "${_AUDIT_TMP}"
+
+  echo "  server version_info endpoint"
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import server
+
+info = server.version_info()
+# The payload version must resolve from the repo-root VERSION file
+# when running from a checkout (HERE.parent.parent / VERSION).
+assert info.get("version") and info["version"] != "unknown", info
+# The pinned provider-bridge versions ship next to the agent sources,
+# so version_info must surface them too.
+assert info.get("pi_mono"), info
+assert info.get("pi_ai"), info
+PY
 }
 
 run_subcommands() {
