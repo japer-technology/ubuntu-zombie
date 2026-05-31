@@ -12,8 +12,29 @@
 // exercise the schema-validation + dispatch + observation path.
 
 import { createInterface } from "node:readline";
+import { writeFileSync } from "node:fs";
 
 function send(obj) { process.stdout.write(JSON.stringify(obj) + "\n"); }
+
+const PROVIDER_KEYS = [
+  "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY",
+  "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY",
+];
+
+// When ZOMBIE_STUB_START_OUT is set, record the received `start` frame
+// and a snapshot of which provider keys are visible in our env. The
+// smoke test reads this to assert that pi_mono.run_turn passed the
+// resolved provider/model and forwarded only the active provider's
+// key (stripping the others).
+function recordStart(start) {
+  const out = process.env.ZOMBIE_STUB_START_OUT;
+  if (!out) return;
+  const env = {};
+  for (const k of PROVIDER_KEYS) env[k] = k in process.env;
+  try {
+    writeFileSync(out, JSON.stringify({ start, env }));
+  } catch (_e) { /* best-effort */ }
+}
 
 const plan = JSON.parse(process.env.ZOMBIE_STUB_PLAN || JSON.stringify([
   { type: "tool_call", id: "1", name: "fs.read",
@@ -27,7 +48,9 @@ let received = 0;
 rl.on("line", (line) => {
   received += 1;
   if (received === 1) {
-    // First line is always the 'start' frame. Replay the plan.
+    // First line is always the 'start' frame. Record it, then replay
+    // the plan.
+    try { recordStart(JSON.parse(line)); } catch (_e) { /* ignore */ }
     let i = 0;
     function step() {
       if (i >= plan.length) return;

@@ -525,10 +525,10 @@ def _render_index(app: App) -> bytes:
     name, status = provider_status()
     if name == "none":
         banner = status
-    elif "not set" in status or "no" in status:
-        banner = f"{name}: {status}"
+    elif status.startswith("model ") and "not set" not in status:
+        banner = f"connected ({name} \u00b7 {status[len('model '):]})"
     else:
-        banner = f"connected ({name})"
+        banner = f"{name}: {status}"
     text = INDEX_HTML_PATH.read_text(encoding="utf-8")
     text = text.replace("{{HOSTNAME}}", html.escape(facts.get("hostname", "?")))
     text = text.replace("{{OS}}", html.escape(facts.get("os", "Ubuntu")))

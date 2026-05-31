@@ -11,7 +11,12 @@ Protocol (Python ↔ bridge, one JSON object per line):
 
 * ``{"type":"start", "prompt": str, "system": str, "history": [...],
      "tools": [...], "settings_path": str, "log_path": str,
-     "max_tool_calls": int}`` — Python → bridge
+     "max_tool_calls": int, "provider": str, "model": str}`` —
+  Python → bridge. ``provider`` (a pi-ai/``pi`` provider id such as
+  ``openai`` or ``google``) and ``model`` are resolved from
+  ``providers`` so the agent loop and chat surface select the same
+  model; either may be ``""`` when no provider is configured, in which
+  case the bridge omits the corresponding ``pi`` CLI flag.
 * ``{"type":"tool_call", "id": str, "name": str, "args": {...}}`` —
   bridge → Python (one or more)
 * ``{"type":"tool_result", "id": str, "ok": bool, "result"|"error":
@@ -38,6 +43,8 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+import providers
 
 HERE = Path(__file__).resolve().parent
 
@@ -105,6 +112,33 @@ def run_turn(
     env = dict(os.environ)
     env.setdefault("PI_MONO_LOG", str(log))
 
+    # Single source of truth for model + auth. Resolve the active
+    # provider from /opt/ai-zombie/secrets/env via the shared registry
+    # in ``providers`` and pass the result to the bridge so the ``pi``
+    # CLI selects the same model the chat banner advertises — rather
+    # than falling back to pi's own default (``google``) or its native
+    # ``~/.pi`` config. Resolution is best-effort: if nothing is
+    # configured we leave the env untouched and let ``pi`` resolve
+    # credentials itself (e.g. an OAuth subscription set up via
+    # ``pi /login``), preserving existing behaviour.
+    pi_provider = ""
+    model_id = ""
+    active_key_env = ""
+    try:
+        active = providers.provider_from_env()
+    except providers.NoProviderConfigured:
+        active = None
+    if active is not None:
+        pi_provider = active.pi_provider
+        model_id = active.model
+        active_key_env = active.key_env
+        # Forward only the active provider's key; strip the others so
+        # the ``pi`` CLI cannot authenticate against — or log — an
+        # unrelated provider. Mirrors providers._bridge_env isolation.
+        for key_env in providers.ALL_KEY_ENVS:
+            if key_env != active_key_env:
+                env.pop(key_env, None)
+
     start_msg = {
         "type": "start",
         "prompt": prompt,
@@ -114,6 +148,8 @@ def run_turn(
         "settings_path": settings,
         "log_path": str(log),
         "max_tool_calls": max_tool_calls,
+        "provider": pi_provider,
+        "model": model_id,
     }
 
     proc = subprocess.Popen(
