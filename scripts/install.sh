@@ -1546,8 +1546,9 @@ if [[ ! -f "${ZOMBIE_DIR}/secrets/env" ]]; then
   install -m 600 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${ZOMBIE_DIR}/secrets/env"
   cat > "${ZOMBIE_DIR}/secrets/env" <<EOF
 # Token provider credentials and runtime environment for the AI Systems Administrator.
-# Pick ONE provider line and paste the key. All providers are routed
-# through @earendil-works/pi-ai.
+# Pick ONE provider line and paste the key. The same provider + model
+# selection drives BOTH the agent loop (pi-mono / the actual chat
+# answers) and the status banner — there is a single source of truth.
 #   OPENAI_API_KEY=sk-...
 #   ANTHROPIC_API_KEY=sk-ant-...
 #   GEMINI_API_KEY=...
@@ -1558,7 +1559,7 @@ if [[ ! -f "${ZOMBIE_DIR}/secrets/env" ]]; then
 #
 # Optional:
 #   ZOMBIE_PROVIDER=openai      # openai|anthropic|gemini|xai|openrouter|mistral|groq
-#   ZOMBIE_MODEL=gpt-4o-mini    # override default model (required for openrouter)
+#   ZOMBIE_MODEL=gpt-4o-mini    # model for the agent loop + chat (required for openrouter)
 #   ZOMBIE_CHAT_PORT=${CHAT_PORT}
 
 DISPLAY=:0

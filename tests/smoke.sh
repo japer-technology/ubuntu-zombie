@@ -293,6 +293,34 @@ try:
     p_or = _pr.provider_from_env()
     if p_or.model != "anthropic/claude-3.5-sonnet":
         raise SystemExit(f"openrouter model was {p_or.model!r}")
+
+    # resolve_active_model is the single authoritative resolver shared
+    # by the chat surface and the agent loop. It must agree with
+    # provider_from_env and expose the pi-ai/pi provider id mapping
+    # (gemini -> google).
+    prov, model, key_env = _pr.resolve_active_model()
+    if (prov, model, key_env) != ("openrouter", "anthropic/claude-3.5-sonnet",
+                                  "OPENROUTER_API_KEY"):
+        raise SystemExit(f"resolve_active_model returned {(prov, model, key_env)!r}")
+
+    # The status banner must report the model the agent loop will use,
+    # and the gemini name must map to the pi provider id "google".
+    for k in ("ZOMBIE_PROVIDER", "ZOMBIE_MODEL", "OPENROUTER_API_KEY"):
+        os.environ.pop(k, None)
+    os.environ["ZOMBIE_PROVIDER"] = "gemini"
+    os.environ["GEMINI_API_KEY"] = "test"
+    s_name, s_status = _pr.provider_status()
+    if s_name != "gemini" or s_status != "model gemini-2.0-flash":
+        raise SystemExit(f"provider_status returned {(s_name, s_status)!r}")
+    g = _pr.provider_from_env()
+    if g.pi_provider != "google" or g.key_env != "GEMINI_API_KEY":
+        raise SystemExit(f"gemini pi_provider/key_env wrong: "
+                         f"{g.pi_provider!r}/{g.key_env!r}")
+    if set(_pr.ALL_KEY_ENVS) != {
+        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY",
+        "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY",
+    }:
+        raise SystemExit(f"ALL_KEY_ENVS unexpected: {_pr.ALL_KEY_ENVS!r}")
 finally:
     for k, v in _saved.items():
         if v is None:
@@ -350,7 +378,51 @@ if not any(e.get("type") == "final" for e in out["events"]):
     raise SystemExit("no final event recorded")
 PY
 
-    # Regression tests for the per-turn tool-call budgets. Both must
+    # Unified model selection + auth isolation: pi_mono.run_turn must
+    # resolve the model from ZOMBIE_PROVIDER/ZOMBIE_MODEL (via the same
+    # providers registry the banner uses) and pass it to the bridge,
+    # while forwarding ONLY the active provider's key. The stub records
+    # the received `start` frame and its env-key visibility.
+    echo "  pi-mono unified model selection + key isolation"
+    _START_OUT="$(mktemp)"
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/tests/fixtures/stub-pi-mono.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    ZOMBIE_STUB_START_OUT="${_START_OUT}" \
+    ZOMBIE_PROVIDER="gemini" \
+    ZOMBIE_MODEL="gemini-2.0-flash" \
+    GEMINI_API_KEY="test-gemini" \
+    OPENAI_API_KEY="test-openai-should-be-stripped" \
+    PYTHONPATH=payload/agent \
+      python3 - "${_START_OUT}" <<'PY'
+import json, sys
+import pi_mono, tools
+
+def on_tool_call(call_id, name, args):
+    return {"ok": True, "result": {"stubbed": True}}
+
+pi_mono.run_turn(
+    prompt="hello",
+    system_prompt="stub",
+    history=[],
+    on_tool_call=on_tool_call,
+    tool_names=tools.tool_names(),
+)
+rec = json.load(open(sys.argv[1]))
+start = rec["start"]
+# gemini must map to the pi provider id "google".
+if start.get("provider") != "google":
+    raise SystemExit(f"bridge provider was {start.get('provider')!r}, want 'google'")
+if start.get("model") != "gemini-2.0-flash":
+    raise SystemExit(f"bridge model was {start.get('model')!r}")
+# Only the active provider's key may reach the bridge env.
+if not rec["env"].get("GEMINI_API_KEY"):
+    raise SystemExit("active GEMINI_API_KEY missing from bridge env")
+if rec["env"].get("OPENAI_API_KEY"):
+    raise SystemExit("non-active OPENAI_API_KEY leaked to bridge env")
+PY
+    rm -f "${_START_OUT}"
+
+
     # produce a soft failure (synthetic ``budget_exceeded``
     # observation) once exceeded so the model ends the turn cleanly
     # rather than looping.

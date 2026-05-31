@@ -116,6 +116,21 @@ async function run() {
     "-p", start.prompt,
     "--no-builtin-tools",
   ];
+  // Model + provider come from payload/agent/providers.py (resolved
+  // from /opt/ai-zombie/secrets/env) so the agent loop selects the
+  // same model the chat banner advertises instead of pi's built-in
+  // default ("google"). Both are optional: when unset the operator has
+  // no provider configured and we let pi resolve credentials/model
+  // from its own config (e.g. an OAuth subscription via `pi /login`).
+  // The active provider's API key is already the only provider key in
+  // our environment (pi_mono.py strips the rest), so pi authenticates
+  // against exactly this provider via the standard env var.
+  if (typeof start.provider === "string" && start.provider.length > 0) {
+    args.push("--provider", start.provider);
+  }
+  if (typeof start.model === "string" && start.model.length > 0) {
+    args.push("--model", start.model);
+  }
   if (Array.isArray(start.tools) && start.tools.length > 0) {
     args.push("--tools", start.tools.join(","));
   }

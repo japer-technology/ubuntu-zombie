@@ -10,6 +10,7 @@ The Python-facing surface is intentionally narrow so
 * ``Message`` — dataclass for chat messages.
 * ``ProviderError`` / ``NoProviderConfigured`` — error types.
 * ``provider_from_env(name=None, model=None) -> BaseProvider``
+* ``resolve_active_model(name=None, model=None) -> (provider, model, key_env)``
 * ``provider_status() -> tuple[name, status_text]``
 * ``BaseProvider.chat(messages) -> str``
 
@@ -29,9 +30,13 @@ the left and supply the matching API key in
     mistral     MISTRAL_API_KEY
     groq        GROQ_API_KEY
 
-The ``chat`` surface is retained alongside the pi-mono agent loop so
-the chat UI keeps a working completion path without maintaining a
-second LLM client implementation.
+The ``chat`` surface is retained alongside the pi-mono agent loop as a
+non-agentic, single-shot completion path and key/model validation
+helper. It shares the same provider registry and resolver
+(:func:`resolve_active_model`) as the agent loop, so both authenticate
+and select the model identically; the live chat turn is driven by
+``pi_mono`` (see ``server.py``), while ``provider_status`` drives the
+UI banner.
 
 .. _pi-ai: https://github.com/earendil-works/pi
 """
@@ -78,6 +83,16 @@ class _ProviderSpec:
     key_env: str
     default_model: str
     model_env: str | None = None
+    # The provider id understood by ``@earendil-works/pi-ai`` and the
+    # ``pi`` CLI's ``--provider`` flag. Defaults to ``name``; only
+    # differs where the operator-visible name and the upstream id
+    # diverge (``gemini`` → ``google``). Keep in lockstep with
+    # ``pi-ai-bridge.mjs``'s ``PROVIDER_MAP``.
+    pi_provider: str | None = None
+
+    @property
+    def pi_id(self) -> str:
+        return self.pi_provider or self.name
 
 
 _PI_AI_PROVIDERS: tuple[_ProviderSpec, ...] = (
@@ -86,7 +101,7 @@ _PI_AI_PROVIDERS: tuple[_ProviderSpec, ...] = (
     _ProviderSpec("anthropic",  "ANTHROPIC_API_KEY",  "claude-3-5-sonnet-latest",
                   "ZOMBIE_ANTHROPIC_MODEL"),
     _ProviderSpec("gemini",     "GEMINI_API_KEY",     "gemini-2.0-flash",
-                  "ZOMBIE_GEMINI_MODEL"),
+                  "ZOMBIE_GEMINI_MODEL", pi_provider="google"),
     _ProviderSpec("xai",        "XAI_API_KEY",        "grok-2-1212",
                   "ZOMBIE_XAI_MODEL"),
     _ProviderSpec("mistral",    "MISTRAL_API_KEY",    "mistral-small-latest",
@@ -105,6 +120,27 @@ _PROVIDER_BY_NAME: dict[str, _ProviderSpec] = {
 }
 
 SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(spec.name for spec in _PI_AI_PROVIDERS)
+
+# Every provider key env var, in registry order. Used by the pi-mono
+# bridge driver to strip non-active provider keys before spawning the
+# ``pi`` CLI, so the agent loop authenticates against exactly one
+# provider.
+ALL_KEY_ENVS: tuple[str, ...] = tuple(spec.key_env for spec in _PI_AI_PROVIDERS)
+
+
+def _resolve_model(spec: _ProviderSpec, model: str | None = None) -> str:
+    """Resolve the model id for ``spec`` using the shared precedence.
+
+    explicit arg > ``ZOMBIE_MODEL`` > provider-specific override env >
+    the registry default. Returns ``""`` when nothing resolves (only
+    possible for openrouter, which has no default).
+    """
+    return (
+        model
+        or os.environ.get("ZOMBIE_MODEL")
+        or (os.environ.get(spec.model_env) if spec.model_env else None)
+        or spec.default_model
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -231,12 +267,7 @@ class BaseProvider:
         self.name = spec.name
         # Resolution order matches the legacy code:
         # explicit arg > ZOMBIE_MODEL > provider-specific override > default.
-        chosen = (
-            model
-            or os.environ.get("ZOMBIE_MODEL")
-            or (os.environ.get(spec.model_env) if spec.model_env else None)
-            or spec.default_model
-        )
+        chosen = _resolve_model(spec, model)
         if not chosen:
             raise NoProviderConfigured(
                 f"{spec.name} requires a model id. Set ZOMBIE_MODEL in "
@@ -247,6 +278,16 @@ class BaseProvider:
         if spec.key_env and not os.environ.get(spec.key_env):
             raise NoProviderConfigured(f"{spec.key_env} is not set")
 
+    @property
+    def key_env(self) -> str:
+        """Env var holding this provider's API key."""
+        return self._spec.key_env
+
+    @property
+    def pi_provider(self) -> str:
+        """Provider id understood by pi-ai and the ``pi`` CLI."""
+        return self._spec.pi_id
+
     def chat(self, messages: Iterable[Message]) -> str:
         return _call_bridge(self._spec, self.model, list(messages))
 
@@ -256,8 +297,17 @@ def provider_status() -> tuple[str, str]:
 
     Returns ``(name, status_text)`` based purely on environment
     variables. Does not spawn the bridge — safe to call on every page
-    load.
+    load. On success ``status_text`` is ``"model <id>"`` so the UI can
+    show the model the agent loop (pi-mono) will actually use; this is
+    the same resolution the pi-mono driver applies, so the banner no
+    longer diverges from the answering path.
     """
+    def _ok(spec: _ProviderSpec) -> tuple[str, str]:
+        model = _resolve_model(spec)
+        if not model:
+            return (spec.name, "model not set (set ZOMBIE_MODEL" + (f" or {spec.model_env}" if spec.model_env else "") + ")")
+        return (spec.name, f"model {model}")
+
     explicit = (os.environ.get("ZOMBIE_PROVIDER") or "").strip().lower()
     if explicit:
         spec = _PROVIDER_BY_NAME.get(explicit)
@@ -265,13 +315,32 @@ def provider_status() -> tuple[str, str]:
             return (explicit, f"unknown provider; supported: "
                               f"{', '.join(SUPPORTED_PROVIDERS)}")
         if os.environ.get(spec.key_env):
-            return (spec.name, "configured")
+            return _ok(spec)
         return (spec.name, f"{spec.key_env} not set")
 
     for spec in _PI_AI_PROVIDERS:
         if os.environ.get(spec.key_env):
-            return (spec.name, "configured")
+            return _ok(spec)
     return ("none", "no API key found")
+
+
+def resolve_active_model(name: str | None = None,
+                         model: str | None = None) -> tuple[str, str, str]:
+    """Return ``(provider, model, key_env)`` for the configured backend.
+
+    This is the single authoritative resolver shared by every code
+    path that needs to know which model answers and which key
+    authenticates it: the chat surface (``pi-ai`` via ``provider.chat``)
+    and the agent loop (``pi-mono`` via :mod:`pi_mono`). ``provider`` is
+    the operator-visible name (e.g. ``gemini``); use
+    :func:`provider_from_env` if you also need the pi-ai/``pi`` provider
+    id (``.pi_provider``).
+
+    Raises :class:`NoProviderConfigured` when no provider key is set or
+    the selected provider lacks a model.
+    """
+    provider = provider_from_env(name=name, model=model)
+    return (provider.name, provider.model, provider.key_env)
 
 
 def provider_from_env(name: str | None = None,

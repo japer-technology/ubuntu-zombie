@@ -25,7 +25,7 @@ Supported variables:
 | `MISTRAL_API_KEY`    | API key for the Mistral provider         |
 | `GROQ_API_KEY`       | API key for the Groq provider            |
 | `ZOMBIE_PROVIDER`    | One of `openai`, `anthropic`, `gemini`, `xai`, `mistral`, `groq`, `openrouter` (default: first key found, in that order) |
-| `ZOMBIE_MODEL`       | Override the provider's default model (required for `openrouter`) |
+| `ZOMBIE_MODEL`       | Model used by both the agent loop and the chat surface; required for `openrouter` unless `ZOMBIE_OPENROUTER_MODEL` is set; overrides the provider's default |
 | `ZOMBIE_OPENAI_MODEL`     | Override the default model used when the active provider is `openai` |
 | `ZOMBIE_ANTHROPIC_MODEL`  | Override the default model used when the active provider is `anthropic` |
 | `ZOMBIE_GEMINI_MODEL`     | Override the default model used when the active provider is `gemini` |
@@ -54,6 +54,16 @@ installed globally by `scripts/install.sh` at the version pinned in
 `payload/agent/pi-ai.version`. The chat service shells out to the Node
 bridge at `/opt/ai-zombie/agent/pi-ai-bridge.mjs`; there are no
 bespoke per-provider Python clients.
+
+`ZOMBIE_PROVIDER` + `ZOMBIE_MODEL` (plus the matching `*_API_KEY`) are
+the **single source of truth** for both the status banner and the
+agent loop that produces every chat answer. `payload/agent/pi_mono.py`
+resolves the active provider/model through the same
+`payload/agent/providers.py` registry and passes them to the `pi` CLI
+(`--provider` / `--model`), forwarding only the active provider's key.
+This means the `pi` CLI's own native configuration (`~/.pi`) and its
+built-in default provider are **not** consulted when a provider is
+configured here — there is no second place to set the model.
 
 [pi-ai]: https://github.com/earendil-works/pi
 
