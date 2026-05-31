@@ -8,6 +8,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Chat slash commands.** The chat web UI now recognises client-side
+  commands (handled in the browser, never sent to the agent): `/help`,
+  `/clear`, `/new` (alias `/reset`), `/examples`, `/tools`, `/health`,
+  `/status`, `/version`, `/audit`, `/conversations` (alias `/history`),
+  `/load <id>`, and `/shortcuts`. Diagnostic commands read the existing
+  read-only API endpoints; `/version` is backed by a new
+  `GET /api/version` endpoint and the deployed `VERSION` file.
 - **`install.sh --dry-run`.** Prints the agent user, install root,
   package groups, file paths, and firewall rules that a real
   `install` would change, then exits without modifying the host.

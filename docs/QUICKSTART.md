@@ -292,6 +292,19 @@ Try one of the safe examples shipped with the chat:
 
 Read-only questions are answered without prompting for approval.
 
+The chat also understands a few client-side commands. Type `/help` to
+list them. Highlights:
+
+- `/clear` clears the view; `/new` (alias `/reset`) starts a fresh
+  conversation; `/examples` shows the safe example prompts.
+- `/tools` lists the agent tools and their risk class; `/health`,
+  `/status`, and `/version` report machine facts and versions.
+- `/audit` shows the most recent audit-log entries; `/conversations`
+  (alias `/history`) lists past conversations and `/load <id>` reopens
+  one; `/shortcuts` lists the keyboard shortcuts.
+
+These commands run in the browser and never reach the agent.
+
 ## 7. Approve a safe command
 
 When the assistant proposes a command in a non-read-only class, the UI

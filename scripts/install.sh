@@ -1861,6 +1861,12 @@ install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/pi-ai-bridge.mjs" "${ZOMBIE_DIR}/agent/pi-ai-bridge.mjs"
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/pi-ai.version" "${ZOMBIE_DIR}/agent/pi-ai.version"
+# Deploy the payload VERSION alongside the agent tree so the chat
+# service can report it via /api/version (the /version chat command).
+if [[ -f "${REPO_ROOT}/VERSION" ]]; then
+  install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
+    "${REPO_ROOT}/VERSION" "${ZOMBIE_DIR}/VERSION"
+fi
 # pi-mono bridge + version pin live alongside the pi-ai ones for the
 # same reasons.
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
