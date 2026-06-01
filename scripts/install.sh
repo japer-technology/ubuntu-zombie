@@ -1224,6 +1224,10 @@ scan_local_llms() {
   local prefix port
   prefix="$(_local_ipv4_prefix)"
   port="${ZOMBIE_LLM_SCAN_PORT}"
+  if ! is_valid_tcp_port "${port}"; then
+    warn "ZOMBIE_LLM_SCAN_PORT='${port}' is not a valid TCP port (1-65535); skipping LLM discovery."
+    return 1
+  fi
   if [[ -z "${prefix}" ]]; then
     warn "Could not determine a local IPv4 /24 to scan; skipping LLM discovery."
     return 1
