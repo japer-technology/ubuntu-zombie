@@ -34,6 +34,7 @@ Supported variables:
 | `ZOMBIE_GROQ_MODEL`       | Override the default model used when the active provider is `groq` |
 | `ZOMBIE_OPENROUTER_MODEL` | Fully-qualified OpenRouter model id (e.g. `anthropic/claude-3.5-sonnet`); takes precedence over `ZOMBIE_MODEL` for `openrouter` |
 | `ZOMBIE_CHAT_PORT`   | Loopback port for the chat UI (default `7878`) |
+| `OPENAI_BASE_URL`    | Point the `openai` provider at an OpenAI-compatible server (a local LM Studio / Ollama / llama.cpp endpoint such as `http://192.168.1.34:1234/v1`). Pair with `ZOMBIE_PROVIDER=openai` and `ZOMBIE_MODEL`. |
 | `DISPLAY`            | X display for desktop helpers (default `:0`; pre-seeded in the generated `secrets/env`) |
 
 Per-provider defaults if no `ZOMBIE_MODEL` / `ZOMBIE_<PROVIDER>_MODEL`
@@ -72,6 +73,45 @@ Restart the chat service after editing:
 ```bash
 sudo systemctl restart ubuntu-zombie-chat.service
 ```
+
+## Local LLM discovery (LAN scan)
+
+During an **interactive** install the script can scan the host's IPv4
+`/24` — all 256 addresses, e.g. `192.168.1.0`–`192.168.1.255` when the
+host is `192.168.1.34` — for an OpenAI-compatible local LLM server
+answering on `http://<ip>:1234/v1`. Servers such as
+[LM Studio](https://lmstudio.ai/) (which listens on port `1234` by
+default), Ollama, and `llama.cpp` expose a `/v1/models` endpoint; the
+installer queries each responder, collects the model ids it advertises,
+and offers them as the **starting model** in the parameter-review step.
+
+When a model is chosen, the generated `/opt/ai-zombie/secrets/env`
+records it as the OpenAI-compatible provider:
+
+```
+ZOMBIE_PROVIDER=openai
+ZOMBIE_MODEL=<the model id you picked>
+OPENAI_BASE_URL=http://<server-ip>:1234/v1
+OPENAI_API_KEY=local
+```
+
+Both the agent loop (`pi-mono`) and the chat surface then talk to the
+local server through the OpenAI-compatible API. Most local servers
+ignore the API key; set `ZOMBIE_LOCAL_LLM_API_KEY` (or edit the file
+afterwards) if yours requires a real one.
+
+The scan is best-effort and skipped automatically for `--yes`,
+non-interactive, and non-TTY runs. It needs `curl` and `python3`
+(both already required by the product).
+
+| Variable                 | Default | Purpose                                                              |
+| ------------------------ | ------- | -------------------------------------------------------------------- |
+| `ZOMBIE_SKIP_LLM_SCAN`   | `0`     | Set to `1` to skip the LAN scan entirely.                            |
+| `ZOMBIE_LLM_SCAN_PORT`   | `1234`  | TCP port probed on each address for the `/v1/models` endpoint.       |
+| `ZOMBIE_LOCAL_LLM_API_KEY` | `local` | API key recorded for the discovered server (most local servers ignore it). |
+
+You can also trigger the scan on demand from the interactive setup
+review by choosing the **Local LLM** field.
 
 ## Agent account name
 
