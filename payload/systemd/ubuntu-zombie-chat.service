@@ -7,17 +7,17 @@ Wants=network-online.target
 Type=simple
 User=__AGENT_USER__
 Group=__AGENT_USER__
-WorkingDirectory=/opt/ai-zombie
-EnvironmentFile=-/opt/ai-zombie/secrets/env
+WorkingDirectory=__ZOMBIE_DIR__
+EnvironmentFile=-__ZOMBIE_DIR__/secrets/env
 Environment=PYTHONUNBUFFERED=1
 Environment=ZOMBIE_USER=__AGENT_USER__
 # FIX-3-02: provide a default for ZOMBIE_CHAT_PORT so the unit still
 # starts when the operator has not added the variable to
-# /opt/ai-zombie/secrets/env (EnvironmentFile= is optional). Without
+# __ZOMBIE_DIR__/secrets/env (EnvironmentFile= is optional). Without
 # this, ${ZOMBIE_CHAT_PORT} would expand to '' and argparse would
 # reject ``--port ''``.
 Environment=ZOMBIE_CHAT_PORT=7878
-ExecStart=__AGENT_HOME__/agent-env/bin/python /opt/ai-zombie/agent/server.py --host 127.0.0.1 --port ${ZOMBIE_CHAT_PORT}
+ExecStart=__AGENT_HOME__/agent-env/bin/python __ZOMBIE_DIR__/agent/server.py --host 127.0.0.1 --port ${ZOMBIE_CHAT_PORT}
 Restart=on-failure
 RestartSec=3
 StandardOutput=journal

@@ -422,6 +422,9 @@ validate_config() {
   if ! is_safe_absolute_path "${LOG_FILE}"; then
     die "LOG_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
+  if [[ "${ZOMBIE_RECEIPT}" == "1" ]] && ! is_safe_absolute_path "${RECEIPT_FILE}"; then
+    die "ZOMBIE_RECEIPT_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
+  fi
   if ! is_valid_tcp_port "${VNC_PORT}"; then
     die "VNC_PORT must be an integer from 1 to 65535." 2
   fi
@@ -1169,6 +1172,13 @@ write_receipt_start() {
     ZOMBIE_RECEIPT=0
     return 0
   fi
+  if [[ -f "${RECEIPT_FILE}" ]]; then
+    chmod 600 "${RECEIPT_FILE}" 2>/dev/null || true
+  elif ! install -m 600 /dev/null "${RECEIPT_FILE}" 2>/dev/null; then
+    warn "Could not create the install receipt at ${RECEIPT_FILE}."
+    ZOMBIE_RECEIPT=0
+    return 0
+  fi
 
   local ssh_state="(none — will prompt during install)"
   if [[ -n "${SSH_PUBLIC_KEY}" ]]; then
@@ -1292,7 +1302,6 @@ fi
 # =============================================================================
 
 require_root
-preflight
 validate_noninteractive
 
 # Interactive review: present every parameter in a branded, editable table
@@ -1300,6 +1309,7 @@ validate_noninteractive
 # is touched and before the transcript is opened, so edits to LOG_FILE take
 # effect. No-op for --yes / non-interactive / non-TTY runs.
 review_parameters
+preflight
 
 # Transcript logging
 mkdir -p "$(dirname "${LOG_FILE}")"
@@ -1895,6 +1905,12 @@ EOF
   ok "Created ${ZOMBIE_DIR}/secrets/env (edit with: sudo ${ZOMBIE_DIR}/bin/secrets-edit)."
 else
   info "Preserving existing ${ZOMBIE_DIR}/secrets/env."
+  if grep -q '^ZOMBIE_CHAT_PORT=' "${ZOMBIE_DIR}/secrets/env"; then
+    sed -i -E "s|^ZOMBIE_CHAT_PORT=.*$|ZOMBIE_CHAT_PORT=${CHAT_PORT}|" "${ZOMBIE_DIR}/secrets/env"
+  else
+    [[ -s "${ZOMBIE_DIR}/secrets/env" ]] && [[ "$(tail -c1 "${ZOMBIE_DIR}/secrets/env" 2>/dev/null)" != $'\n' ]] && printf '\n' >> "${ZOMBIE_DIR}/secrets/env"
+    printf 'ZOMBIE_CHAT_PORT=%s\n' "${CHAT_PORT}" >> "${ZOMBIE_DIR}/secrets/env"
+  fi
   chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/secrets/env"
   chmod 600 "${ZOMBIE_DIR}/secrets/env"
 fi
@@ -2297,6 +2313,7 @@ render_unit() {
   # validator is ever relaxed, escape AGENT_USER/AGENT_HOME for sed here.
   sed -e "s|__AGENT_USER__|${AGENT_USER}|g" \
       -e "s|__AGENT_HOME__|${AGENT_HOME}|g" \
+      -e "s|__ZOMBIE_DIR__|${ZOMBIE_DIR}|g" \
       "${src}" | install -m 644 /dev/stdin "${dest}"
 }
 render_unit "${PAYLOAD_DIR}/systemd/ubuntu-zombie-chat.service"   /etc/systemd/system/ubuntu-zombie-chat.service
