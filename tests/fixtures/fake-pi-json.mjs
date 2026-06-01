@@ -36,12 +36,20 @@ out({ type: "turn_start" });
 out({ type: "message_start", message: { role: "user", content: [{ type: "text", text: "say hi" }], timestamp: Date.now() } });
 out({ type: "message_end", message: { role: "user", content: [{ type: "text", text: "say hi" }], timestamp: Date.now() } });
 
+function waitForStdinEof() {
+  return new Promise((resolve) => {
+    process.stdin.on("end", resolve);
+    process.stdin.resume();
+  });
+}
+
 if (mode === "error") {
   const err = { role: "assistant", content: [], ...base, stopReason: "error", errorMessage: "Connection error.", timestamp: Date.now() };
   out({ type: "message_start", message: err });
   out({ type: "message_end", message: err });
   out({ type: "turn_end", message: err, toolResults: [] });
   out({ type: "agent_end", messages: [err], willRetry: false });
+  await waitForStdinEof();
   process.exit(0);
 }
 
@@ -60,4 +68,5 @@ for (const piece of ["Hello", " from", " the", " local", " model!"]) {
 out({ type: "message_end", message: asst(ANSWER) });
 out({ type: "turn_end", message: asst(ANSWER), toolResults: [] });
 out({ type: "agent_end", messages: [asst(ANSWER)], willRetry: false });
-process.exit(0);
+await waitForStdinEof();
+process.exit(0)
