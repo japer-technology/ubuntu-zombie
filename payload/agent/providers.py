@@ -190,6 +190,15 @@ def _bridge_env(spec: _ProviderSpec) -> dict[str, str]:
     # Forward the active provider's key only.
     if spec.key_env in os.environ:
         env[spec.key_env] = os.environ[spec.key_env]
+    # Forward an OpenAI-compatible base URL override when present so the
+    # bridge (and the underlying client) can talk to a local LLM server
+    # — e.g. an LM Studio / Ollama instance discovered on the LAN during
+    # install. Scoped to the openai provider so an override never leaks
+    # into an unrelated hosted provider's client.
+    if spec.name == "openai":
+        for base_url_env in ("OPENAI_BASE_URL", "OPENAI_API_BASE"):
+            if base_url_env in os.environ:
+                env[base_url_env] = os.environ[base_url_env]
     # pi-ai may need an HTTPS proxy in restricted networks; honour the
     # standard variables if the operator set them.
     for passthrough in ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",

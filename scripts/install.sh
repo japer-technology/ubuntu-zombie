@@ -96,6 +96,22 @@ SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
 VNC_PASSWORD="${VNC_PASSWORD:-}"
 TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
 
+# Local LLM discovery. During an interactive install the script can scan the
+# host's IPv4 /24 (all 256 addresses) for an OpenAI-compatible local LLM
+# server — LM Studio, Ollama, llama.cpp, etc. — answering on
+# http://<ip>:PORT/v1 and offer the models it advertises as the starting
+# model. Set ZOMBIE_SKIP_LLM_SCAN=1 to skip the scan, ZOMBIE_LLM_SCAN_PORT to
+# probe a different port (default 1234, LM Studio's default), and
+# ZOMBIE_LOCAL_LLM_API_KEY to record a non-default key for the local server
+# (most ignore it).
+ZOMBIE_SKIP_LLM_SCAN="${ZOMBIE_SKIP_LLM_SCAN:-0}"
+ZOMBIE_LLM_SCAN_PORT="${ZOMBIE_LLM_SCAN_PORT:-1234}"
+ZOMBIE_LOCAL_LLM_API_KEY="${ZOMBIE_LOCAL_LLM_API_KEY:-local}"
+# Selection populated by discover_local_llms (empty when none is chosen).
+LOCAL_LLM_ENDPOINT=""
+LOCAL_LLM_BASE_URL=""
+LOCAL_LLM_MODEL=""
+
 # UX flags (set by argument parsing below; env provides the defaults).
 #   ASSUME_YES   skip the interactive "Type YES" confirmation but keep
 #                interactive prompts for any still-missing inputs.
@@ -241,6 +257,13 @@ Environment variables (selected; see docs/CONFIGURATION.md for all):
                               (written by default).
   ZOMBIE_RECEIPT_FILE=<path>  override the receipt path (default
                               /var/log/ubuntu-zombie/install-receipt.txt).
+  ZOMBIE_SKIP_LLM_SCAN=1     skip the interactive LAN scan that looks for an
+                              OpenAI-compatible local LLM server and offers
+                              its models as the starting model.
+  ZOMBIE_LLM_SCAN_PORT=<n>    port probed for the local LLM scan (default
+                              1234, LM Studio's default).
+  ZOMBIE_LOCAL_LLM_API_KEY=<k>  API key recorded for the discovered local LLM
+                              (default 'local'; most local servers ignore it).
   SSH_PUBLIC_KEY              SSH public key string.
   VNC_PASSWORD                Loopback-only VNC password.
   TAILSCALE_AUTHKEY           Pre-auth key for unattended Tailscale
@@ -1019,6 +1042,11 @@ print_parameter_table() {
   field "8) Receipt file"    "${receipt_state}"
   field "9) SSH public key"  "${ssh_state}"
   field "10) VNC password"   "${vnc_state}"
+  if [[ -n "${LOCAL_LLM_MODEL}" ]]; then
+    field "11) Local LLM"    "${LOCAL_LLM_MODEL} @ ${LOCAL_LLM_BASE_URL}"
+  else
+    field "11) Local LLM"    "none (scan LAN for an OpenAI-compatible server)" "${C_DIM}"
+  fi
   field "    Host"           "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
   printf '\n'
 }
@@ -1117,6 +1145,175 @@ _edit_vnc_password() {
   ok "VNC password recorded."
 }
 
+# ---------------------------------------------------------------------------
+# Local LLM discovery on the LAN
+# ---------------------------------------------------------------------------
+# Probe every address in the host's IPv4 /24 for an OpenAI-compatible LLM
+# server (LM Studio, Ollama, llama.cpp, …) answering on
+# http://<ip>:PORT/v1/models, then offer the advertised models as the
+# starting model. Entirely best-effort: a missing curl/python3, an
+# undetectable subnet, or an empty result simply leaves the selection unset.
+
+# Print the host's primary global IPv4 /24 prefix (first three octets), or
+# nothing when it cannot be determined.
+_local_ipv4_prefix() {
+  local cidr ip
+  cidr="$(ip -4 -o addr show scope global up 2>/dev/null \
+            | awk '{print $4; exit}')"
+  ip="${cidr%/*}"
+  if [[ -z "${ip}" ]]; then
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  [[ "${ip}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 0
+  printf '%s.%s.%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+}
+
+# Parse the model ids from a /v1/models JSON body on stdin, one per line.
+# Only ids made of a conservative, shell/env-safe character set are emitted:
+# the values are later written verbatim into secrets/env, so a hostile or
+# malformed local server must not be able to inject newlines or other
+# characters that would smuggle extra assignments into that file.
+_parse_model_ids() {
+  python3 -c '
+import json, re, sys
+SAFE = re.compile(r"\A[A-Za-z0-9._:/+@-]{1,200}\Z")
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+items = data.get("data") if isinstance(data, dict) else None
+if not isinstance(items, list):
+    sys.exit(0)
+seen = set()
+for item in items:
+    if not isinstance(item, dict):
+        continue
+    mid = item.get("id")
+    if isinstance(mid, str):
+        mid = mid.strip()
+        if mid and mid not in seen and SAFE.match(mid):
+            seen.add(mid)
+            print(mid)
+' 2>/dev/null || true
+}
+
+# Probe a single host:port for an OpenAI-compatible /v1/models endpoint and,
+# on success, append "host<TAB>port<TAB>model" lines to ``outfile``.
+_probe_llm_host() {
+  local host="$1" port="$2" outfile="$3"
+  local body model
+  body="$(curl -fsS --connect-timeout 1 --max-time 3 \
+            "http://${host}:${port}/v1/models" 2>/dev/null)" || return 0
+  [[ -n "${body}" ]] || return 0
+  while IFS= read -r model; do
+    [[ -n "${model}" ]] && printf '%s\t%s\t%s\n' "${host}" "${port}" "${model}" >> "${outfile}"
+  done < <(printf '%s' "${body}" | _parse_model_ids)
+}
+
+# Scan the local /24 and populate the global arrays DISCOVERED_ENDPOINTS /
+# DISCOVERED_MODELS (parallel index) with every advertised model.
+DISCOVERED_ENDPOINTS=()
+DISCOVERED_MODELS=()
+scan_local_llms() {
+  DISCOVERED_ENDPOINTS=()
+  DISCOVERED_MODELS=()
+  if ! command -v curl >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+    warn "Local LLM scan needs curl and python3; skipping."
+    return 1
+  fi
+  local prefix port
+  prefix="$(_local_ipv4_prefix)"
+  port="${ZOMBIE_LLM_SCAN_PORT}"
+  if ! is_valid_tcp_port "${port}"; then
+    warn "ZOMBIE_LLM_SCAN_PORT='${port}' is not a valid TCP port (1-65535); skipping LLM discovery."
+    return 1
+  fi
+  if [[ -z "${prefix}" ]]; then
+    warn "Could not determine a local IPv4 /24 to scan; skipping LLM discovery."
+    return 1
+  fi
+  info "Scanning ${prefix}.0/24 on port ${port} for OpenAI-compatible LLM servers…"
+  local resfile pids n max=64
+  resfile="$(mktemp 2>/dev/null)" || { warn "Could not create a temp file for the scan."; return 1; }
+  chmod 600 "${resfile}" 2>/dev/null || true
+  pids=()
+  for n in $(seq 0 255); do
+    _probe_llm_host "${prefix}.${n}" "${port}" "${resfile}" &
+    pids+=("$!")
+    if (( ${#pids[@]} >= max )); then
+      wait "${pids[@]}" 2>/dev/null || true
+      pids=()
+    fi
+  done
+  (( ${#pids[@]} )) && { wait "${pids[@]}" 2>/dev/null || true; }
+
+  local host hport hmodel
+  while IFS=$'\t' read -r host hport hmodel; do
+    [[ -n "${host}" && -n "${hmodel}" ]] || continue
+    DISCOVERED_ENDPOINTS+=("${host}:${hport}")
+    DISCOVERED_MODELS+=("${hmodel}")
+  done < <(sort -u "${resfile}" 2>/dev/null)
+  rm -f "${resfile}" 2>/dev/null || true
+
+  if (( ${#DISCOVERED_MODELS[@]} == 0 )); then
+    info "No local LLM servers found on ${prefix}.0/24:${port}."
+    return 1
+  fi
+  return 0
+}
+
+# Interactive picker: scan, present the discovered models, and record the
+# operator's choice in LOCAL_LLM_ENDPOINT / LOCAL_LLM_BASE_URL /
+# LOCAL_LLM_MODEL. Skipped on non-interactive / --yes / non-TTY runs and when
+# ZOMBIE_SKIP_LLM_SCAN=1.
+discover_local_llms() {
+  [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && return 0
+  (( ASSUME_YES )) && return 0
+  [[ -t 0 ]] || return 0
+  [[ "${ZOMBIE_SKIP_LLM_SCAN}" == "1" ]] && return 0
+
+  scan_local_llms || return 0
+
+  local i choice
+  while true; do
+    brand_banner "Local LLM servers discovered on your network"
+    printf '  %sPick a model to use as the starting model, or skip to configure a%s\n' "${C_DIM}" "${C_RESET}"
+    printf '  %scloud provider later in %s/secrets/env.%s\n\n' "${C_DIM}" "${ZOMBIE_DIR}" "${C_RESET}"
+    for i in "${!DISCOVERED_MODELS[@]}"; do
+      field "$(printf '%2d)' "$((i + 1))")" \
+        "${DISCOVERED_MODELS[$i]}  @  http://${DISCOVERED_ENDPOINTS[$i]}/v1"
+    done
+    printf '\n  %s[1-%d]%s use a model    %s[r]%s rescan    %s[s]%s skip\n' \
+      "${C_BRAND2}" "${#DISCOVERED_MODELS[@]}" "${C_RESET}" \
+      "${C_ACCENT}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
+    if ! read -r -p "$(printf '%s➜%s your choice [s]: ' "${C_BRAND}" "${C_RESET}")" choice; then
+      info "No input (EOF); skipping local LLM selection."
+      return 0
+    fi
+    case "${choice,,}" in
+      ""|s|skip|n|no)
+        info "No local LLM selected."
+        return 0 ;;
+      r|rescan)
+        scan_local_llms || return 0
+        continue ;;
+      *)
+        if [[ "${choice}" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#DISCOVERED_MODELS[@]} )); then
+          LOCAL_LLM_ENDPOINT="${DISCOVERED_ENDPOINTS[$((choice - 1))]}"
+          LOCAL_LLM_MODEL="${DISCOVERED_MODELS[$((choice - 1))]}"
+          LOCAL_LLM_BASE_URL="http://${LOCAL_LLM_ENDPOINT}/v1"
+          ok "Local LLM ${LOCAL_LLM_MODEL} (${LOCAL_LLM_BASE_URL}) chosen as the starting model."
+          return 0
+        fi
+        warn "Unrecognised choice: '${choice}'. Enter 1-${#DISCOVERED_MODELS[@]}, 'r', or 's'." ;;
+    esac
+  done
+}
+
+_edit_local_llm() {
+  discover_local_llms
+}
+
 review_parameters() {
   # Automated paths skip the review entirely.
   [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && return 0
@@ -1126,7 +1323,7 @@ review_parameters() {
   local choice
   while true; do
     print_parameter_table
-    printf '  %s[a]%s accept and install    %s[1-10]%s edit a field    %s[q]%s cancel\n' \
+    printf '  %s[a]%s accept and install    %s[1-11]%s edit a field    %s[q]%s cancel\n' \
       "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
     if ! read -r -p "$(printf '%s➜%s your choice [a]: ' "${C_BRAND}" "${C_RESET}")" choice; then
       info "No input (EOF); cancelling."; exit 0
@@ -1151,7 +1348,8 @@ review_parameters() {
       8)  _toggle_receipt ;;
       9)  _edit_ssh_key ;;
       10) _edit_vnc_password ;;
-      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-10, 'a', or 'q'." ;;
+      11) _edit_local_llm ;;
+      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-11, 'a', or 'q'." ;;
     esac
   done
 }
@@ -1218,6 +1416,8 @@ write_receipt_start() {
       "$([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo 'skipped (SSH on every interface)' || echo 'installed (SSH on tailscale0 only)')"
     printf 'SSH public key   : %s\n' "${ssh_state}"
     printf 'VNC password     : %s\n' "${vnc_state}"
+    printf 'Local LLM        : %s\n' \
+      "$([[ -n "${LOCAL_LLM_MODEL}" ]] && printf '%s @ %s' "${LOCAL_LLM_MODEL}" "${LOCAL_LLM_BASE_URL}" || echo 'none')"
     printf 'Receipt file     : %s\n' "${RECEIPT_FILE}"
     printf '============================================================\n'
   } >> "${RECEIPT_FILE}" 2>/dev/null; then
@@ -1303,6 +1503,12 @@ fi
 
 require_root
 validate_noninteractive
+
+# Local LLM discovery: scan the host's IPv4 /24 for an OpenAI-compatible LLM
+# server and offer the models it advertises as the starting model. Runs before
+# the parameter review so the choice shows up in the table. No-op for
+# --yes / non-interactive / non-TTY runs or when ZOMBIE_SKIP_LLM_SCAN=1.
+discover_local_llms
 
 # Interactive review: present every parameter in a branded, editable table
 # and let the operator tweak settings until satisfied. Runs before any state
@@ -1892,6 +2098,9 @@ if [[ ! -f "${ZOMBIE_DIR}/secrets/env" ]]; then
 # Optional:
 #   ZOMBIE_PROVIDER=openai      # openai|anthropic|gemini|xai|openrouter|mistral|groq
 #   ZOMBIE_MODEL=gpt-4o-mini    # model for the agent loop + chat (required for openrouter)
+#   OPENAI_BASE_URL=http://HOST:1234/v1  # point the openai provider at a
+#                               # local OpenAI-compatible server (LM Studio,
+#                               # Ollama, llama.cpp). Pair with ZOMBIE_PROVIDER=openai.
 #   ZOMBIE_CHAT_PORT=${CHAT_PORT}
 
 DISPLAY=:0
@@ -1900,9 +2109,26 @@ AGENT_USER=${AGENT_USER}
 AGENT_HOME=${AGENT_HOME}
 ZOMBIE_CHAT_PORT=${CHAT_PORT}
 EOF
+  if [[ -n "${LOCAL_LLM_MODEL}" ]]; then
+    cat >> "${ZOMBIE_DIR}/secrets/env" <<EOF
+
+# Local LLM auto-discovered on the LAN during install: an OpenAI-compatible
+# server at http://${LOCAL_LLM_ENDPOINT}/v1. Both the agent loop (pi-mono)
+# and the chat surface talk to it through the OpenAI-compatible API. Most
+# local servers ignore the API key; replace it if yours requires one.
+ZOMBIE_PROVIDER=openai
+ZOMBIE_MODEL=${LOCAL_LLM_MODEL}
+OPENAI_BASE_URL=${LOCAL_LLM_BASE_URL}
+OPENAI_API_KEY=${ZOMBIE_LOCAL_LLM_API_KEY}
+EOF
+  fi
   chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/secrets/env"
   chmod 600 "${ZOMBIE_DIR}/secrets/env"
-  ok "Created ${ZOMBIE_DIR}/secrets/env (edit with: sudo ${ZOMBIE_DIR}/bin/secrets-edit)."
+  if [[ -n "${LOCAL_LLM_MODEL}" ]]; then
+    ok "Created ${ZOMBIE_DIR}/secrets/env with local LLM ${LOCAL_LLM_MODEL} at ${LOCAL_LLM_BASE_URL}."
+  else
+    ok "Created ${ZOMBIE_DIR}/secrets/env (edit with: sudo ${ZOMBIE_DIR}/bin/secrets-edit)."
+  fi
 else
   info "Preserving existing ${ZOMBIE_DIR}/secrets/env."
   if grep -q '^ZOMBIE_CHAT_PORT=' "${ZOMBIE_DIR}/secrets/env"; then
