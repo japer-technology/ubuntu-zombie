@@ -1210,6 +1210,37 @@ _probe_llm_host() {
   done < <(printf '%s' "${body}" | _parse_model_ids)
 }
 
+# Write the `pi` custom-provider config so the agent loop reaches a local
+# OpenAI-compatible server through the 'lmstudio' provider. pi reads
+# ${AGENT_HOME}/.pi/agent/models.json (homedir() + ~/.pi/agent), so the server
+# URL lives here rather than in an environment variable. Args: base URL, model.
+write_pi_models_json() {
+  local base_url="$1" model="$2" dir="${AGENT_HOME}/.pi/agent" file
+  file="${dir}/models.json"
+  install -d -m 700 -o "${AGENT_USER}" -g "${AGENT_USER}" "${AGENT_HOME}/.pi" "${dir}"
+  install -m 600 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${file}"
+  cat > "${file}" <<EOF
+{
+  "providers": {
+    "lmstudio": {
+      "baseUrl": "$(json_escape "${base_url}")",
+      "api": "openai-completions",
+      "apiKey": "LMSTUDIO_API_KEY",
+      "compat": {
+        "supportsDeveloperRole": false,
+        "supportsReasoningEffort": false
+      },
+      "models": [
+        { "id": "$(json_escape "${model}")" }
+      ]
+    }
+  }
+}
+EOF
+  chown "${AGENT_USER}:${AGENT_USER}" "${file}"
+  chmod 600 "${file}"
+}
+
 # Scan the local /24 and populate the global arrays DISCOVERED_ENDPOINTS /
 # DISCOVERED_MODELS (parallel index) with every advertised model.
 DISCOVERED_ENDPOINTS=()
@@ -2096,11 +2127,11 @@ if [[ ! -f "${ZOMBIE_DIR}/secrets/env" ]]; then
 #   GROQ_API_KEY=...
 #
 # Optional:
-#   ZOMBIE_PROVIDER=openai      # openai|anthropic|gemini|xai|openrouter|mistral|groq
-#   ZOMBIE_MODEL=gpt-4o-mini    # model for the agent loop + chat (required for openrouter)
-#   OPENAI_BASE_URL=http://HOST:1234/v1  # point the openai provider at a
-#                               # local OpenAI-compatible server (LM Studio,
-#                               # Ollama, llama.cpp). Pair with ZOMBIE_PROVIDER=openai.
+#   ZOMBIE_PROVIDER=openai      # openai|anthropic|gemini|xai|openrouter|mistral|groq|lmstudio
+#   ZOMBIE_MODEL=gpt-4o-mini    # model for the agent loop + chat (required for openrouter/lmstudio)
+#   LMSTUDIO_API_KEY=local      # local OpenAI-compatible server (LM Studio, Ollama,
+#                               # llama.cpp). Pair with ZOMBIE_PROVIDER=lmstudio; the
+#                               # server URL lives in ~/.pi/agent/models.json.
 #   ZOMBIE_CHAT_PORT=${CHAT_PORT}
 
 DISPLAY=:0
@@ -2113,18 +2144,19 @@ EOF
     cat >> "${ZOMBIE_DIR}/secrets/env" <<EOF
 
 # Local LLM auto-discovered on the LAN during install: an OpenAI-compatible
-# server at http://${LOCAL_LLM_ENDPOINT}/v1. Both the agent loop (pi-mono)
-# and the chat surface talk to it through the OpenAI-compatible API. Most
-# local servers ignore the API key; replace it if yours requires one.
-ZOMBIE_PROVIDER=openai
+# server at ${LOCAL_LLM_BASE_URL}. The agent loop (pi-mono / the actual chat
+# answers) reaches it through the custom 'lmstudio' provider defined in
+# ${AGENT_HOME}/.pi/agent/models.json, which carries the server URL. Most local
+# servers ignore the API key; replace it if yours requires one.
+ZOMBIE_PROVIDER=lmstudio
 ZOMBIE_MODEL=${LOCAL_LLM_MODEL}
-OPENAI_BASE_URL=${LOCAL_LLM_BASE_URL}
-OPENAI_API_KEY=${ZOMBIE_LOCAL_LLM_API_KEY}
+LMSTUDIO_API_KEY=${ZOMBIE_LOCAL_LLM_API_KEY}
 EOF
   fi
   chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/secrets/env"
   chmod 600 "${ZOMBIE_DIR}/secrets/env"
   if [[ -n "${LOCAL_LLM_MODEL}" ]]; then
+    write_pi_models_json "${LOCAL_LLM_BASE_URL}" "${LOCAL_LLM_MODEL}"
     ok "Created ${ZOMBIE_DIR}/secrets/env with local LLM ${LOCAL_LLM_MODEL} at ${LOCAL_LLM_BASE_URL}."
   else
     ok "Created ${ZOMBIE_DIR}/secrets/env (edit with: sudo ${ZOMBIE_DIR}/bin/secrets-edit)."

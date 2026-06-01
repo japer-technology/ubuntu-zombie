@@ -252,8 +252,8 @@ OPENAI_API_KEY=sk-…
 # GROQ_API_KEY=…
 
 # Optional knobs:
-ZOMBIE_PROVIDER=openai     # openai|anthropic|gemini|xai|openrouter|mistral|groq
-ZOMBIE_MODEL=gpt-4o-mini   # override default model (required for openrouter)
+ZOMBIE_PROVIDER=openai     # openai|anthropic|gemini|xai|openrouter|mistral|groq|lmstudio
+ZOMBIE_MODEL=gpt-4o-mini   # override default model (required for openrouter/lmstudio)
 ```
 
 Restart the chat service:

@@ -13,11 +13,13 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   addresses) for an OpenAI-compatible local LLM server answering on
   `http://<ip>:1234/v1` — LM Studio, Ollama, llama.cpp, etc. — queries
   each responder's `/v1/models`, and offers the advertised models as the
-  starting model. Choosing one writes `ZOMBIE_PROVIDER=openai`,
-  `ZOMBIE_MODEL`, and `OPENAI_BASE_URL` to `secrets/env` so both the
-  agent loop and chat talk to the local server. Best-effort and skipped
-  for `--yes` / non-interactive / non-TTY runs; tune with
-  `ZOMBIE_SKIP_LLM_SCAN`, `ZOMBIE_LLM_SCAN_PORT`, and
+  starting model. Choosing one writes `ZOMBIE_PROVIDER=lmstudio`,
+  `ZOMBIE_MODEL`, and `LMSTUDIO_API_KEY` to `secrets/env` and the server's
+  base URL to the `pi` custom-provider file `~/.pi/agent/models.json`, so
+  the agent loop reaches the local server through a dedicated `lmstudio`
+  provider (rather than `openai`, whose base URL the `pi` CLI ignores).
+  Best-effort and skipped for `--yes` / non-interactive / non-TTY runs;
+  tune with `ZOMBIE_SKIP_LLM_SCAN`, `ZOMBIE_LLM_SCAN_PORT`, and
   `ZOMBIE_LOCAL_LLM_API_KEY`.
 - **Interactive install parameter review.** On an interactive terminal,
   `scripts/install.sh install` now opens an editable, branded summary of
