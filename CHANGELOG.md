@@ -131,6 +131,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   installer requires to proceed.
 
 ### Fixed
+- **Loading a past conversation in the chat UI.** The `/load <id>`
+  command now reports unknown ids instead of silently showing an empty
+  transcript: `GET /api/conversation/<id>` returns a `404` with an
+  `{"error": …}` body for an unknown conversation (and the existing
+  `400 bad id` for a non-numeric id), and the chat UI surfaces that
+  server message rather than a bare `HTTP 4xx`. Loaded transcripts now
+  interleave chat messages and tool events in their recorded
+  chronological order — matching the live turn view — instead of
+  rendering every message first and bunching all tool calls at the end.
+  A smoke test (`tests/smoke.sh python`) guards the conversation
+  endpoint's existing / bad-id / not-found responses.
 - **`collect-diagnostics` aborted before writing its bundle.** The
   `capture` helper ran each diagnostic command under `set -euo
   pipefail` without guarding its exit status, so the first tool that

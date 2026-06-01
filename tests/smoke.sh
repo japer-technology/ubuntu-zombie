@@ -670,6 +670,87 @@ assert info.get("version") and info["version"] != "unknown", info
 assert info.get("pi_mono"), info
 assert info.get("pi_ai"), info
 PY
+
+  echo "  server conversation endpoint (existing / bad id / not found)"
+  _CONV_TMP="$(mktemp -d)"
+  ZOMBIE_HISTORY_DB="${_CONV_TMP}/conversations.db" \
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import json
+
+import server
+
+
+class _FakeRFile:
+    def read(self, _n):
+        return b""
+
+
+class _Recorder(server.Handler):
+    """Drive Handler.do_GET without a real socket; capture the reply."""
+
+    def __init__(self, app, path):  # noqa: D107 - test shim
+        self.app = app
+        self.path = path
+        self.rfile = _FakeRFile()
+        self.headers = {}
+        self.status = None
+        self.body = b""
+
+    def send_response(self, code, message=None):
+        self.status = code
+
+    def send_header(self, *a, **k):
+        pass
+
+    def end_headers(self):
+        pass
+
+    def send_error(self, code, *a, **k):
+        self.status = int(code)
+
+    class _W:
+        def __init__(self, outer):
+            self._outer = outer
+
+        def write(self, data):
+            self._outer.body += data
+
+    @property
+    def wfile(self):
+        return _Recorder._W(self)
+
+
+def get(app, path):
+    h = _Recorder(app, path)
+    h.do_GET()
+    payload = json.loads(h.body.decode("utf-8")) if h.body else {}
+    return h.status, payload
+
+
+app = server.App()
+cid = app.history.create_conversation()
+app.history.add_message(cid, "user", "hello there")
+
+# Existing conversation: 200 with the stored messages, no error.
+status, body = get(app, f"/api/conversation/{cid}")
+assert status == 200, (status, body)
+assert "error" not in body, body
+assert any(m["content"] == "hello there" for m in body["messages"]), body
+
+# Unknown id: a 404 with an error body the UI can surface, rather than
+# a silent empty conversation the operator thinks loaded.
+status, body = get(app, "/api/conversation/999999")
+assert status == 404, (status, body)
+assert "error" in body and "999999" in body["error"], body
+
+# Non-numeric id: a 400 with a "bad id" error.
+status, body = get(app, "/api/conversation/not-a-number")
+assert status == 400, (status, body)
+assert body.get("error") == "bad id", body
+
+app.history.close()
+PY
+  rm -rf "${_CONV_TMP}"
 }
 
 run_subcommands() {

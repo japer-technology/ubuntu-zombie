@@ -347,11 +347,29 @@ function timestamp(value) {
   return value ? String(value) : "";
 }
 
-function renderEvents(events) {
-  for (const ev of events || []) {
-    const node = renderEvent(ev);
-    if (node) log.appendChild(node);
-  }
+function renderConversation(messages, events) {
+  // Replay a stored conversation faithfully: interleave chat messages
+  // and tool events by their recorded timestamp so a loaded transcript
+  // reads in the same order it happened live (rather than every message
+  // first, then every tool call bunched at the end).
+  const items = [];
+  (messages || []).forEach((m, i) => {
+    if (m.role === "user" || m.role === "assistant") {
+      items.push({ at: m.created_at, seq: i, node: () => addMessage(m.role, m.content) });
+    }
+  });
+  (events || []).forEach((ev, i) => {
+    items.push({ at: ev.created_at, seq: i, node: () => {
+      const n = renderEvent(ev);
+      if (n) log.appendChild(n);
+    }});
+  });
+  items.sort((a, b) => {
+    const at = (typeof a.at === "number") ? a.at : 0;
+    const bt = (typeof b.at === "number") ? b.at : 0;
+    return at === bt ? a.seq - b.seq : at - bt;
+  });
+  for (const item of items) item.node();
 }
 
 async function handleSlashCommand(input) {
@@ -506,17 +524,20 @@ async function handleSlashCommand(input) {
         return true;
       }
       try {
-        const data = await fetchJson(`/api/conversation/${id}`);
-        if (data.error) { addMessage("system", data.error, { error: true }); return true; }
+        // Read the JSON body regardless of HTTP status so a
+        // server-provided message (bad id / no such conversation)
+        // surfaces instead of a bare "HTTP 404".
+        const r = await fetch(`/api/conversation/${id}`);
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.error) {
+          addMessage("system", data.error || `/api/conversation/${id} → HTTP ${r.status}`,
+            { error: true });
+          return true;
+        }
         log.replaceChildren();
         conversationId = id;
         addMessage("system", `Loaded conversation #${id}.`);
-        for (const m of data.messages || []) {
-          if (m.role === "user" || m.role === "assistant") {
-            addMessage(m.role, m.content);
-          }
-        }
-        renderEvents(data.events);
+        renderConversation(data.messages, data.events);
         log.scrollTop = log.scrollHeight;
       } catch (err) {
         addMessage("system", String(err), { error: true });
