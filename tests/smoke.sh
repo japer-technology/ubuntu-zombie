@@ -599,6 +599,83 @@ except pi_mono.BridgeError as exc:
 else:
     raise SystemExit("expected a BridgeError from the idle watchdog")
 PY
+
+    # Real bridge against pi's actual `--mode json` event schema. This
+    # drives payload/agent/pi-mono-bridge.mjs (not the protocol stub)
+    # with a fake `pi` binary that emits the genuine AgentSession event
+    # stream, locking in two regressions:
+    #   1. the bridge must capture the assistant text from
+    #      message_update/message_end (it previously looked for
+    #      non-existent "text"/"final" events and returned an empty
+    #      answer); and
+    #   2. the fake `pi` must be allowed to exit on stdin EOF — the
+    #      bridge must not keep its stdin open (the "120s inactivity
+    #      timeout" with a working local LM Studio server).
+    echo "  pi-mono real bridge parses pi --mode json (text answer)"
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/payload/agent/pi-mono-bridge.mjs" \
+    ZOMBIE_PI_MONO_BIN="$(pwd)/tests/fixtures/fake-pi-json.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import time
+import pi_mono, tools
+
+def on_tool_call(call_id, name, args):
+    raise SystemExit("on_tool_call must NOT fire: pi runs its own tools "
+                     "in --mode json")
+
+started = time.monotonic()
+out = pi_mono.run_turn(
+    prompt="say hi",
+    system_prompt="you are helpful",
+    history=[],
+    on_tool_call=on_tool_call,
+    tool_names=tools.tool_names(),
+    timeout=20.0,
+)
+elapsed = time.monotonic() - started
+if out["final"] != "Hello from the local model!":
+    raise SystemExit(f"bridge dropped the assistant text: {out['final']!r}")
+# The turn must complete promptly (the fake pi exits on stdin EOF); a
+# regression that keeps pi's stdin open would hang until the watchdog.
+if elapsed > 10:
+    raise SystemExit(f"bridge turn took too long ({elapsed:.1f}s); "
+                     "did pi fail to exit on stdin EOF?")
+# pi executes its own tools in --mode json, so the bridge must not
+# surface tool_execution_* events as mediated tool_call frames.
+if any(e.get("type") == "tool_call" for e in out["events"]):
+    raise SystemExit("bridge must not re-dispatch pi's tool_execution events")
+PY
+
+    # The real bridge must surface a provider/connection error as a
+    # clean BridgeError rather than a blank answer or a hung turn.
+    echo "  pi-mono real bridge surfaces provider errors"
+    ZOMBIE_FAKE_PI_MODE="error" \
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/payload/agent/pi-mono-bridge.mjs" \
+    ZOMBIE_PI_MONO_BIN="$(pwd)/tests/fixtures/fake-pi-json.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import pi_mono, tools
+
+def on_tool_call(call_id, name, args):
+    return {"ok": True, "result": {}}
+
+try:
+    pi_mono.run_turn(
+        prompt="say hi",
+        system_prompt="stub",
+        history=[],
+        on_tool_call=on_tool_call,
+        tool_names=tools.tool_names(),
+        timeout=20.0,
+    )
+except pi_mono.BridgeError as exc:
+    if "Connection error" not in str(exc):
+        raise SystemExit(f"unexpected BridgeError text: {exc}")
+else:
+    raise SystemExit("expected a BridgeError for the provider error case")
+PY
   else
     echo "  (skipping pi-mono stub end-to-end: node not on PATH)"
   fi
@@ -688,6 +765,15 @@ if _db:
         atexit.register(lambda p=str(_td): shutil.rmtree(p, ignore_errors=True))
 
 import server
+
+class _FakeRFile:
+    """Minimal stand-in for a socket rfile; do_GET never reads a body."""
+
+    def read(self, *_a, **_k):
+        return b""
+
+    def readline(self, *_a, **_k):
+        return b""
 
 class _Recorder(server.Handler):
     """Drive Handler.do_GET without a real socket; capture the reply."""

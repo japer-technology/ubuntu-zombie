@@ -21,11 +21,17 @@
 // translating that protocol in a 60-line script is brittle, so this
 // bridge takes a pragmatic approach: it spawns `pi --mode json -p`
 // with --no-builtin-tools --tools <allowlist> and parses pi's JSON
-// event stream into our protocol. Tool execution happens here:
-// whenever pi requests a built-in tool that we've translated to one
-// of our registry names, we relay it to Python, await the result,
-// and feed pi the observation via its stdin protocol. If pi is not
-// available the bridge surfaces a helpful error.
+// event stream into our protocol. The whole prompt is supplied up
+// front via `-p`, so `pi` needs no stdin; we spawn it with stdin
+// closed (EOF) so it exits as soon as the turn finishes. (`pi
+// --mode json` is a one-shot event *stream* — unlike `--mode rpc` it
+// does not read tool observations back from stdin, so leaving stdin
+// open just makes `pi` wait forever for EOF and never exit.) We parse
+// `pi`'s real `--mode json` event schema (session / agent_start /
+// turn_start / message_start / message_update / message_end /
+// turn_end / agent_end / tool_execution_* / auto_retry_*) and surface
+// the assistant's text — and any provider error — back to Python. If
+// pi is not available the bridge surfaces a helpful error.
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -44,6 +50,21 @@ function fatal(message) {
   // Exit non-zero so the supervising service / Python driver can tell a
   // reported failure apart from a clean shutdown.
   process.exit(1);
+}
+
+// Extract the plain assistant text from a `pi` message `content` array.
+// Content is an ordered list of parts; we keep only `text` parts and
+// drop `thinking` / `toolCall` parts (and tolerate a bare string).
+function extractText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  let out = "";
+  for (const part of content) {
+    if (part && part.type === "text" && typeof part.text === "string") {
+      out += part.text;
+    }
+  }
+  return out;
 }
 
 let logFd = null;
@@ -97,12 +118,6 @@ async function readOneStartMessage() {
   });
 }
 
-function pendingTurnReplies() {
-  // Map id -> resolver, populated when we forward a tool_call upstream
-  // and awaiting a tool_result from Python on stdin.
-  return new Map();
-}
-
 async function run() {
   let start;
   try {
@@ -152,7 +167,12 @@ async function run() {
   let child;
   try {
     child = spawn(piBin, args, {
-      stdio: ["pipe", "pipe", "pipe"],
+      // stdin is closed ("ignore") so `pi` receives EOF immediately and
+      // exits once the `-p` turn completes. `pi --mode json` never reads
+      // tool observations from stdin (that is `--mode rpc`), so an open
+      // stdin pipe would only make `pi` hang waiting for EOF — which the
+      // Python idle watchdog then reports as a spurious turn timeout.
+      stdio: ["ignore", "pipe", "pipe"],
       env: process.env,
     });
   } catch (e) {
@@ -163,8 +183,6 @@ async function run() {
   child.on("error", (e) => {
     fatal(`pi spawn error: ${e.message}. Is '@earendil-works/pi-coding-agent' installed globally?`);
   });
-
-  const replies = pendingTurnReplies();
 
   // Idle watchdog (defence in depth). The Python driver already imposes
   // a per-turn idle deadline, but when this bridge is exercised
@@ -195,9 +213,41 @@ async function run() {
   }
 
   // Forward pi stdout (JSON events, one per line) -> our protocol.
+  //
+  // `pi --mode json` serialises every AgentSession event as one JSON
+  // object per line. We translate the subset we care about:
+  //
+  //   * assistant text  — accumulated from `message_update`
+  //     (`assistantMessageEvent.type === "text_delta"`) and finalised
+  //     from the assistant `message_end` content parts.
+  //   * provider errors — an assistant message with
+  //     `stopReason === "error"` carries a human-readable `errorMessage`.
+  //   * turn completion — the terminal `agent_end` (`willRetry !== true`)
+  //     ends the turn; `pi` then exits because its stdin is closed.
+  //
+  // `pi` runs its own built-in tools in this mode (there is no stdin
+  // observation channel like `--mode rpc`), so we only *log* any
+  // `tool_execution_*` events rather than re-dispatching them through
+  // Python — re-dispatching would double-execute and the model would
+  // never see Python's result anyway.
   const piOut = createInterface({ input: child.stdout });
-  let assistantBuf = "";
+  let assistantText = "";   // latest successful assistant answer
+  let lastError = "";       // latest provider/assistant error message
   let finalEmitted = false;
+
+  function finish() {
+    if (finalEmitted) return;
+    finalEmitted = true;
+    clearIdle();
+    if (assistantText) {
+      send({ type: "final", text: assistantText });
+    } else if (lastError) {
+      send({ type: "error", message: lastError });
+    } else {
+      send({ type: "final", text: "" });
+    }
+  }
+
   armIdle();
   piOut.on("line", (line) => {
     armIdle();
@@ -207,56 +257,49 @@ async function run() {
     try { evt = JSON.parse(line); } catch (_e) { return; }
     logLine("pi_event", evt);
     const kind = evt.type || evt.event || evt.kind;
-    if (kind === "tool_use" || kind === "tool_call") {
-      send({
-        type: "tool_call",
-        id: String(evt.id || evt.tool_use_id || Math.random().toString(36).slice(2)),
-        name: String(evt.name || evt.tool || ""),
-        args: evt.input || evt.args || {},
-      });
-    } else if (kind === "text" || kind === "assistant_text" || kind === "message") {
-      const piece = evt.text || evt.content || "";
-      if (typeof piece === "string") assistantBuf += piece;
-    } else if (kind === "final" || kind === "done" || kind === "stop") {
-      if (!finalEmitted) {
-        finalEmitted = true;
-        clearIdle();
-        send({ type: "final", text: assistantBuf || String(evt.text || "") });
+
+    if (kind === "message_update") {
+      // Incremental assistant text; accumulate the streamed deltas.
+      const ame = evt.assistantMessageEvent;
+      if (ame && ame.type === "text_delta" && typeof ame.delta === "string") {
+        assistantText += ame.delta;
+      }
+    } else if (kind === "message_end") {
+      const msg = evt.message;
+      if (msg && msg.role === "assistant") {
+        if (msg.stopReason === "error") {
+          lastError = String(msg.errorMessage || "Provider error (no message)");
+        } else {
+          // Prefer the complete content from the finalised message so we
+          // are robust even if individual deltas were missed.
+          const txt = extractText(msg.content);
+          if (txt) { assistantText = txt; lastError = ""; }
+        }
+      }
+    } else if (kind === "tool_execution_start" || kind === "tool_execution_end") {
+      // pi executes its own tools in --mode json; log for diagnostics only.
+      logLine("pi_tool", { kind, name: evt.toolName, id: evt.toolCallId });
+    } else if (kind === "agent_end") {
+      // `willRetry === true` means pi will auto-retry after a transient
+      // error; only the terminal agent_end (or process exit) ends the turn.
+      if (evt.willRetry !== true) finish();
+    } else if (kind === "auto_retry_start") {
+      // A retry is starting after a transient failure — clear any captured
+      // state so a later success is not masked by stale output.
+      lastError = "";
+      assistantText = "";
+    } else if (kind === "auto_retry_end") {
+      if (evt.success === false) {
+        if (evt.finalError) lastError = String(evt.finalError);
+        finish();
       }
     } else if (kind === "error") {
+      // Defensive: a top-level error event (not normally emitted in
+      // --mode json) terminates the turn.
       clearIdle();
-      fatal(evt.message || "pi reported error");
+      finalEmitted = true;
+      fatal(evt.message || evt.errorMessage || "pi reported error");
     }
-  });
-
-  // Forward our stdin (tool_result) back to pi.
-  const ours = createInterface({ input: stdin });
-  ours.on("line", (line) => {
-    line = line.trim();
-    if (!line) return;
-    let reply;
-    try { reply = JSON.parse(line); } catch (_e) { return; }
-    if (reply.type !== "tool_result") return;
-    // The pi `--mode json` protocol expects observations on stdin as
-    // ``{"type":"tool_result","id":...,"output":...}``. Different pi
-    // versions accept slightly different field names; emit the common
-    // shape.
-    const payload = {
-      type: "tool_result",
-      id: reply.id,
-      output: reply.ok
-        ? (typeof reply.result === "string" ? reply.result : JSON.stringify(reply.result))
-        : `ERROR: ${reply.error || "tool failed"}`,
-      is_error: !reply.ok,
-    };
-    try {
-      child.stdin.write(JSON.stringify(payload) + "\n");
-    } catch (_e) { /* pi may have exited */ }
-    // An incoming observation means the turn is progressing; keep the
-    // idle watchdog from firing while pi works on the next step.
-    armIdle();
-    const r = replies.get(String(reply.id));
-    if (r) { r(); replies.delete(String(reply.id)); }
   });
 
   child.stderr.on("data", (chunk) => {
@@ -267,12 +310,13 @@ async function run() {
     clearIdle();
     logLine("pi_exit", { code, signal });
     if (!finalEmitted) {
-      finalEmitted = true;
-      if (code === 0) {
-        send({ type: "final", text: assistantBuf });
+      if (code === 0 || assistantText) {
+        finish();
       } else {
+        finalEmitted = true;
         send({ type: "error",
-               message: `pi exited with code=${code} signal=${signal || ""}`.trim() });
+               message: (lastError ||
+                 `pi exited with code=${code} signal=${signal || ""}`.trim()) });
       }
     }
     if (logFd !== null) { try { closeSync(logFd); } catch (_e) {} }
