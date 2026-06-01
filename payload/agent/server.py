@@ -264,6 +264,9 @@ class App:
         max_elevated = int(
             getattr(policy, "max_elevated_calls_per_turn", 3) or 3
         )
+        # Per-turn idle deadline so a wedged provider cannot leave the
+        # operator's request pending forever (see ``pi_mono.run_turn``).
+        turn_timeout = float(getattr(policy, "max_turn_seconds", 120) or 0)
         elevated_calls = 0
         turn_events: list[dict[str, Any]] = []
 
@@ -388,6 +391,7 @@ class App:
                 on_tool_call=on_tool_call,
                 tool_names=tools_mod.tool_names(),
                 max_tool_calls=max_calls,
+                timeout=turn_timeout,
             )
         except pi_mono.BridgeError as exc:
             err = str(exc)

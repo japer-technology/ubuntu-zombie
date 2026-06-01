@@ -41,7 +41,9 @@ function send(obj) {
 
 function fatal(message) {
   send({ type: "error", message: String(message) });
-  process.exit(0);
+  // Exit non-zero so the supervising service / Python driver can tell a
+  // reported failure apart from a clean shutdown.
+  process.exit(1);
 }
 
 let logFd = null;
@@ -164,11 +166,41 @@ async function run() {
 
   const replies = pendingTurnReplies();
 
+  // Idle watchdog (defence in depth). The Python driver already imposes
+  // a per-turn idle deadline, but when this bridge is exercised
+  // standalone — or if the driver is wedged — kill a `pi` child that has
+  // gone silent (e.g. a hung provider socket) so we never block forever.
+  // Disabled when ZOMBIE_PI_MONO_IDLE_TIMEOUT <= 0.
+  const idleTimeoutMs = (() => {
+    const raw = Number(process.env.ZOMBIE_PI_MONO_IDLE_TIMEOUT);
+    if (Number.isFinite(raw)) return raw * 1000;
+    return 150 * 1000; // generous: longer than the Python-side default
+  })();
+  let idleTimer = null;
+  function clearIdle() {
+    if (idleTimer !== null) { clearTimeout(idleTimer); idleTimer = null; }
+  }
+  function armIdle() {
+    if (idleTimeoutMs <= 0) return;
+    clearIdle();
+    idleTimer = setTimeout(() => {
+      logLine("idle_timeout", { ms: idleTimeoutMs });
+      try { child.kill("SIGKILL"); } catch (_e) { /* already gone */ }
+      if (!finalEmitted) {
+        finalEmitted = true;
+        fatal(`pi produced no output for ${Math.round(idleTimeoutMs / 1000)}s; terminated`);
+      }
+    }, idleTimeoutMs);
+    if (typeof idleTimer.unref === "function") idleTimer.unref();
+  }
+
   // Forward pi stdout (JSON events, one per line) -> our protocol.
   const piOut = createInterface({ input: child.stdout });
   let assistantBuf = "";
   let finalEmitted = false;
+  armIdle();
   piOut.on("line", (line) => {
+    armIdle();
     line = line.trim();
     if (!line) return;
     let evt;
@@ -188,9 +220,11 @@ async function run() {
     } else if (kind === "final" || kind === "done" || kind === "stop") {
       if (!finalEmitted) {
         finalEmitted = true;
+        clearIdle();
         send({ type: "final", text: assistantBuf || String(evt.text || "") });
       }
     } else if (kind === "error") {
+      clearIdle();
       fatal(evt.message || "pi reported error");
     }
   });
@@ -218,6 +252,9 @@ async function run() {
     try {
       child.stdin.write(JSON.stringify(payload) + "\n");
     } catch (_e) { /* pi may have exited */ }
+    // An incoming observation means the turn is progressing; keep the
+    // idle watchdog from firing while pi works on the next step.
+    armIdle();
     const r = replies.get(String(reply.id));
     if (r) { r(); replies.delete(String(reply.id)); }
   });
@@ -227,6 +264,7 @@ async function run() {
   });
 
   child.on("exit", (code, signal) => {
+    clearIdle();
     logLine("pi_exit", { code, signal });
     if (!finalEmitted) {
       finalEmitted = true;

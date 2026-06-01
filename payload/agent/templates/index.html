@@ -55,6 +55,20 @@
   .result pre { background: #0003; padding: .4rem .6rem;
                 border-radius: .3rem; max-height: 16rem; overflow: auto;
                 font-size: .8rem; }
+  .turn-status { max-width: 60rem; margin: .3rem auto 0; padding: 0 1rem;
+                 font-size: .8rem; opacity: .75; min-height: 1.1rem; }
+  .thinking { display: flex; align-items: center; gap: .5rem; }
+  .thinking .dots { display: inline-flex; gap: .25rem; }
+  .thinking .dots i { width: .4rem; height: .4rem; border-radius: 50%;
+                      background: currentColor; opacity: .35;
+                      animation: zblink 1.2s infinite ease-in-out both; }
+  .thinking .dots i:nth-child(2) { animation-delay: .2s; }
+  .thinking .dots i:nth-child(3) { animation-delay: .4s; }
+  @keyframes zblink { 0%, 80%, 100% { opacity: .25; }
+                      40% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) {
+    .thinking .dots i { animation: none; opacity: .6; }
+  }
 </style>
 </head>
 <body>
@@ -69,9 +83,11 @@
 </details>
 <footer>
   <form id="form">
-    <textarea id="prompt" placeholder="Ask the administrator...  (type /help for commands)" required></textarea>
-    <button type="submit" class="primary">Send</button>
+    <textarea id="prompt" placeholder="Ask the administrator…  (Enter to send, Shift+Enter for newline, /help for commands)" required></textarea>
+    <button type="submit" id="send" class="primary">Send</button>
+    <button type="button" id="stop" class="danger" hidden>Stop</button>
   </form>
+  <div id="status" class="turn-status" role="status" aria-live="polite"></div>
 </footer>
 <script>
 "use strict";
@@ -79,6 +95,20 @@ let conversationId = null;
 const log = document.getElementById("log");
 const form = document.getElementById("form");
 const promptEl = document.getElementById("prompt");
+const sendBtn = document.getElementById("send");
+const stopBtn = document.getElementById("stop");
+const statusEl = document.getElementById("status");
+
+// In-flight turn state. ``turnController`` lets the operator (or a
+// client-side timeout) abort a request that the server is taking too
+// long to answer, so the UI can never wedge on a single prompt. The
+// default ceiling is generous — longer than the server-side idle
+// deadline — so a legitimately slow turn still completes server-side
+// before the browser gives up.
+let turnController = null;
+let thinkingEl = null;
+let thinkingTimer = null;
+const CLIENT_TURN_TIMEOUT_MS = 180000;
 
 function el(tag, attrs = {}, ...children) {
   const e = document.createElement(tag);
@@ -103,6 +133,46 @@ function addMessage(role, content, opts = {}) {
   log.scrollTop = log.scrollHeight;
   return wrap;
 }
+
+function showThinking() {
+  const wrap = el("div", { class: "msg assistant thinking" });
+  wrap.appendChild(el("div", { class: "role", text: "assistant" }));
+  const dots = el("div", { class: "dots" }, el("i", {}), el("i", {}), el("i", {}));
+  const label = el("span", { text: "Thinking… 0s" });
+  wrap.appendChild(dots);
+  wrap.appendChild(label);
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  const started = Date.now();
+  thinkingTimer = setInterval(() => {
+    const secs = Math.round((Date.now() - started) / 1000);
+    label.textContent = `Thinking… ${secs}s`;
+  }, 1000);
+  return wrap;
+}
+
+function clearThinking() {
+  if (thinkingTimer !== null) { clearInterval(thinkingTimer); thinkingTimer = null; }
+  if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+}
+
+function setBusy(busy) {
+  // Keep the textarea enabled so slash commands (/help, /clear, /stop)
+  // remain usable, but reflect the turn state on the controls.
+  sendBtn.disabled = busy;
+  stopBtn.hidden = !busy;
+  log.setAttribute("aria-busy", busy ? "true" : "false");
+  statusEl.textContent = busy ? "Agent is working…" : "";
+}
+
+function abortTurn(reason) {
+  if (turnController) {
+    try { turnController.abort(); } catch (_e) { /* ignore */ }
+  }
+  if (reason) statusEl.textContent = reason;
+}
+
+stopBtn.addEventListener("click", () => abortTurn("Stopped."));
 
 function renderResult(result) {
   const wrap = el("div", { class: "result" });
@@ -261,6 +331,7 @@ const SLASH_COMMANDS = [
   ["/conversations", "List recent conversations (alias: /history)."],
   ["/load", "Load a past conversation: /load <id>."],
   ["/shortcuts", "Show the keyboard shortcuts."],
+  ["/stop", "Cancel the turn that is currently running."],
 ];
 
 async function fetchJson(path) {
@@ -320,7 +391,19 @@ async function handleSlashCommand(input) {
       addMessage("user", input);
       addMessage("system",
         "Keyboard shortcuts:\n" +
-        "Ctrl+Enter (or Cmd+Enter) — send the current message");
+        "Enter — send the current message\n" +
+        "Shift+Enter (or Ctrl/Cmd+Enter) — insert a newline\n" +
+        "/stop — cancel the in-flight turn");
+      return true;
+    }
+    case "/stop": {
+      addMessage("user", input);
+      if (turnController) {
+        abortTurn("Stopped.");
+        addMessage("system", "Cancelling the current turn…");
+      } else {
+        addMessage("system", "Nothing is running.");
+      }
       return true;
     }
     case "/tools": {
@@ -452,6 +535,7 @@ async function handleSlashCommand(input) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  if (sendBtn.disabled) return; // a turn is already in flight
   const prompt = promptEl.value.trim();
   if (!prompt) return;
   if (await handleSlashCommand(prompt)) {
@@ -461,14 +545,22 @@ form.addEventListener("submit", async (event) => {
   }
   addMessage("user", prompt);
   promptEl.value = "";
-  promptEl.disabled = true;
+  setBusy(true);
+  thinkingEl = showThinking();
+
+  turnController = new AbortController();
+  const timeoutId = setTimeout(
+    () => abortTurn(`No response after ${Math.round(CLIENT_TURN_TIMEOUT_MS / 1000)}s — giving up.`),
+    CLIENT_TURN_TIMEOUT_MS);
   try {
     const r = await fetch("/api/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt, conversation_id: conversationId }),
+      signal: turnController.signal,
     });
     const data = await r.json();
+    clearThinking();
     conversationId = data.conversation_id ?? conversationId;
     if (data.error) addMessage("system", data.error, { error: true });
     if (data.reply) addMessage("assistant", data.reply);
@@ -480,15 +572,28 @@ form.addEventListener("submit", async (event) => {
     if (events.length) log.appendChild(renderTurnCounter(events));
     log.scrollTop = log.scrollHeight;
   } catch (err) {
-    addMessage("system", String(err), { error: true });
+    clearThinking();
+    if (err && err.name === "AbortError") {
+      addMessage("system",
+        "Request cancelled. The agent may still finish in the background; "
+        + "reload to see the latest conversation.", { error: true });
+    } else {
+      addMessage("system", String(err), { error: true });
+    }
   } finally {
-    promptEl.disabled = false;
+    clearTimeout(timeoutId);
+    clearThinking();
+    turnController = null;
+    setBusy(false);
     promptEl.focus();
   }
 });
 
 promptEl.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+  // Enter sends; Shift+Enter (or Ctrl/Meta+Enter) inserts a newline —
+  // the standard chat affordance, so a one-word "Hello" just works.
+  if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    event.preventDefault();
     form.requestSubmit();
   }
 });
