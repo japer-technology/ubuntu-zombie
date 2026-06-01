@@ -326,6 +326,7 @@ root-equivalent.
 | Path                                       | Purpose                                         |
 | ------------------------------------------ | ----------------------------------------------- |
 | `/var/log/ubuntu-zombie-install.log`       | Installer transcripts                           |
+| `/var/log/ubuntu-zombie/install-receipt.txt` | Install receipt (parameters + start/finish outcome) |
 | `/var/log/ubuntu-zombie/audit.log`         | JSON-lines AI audit trail                       |
 | `/opt/ai-zombie/state/conversations.db`    | Chat history (SQLite)                           |
 | `/opt/ai-zombie/state/screen.png`          | Latest screenshot helper output                 |
@@ -348,6 +349,40 @@ root-equivalent.
 The installer also drops `verify` and a few GUI shims (`gui-env`,
 `screenshot`, `click`, `type`, `key`) under the same directory; the
 agent invokes them directly.
+
+## Interactive setup review
+
+When `scripts/install.sh install` runs on an interactive terminal (i.e.
+not `--yes` and not `ZOMBIE_NONINTERACTIVE=1`), it opens an editable
+**parameter review** before touching the host. Every install parameter —
+agent user, install root, chat/VNC ports, autologin, Tailscale, transcript
+and receipt paths, the SSH public key, and the VNC password — is listed in
+a branded summary. Enter a number to edit a field (with validation and
+re-prompting on bad input), toggle the boolean options, and repeat until
+you are satisfied; then accept to begin the install. Cancelling at the
+review (`q`) exits without changing anything.
+
+The review uses the **Zombie Orchid** highlight (`#AC43D9`) with
+compatible accent colours when colour is enabled. Colour follows the same
+`ZOMBIE_COLOR=auto|always|never` / `NO_COLOR` policy as the rest of the
+output, so `--no-color` produces a plain, screen-reader-friendly table.
+
+Automated runs (`--yes`, `ZOMBIE_NONINTERACTIVE=1`, or non-TTY stdin) skip
+the review entirely and use the supplied environment unchanged.
+
+## Install receipt
+
+Every install writes a human-readable **receipt** recording all parameters
+when the run starts and the outcome (result, duration, service status,
+applied/satisfied step counts, next step) when it finishes. A failed run
+appends a `FAILED` record with the line and exit code. Secrets are never
+written: only the SSH key fingerprint and a set/unset flag for the VNC
+password are recorded.
+
+| Variable             | Default                                        | Effect                                             |
+| -------------------- | ---------------------------------------------- | -------------------------------------------------- |
+| `ZOMBIE_RECEIPT`     | `1`                                            | Set to `0` to disable the receipt.                 |
+| `ZOMBIE_RECEIPT_FILE`| `/var/log/ubuntu-zombie/install-receipt.txt`   | Override the receipt file path (absolute).         |
 
 ## Install subcommands
 

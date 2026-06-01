@@ -81,6 +81,12 @@ VNC_PORT="${VNC_PORT:-5900}"
 CHAT_PORT="${ZOMBIE_CHAT_PORT:-7878}"
 LOG_FILE="${LOG_FILE:-/var/log/ubuntu-zombie-install.log}"
 
+# Install receipt: a human-readable record of every parameter, written once
+# when the install starts and finalised with the outcome when it finishes.
+# Set ZOMBIE_RECEIPT=0 to disable, or point ZOMBIE_RECEIPT_FILE elsewhere.
+ZOMBIE_RECEIPT="${ZOMBIE_RECEIPT:-1}"
+RECEIPT_FILE="${ZOMBIE_RECEIPT_FILE:-${ZOMBIE_LOG_DIR}/install-receipt.txt}"
+
 ZOMBIE_NONINTERACTIVE="${ZOMBIE_NONINTERACTIVE:-0}"
 ZOMBIE_ENABLE_AUTOLOGIN="${ZOMBIE_ENABLE_AUTOLOGIN:-0}"
 # Tailscale is OFF by default. Opt in by setting ZOMBIE_SKIP_TAILSCALE=0
@@ -100,6 +106,9 @@ ASSUME_YES="${ZOMBIE_ASSUME_YES:-0}"
 STRICT="${ZOMBIE_STRICT:-0}"
 JSON_OUTPUT=0
 VERBOSE="${ZOMBIE_VERBOSE:-0}"
+# Set to 1 once the operator has reviewed (and possibly edited) the install
+# parameters interactively, so the later confirmation gate is not asked twice.
+REVIEWED=0
 
 # Idempotency transparency: count how many idempotent steps were already in
 # place versus newly applied, so a re-run does not look like a fresh install.
@@ -184,7 +193,8 @@ Usage:
   sudo ./${SCRIPT_NAME} [SUBCOMMAND] [FLAGS]
 
 Subcommands:
-  install     Full install (default). Idempotent.
+  install     Full install (default). Idempotent. Interactive runs open an
+              editable parameter review before any change is made.
   verify      Read-only state check. Does not change state.
   doctor      Explain failures and likely fixes.
   repair      Apply known-safe fixes (re-assert permissions, retry
@@ -224,7 +234,13 @@ Environment variables (selected; see docs/CONFIGURATION.md for all):
   ZOMBIE_SKIP_TAILSCALE=0     opt in to Tailscale: install/enrol it and
                               restrict inbound SSH to tailscale0 (needs a
                               Tailscale account).
-  ZOMBIE_COLOR=auto|always|never   colour policy (default auto).
+  ZOMBIE_COLOR=auto|always|never   colour policy (default auto). The setup
+                              UI uses the Zombie Orchid highlight (#AC43D9)
+                              and compatible accents when colour is enabled.
+  ZOMBIE_RECEIPT=0            disable the start/finish install receipt
+                              (written by default).
+  ZOMBIE_RECEIPT_FILE=<path>  override the receipt path (default
+                              /var/log/ubuntu-zombie/install-receipt.txt).
   SSH_PUBLIC_KEY              SSH public key string.
   VNC_PASSWORD                Loopback-only VNC password.
   TAILSCALE_AUTHKEY           Pre-auth key for unattended Tailscale
@@ -909,6 +925,7 @@ A real 'install' run with the current environment would:
   Etc dir:        ${ZOMBIE_ETC}
   Log dir:        ${ZOMBIE_LOG_DIR}
   Transcript:     ${LOG_FILE}
+  Receipt:        $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "(disabled)")
   Chat port:      ${CHAT_PORT}/tcp (loopback only)
   VNC port:       ${VNC_PORT}/tcp (loopback only)
   Tailscale:      $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "SKIPPED (ZOMBIE_SKIP_TAILSCALE=1)" || echo "installed and enrolled")
@@ -954,6 +971,298 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# Interactive parameter review (Zombie Orchid setup experience)
+# ---------------------------------------------------------------------------
+# A branded, editable summary of every install parameter. The operator can
+# tweak any field and re-review until satisfied, then accept. Skipped in
+# non-interactive / --yes runs and when stdin is not a TTY, so automated
+# installs are unaffected.
+
+# Render the current parameters as a glance-able, brand-coloured table.
+print_parameter_table() {
+  load_os_release
+  local ssh_state vnc_state receipt_state
+  if [[ -n "${SSH_PUBLIC_KEY}" ]]; then
+    ssh_state="provided"
+  else
+    ssh_state="will prompt during install"
+  fi
+  if [[ -n "${VNC_PASSWORD}" ]]; then
+    vnc_state="set (hidden)"
+  else
+    vnc_state="will prompt during install"
+  fi
+  if [[ "${ZOMBIE_RECEIPT}" == "1" ]]; then
+    receipt_state="${RECEIPT_FILE}"
+  else
+    receipt_state="disabled"
+  fi
+
+  brand_banner "Ubuntu Zombie — setup parameters"
+  printf '  %sReview every setting below, edit any of them, then accept when happy.%s\n\n' \
+    "${C_DIM}" "${C_RESET}"
+  field "1) Agent user"      "${AGENT_USER}"
+  field "   Agent home"      "${AGENT_HOME}" "${C_DIM}"
+  field "2) Install root"    "${ZOMBIE_DIR}"
+  field "3) Chat port"       "${CHAT_PORT}/tcp (loopback only)"
+  field "4) VNC port"        "${VNC_PORT}/tcp (loopback only)"
+  field "5) Autologin"       "$([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo enabled || echo disabled)"
+  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+    field "6) Tailscale"     "skipped — SSH on every interface" "${C_YELLOW}"
+  else
+    field "6) Tailscale"     "installed — SSH on tailscale0 only"
+  fi
+  field "7) Transcript log"  "${LOG_FILE}"
+  field "8) Receipt file"    "${receipt_state}"
+  field "9) SSH public key"  "${ssh_state}"
+  field "10) VNC password"   "${vnc_state}"
+  field "    Host"           "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
+  printf '\n'
+}
+
+# Individual field editors. Each keeps the current value when the operator
+# presses Enter (allow_empty=1), and re-prompts on invalid input rather than
+# aborting the whole run.
+_edit_agent_user() {
+  local v
+  if prompt_until_valid "$(printf 'New agent user [%s]: ' "${AGENT_USER}")" \
+       is_supported_agent_username v 1 && [[ -n "${v}" ]]; then
+    AGENT_USER="${v}"; AGENT_HOME="/home/${AGENT_USER}"
+  fi
+}
+_edit_zombie_dir() {
+  local v
+  if prompt_until_valid "$(printf 'New install root [%s]: ' "${ZOMBIE_DIR}")" \
+       is_safe_absolute_path v 1 && [[ -n "${v}" ]]; then
+    ZOMBIE_DIR="${v}"
+  fi
+}
+_edit_chat_port() {
+  local v
+  if prompt_until_valid "$(printf 'New chat port [%s]: ' "${CHAT_PORT}")" \
+       is_valid_tcp_port v 1 && [[ -n "${v}" ]]; then
+    CHAT_PORT="${v}"
+  fi
+}
+_edit_vnc_port() {
+  local v
+  if prompt_until_valid "$(printf 'New VNC port [%s]: ' "${VNC_PORT}")" \
+       is_valid_tcp_port v 1 && [[ -n "${v}" ]]; then
+    VNC_PORT="${v}"
+  fi
+}
+_edit_log_file() {
+  local v
+  if prompt_until_valid "$(printf 'New transcript log path [%s]: ' "${LOG_FILE}")" \
+       is_safe_absolute_path v 1 && [[ -n "${v}" ]]; then
+    LOG_FILE="${v}"
+  fi
+}
+_toggle_autologin() {
+  if [[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]]; then
+    ZOMBIE_ENABLE_AUTOLOGIN=0; info "Autologin disabled."
+  else
+    ZOMBIE_ENABLE_AUTOLOGIN=1; info "Autologin enabled."
+  fi
+}
+_toggle_tailscale() {
+  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
+    ZOMBIE_SKIP_TAILSCALE=0; info "Tailscale will be installed; SSH restricted to tailscale0."
+  else
+    ZOMBIE_SKIP_TAILSCALE=1; warn "Tailscale skipped; SSH allowed on every interface."
+  fi
+}
+_toggle_receipt() {
+  if [[ "${ZOMBIE_RECEIPT}" == "1" ]]; then
+    local v
+    printf 'Receipt is ON. Press Enter to turn it OFF, or type a new path: '
+    if read -r v && [[ -n "${v}" ]]; then
+      if is_safe_absolute_path "${v}"; then
+        RECEIPT_FILE="${v}"; info "Receipt path set to ${RECEIPT_FILE}."
+      else
+        warn "Not a safe absolute path; receipt unchanged."
+      fi
+    else
+      ZOMBIE_RECEIPT=0; info "Receipt disabled."
+    fi
+  else
+    ZOMBIE_RECEIPT=1; info "Receipt enabled: ${RECEIPT_FILE}."
+  fi
+}
+_edit_ssh_key() {
+  log "Paste the SSH public key to authorise (blank to leave unset)."
+  log "Example: ssh-ed25519 AAAAC3... you@workstation"
+  local v
+  if prompt_until_valid "SSH public key: " is_ssh_pubkey v 1; then
+    SSH_PUBLIC_KEY="${v}"
+    [[ -n "${v}" ]] && ok "SSH public key recorded." || info "SSH public key left unset."
+  fi
+}
+_edit_vnc_password() {
+  local p1 p2
+  read -r -s -p "New VNC password (blank to leave unset): " p1; echo
+  if [[ -z "${p1}" ]]; then
+    info "VNC password left unset."
+    return 0
+  fi
+  read -r -s -p "Confirm VNC password: " p2; echo
+  if [[ "${p1}" != "${p2}" ]]; then
+    warn "Passwords did not match; VNC password unchanged."
+    return 0
+  fi
+  VNC_PASSWORD="${p1}"
+  ok "VNC password recorded."
+}
+
+review_parameters() {
+  # Automated paths skip the review entirely.
+  [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && return 0
+  (( ASSUME_YES )) && return 0
+  [[ -t 0 ]] || return 0
+
+  local choice
+  while true; do
+    print_parameter_table
+    printf '  %s[a]%s accept and install    %s[1-10]%s edit a field    %s[q]%s cancel\n' \
+      "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
+    if ! read -r -p "$(printf '%s➜%s your choice [a]: ' "${C_BRAND}" "${C_RESET}")" choice; then
+      info "No input (EOF); cancelling."; exit 0
+    fi
+    case "${choice,,}" in
+      ""|a|accept|y|yes)
+        # Edits are validated as they are entered, so this is a belt-and-
+        # braces final check before committing to the install.
+        validate_config
+        REVIEWED=1
+        ok "Parameters accepted."
+        return 0 ;;
+      q|quit|cancel|n|no)
+        info "Cancelled."; exit 0 ;;
+      1)  _edit_agent_user ;;
+      2)  _edit_zombie_dir ;;
+      3)  _edit_chat_port ;;
+      4)  _edit_vnc_port ;;
+      5)  _toggle_autologin ;;
+      6)  _toggle_tailscale ;;
+      7)  _edit_log_file ;;
+      8)  _toggle_receipt ;;
+      9)  _edit_ssh_key ;;
+      10) _edit_vnc_password ;;
+      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-10, 'a', or 'q'." ;;
+    esac
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Install receipt (start + finish records)
+# ---------------------------------------------------------------------------
+# A human-readable record of the install. Written once when the run starts
+# (every parameter) and finalised with the outcome when it ends. Secrets are
+# never written: only an SSH key fingerprint and a "set/unset" flag for the
+# VNC password are recorded.
+
+write_receipt_start() {
+  [[ "${ZOMBIE_RECEIPT}" == "1" ]] || return 0
+  load_os_release
+  if ! mkdir -p "$(dirname "${RECEIPT_FILE}")" 2>/dev/null; then
+    warn "Could not create receipt directory; receipt disabled for this run."
+    ZOMBIE_RECEIPT=0
+    return 0
+  fi
+
+  local ssh_state="(none — will prompt during install)"
+  if [[ -n "${SSH_PUBLIC_KEY}" ]]; then
+    if command -v ssh-keygen >/dev/null 2>&1; then
+      ssh_state="$(printf '%s\n' "${SSH_PUBLIC_KEY}" | ssh-keygen -l -f - 2>/dev/null || echo 'provided')"
+    else
+      ssh_state="provided"
+    fi
+  fi
+  local vnc_state="(none — will prompt during install)"
+  [[ -n "${VNC_PASSWORD}" ]] && vnc_state="set via parameter/env (value not recorded)"
+
+  if ! {
+    printf '============================================================\n'
+    printf 'Ubuntu Zombie — install receipt\n'
+    printf '============================================================\n'
+    printf 'Phase            : START\n'
+    printf 'Started (UTC)    : %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'Installer        : %s %s\n' "${SCRIPT_NAME}" "${SCRIPT_VERSION}"
+    printf 'Host             : %s %s (%s)\n' "${ID:-?}" "${VERSION_ID:-?}" \
+      "$(dpkg --print-architecture 2>/dev/null || uname -m)"
+    printf 'Invoked by       : %s (uid %s)\n' "${SUDO_USER:-$(id -un)}" "$(id -u)"
+    printf 'Mode             : %s\n' \
+      "$([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)"
+    printf '\n-- Parameters --\n'
+    printf 'Agent user       : %s\n' "${AGENT_USER}"
+    printf 'Agent home       : %s\n' "${AGENT_HOME}"
+    printf 'Install root     : %s\n' "${ZOMBIE_DIR}"
+    printf 'Etc dir          : %s\n' "${ZOMBIE_ETC}"
+    printf 'Log dir          : %s\n' "${ZOMBIE_LOG_DIR}"
+    printf 'Transcript log   : %s\n' "${LOG_FILE}"
+    printf 'Chat port        : %s/tcp (loopback only)\n' "${CHAT_PORT}"
+    printf 'VNC port         : %s/tcp (loopback only)\n' "${VNC_PORT}"
+    printf 'Autologin        : %s\n' \
+      "$([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo enabled || echo disabled)"
+    printf 'Tailscale        : %s\n' \
+      "$([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo 'skipped (SSH on every interface)' || echo 'installed (SSH on tailscale0 only)')"
+    printf 'SSH public key   : %s\n' "${ssh_state}"
+    printf 'VNC password     : %s\n' "${vnc_state}"
+    printf 'Receipt file     : %s\n' "${RECEIPT_FILE}"
+    printf '============================================================\n'
+  } >> "${RECEIPT_FILE}" 2>/dev/null; then
+    warn "Could not write the install receipt to ${RECEIPT_FILE}."
+    ZOMBIE_RECEIPT=0
+    return 0
+  fi
+  chmod 600 "${RECEIPT_FILE}" 2>/dev/null || true
+  info "Install receipt opened: ${RECEIPT_FILE}"
+}
+
+write_receipt_finish() {
+  [[ "${ZOMBIE_RECEIPT}" == "1" ]] || return 0
+  [[ -f "${RECEIPT_FILE}" ]] || return 0
+  {
+    printf '\n-- Finish --\n'
+    printf 'Phase            : FINISH\n'
+    printf 'Result           : SUCCESS\n'
+    printf 'Finished (UTC)   : %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [[ -n "${INSTALL_T0:-}" ]]; then
+      printf 'Duration         : %s\n' "$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
+    fi
+    printf 'Tailscale        : %s\n' \
+      "$([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo 'skipped' || { [[ "${TS_STATUS_OK:-0}" == "1" ]] && echo 'logged in' || echo 'installed (not logged in)'; })"
+    printf 'Provider token   : %s\n' "$([[ "${PROVIDER_OK:-0}" == "1" ]] && echo present || echo missing)"
+    printf 'Chat service     : %s\n' "$([[ "${CHAT_OK:-0}" == "1" ]] && echo running || echo 'not running')"
+    printf 'Steps satisfied  : %s\n' "${STEPS_SATISFIED}"
+    printf 'Steps applied    : %s\n' "${STEPS_CHANGED}"
+    [[ -n "${NEXT_STEP:-}" ]] && printf 'Next step        : %s\n' "${NEXT_STEP}"
+    printf '============================================================\n'
+  } >> "${RECEIPT_FILE}" 2>/dev/null || {
+    warn "Could not finalise the install receipt at ${RECEIPT_FILE}."
+    return 0
+  }
+  ok "Install receipt finalised: ${RECEIPT_FILE}"
+}
+
+# Append a short failure record to the receipt from the error trap.
+write_receipt_fail() {
+  [[ "${ZOMBIE_RECEIPT}" == "1" ]] || return 0
+  [[ -f "${RECEIPT_FILE}" ]] || return 0
+  {
+    printf '\n-- Finish --\n'
+    printf 'Phase            : FINISH\n'
+    printf 'Result           : FAILED (line %s, exit %s)\n' "${1:-?}" "${2:-?}"
+    printf 'Finished (UTC)   : %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [[ -n "${INSTALL_T0:-}" ]]; then
+      printf 'Duration         : %s\n' "$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
+    fi
+    printf 'Transcript log   : %s\n' "${LOG_FILE}"
+    printf '============================================================\n'
+  } >> "${RECEIPT_FILE}" 2>/dev/null || true
+}
+
+# ---------------------------------------------------------------------------
 # Dispatch non-install subcommands early.
 # ---------------------------------------------------------------------------
 
@@ -985,6 +1294,12 @@ fi
 require_root
 preflight
 validate_noninteractive
+
+# Interactive review: present every parameter in a branded, editable table
+# and let the operator tweak settings until satisfied. Runs before any state
+# is touched and before the transcript is opened, so edits to LOG_FILE take
+# effect. No-op for --yes / non-interactive / non-TTY runs.
+review_parameters
 
 # Transcript logging
 mkdir -p "$(dirname "${LOG_FILE}")"
@@ -1059,6 +1374,7 @@ on_error() {
     printf '%s    Full step trail: %s%s\n' "${C_RED}" "${STEP_LOG}" "${C_RESET}" >&2
   fi
   diagnose_failure "${exit_code}" || true
+  write_receipt_fail "${line}" "${exit_code}" || true
   printf '%s    Exit codes: 1 generic · 2 usage · 64 missing env · 65 bad host · 66 network.%s\n' \
     "${C_RED}" "${C_RESET}" >&2
   printf '%s    Recovery: re-run the installer (it is idempotent), or %ssudo ./%s doctor%s for guidance.%s\n' \
@@ -1114,10 +1430,16 @@ if [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]]; then
   info "Non-interactive mode: proceeding without confirmation."
 elif (( ASSUME_YES )); then
   info "--yes: proceeding without confirmation."
+elif (( REVIEWED )); then
+  info "Parameters reviewed and accepted: proceeding."
 else
   read -r -p "Continue? Type YES to proceed: " CONFIRM
   [[ "${CONFIRM}" == "YES" ]] || { info "Cancelled."; exit 0; }
 fi
+
+# Open the install receipt now that every parameter is finalised and the
+# operator has committed to the run.
+write_receipt_start
 
 # ---------------------------------------------------------------------------
 # System packages
@@ -2425,6 +2747,7 @@ Public exposure:
   - UFW default:   deny inbound
 
 Install transcript: ${LOG_FILE}
+Install receipt:    $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "(disabled)")
 Audit log:          ${ZOMBIE_LOG_DIR}/audit.log
 Policy:             ${ZOMBIE_ETC}/policy.yaml
 Uninstall:          sudo ${SCRIPT_DIR}/uninstall.sh --dry-run
@@ -2444,3 +2767,6 @@ fi
 if (( STEPS_SATISFIED + STEPS_CHANGED > 0 )); then
   info "Idempotent steps: ${STEPS_SATISFIED} already satisfied, ${STEPS_CHANGED} applied this run."
 fi
+
+# Finalise the install receipt with the outcome of this run.
+write_receipt_finish
