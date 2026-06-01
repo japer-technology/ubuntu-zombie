@@ -305,7 +305,6 @@ def run_turn(
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=5)
-        stop_watchdog.set()
         if watchdog is not None:
             watchdog.join(timeout=2)
 

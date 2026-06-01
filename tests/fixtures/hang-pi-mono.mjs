@@ -11,7 +11,9 @@ import { createInterface } from "node:readline";
 
 const rl = createInterface({ input: process.stdin });
 rl.on("line", () => {
-  // Swallow input and hang. Keep the process alive indefinitely so the
-  // driver-side watchdog is the only thing that can end the turn.
-  setInterval(() => {}, 1 << 30);
+  // Swallow input and hang. Keep the process alive indefinitely (a very
+  // long interval ~ 12 days) so the driver-side watchdog is the only
+  // thing that can end the turn.
+  const HANG_FOREVER_MS = 1 << 30;
+  setInterval(() => {}, HANG_FOREVER_MS);
 });
