@@ -284,9 +284,10 @@ async function run() {
       // error; only the terminal agent_end (or process exit) ends the turn.
       if (evt.willRetry !== true) finish();
     } else if (kind === "auto_retry_start") {
-      // A retry is starting after a transient failure — clear the captured
-      // error so a later success is not masked by a stale message.
+      // A retry is starting after a transient failure — clear any captured
+      // state so a later success is not masked by stale output.
       lastError = "";
+      assistantText = "";
     } else if (kind === "auto_retry_end") {
       if (evt.success === false) {
         if (evt.finalError) lastError = String(evt.finalError);
