@@ -625,16 +625,16 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
         tool_classes=tool_classes,
         max_tool_calls_per_turn=_coerce_int(agent_raw.get("max_tool_calls_per_turn"), 12),
         max_elevated_calls_per_turn=_coerce_int(agent_raw.get("max_elevated_calls_per_turn"), 3),
-        max_turn_seconds=_coerce_int(agent_raw.get("max_turn_seconds"), 120),
+        max_turn_seconds=_coerce_int(agent_raw.get("max_turn_seconds"), 120, min_val=0),
     )
     _cache = (key, policy)
     return policy
 
 
-def _coerce_int(value: Any, default: int) -> int:
+def _coerce_int(value: Any, default: int, min_val: int = 1) -> int:
     try:
         n = int(value)
-        return n if n > 0 else default
+        return n if n >= min_val else default
     except (TypeError, ValueError):
         return default
 
