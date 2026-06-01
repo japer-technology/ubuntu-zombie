@@ -1169,9 +1169,14 @@ _local_ipv4_prefix() {
 }
 
 # Parse the model ids from a /v1/models JSON body on stdin, one per line.
+# Only ids made of a conservative, shell/env-safe character set are emitted:
+# the values are later written verbatim into secrets/env, so a hostile or
+# malformed local server must not be able to inject newlines or other
+# characters that would smuggle extra assignments into that file.
 _parse_model_ids() {
   python3 -c '
-import json, sys
+import json, re, sys
+SAFE = re.compile(r"\A[A-Za-z0-9._:/+@-]{1,200}\Z")
 try:
     data = json.load(sys.stdin)
 except Exception:
@@ -1184,9 +1189,11 @@ for item in items:
     if not isinstance(item, dict):
         continue
     mid = item.get("id")
-    if isinstance(mid, str) and mid.strip() and mid not in seen:
-        seen.add(mid)
-        print(mid.strip())
+    if isinstance(mid, str):
+        mid = mid.strip()
+        if mid and mid not in seen and SAFE.match(mid):
+            seen.add(mid)
+            print(mid)
 ' 2>/dev/null || true
 }
 
@@ -1224,6 +1231,7 @@ scan_local_llms() {
   info "Scanning ${prefix}.0/24 on port ${port} for OpenAI-compatible LLM servers…"
   local resfile pids n max=64
   resfile="$(mktemp 2>/dev/null)" || { warn "Could not create a temp file for the scan."; return 1; }
+  chmod 600 "${resfile}" 2>/dev/null || true
   pids=()
   for n in $(seq 0 255); do
     _probe_llm_host "${prefix}.${n}" "${port}" "${resfile}" &
