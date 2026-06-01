@@ -216,7 +216,10 @@ def run_turn(
                 idle = time.monotonic() - last_activity
             if idle >= timeout:
                 timed_out.set()
-                proc.kill()
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
                 return
 
     watchdog: threading.Thread | None = None
