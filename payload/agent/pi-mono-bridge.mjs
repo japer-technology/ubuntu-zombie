@@ -69,7 +69,16 @@ function logLine(tag, data) {
 async function readOneStartMessage() {
   return new Promise((resolve, reject) => {
     const rl = createInterface({ input: stdin });
+    const onClose = () => reject(new Error("stdin closed before start"));
     rl.once("line", (line) => {
+      // Detach the close listener *before* calling rl.close() so the
+      // synchronous "close" event it emits cannot race ahead of our
+      // resolve/reject below — readline emits "line" then "close"
+      // synchronously on rl.close(), and a "close" reject would
+      // otherwise win against a later resolve (Promise resolution is
+      // first-wins) and surface as a spurious
+      // "stdin closed before start" error to the Python driver.
+      rl.off("close", onClose);
       rl.close();
       try {
         const obj = JSON.parse(line);
@@ -82,7 +91,7 @@ async function readOneStartMessage() {
         reject(e);
       }
     });
-    rl.once("close", () => reject(new Error("stdin closed before start")));
+    rl.once("close", onClose);
   });
 }
 

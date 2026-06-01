@@ -2169,6 +2169,28 @@ else
     [[ -s "${ZOMBIE_DIR}/secrets/env" ]] && [[ "$(tail -c1 "${ZOMBIE_DIR}/secrets/env" 2>/dev/null)" != $'\n' ]] && printf '\n' >> "${ZOMBIE_DIR}/secrets/env"
     printf 'ZOMBIE_CHAT_PORT=%s\n' "${CHAT_PORT}" >> "${ZOMBIE_DIR}/secrets/env"
   fi
+  # When a local LLM was discovered during this run, also apply the
+  # lmstudio provider settings to the existing secrets/env so a
+  # re-install picks up the new backend instead of silently keeping
+  # whatever provider was previously selected (the chat banner would
+  # otherwise still show e.g. "openai" even though the operator
+  # intends to use the local server).
+  if [[ -n "${LOCAL_LLM_MODEL}" ]]; then
+    # Drop any prior provider/model/key lines so we can append fresh
+    # values without sed-escaping the operator-supplied key (which may
+    # contain characters that would otherwise terminate the s|||
+    # expression).
+    sed -i -E '/^(ZOMBIE_PROVIDER|ZOMBIE_MODEL|LMSTUDIO_API_KEY)=/d' \
+      "${ZOMBIE_DIR}/secrets/env"
+    [[ -s "${ZOMBIE_DIR}/secrets/env" ]] && [[ "$(tail -c1 "${ZOMBIE_DIR}/secrets/env" 2>/dev/null)" != $'\n' ]] && printf '\n' >> "${ZOMBIE_DIR}/secrets/env"
+    {
+      printf 'ZOMBIE_PROVIDER=lmstudio\n'
+      printf 'ZOMBIE_MODEL=%s\n' "${LOCAL_LLM_MODEL}"
+      printf 'LMSTUDIO_API_KEY=%s\n' "${ZOMBIE_LOCAL_LLM_API_KEY}"
+    } >> "${ZOMBIE_DIR}/secrets/env"
+    write_pi_models_json "${LOCAL_LLM_BASE_URL}" "${LOCAL_LLM_MODEL}"
+    ok "Applied local LLM ${LOCAL_LLM_MODEL} at ${LOCAL_LLM_BASE_URL} to existing secrets/env."
+  fi
   chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/secrets/env"
   chmod 600 "${ZOMBIE_DIR}/secrets/env"
 fi
