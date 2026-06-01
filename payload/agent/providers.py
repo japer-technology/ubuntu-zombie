@@ -29,6 +29,16 @@ the left and supply the matching API key in
     openrouter  OPENROUTER_API_KEY    (ZOMBIE_MODEL must be set)
     mistral     MISTRAL_API_KEY
     groq        GROQ_API_KEY
+    lmstudio    LMSTUDIO_API_KEY      (ZOMBIE_MODEL must be set)
+
+``lmstudio`` is a local, OpenAI-compatible server (LM Studio, and by
+extension any ``/v1/chat/completions`` endpoint such as Ollama or
+llama.cpp). Unlike the hosted providers it has no fixed endpoint, so
+the agent loop reaches it through a custom ``pi`` provider defined in
+``~/.pi/agent/models.json`` (written by ``scripts/install.sh`` when a
+local server is discovered on the LAN). The ``base URL`` therefore
+lives in that file rather than in an environment variable, and the API
+key is usually ignored by the server.
 
 The ``chat`` surface is retained alongside the pi-mono agent loop as a
 non-agentic, single-shot completion path and key/model validation
@@ -113,6 +123,14 @@ _PI_AI_PROVIDERS: tuple[_ProviderSpec, ...] = (
     # fully-qualified id such as ``anthropic/claude-3.5-sonnet``.
     _ProviderSpec("openrouter", "OPENROUTER_API_KEY", "",
                   "ZOMBIE_OPENROUTER_MODEL"),
+    # A local, OpenAI-compatible server (LM Studio, Ollama, llama.cpp).
+    # It has no fixed catalogue of models, so — like openrouter — the
+    # operator must pin ``ZOMBIE_MODEL`` to the id their server serves.
+    # The agent loop reaches it through a custom ``pi`` provider named
+    # ``lmstudio`` defined in ``~/.pi/agent/models.json`` (which carries
+    # the base URL); the API key is usually ignored by the server.
+    _ProviderSpec("lmstudio",   "LMSTUDIO_API_KEY",   "",
+                  "ZOMBIE_LMSTUDIO_MODEL"),
 )
 
 _PROVIDER_BY_NAME: dict[str, _ProviderSpec] = {

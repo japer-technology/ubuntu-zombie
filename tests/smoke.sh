@@ -225,7 +225,8 @@ import os
 import providers as _pr
 
 assert set(_pr.SUPPORTED_PROVIDERS) == {
-    "openai", "anthropic", "gemini", "xai", "openrouter", "mistral", "groq"
+    "openai", "anthropic", "gemini", "xai", "openrouter", "mistral", "groq",
+    "lmstudio",
 }, _pr.SUPPORTED_PROVIDERS
 
 # Snapshot env so we can reset it cleanly.
@@ -233,6 +234,7 @@ _keys = (
     "ZOMBIE_PROVIDER", "ZOMBIE_MODEL",
     "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
     "XAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY",
+    "LMSTUDIO_API_KEY",
 )
 _saved = {k: os.environ.pop(k, None) for k in _keys}
 try:
@@ -319,8 +321,37 @@ try:
     if set(_pr.ALL_KEY_ENVS) != {
         "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY",
         "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY",
+        "LMSTUDIO_API_KEY",
     }:
         raise SystemExit(f"ALL_KEY_ENVS unexpected: {_pr.ALL_KEY_ENVS!r}")
+
+    # lmstudio is a local OpenAI-compatible provider: its pi id is
+    # "lmstudio" (the custom provider the installer writes to
+    # ~/.pi/agent/models.json) and, like openrouter, it has no default
+    # model so ZOMBIE_MODEL must be set.
+    for k in ("ZOMBIE_PROVIDER", "ZOMBIE_MODEL", "GEMINI_API_KEY"):
+        os.environ.pop(k, None)
+    os.environ["ZOMBIE_PROVIDER"] = "lmstudio"
+    os.environ["LMSTUDIO_API_KEY"] = "local"
+    try:
+        _pr.provider_from_env()
+    except _pr.NoProviderConfigured:
+        pass
+    else:
+        raise SystemExit("lmstudio without ZOMBIE_MODEL should raise")
+    os.environ["ZOMBIE_MODEL"] = "qwen/qwen3-coder"
+    p_lm = _pr.provider_from_env()
+    if (p_lm.name, p_lm.pi_provider, p_lm.key_env, p_lm.model) != (
+        "lmstudio", "lmstudio", "LMSTUDIO_API_KEY", "qwen/qwen3-coder"):
+        raise SystemExit(
+            f"lmstudio resolved wrong: "
+            f"{(p_lm.name, p_lm.pi_provider, p_lm.key_env, p_lm.model)!r}")
+    if _pr.resolve_active_model() != (
+        "lmstudio", "qwen/qwen3-coder", "LMSTUDIO_API_KEY"):
+        raise SystemExit(
+            f"lmstudio resolve_active_model wrong: {_pr.resolve_active_model()!r}")
+    if _pr.provider_status() != ("lmstudio", "model qwen/qwen3-coder"):
+        raise SystemExit(f"lmstudio status wrong: {_pr.provider_status()!r}")
 finally:
     for k, v in _saved.items():
         if v is None:

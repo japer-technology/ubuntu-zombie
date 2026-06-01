@@ -11,7 +11,7 @@
 // stdin: a single JSON object
 //   {
 //     "provider": "openai" | "anthropic" | "gemini" | "xai"
-//                 | "openrouter" | "mistral" | "groq",
+//                 | "openrouter" | "mistral" | "groq" | "lmstudio",
 //     "model":    "<provider model id>",
 //     "messages": [{ "role": "system"|"user"|"assistant",
 //                    "content": "..." }, ...]
@@ -24,7 +24,8 @@
 // The bridge never reads provider keys directly — it relies on the
 // environment variables already in scope (OPENAI_API_KEY,
 // ANTHROPIC_API_KEY, GEMINI_API_KEY, XAI_API_KEY,
-// OPENROUTER_API_KEY, MISTRAL_API_KEY, GROQ_API_KEY) which
+// OPENROUTER_API_KEY, MISTRAL_API_KEY, GROQ_API_KEY,
+// LMSTUDIO_API_KEY) which
 // payload/agent/providers.py forwards from the secrets file.
 
 import { readFileSync } from "node:fs";
@@ -40,6 +41,7 @@ const PROVIDER_MAP = {
   openrouter: "openrouter",
   mistral: "mistral",
   groq: "groq",
+  lmstudio: "lmstudio",
 };
 
 // Map provider name to the env var that must be set. Mirrors
@@ -52,6 +54,7 @@ const KEY_ENV = {
   openrouter: "OPENROUTER_API_KEY",
   mistral: "MISTRAL_API_KEY",
   groq: "GROQ_API_KEY",
+  lmstudio: "LMSTUDIO_API_KEY",
 };
 
 function emit(obj) {

@@ -34,7 +34,7 @@ Supported variables:
 | `ZOMBIE_GROQ_MODEL`       | Override the default model used when the active provider is `groq` |
 | `ZOMBIE_OPENROUTER_MODEL` | Fully-qualified OpenRouter model id (e.g. `anthropic/claude-3.5-sonnet`); takes precedence over `ZOMBIE_MODEL` for `openrouter` |
 | `ZOMBIE_CHAT_PORT`   | Loopback port for the chat UI (default `7878`) |
-| `OPENAI_BASE_URL`    | Point the `openai` provider at an OpenAI-compatible server (a local LM Studio / Ollama / llama.cpp endpoint such as `http://192.168.1.34:1234/v1`). Pair with `ZOMBIE_PROVIDER=openai` and `ZOMBIE_MODEL`. |
+| `LMSTUDIO_API_KEY`   | API key for a local OpenAI-compatible server (LM Studio / Ollama / llama.cpp). Pair with `ZOMBIE_PROVIDER=lmstudio` and `ZOMBIE_MODEL`; the server URL lives in `~/.pi/agent/models.json` (most local servers ignore the key). |
 | `DISPLAY`            | X display for desktop helpers (default `:0`; pre-seeded in the generated `secrets/env`) |
 
 Per-provider defaults if no `ZOMBIE_MODEL` / `ZOMBIE_<PROVIDER>_MODEL`
@@ -49,6 +49,7 @@ override is set (from `payload/agent/providers.py`):
 | `mistral`    | `mistral-small-latest`      |
 | `groq`       | `llama-3.1-8b-instant`      |
 | `openrouter` | *(no default; must be set)* |
+| `lmstudio`   | *(no default; must be set)* |
 
 All providers are routed through [`@earendil-works/pi-ai`][pi-ai],
 installed globally by `scripts/install.sh` at the version pinned in
@@ -64,7 +65,11 @@ resolves the active provider/model through the same
 (`--provider` / `--model`), forwarding only the active provider's key.
 This means the `pi` CLI's own native configuration (`~/.pi`) and its
 built-in default provider are **not** consulted when a provider is
-configured here — there is no second place to set the model.
+configured here — there is no second place to set the model. The one
+exception is the `lmstudio` provider: because a local server has no
+fixed endpoint, the installer writes its base URL to the `pi` custom
+provider file `~/.pi/agent/models.json` (the model id and key still
+come from `secrets/env`). See [Local LLM discovery](#local-llm-discovery-lan-scan).
 
 [pi-ai]: https://github.com/earendil-works/pi
 
@@ -86,19 +91,39 @@ installer queries each responder, collects the model ids it advertises,
 and offers them as the **starting model** in the parameter-review step.
 
 When a model is chosen, the generated `/opt/ai-zombie/secrets/env`
-records it as the OpenAI-compatible provider:
+records it as the `lmstudio` provider:
 
 ```
-ZOMBIE_PROVIDER=openai
+ZOMBIE_PROVIDER=lmstudio
 ZOMBIE_MODEL=<the model id you picked>
-OPENAI_BASE_URL=http://<server-ip>:1234/v1
-OPENAI_API_KEY=local
+LMSTUDIO_API_KEY=local
 ```
 
-Both the agent loop (`pi-mono`) and the chat surface then talk to the
-local server through the OpenAI-compatible API. Most local servers
-ignore the API key; set `ZOMBIE_LOCAL_LLM_API_KEY` (or edit the file
-afterwards) if yours requires a real one.
+and the server URL is written to the `pi` custom-provider file
+`~/.pi/agent/models.json` (owned by the agent account):
+
+```json
+{
+  "providers": {
+    "lmstudio": {
+      "baseUrl": "http://<server-ip>:1234/v1",
+      "api": "openai-completions",
+      "apiKey": "LMSTUDIO_API_KEY",
+      "compat": { "supportsDeveloperRole": false, "supportsReasoningEffort": false },
+      "models": [ { "id": "<the model id you picked>" } ]
+    }
+  }
+}
+```
+
+The agent loop (`pi-mono`, which produces every chat answer) reaches the
+local server through this `lmstudio` provider; `pi --provider openai`
+would ignore the base URL and hit `api.openai.com` instead, so a
+dedicated local provider is required. Most local servers ignore the API
+key; set `ZOMBIE_LOCAL_LLM_API_KEY` (or edit the files afterwards) if
+yours requires a real one. If you later load a different model in LM
+Studio, update the `id` in `~/.pi/agent/models.json` and `ZOMBIE_MODEL`
+in `secrets/env`, then restart the chat service.
 
 The scan is best-effort and skipped automatically for `--yes`,
 non-interactive, and non-TTY runs. It needs `curl` and `python3`
