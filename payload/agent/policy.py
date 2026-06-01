@@ -100,6 +100,11 @@ class Policy:
     # skill-driven tool calls are in play.
     max_tool_calls_per_turn: int = 12
     max_elevated_calls_per_turn: int = 3
+    # Wall-clock idle deadline (seconds) for a single agent turn. If the
+    # model/provider produces no event for this long the turn is
+    # terminated and the operator sees a clean error instead of an
+    # indefinitely-pending request. ``0`` disables the watchdog.
+    max_turn_seconds: int = 120
 
     def classify(self, command: str | Iterable[str]) -> str:
         """Return the most-elevated class implied by ``command``.
@@ -620,6 +625,7 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
         tool_classes=tool_classes,
         max_tool_calls_per_turn=_coerce_int(agent_raw.get("max_tool_calls_per_turn"), 12),
         max_elevated_calls_per_turn=_coerce_int(agent_raw.get("max_elevated_calls_per_turn"), 3),
+        max_turn_seconds=_coerce_int(agent_raw.get("max_turn_seconds"), 120),
     )
     _cache = (key, policy)
     return policy

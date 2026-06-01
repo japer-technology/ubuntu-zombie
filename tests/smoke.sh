@@ -564,6 +564,41 @@ if any(p["tool_call_id"] == "c" for p in pending):
     raise SystemExit("budget-exceeded call must not appear as pending")
 PY
     rm -rf "${_BUDGET_TMP}"
+
+    # Idle-deadline watchdog: a bridge that never answers must not hang
+    # the turn forever. pi_mono.run_turn should terminate the wedged
+    # subprocess and raise a clean BridgeError once the idle timeout
+    # elapses (the "Hello hangs forever" regression).
+    echo "  pi-mono idle timeout terminates a wedged turn"
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/tests/fixtures/hang-pi-mono.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import time
+import pi_mono, tools
+
+def on_tool_call(call_id, name, args):
+    return {"ok": True, "result": {"stubbed": True}}
+
+started = time.monotonic()
+try:
+    pi_mono.run_turn(
+        prompt="Hello",
+        system_prompt="stub",
+        history=[],
+        on_tool_call=on_tool_call,
+        tool_names=tools.tool_names(),
+        timeout=2.0,
+    )
+except pi_mono.BridgeError as exc:
+    elapsed = time.monotonic() - started
+    if "timed out" not in str(exc):
+        raise SystemExit(f"unexpected BridgeError: {exc}")
+    if elapsed > 10:
+        raise SystemExit(f"watchdog took too long to fire: {elapsed:.1f}s")
+else:
+    raise SystemExit("expected a BridgeError from the idle watchdog")
+PY
   else
     echo "  (skipping pi-mono stub end-to-end: node not on PATH)"
   fi

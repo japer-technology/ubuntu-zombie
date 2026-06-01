@@ -39,6 +39,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -53,6 +54,13 @@ DEFAULT_LOG_DIR = Path(os.environ.get(
     "ZOMBIE_PI_MONO_LOG_DIR", "/opt/ai-zombie/state/logs"))
 DEFAULT_SETTINGS_PATH = Path(os.environ.get(
     "ZOMBIE_PI_MONO_SETTINGS", "/opt/ai-zombie/pi/settings.json"))
+
+# Per-turn idle deadline (seconds). If the bridge produces no event for
+# this long the turn is presumed wedged — a hung provider socket, a pi
+# child stuck mid-stream, or a bridge that never emits ``final`` — and
+# the subprocess is killed so the chat surfaces a clean error instead of
+# hanging the operator's request forever. ``0`` disables the watchdog.
+DEFAULT_TURN_TIMEOUT = 120.0
 
 
 class BridgeError(RuntimeError):
@@ -85,6 +93,17 @@ def _log_path() -> Path:
     return DEFAULT_LOG_DIR / f"pi-mono.{ts}.{os.getpid()}.log"
 
 
+def _env_float(name: str, default: float) -> float:
+    """Best-effort float from the environment; ``default`` on any error."""
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
 ToolCallback = Callable[[str, str, dict[str, Any]], dict[str, Any]]
 """Signature: callback(tool_call_id, tool_name, args) -> {"ok": bool,
 "result"|"error": ...}."""
@@ -99,18 +118,30 @@ def run_turn(
     tool_names: Iterable[str],
     max_tool_calls: int = 8,
     settings_path: Path | str | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
     """Run one pi-mono turn.
 
     Returns ``{"final": str, "events": [...]}`` where ``events`` is the
     full list of bridge-emitted events (tool_call + tool_result echoes,
     in order).
+
+    ``timeout`` is a per-turn *idle* deadline in seconds: if the bridge
+    emits no event (and we are not waiting on an operator-mediated tool
+    result) for ``timeout`` seconds, the subprocess is terminated and a
+    :class:`BridgeError` is raised so the caller can report a clean
+    error rather than blocking the operator forever. ``None`` falls back
+    to ``ZOMBIE_PI_MONO_TIMEOUT`` then :data:`DEFAULT_TURN_TIMEOUT`; a
+    non-positive value disables the watchdog.
     """
     argv = _bridge_argv()
     log = _log_path()
     settings = str(settings_path or DEFAULT_SETTINGS_PATH)
     env = dict(os.environ)
     env.setdefault("PI_MONO_LOG", str(log))
+
+    if timeout is None:
+        timeout = _env_float("ZOMBIE_PI_MONO_TIMEOUT", DEFAULT_TURN_TIMEOUT)
 
     # Single source of truth for model + auth. Resolve the active
     # provider from /opt/ai-zombie/secrets/env via the shared registry
@@ -163,6 +194,37 @@ def run_turn(
     )
     assert proc.stdin is not None and proc.stdout is not None
 
+    # Idle watchdog: if the bridge produces no event for ``timeout``
+    # seconds the turn is presumed wedged and the subprocess is killed.
+    # ``readline`` below then returns EOF and we raise a timeout-specific
+    # error. ``last_activity`` is refreshed by the read loop after every
+    # event (and after each operator-mediated tool result) so a long but
+    # *active* turn — many tool calls — is never killed prematurely.
+    timed_out = threading.Event()
+    stop_watchdog = threading.Event()
+    activity_lock = threading.Lock()
+    last_activity = time.monotonic()
+
+    def _touch() -> None:
+        nonlocal last_activity
+        with activity_lock:
+            last_activity = time.monotonic()
+
+    def _watchdog() -> None:
+        while not stop_watchdog.wait(0.5):
+            with activity_lock:
+                idle = time.monotonic() - last_activity
+            if idle >= timeout:
+                timed_out.set()
+                proc.kill()
+                return
+
+    watchdog: threading.Thread | None = None
+    if timeout and timeout > 0:
+        watchdog = threading.Thread(
+            target=_watchdog, name="pi-mono-watchdog", daemon=True)
+        watchdog.start()
+
     events: list[dict[str, Any]] = []
     final_text = ""
     try:
@@ -173,11 +235,19 @@ def run_turn(
         while True:
             line = proc.stdout.readline()
             if not line:
+                if timed_out.is_set():
+                    raise BridgeError(
+                        f"pi-mono turn timed out after {timeout:.0f}s of "
+                        f"inactivity and was terminated. The model or "
+                        f"provider stopped responding; try again or check "
+                        f"the provider configuration."
+                    )
                 # Bridge exited; capture stderr for diagnostics.
                 err = proc.stderr.read() if proc.stderr else ""
                 raise BridgeError(
                     f"pi-mono bridge exited without 'final'. stderr:\n{err[-2000:]}"
                 )
+            _touch()
             line = line.strip()
             if not line:
                 continue
@@ -208,6 +278,10 @@ def run_turn(
                     except Exception as exc:  # noqa: BLE001
                         result = {"ok": False, "error": f"{exc.__class__.__name__}: {exc}"}
                     reply = {"type": "tool_result", "id": event.get("id"), **result}
+                # Executing a tool (or waiting on the operator gate) is
+                # activity, not idleness — refresh the deadline before we
+                # block again on the next bridge event.
+                _touch()
                 proc.stdin.write(json.dumps(reply, ensure_ascii=False) + "\n")
                 proc.stdin.flush()
             elif kind == "final":
@@ -220,6 +294,7 @@ def run_turn(
                 # emit progress hints we do not yet interpret.
                 continue
     finally:
+        stop_watchdog.set()
         try:
             if proc.stdin:
                 proc.stdin.close()
@@ -230,6 +305,9 @@ def run_turn(
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=5)
+        stop_watchdog.set()
+        if watchdog is not None:
+            watchdog.join(timeout=2)
 
     return {"final": final_text, "events": events, "log_path": str(log)}
 

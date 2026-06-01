@@ -221,6 +221,10 @@ tool_classes: {}
 # ``budget_exceeded`` observation so the model ends the turn cleanly.
 # The 12 / 3 defaults match the typical turn shape observed once
 # parallel skill-driven tool calls are in play.
+# ``max_turn_seconds`` is an idle deadline: if the model/provider
+# produces no event for this long the turn is terminated and the
+# operator sees a clean error instead of a request that hangs forever.
 agent:
   max_tool_calls_per_turn: 12
   max_elevated_calls_per_turn: 3
+  max_turn_seconds: 120
