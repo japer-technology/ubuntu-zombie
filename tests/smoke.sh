@@ -675,15 +675,19 @@ PY
   _CONV_TMP="$(mktemp -d)"
   ZOMBIE_HISTORY_DB="${_CONV_TMP}/conversations.db" \
   PYTHONPATH=payload/agent python3 - <<'PY'
+import atexit
 import json
+import os
+import shutil
+from pathlib import Path
+
+_db = os.environ.get("ZOMBIE_HISTORY_DB")
+if _db:
+    _td = Path(_db).resolve().parent
+    if _td != Path("/") and len(str(_td)) > 10:
+        atexit.register(lambda p=str(_td): shutil.rmtree(p, ignore_errors=True))
 
 import server
-
-
-class _FakeRFile:
-    def read(self, _n):
-        return b""
-
 
 class _Recorder(server.Handler):
     """Drive Handler.do_GET without a real socket; capture the reply."""
