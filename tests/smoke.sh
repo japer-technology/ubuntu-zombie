@@ -658,6 +658,7 @@ run_bad_usage() {
   expect_exit_code 2 env 'ZOMBIE_DIR=/tmp/zombie;touch /tmp/install-path-pwn' ./scripts/install.sh doctor
   expect_exit_code 2 env 'LOG_FILE=relative.log' ./scripts/install.sh doctor
   expect_exit_code 2 env 'LOG_FILE=/tmp/zombie log' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_RECEIPT=1' 'ZOMBIE_RECEIPT_FILE=relative-receipt.txt' ./scripts/install.sh doctor
   expect_exit_code 2 env 'VNC_PORT=bad' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_CHAT_PORT=70000' ./scripts/install.sh doctor
   # FIX-2-01: uninstall.sh must validate ZOMBIE_USER / paths *before*
@@ -793,6 +794,11 @@ run_standards() {
     [[ -s "payload/agent/skills/${s}.md" ]] || \
       { echo "missing built-in skill: payload/agent/skills/${s}.md" >&2; exit 1; }
   done
+
+  grep -q "__ZOMBIE_DIR__" payload/systemd/ubuntu-zombie-chat.service \
+    || { echo "chat systemd template must keep __ZOMBIE_DIR__ placeholder" >&2; exit 1; }
+  grep -q "s|__ZOMBIE_DIR__|\\\${ZOMBIE_DIR}|g" scripts/install.sh \
+    || { echo "install.sh must render __ZOMBIE_DIR__ in systemd units" >&2; exit 1; }
 
   # Keep the release bundle source list honest without creating dist/.
   tar --exclude-vcs --exclude='dist' --exclude='__pycache__' \
