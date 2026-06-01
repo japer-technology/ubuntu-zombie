@@ -60,8 +60,28 @@ lib_setup_colors() {
     C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'
     C_RED=$'\033[31m'; C_YELLOW=$'\033[33m'
     C_GREEN=$'\033[32m'; C_CYAN=$'\033[36m'
+    # Brand / theme accent palette. The primary highlight is Zombie Orchid
+    # #AC43D9 (RGB 172,67,217); the others are hand-picked to harmonise with
+    # it: a lighter tint, a complementary teal, and a warm magenta. These use
+    # 24-bit "truecolor" escapes; terminals without truecolor degrade to the
+    # nearest colour and everything still reads cleanly. They honour the same
+    # enable/disable policy as the base colours, so --no-color / NO_COLOR /
+    # ZOMBIE_COLOR=never blank them out and emit no ANSI at all.
+    # C_DIM/C_BRAND*/C_ACCENT/C_MAGENTA are consumed by sourcing scripts.
+    # shellcheck disable=SC2034
+    {
+      C_DIM=$'\033[2m'
+      C_BRAND=$'\033[38;2;172;67;217m'      # #AC43D9 primary highlight (orchid)
+      C_BRAND2=$'\033[38;2;199;123;230m'    # #C77BE6 lighter tint
+      C_ACCENT=$'\033[38;2;67;217;172m'     # #43D9AC complementary teal
+      C_MAGENTA=$'\033[38;2;217;67;172m'    # #D943AC warm magenta
+    }
   else
     C_RESET=""; C_BOLD=""; C_RED=""; C_YELLOW=""; C_GREEN=""; C_CYAN=""
+    # shellcheck disable=SC2034
+    {
+      C_DIM=""; C_BRAND=""; C_BRAND2=""; C_ACCENT=""; C_MAGENTA=""
+    }
   fi
 }
 
@@ -96,6 +116,41 @@ section() {
   printf '\n%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
   printf '%s%s%s\n' "${C_BOLD}" "$*" "${C_RESET}"
   printf '%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
+}
+
+# ---------------------------------------------------------------------------
+# Branded UI helpers (Zombie Orchid theme)
+# ---------------------------------------------------------------------------
+
+# brand_rule [width]
+#   A thin horizontal rule drawn in the brand highlight colour.
+# shellcheck disable=SC2120  # width is optional; callers may omit it
+brand_rule() {
+  local width="${1:-60}" line=""
+  local i
+  for (( i = 0; i < width; i++ )); do line+="─"; done
+  printf '%s%s%s\n' "${C_BRAND}" "${line}" "${C_RESET}"
+}
+
+# brand_banner "Title"
+#   A boxed, brand-coloured banner used to frame the setup experience.
+brand_banner() {
+  (( ZOMBIE_QUIET )) && return 0
+  local title="$*"
+  printf '\n'
+  brand_rule
+  printf '%s%s  %s%s\n' "${C_BRAND}" "${C_BOLD}" "${title}" "${C_RESET}"
+  brand_rule
+}
+
+# field "Label" "value" [accent_color]
+#   Render an aligned "label : value" row with a brand-coloured label and an
+#   optionally accented value. Used by the parameter review screen so every
+#   setting is presented in a consistent, glance-able way.
+field() {
+  local label="$1" value="$2" vcolor="${3:-${C_ACCENT}}"
+  printf '  %s%-22s%s %s%s%s\n' \
+    "${C_BRAND2}" "${label}" "${C_RESET}" "${vcolor}" "${value}" "${C_RESET}"
 }
 
 # ---------------------------------------------------------------------------

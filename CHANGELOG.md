@@ -8,6 +8,25 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **Interactive install parameter review.** On an interactive terminal,
+  `scripts/install.sh install` now opens an editable, branded summary of
+  every parameter (agent user, install root, chat/VNC ports, autologin,
+  Tailscale, transcript/receipt paths, SSH public key, VNC password)
+  before touching the host. Edit any field with validation and re-prompt
+  until satisfied, then accept to proceed; `q` cancels without changes.
+  Automated runs (`--yes`, `ZOMBIE_NONINTERACTIVE=1`, non-TTY) skip it.
+- **Zombie Orchid setup theme.** The setup UI is highlighted in
+  `#AC43D9` with compatible accent colours (lighter orchid tint,
+  complementary teal, warm magenta) via shared helpers in
+  `scripts/lib.sh`. Honours the existing `ZOMBIE_COLOR` / `NO_COLOR`
+  policy, so `--no-color` still emits plain text.
+- **Install receipt.** Every install writes a human-readable receipt
+  with all parameters at start and the outcome (result, duration,
+  service status, step counts, next step) at finish; failures append a
+  `FAILED` record. Secrets are never written (only an SSH key
+  fingerprint and a VNC password set/unset flag). Controlled by
+  `ZOMBIE_RECEIPT` (default on) and `ZOMBIE_RECEIPT_FILE` (default
+  `/var/log/ubuntu-zombie/install-receipt.txt`).
 - **Chat slash commands.** The chat web UI now recognises client-side
   commands (handled in the browser, never sent to the agent): `/help`,
   `/clear`, `/new` (alias `/reset`), `/examples`, `/tools`, `/health`,
