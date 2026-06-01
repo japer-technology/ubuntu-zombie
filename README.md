@@ -19,7 +19,7 @@
 > owner can ask the machine to diagnose, explain, configure,
 > repair, and operate itself.**
 
-# An AI SysAdmin
+## An AI System Administrator
 
 It is a normal Ubuntu PC with an administrator inside it. Any local
 user can open a private chat, ask the machine to do something, see
