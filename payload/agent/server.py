@@ -594,6 +594,9 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 self._send_json({"error": "bad id"}, 400)
                 return
+            if not self.app.history.conversation_exists(cid):
+                self._send_json({"error": f"No conversation #{cid}."}, 404)
+                return
             self._send_json({
                 "messages": self.app.history.get_messages(cid),
                 "events": self.app.history.get_events(cid),

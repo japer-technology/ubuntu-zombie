@@ -119,6 +119,14 @@ class History:
                 for row in cur.fetchall()
             ]
 
+    def conversation_exists(self, conversation_id: int) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+        return row is not None
+
     def add_message(self, conversation_id: int, role: str, content: str,
                     meta: dict[str, Any] | None = None) -> int:
         # FIX-3-17: insert + (conditional) title update must run in a
