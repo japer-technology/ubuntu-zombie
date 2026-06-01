@@ -351,19 +351,23 @@ function renderConversation(messages, events) {
   // Replay a stored conversation faithfully: interleave chat messages
   // and tool events by their recorded timestamp so a loaded transcript
   // reads in the same order it happened live (rather than every message
-  // first, then every tool call bunched at the end).
+  // first, then every tool call bunched at the end). ``seq`` is a single
+  // counter spanning both arrays, so when two items share a timestamp
+  // the tiebreak is their original insertion order (messages are added
+  // before the tool events they trigger).
   const items = [];
-  (messages || []).forEach((m, i) => {
+  let seq = 0;
+  for (const m of messages || []) {
     if (m.role === "user" || m.role === "assistant") {
-      items.push({ at: m.created_at, seq: i, node: () => addMessage(m.role, m.content) });
+      items.push({ at: m.created_at, seq: seq++, node: () => addMessage(m.role, m.content) });
     }
-  });
-  (events || []).forEach((ev, i) => {
-    items.push({ at: ev.created_at, seq: i, node: () => {
+  }
+  for (const ev of events || []) {
+    items.push({ at: ev.created_at, seq: seq++, node: () => {
       const n = renderEvent(ev);
       if (n) log.appendChild(n);
     }});
-  });
+  }
   items.sort((a, b) => {
     const at = (typeof a.at === "number") ? a.at : 0;
     const bt = (typeof b.at === "number") ? b.at : 0;
