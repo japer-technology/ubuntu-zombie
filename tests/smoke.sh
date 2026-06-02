@@ -647,6 +647,47 @@ if any(e.get("type") == "tool_call" for e in out["events"]):
     raise SystemExit("bridge must not re-dispatch pi's tool_execution events")
 PY
 
+    # The real bridge must forward the prior conversation into pi's
+    # one-shot -p prompt so the agent has cross-turn memory (regression:
+    # the bridge previously dropped `history`, so the model forgot names
+    # and earlier context). The fake pi echoes its -p prompt back.
+    echo "  pi-mono real bridge forwards conversation history (memory)"
+    ZOMBIE_FAKE_PI_MODE="echo" \
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/payload/agent/pi-mono-bridge.mjs" \
+    ZOMBIE_PI_MONO_BIN="$(pwd)/tests/fixtures/fake-pi-json.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import pi_mono, tools
+
+def on_tool_call(call_id, name, args):
+    return {"ok": True, "result": {}}
+
+# Mirror server.py: the current user turn is the last history entry and
+# is also passed as `prompt`.
+history = [
+    {"role": "user", "content": "Call me Eric"},
+    {"role": "assistant", "content": "Understood, Eric."},
+    {"role": "user", "content": "What is my name?"},
+]
+out = pi_mono.run_turn(
+    prompt="What is my name?",
+    system_prompt="you are helpful",
+    history=history,
+    on_tool_call=on_tool_call,
+    tool_names=tools.tool_names(),
+    timeout=20.0,
+)
+final = out["final"]
+# Earlier turns must reach pi so the model can answer from memory.
+if "Eric" not in final:
+    raise SystemExit(f"bridge dropped conversation history: {final!r}")
+# The current question must appear exactly once (not duplicated by the
+# trailing history entry the server appends).
+if final.count("What is my name?") != 1:
+    raise SystemExit(f"current prompt duplicated/missing: {final!r}")
+PY
+
     # The real bridge must surface a provider/connection error as a
     # clean BridgeError rather than a blank answer or a hung turn.
     echo "  pi-mono real bridge surfaces provider errors"

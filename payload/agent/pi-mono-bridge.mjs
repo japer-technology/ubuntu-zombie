@@ -20,18 +20,19 @@
 // The actual upstream `pi` CLI talks `--mode rpc` JSON-RPC on stdio;
 // translating that protocol in a 60-line script is brittle, so this
 // bridge takes a pragmatic approach: it spawns `pi --mode json -p`
-// with --no-builtin-tools --tools <allowlist> and parses pi's JSON
-// event stream into our protocol. The whole prompt is supplied up
-// front via `-p`, so `pi` needs no stdin; we spawn it with stdin
-// closed (EOF) so it exits as soon as the turn finishes. (`pi
-// --mode json` is a one-shot event *stream* — unlike `--mode rpc` it
-// does not read tool observations back from stdin, so leaving stdin
-// open just makes `pi` wait forever for EOF and never exit.) We parse
-// `pi`'s real `--mode json` event schema (session / agent_start /
-// turn_start / message_start / message_update / message_end /
-// turn_end / agent_end / tool_execution_* / auto_retry_*) and surface
-// the assistant's text — and any provider error — back to Python. If
-// pi is not available the bridge surfaces a helpful error.
+// with pi's real built-in tools (read, bash, edit, write, grep, find,
+// ls) enabled and parses pi's JSON event stream into our protocol. The
+// whole prompt — rendered with the prior conversation so the agent has
+// cross-turn memory — is supplied up front via `-p`, so `pi` needs no
+// stdin; we spawn it with stdin closed (EOF) so it exits as soon as the
+// turn finishes. (`pi --mode json` is a one-shot event *stream* —
+// unlike `--mode rpc` it does not read tool observations back from
+// stdin, so leaving stdin open just makes `pi` wait forever for EOF and
+// never exit.) We parse `pi`'s real `--mode json` event schema (session
+// / agent_start / turn_start / message_start / message_update /
+// message_end / turn_end / agent_end / tool_execution_* / auto_retry_*)
+// and surface the assistant's text — and any provider error — back to
+// Python. If pi is not available the bridge surfaces a helpful error.
 
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -65,6 +66,49 @@ function extractText(content) {
     }
   }
   return out;
+}
+
+// pi's real built-in tool names (see `pi --help`: "Built-in tools:
+// read, bash, edit, write, grep, find, ls"). The Python registry uses
+// logical names like `fs.read` / `shell.run` that pi does not know
+// about; forwarding those verbatim to `--tools` *and* passing
+// `--no-builtin-tools` left the agent with zero usable tools, so it
+// could not run anything and instead emitted tool-call-shaped text
+// (e.g. `<|tool_call>call:fs.list{…}`). Enabling pi's genuine built-in
+// tools lets the agent actually act on the operator's requests.
+const PI_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
+
+// Render the prior conversation into the one-shot `-p` prompt so the
+// agent has memory across turns. `pi --mode json -p` is a single-shot
+// invocation with no session loaded, so without this the model never
+// sees earlier turns and "forgets" names and context. The Python
+// server appends the current user turn to `history` before sending, so
+// the final entry usually duplicates `prompt`; drop it to avoid asking
+// the current question twice.
+function buildPrompt(start) {
+  const prompt = start && start.prompt != null ? String(start.prompt) : "";
+  const history = Array.isArray(start && start.history)
+    ? start.history.slice()
+    : [];
+  if (history.length > 0) {
+    const last = history[history.length - 1];
+    if (last && last.role === "user" &&
+        String(last.content == null ? "" : last.content) === prompt) {
+      history.pop();
+    }
+  }
+  const lines = [];
+  for (const m of history) {
+    if (!m || typeof m !== "object") continue;
+    const role = m.role === "assistant"
+      ? "Assistant"
+      : m.role === "user" ? "User" : null;
+    if (!role) continue;
+    lines.push(`${role}: ${m.content == null ? "" : String(m.content)}`);
+  }
+  if (lines.length === 0) return prompt;
+  return "Conversation so far:\n" + lines.join("\n") +
+    "\n\nCurrent message:\n" + prompt;
 }
 
 let logFd = null;
@@ -134,13 +178,12 @@ async function run() {
   const piBin = process.env.ZOMBIE_PI_MONO_BIN || "pi";
 
   // Build CLI arguments.  We invoke pi in JSON-event mode with the
-  // operator-supplied system prompt appended, the built-in tools off,
-  // and the closed allow-list passed verbatim. The prompt is fed via
-  // -p so pi exits after one turn.
+  // operator-supplied system prompt appended and pi's real built-in
+  // tools enabled. The prompt — rendered with the prior conversation so
+  // the agent has memory — is fed via -p so pi exits after one turn.
   const args = [
     "--mode", "json",
-    "-p", start.prompt,
-    "--no-builtin-tools",
+    "-p", buildPrompt(start),
   ];
   // Model + provider come from payload/agent/providers.py (resolved
   // from /opt/ai-zombie/secrets/env) so the agent loop selects the
@@ -158,7 +201,11 @@ async function run() {
     args.push("--model", start.model);
   }
   if (Array.isArray(start.tools) && start.tools.length > 0) {
-    args.push("--tools", start.tools.join(","));
+    // The operator configured a tool allow-list, but its logical names
+    // (fs.read, shell.run, …) are not pi tool ids. Enable pi's real
+    // built-in tools so the agent can read the filesystem and run
+    // commands; pi executes them itself in --mode json.
+    args.push("--tools", PI_BUILTIN_TOOLS.join(","));
   }
   if (typeof start.system === "string" && start.system.length > 0) {
     args.push("--append-system-prompt", start.system);
