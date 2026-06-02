@@ -13,6 +13,8 @@
 // ZOMBIE_FAKE_PI_MODE selects the scenario:
 //   "text"  (default) — a normal streamed assistant answer.
 //   "error"           — a provider/connection error with no answer.
+//   "echo"            — answer with the exact -p prompt received, so a
+//                       test can assert the bridge forwarded history.
 //
 // Crucially, it does NOT read stdin: the real `pi --mode json` is a
 // one-shot event stream, and the bridge must let it exit on stdin EOF
@@ -22,6 +24,18 @@ function out(o) { process.stdout.write(JSON.stringify(o) + "\n"); }
 
 const ANSWER = "Hello from the local model!";
 const mode = process.env.ZOMBIE_FAKE_PI_MODE || "text";
+
+// In "echo" mode the fake pi answers with the exact prompt it received
+// via -p. The bridge renders the prior conversation into that prompt,
+// so smoke.sh can assert cross-turn memory is actually forwarded.
+function promptArg() {
+  const argv = process.argv.slice(2);
+  const i = argv.indexOf("-p");
+  if (i !== -1 && i + 1 < argv.length) return argv[i + 1];
+  const j = argv.indexOf("--prompt");
+  if (j !== -1 && j + 1 < argv.length) return argv[j + 1];
+  return "";
+}
 
 const base = {
   api: "openai-completions",
@@ -54,6 +68,16 @@ if (mode === "error") {
 }
 
 const asst = (text) => ({ role: "assistant", content: text ? [{ type: "text", text }] : [], ...base, stopReason: "stop", timestamp: Date.now() });
+
+if (mode === "echo") {
+  const answer = promptArg();
+  out({ type: "message_start", message: asst("") });
+  out({ type: "message_end", message: asst(answer) });
+  out({ type: "turn_end", message: asst(answer), toolResults: [] });
+  out({ type: "agent_end", messages: [asst(answer)], willRetry: false });
+  await waitForStdinEof();
+  process.exit(0);
+}
 
 out({ type: "message_start", message: asst("") });
 // A tool_execution pair the bridge must tolerate (log only) without

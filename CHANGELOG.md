@@ -131,6 +131,17 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   installer requires to proceed.
 
 ### Fixed
+- **Chat memory and command execution in the pi-mono agent loop.** The
+  `pi-mono` bridge (`payload/agent/pi-mono-bridge.mjs`) now forwards the
+  prior conversation into pi's one-shot `-p` prompt, so the agent
+  remembers names and earlier context across turns instead of starting
+  fresh every message. It also enables pi's real built-in tools (`read`,
+  `bash`, `edit`, `write`, `grep`, `find`, `ls`) instead of passing the
+  Python registry's logical names (`fs.read`, `shell.run`, …) — which pi
+  does not recognise — together with `--no-builtin-tools`, a combination
+  that left the agent with zero usable tools and made it emit
+  tool-call-shaped text (e.g. `<|tool_call>call:fs.list{…}`) rather than
+  acting. The chat system prompt now describes these built-in tools.
 - **Loading a past conversation in the chat UI.** The `/load <id>`
   command now reports unknown ids instead of silently showing an empty
   transcript: `GET /api/conversation/<id>` returns a `404` with an
