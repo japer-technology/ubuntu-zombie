@@ -23,8 +23,9 @@ RestartSec=3
 StandardOutput=journal
 StandardError=journal
 
-# Security hardening — the service must keep writing the audit log
-# under /var/log/ubuntu-zombie/, so /var/log is not made read-only.
+# Security hardening — note ProtectSystem is deliberately disabled
+# (see FIX-3-03 below) so the agent can write /usr and /etc; /var/log
+# (the audit log) therefore stays writable too.
 #
 # FIX-3-01: ``NoNewPrivileges=true`` is intentionally absent here. The
 # whole product is designed around the agent account elevating via
@@ -33,7 +34,20 @@ StandardError=journal
 # The policy gate in payload/etc/policy.yaml is the security boundary,
 # not the systemd sandbox. For extra defence-in-depth use a dedicated
 # AppArmor profile that allows /usr/bin/sudo.
-ProtectSystem=full
+#
+# FIX-3-03: ``ProtectSystem`` is intentionally disabled for the same
+# reason. ``ProtectSystem=full`` (and ``strict``) read-only bind-mounts
+# /usr, /boot and /etc *inside this unit's private mount namespace*.
+# ``sudo`` does not create a new mount namespace, so every approved
+# elevation the agent runs — ``pkg.install`` (``apt-get install``),
+# config edits under /etc, and so on — inherits that read-only /usr and
+# fails with "Read-only file system", even after a successful live
+# ``mount -o remount,rw /usr`` (the namespace override cannot be undone
+# from inside the unit). Writing /usr and /etc *is* the agent's job, so
+# the systemd mount sandbox must not block it. Defence-in-depth here is
+# the policy gate plus the optional AppArmor profile, not a read-only
+# system tree.
+ProtectSystem=false
 ProtectHome=false
 PrivateTmp=true
 ProtectKernelTunables=true

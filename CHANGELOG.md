@@ -9,6 +9,17 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Fixed
+- **Approved package installs and `/etc` edits no longer fail with
+  "Read-only file system."** The chat service unit ran under
+  `ProtectSystem=full`, which read-only bind-mounts `/usr`, `/boot`, and
+  `/etc` inside the unit's private mount namespace. Because `sudo` does
+  not open a new mount namespace, every approved elevation — including
+  `pkg.install` (`apt-get install`) and configuration edits — inherited
+  the read-only `/usr` and failed regardless of any live
+  `mount -o remount,rw`. `ProtectSystem` is now disabled (`false`) so the
+  agent can write `/usr`/`/etc` as its job requires; the policy gate and
+  closed tool registry remain the security boundary (same rationale as
+  the deliberately-absent `NoNewPrivileges`).
 - Periodic post-install health checks now report unhealthy runtime state in
   the journal without leaving `ubuntu-zombie-health.service` failed after the
   timer runs.

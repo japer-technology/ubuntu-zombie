@@ -285,9 +285,13 @@ Created/asserted by `scripts/install.sh`. `ZOMBIE_DIR` defaults to
 | `ubuntu-zombie-chat.service` | `User=/Group=__AGENT_USER__`; `WorkingDirectory=/opt/ai-zombie`; `EnvironmentFile=-/opt/ai-zombie/secrets/env`; `Environment=ZOMBIE_CHAT_PORT=7878` (fallback); `ExecStart=__AGENT_HOME__/agent-env/bin/python /opt/ai-zombie/agent/server.py --host 127.0.0.1 --port ${ZOMBIE_CHAT_PORT}`; `After/Wants=network-online.target`; `Restart=on-failure`. |
 | `ubuntu-zombie-health.service` + `.timer` | Periodic `health-check`; timer `OnBootSec=5min`, `OnUnitActiveSec=15min`, `Persistent=true`. |
 
-Hardening on the chat service: `ProtectSystem=full`, `PrivateTmp=true`,
+Hardening on the chat service: `PrivateTmp=true`,
 `ProtectKernelTunables/Modules/ControlGroups=true`,
 `RestrictRealtime=true`, `RestrictSUIDSGID=true`, `LockPersonality=true`.
+`ProtectSystem` is deliberately **disabled** (`false`): a read-only
+`/usr`/`/etc` mount would block the agent's approved package installs and
+config edits (see the `NoNewPrivileges` note below — `sudo` inherits the
+unit's mount namespace).
 
 **Critical, intentional exception:** `NoNewPrivileges` is **absent**.
 The agent elevates through passwordless `sudo` (a setuid binary) once
@@ -418,8 +422,11 @@ the secrets path itself. `tool_call` entries carry classification,
 decision, exit code, duration, and SHA-256 digests; stdout/stderr
 previews appear only under `ZOMBIE_AUDIT_VERBOSE=1`. Inspect with
 `audit-recent` (pretty via `jq`, falling back to `grep`). The service
-**must** retain write access to `/var/log/ubuntu-zombie/` (reflected in
-the unit's `ProtectSystem=full`, not `strict`).
+**must** retain write access to `/var/log/ubuntu-zombie/`. The unit
+leaves `ProtectSystem` **disabled** (`false`) so approved elevations can
+also write `/usr` (package installs) and `/etc` (configuration); a
+read-only system mount would break the agent's core job, since `sudo`
+cannot escape the unit's mount namespace.
 
 ---
 
