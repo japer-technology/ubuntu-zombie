@@ -106,7 +106,7 @@ if hasattr(server, "extract_commands"):
     raise SystemExit("extract_commands must be removed")
 import tools as _t
 assert set(_t.tool_names()) == {
-    "shell.run", "fs.read", "fs.write", "pkg.query", "pkg.install",
+    "shell.run", "fs.read", "fs.list", "fs.write", "pkg.query", "pkg.install",
     "svc.status", "svc.control", "net.status", "gui.screenshot",
     "gui.click", "gui.type", "skill.list", "skill.load",
 }, _t.tool_names()
