@@ -45,6 +45,7 @@ from audit import log_event, log_tool_call, tail as audit_tail  # noqa: E402
 from history import History  # noqa: E402
 from policy import load_policy  # noqa: E402
 from providers import provider_status  # noqa: E402
+import providers  # noqa: E402
 import pi_mono  # noqa: E402
 import skill_loader  # noqa: E402
 import tools as tools_mod  # noqa: E402
@@ -492,6 +493,39 @@ class App:
             return {"status": "error", "tool_call_id": tool_call_id,
                     "error": str(exc)}
 
+    # ---- model catalogue / selection ----
+    def models_info(self) -> dict[str, Any]:
+        """List the models the active provider exposes for ``/model``.
+
+        Returns ``{provider, current, models}`` where ``models`` is a
+        list of ``{id, name, reasoning, context_window}``. Surfaces an
+        ``error`` (alongside any data resolved so far) when no provider
+        is configured or the bridge cannot be reached, so the UI can
+        show a useful message rather than a bare failure.
+        """
+        try:
+            provider = providers.active_provider()
+        except providers.NoProviderConfigured as exc:
+            return {"error": str(exc)}
+        current = providers.current_model()
+        try:
+            models = providers.list_models()
+        except providers.ProviderError as exc:
+            return {"provider": provider, "current": current,
+                    "models": [], "error": str(exc)}
+        return {"provider": provider, "current": current, "models": models}
+
+    def set_model(self, model: str) -> dict[str, Any]:
+        """Select ``model`` for the active provider for this process."""
+        try:
+            provider, chosen = providers.set_active_model(model)
+        except providers.NoProviderConfigured as exc:
+            return {"error": str(exc)}
+        except ValueError as exc:
+            return {"error": str(exc)}
+        log_event("model_selected", provider=provider, model=chosen)
+        return {"ok": True, "provider": provider, "model": chosen}
+
 
 def _summarize(args: Any) -> dict[str, Any]:
     """Return a small, audit-safe summary of tool args."""
@@ -622,6 +656,9 @@ class Handler(BaseHTTPRequestHandler):
                 for n, spec in tools_mod.TOOL_REGISTRY.items()
             ]})
             return
+        if self.path == "/api/models":
+            self._send_json(self.app.models_info())
+            return
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -650,6 +687,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "missing tool_call_id"}, 400)
                 return
             self._send_json(self.app.approve(tcid, decision, phrase))
+            return
+        if self.path == "/api/model":
+            data = self._read_json()
+            model = (data.get("model") or "").strip()
+            if not model:
+                self._send_json({"error": "missing model"}, 400)
+                return
+            self._send_json(self.app.set_model(model))
             return
         self.send_error(HTTPStatus.NOT_FOUND)
 

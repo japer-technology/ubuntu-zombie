@@ -226,9 +226,14 @@ def _bridge_env(spec: _ProviderSpec) -> dict[str, str]:
     return env
 
 
-def _call_bridge(spec: _ProviderSpec, model: str,
-                 messages: list[Message]) -> str:
-    """Invoke the Node bridge and return the assistant text."""
+def _run_bridge(spec: _ProviderSpec, request: dict) -> dict:
+    """Invoke the Node bridge with ``request`` and return the parsed reply.
+
+    Shared by the chat-completion path (:func:`_call_bridge`) and the
+    model catalogue path (:func:`list_models`). Raises
+    :class:`NoProviderConfigured` when the bridge reports a missing key
+    and :class:`ProviderError` for every other failure.
+    """
     bridge = _bridge_path()
     if not bridge.exists():
         raise ProviderError(
@@ -236,11 +241,7 @@ def _call_bridge(spec: _ProviderSpec, model: str,
             "or set ZOMBIE_PI_AI_BRIDGE."
         )
     node = _node_binary()
-    payload = json.dumps({
-        "provider": spec.name,
-        "model": model,
-        "messages": [{"role": m.role, "content": m.content} for m in messages],
-    })
+    payload = json.dumps(request)
     try:
         proc = subprocess.run(
             [node, str(bridge)],
@@ -274,10 +275,19 @@ def _call_bridge(spec: _ProviderSpec, model: str,
         code = (result or {}).get("code", "")
         if code == "missing_key":
             raise NoProviderConfigured(msg)
-        if code == "pi_ai_missing":
-            raise ProviderError(msg)
         raise ProviderError(msg)
+    return result
 
+
+def _call_bridge(spec: _ProviderSpec, model: str,
+                 messages: list[Message]) -> str:
+    """Invoke the Node bridge and return the assistant text."""
+    result = _run_bridge(spec, {
+        "op": "complete",
+        "provider": spec.name,
+        "model": model,
+        "messages": [{"role": m.role, "content": m.content} for m in messages],
+    })
     text = result.get("text", "")
     return text if isinstance(text, str) else ""
 
@@ -370,6 +380,43 @@ def resolve_active_model(name: str | None = None,
     return (provider.name, provider.model, provider.key_env)
 
 
+def _resolve_spec(name: str | None = None) -> _ProviderSpec:
+    """Return the active provider spec, or raise ``NoProviderConfigured``.
+
+    Selection order mirrors :func:`provider_from_env`:
+
+    1. ``name`` argument, if set.
+    2. ``ZOMBIE_PROVIDER`` environment variable.
+    3. The first provider in ``_PI_AI_PROVIDERS`` whose key env var is
+       present (preserves the legacy "first key wins" autodetect).
+
+    Unlike :func:`provider_from_env` this resolves the provider only —
+    it does not require a model id — so it can serve the model-catalogue
+    and selection helpers for providers (openrouter, lmstudio) that have
+    no default model yet.
+    """
+    explicit = (name or os.environ.get("ZOMBIE_PROVIDER", "")).strip().lower()
+    if explicit:
+        spec = _PROVIDER_BY_NAME.get(explicit)
+        if spec is None:
+            raise NoProviderConfigured(
+                f"Unknown provider {explicit!r}. Supported: "
+                f"{', '.join(SUPPORTED_PROVIDERS)}."
+            )
+        return spec
+
+    for spec in _PI_AI_PROVIDERS:
+        if os.environ.get(spec.key_env):
+            return spec
+
+    keys = ", ".join(spec.key_env for spec in _PI_AI_PROVIDERS)
+    raise NoProviderConfigured(
+        "No provider API key found. Set one of "
+        f"{keys} in /opt/ai-zombie/secrets/env and restart "
+        "ubuntu-zombie-chat.service."
+    )
+
+
 def provider_from_env(name: str | None = None,
                       model: str | None = None) -> BaseProvider:
     """Return a configured provider, or raise ``NoProviderConfigured``.
@@ -381,23 +428,94 @@ def provider_from_env(name: str | None = None,
     3. The first provider in ``_PI_AI_PROVIDERS`` whose key env var is
        present (preserves the legacy "first key wins" autodetect).
     """
-    explicit = (name or os.environ.get("ZOMBIE_PROVIDER", "")).strip().lower()
-    if explicit:
-        spec = _PROVIDER_BY_NAME.get(explicit)
-        if spec is None:
-            raise NoProviderConfigured(
-                f"Unknown provider {explicit!r}. Supported: "
-                f"{', '.join(SUPPORTED_PROVIDERS)}."
-            )
-        return BaseProvider(spec, model=model)
+    return BaseProvider(_resolve_spec(name), model=model)
 
-    for spec in _PI_AI_PROVIDERS:
-        if os.environ.get(spec.key_env):
-            return BaseProvider(spec, model=model)
 
-    keys = ", ".join(spec.key_env for spec in _PI_AI_PROVIDERS)
-    raise NoProviderConfigured(
-        "No provider API key found. Set one of "
-        f"{keys} in /opt/ai-zombie/secrets/env and restart "
-        "ubuntu-zombie-chat.service."
-    )
+def active_provider(name: str | None = None) -> str:
+    """Return the operator-visible name of the active provider.
+
+    Resolves like :func:`provider_from_env` but without requiring a
+    model id or API key, so the UI can name the provider even before a
+    model is pinned. Raises :class:`NoProviderConfigured` when nothing
+    is configured.
+    """
+    return _resolve_spec(name).name
+
+
+def current_model(name: str | None = None) -> str | None:
+    """Return the model id the active provider would use, or ``None``.
+
+    Applies the same precedence as the chat surface and agent loop
+    (``ZOMBIE_MODEL`` > provider override env > registry default).
+    Returns ``None`` when nothing resolves (e.g. openrouter or lmstudio
+    before a model is selected). Raises :class:`NoProviderConfigured`
+    when no provider is configured at all.
+    """
+    return _resolve_model(_resolve_spec(name)) or None
+
+
+def list_models(name: str | None = None) -> list[dict]:
+    """List the models pi-ai knows for the active (or named) provider.
+
+    Returns a list of ``{"id", "name", "reasoning", "context_window"}``
+    dicts. The catalogue is static (pi-ai bundles it), so no API key is
+    required. Providers without a bundled catalogue — notably
+    ``lmstudio`` — return an empty list; the operator must pin the model
+    id their local server serves via :func:`set_active_model`.
+
+    Raises :class:`NoProviderConfigured` when no provider is configured
+    and :class:`ProviderError` when the bridge cannot be reached.
+    """
+    spec = _resolve_spec(name)
+    result = _run_bridge(spec, {"op": "list_models", "provider": spec.name})
+    models = result.get("models", [])
+    if not isinstance(models, list):
+        return []
+    out: list[dict] = []
+    for m in models:
+        if not isinstance(m, dict):
+            continue
+        mid = str(m.get("id") or "").strip()
+        if not mid:
+            continue
+        out.append({
+            "id": mid,
+            "name": str(m.get("name") or mid),
+            "reasoning": bool(m.get("reasoning")),
+            "context_window": m.get("contextWindow"),
+        })
+    return out
+
+
+def set_active_model(model: str, name: str | None = None) -> tuple[str, str]:
+    """Select ``model`` for the active provider for this process.
+
+    Sets ``ZOMBIE_MODEL`` in the current process environment so every
+    subsequent chat turn and agent loop (which both resolve through this
+    module) uses it. When the provider exposes a model catalogue the id
+    is validated against it; providers without a catalogue (lmstudio)
+    accept any non-empty id.
+
+    Returns ``(provider, model)``. Raises :class:`NoProviderConfigured`
+    when no provider is configured and :class:`ValueError` when ``model``
+    is empty or not a known id for the provider.
+    """
+    chosen = (model or "").strip()
+    if not chosen:
+        raise ValueError("a model id is required")
+    spec = _resolve_spec(name)
+    # Validate against the provider's catalogue when one is available.
+    # A missing bridge/node (ProviderError) must not block selection, so
+    # fall back to accepting the id and let the chat turn surface any
+    # error — this also covers free-form providers (lmstudio).
+    try:
+        known = [m["id"] for m in list_models(spec.name)]
+    except ProviderError:
+        known = []
+    if known and chosen not in known:
+        raise ValueError(
+            f"unknown model {chosen!r} for provider {spec.name!r}; "
+            "use /model to list the available models."
+        )
+    os.environ["ZOMBIE_MODEL"] = chosen
+    return (spec.name, chosen)
