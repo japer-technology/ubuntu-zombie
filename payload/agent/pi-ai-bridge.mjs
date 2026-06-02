@@ -8,8 +8,12 @@
 //
 // Wire format
 // -----------
-// stdin: a single JSON object
+// stdin: a single JSON object. Two operations are supported, selected
+// by the optional "op" field (defaults to "complete"):
+//
+//   complete — run a one-shot chat completion (the default):
 //   {
+//     "op":       "complete",   // optional
 //     "provider": "openai" | "anthropic" | "gemini" | "xai"
 //                 | "openrouter" | "mistral" | "groq" | "lmstudio",
 //     "model":    "<provider model id>",
@@ -17,8 +21,17 @@
 //                    "content": "..." }, ...]
 //   }
 //
+//   list_models — list the models pi-ai knows for a provider. Needs no
+//   API key (the catalogue is static) and no model:
+//   {
+//     "op":       "list_models",
+//     "provider": "openai" | ...
+//   }
+//
 // stdout: a single JSON object
-//   { "ok": true,  "text": "<assistant reply>" }                (success)
+//   { "ok": true,  "text": "<assistant reply>" }                (complete)
+//   { "ok": true,  "models": [{ "id", "name", "reasoning",
+//                               "contextWindow" }, ...] }        (list_models)
 //   { "ok": false, "error": "<message>", "code": "<short id>" } (failure)
 //
 // The bridge never reads provider keys directly — it relies on the
@@ -100,6 +113,43 @@ async function main() {
       `unknown provider "${provider}"; supported: ${Object.keys(PROVIDER_MAP).join(", ")}`,
       "unknown_provider",
     );
+  }
+
+  // list_models is satisfied entirely from pi-ai's static catalogue, so
+  // it needs neither an API key nor a model id — handle it before those
+  // checks and return early.
+  const op = String(req.op || "complete").toLowerCase();
+  if (op === "list_models") {
+    let pi;
+    try {
+      pi = await import("@earendil-works/pi-ai");
+    } catch (err) {
+      die(
+        `failed to load @earendil-works/pi-ai: ${err.message}. ` +
+          "Reinstall via scripts/install.sh.",
+        "pi_ai_missing",
+      );
+    }
+    let models;
+    try {
+      models = pi.getModels(piProvider) || [];
+    } catch (err) {
+      die(
+        `failed to list models for provider "${provider}": ${err.message}`,
+        "list_failed",
+      );
+    }
+    const out = models
+      .filter((m) => m && m.id)
+      .map((m) => ({
+        id: String(m.id),
+        name: String(m.name || m.id),
+        reasoning: !!m.reasoning,
+        contextWindow:
+          typeof m.contextWindow === "number" ? m.contextWindow : null,
+      }));
+    emit({ ok: true, models: out });
+    return;
   }
 
   const keyEnv = KEY_ENV[provider];

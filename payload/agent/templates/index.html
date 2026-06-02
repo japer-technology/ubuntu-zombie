@@ -479,6 +479,7 @@ const SLASH_COMMANDS = [
   ["/health", "Show this machine's facts (hostname, OS, kernel, arch)."],
   ["/status", "Show a compact host + provider status line."],
   ["/version", "Show the payload and provider-bridge versions."],
+  ["/model", "List the provider's models, or switch: /model <id>."],
   ["/audit", "Show the most recent audit-log entries."],
   ["/conversations", "List recent conversations (alias: /history)."],
   ["/load", "Load a past conversation: /load <id>."],
@@ -632,6 +633,62 @@ async function handleSlashCommand(input) {
         if (data.pi_mono) lines.push(`pi-mono: ${data.pi_mono}`);
         if (data.pi_ai) lines.push(`pi-ai: ${data.pi_ai}`);
         addMessage("system", lines.join("\n"));
+      } catch (err) {
+        addMessage("system", String(err), { error: true });
+      }
+      return true;
+    }
+    case "/model": {
+      addMessage("user", input);
+      if (!arg) {
+        try {
+          const data = await fetchJson("/api/models");
+          if (data.error && !(data.models || []).length) {
+            addMessage("system", data.error, { error: true });
+            return true;
+          }
+          const models = data.models || [];
+          if (!models.length) {
+            addMessage("system",
+              `Provider ${data.provider || "?"} exposes no model catalogue` +
+              (data.current ? ` (current: ${data.current})` : "") +
+              ". Set the id your server serves with /model <id>." +
+              (data.error ? `\n${data.error}` : ""));
+            return true;
+          }
+          const lines = models.map(m => {
+            const mark = (data.current && m.id === data.current) ? "* " : "  ";
+            const extra = [
+              m.reasoning ? "reasoning" : null,
+              m.context_window ? `${m.context_window} ctx` : null,
+            ].filter(Boolean).join(", ");
+            return `${mark}${m.id}` + (extra ? ` — ${extra}` : "");
+          });
+          addMessage("system",
+            `Models for ${data.provider} (use /model <id> to switch` +
+            (data.current ? "; * = current" : "") + "):\n" + lines.join("\n"));
+        } catch (err) {
+          addMessage("system", String(err), { error: true });
+        }
+        return true;
+      }
+      try {
+        const r = await fetch("/api/model", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ model: arg }),
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.error) {
+          addMessage("system", data.error || `/api/model → HTTP ${r.status}`,
+            { error: true });
+          return true;
+        }
+        addMessage("system", `Model set to ${data.model} (provider ${data.provider}).`);
+        const banner = document.querySelector("header .status");
+        if (banner && data.provider && data.model) {
+          banner.textContent = `Provider: connected (${data.provider} \u00b7 ${data.model})`;
+        }
       } catch (err) {
         addMessage("system", String(err), { error: true });
       }

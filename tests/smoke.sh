@@ -453,6 +453,104 @@ if rec["env"].get("OPENAI_API_KEY"):
 PY
     rm -f "${_START_OUT}"
 
+    # Model catalogue + runtime selection: providers.list_models /
+    # current_model / set_active_model back the /model chat command and
+    # the /api/models + /api/model endpoints. Drive them against a
+    # hermetic stub bridge so no API key or @earendil-works/pi-ai
+    # install is needed. Also exercises the server App wrappers.
+    echo "  providers model catalogue + /model endpoints"
+    ZOMBIE_PI_AI_BRIDGE="$(pwd)/tests/fixtures/stub-pi-ai-bridge.mjs" \
+    ZOMBIE_NODE="$(command -v node)" \
+    ZOMBIE_AUDIT_LOG="$(mktemp -d)/audit.log" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import os
+import providers as _pr
+import server
+
+for k in ("ZOMBIE_PROVIDER", "ZOMBIE_MODEL", "OPENAI_API_KEY",
+          "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY",
+          "OPENROUTER_API_KEY", "MISTRAL_API_KEY", "GROQ_API_KEY",
+          "LMSTUDIO_API_KEY"):
+    os.environ.pop(k, None)
+
+# No provider configured: both helpers must raise the shared
+# NoProviderConfigured rather than returning a misleading empty list.
+for fn in (_pr.active_provider, _pr.list_models, _pr.current_model):
+    try:
+        fn()
+    except _pr.NoProviderConfigured:
+        pass
+    else:
+        raise SystemExit(f"{fn.__name__} should raise without a provider")
+
+os.environ["ZOMBIE_PROVIDER"] = "openai"
+os.environ["OPENAI_API_KEY"] = "test"
+
+if _pr.active_provider() != "openai":
+    raise SystemExit(f"active_provider wrong: {_pr.active_provider()!r}")
+# current_model falls back to the registry default before selection.
+if _pr.current_model() != "gpt-4o-mini":
+    raise SystemExit(f"current_model wrong: {_pr.current_model()!r}")
+
+models = _pr.list_models()
+ids = [m["id"] for m in models]
+if ids != ["gpt-4o-mini", "gpt-4o", "o3-mini"]:
+    raise SystemExit(f"list_models ids wrong: {ids!r}")
+o3 = next(m for m in models if m["id"] == "o3-mini")
+if o3["reasoning"] is not True or o3["context_window"] != 200000:
+    raise SystemExit(f"list_models lost model metadata: {o3!r}")
+
+# Selecting a known id pins ZOMBIE_MODEL for this process so every
+# later turn resolves the same model.
+prov, chosen = _pr.set_active_model("gpt-4o")
+if (prov, chosen) != ("openai", "gpt-4o"):
+    raise SystemExit(f"set_active_model returned {(prov, chosen)!r}")
+if os.environ.get("ZOMBIE_MODEL") != "gpt-4o":
+    raise SystemExit("set_active_model must pin ZOMBIE_MODEL")
+if _pr.current_model() != "gpt-4o":
+    raise SystemExit("current_model must reflect the selection")
+
+# An unknown id (for a provider with a catalogue) is rejected, and an
+# empty id is always rejected.
+for bad in ("definitely-not-a-model", ""):
+    try:
+        _pr.set_active_model(bad)
+    except ValueError:
+        pass
+    else:
+        raise SystemExit(f"set_active_model({bad!r}) should raise ValueError")
+# The rejected selection must not have changed the pinned model.
+if os.environ.get("ZOMBIE_MODEL") != "gpt-4o":
+    raise SystemExit("a rejected selection must not mutate ZOMBIE_MODEL")
+
+# lmstudio has no catalogue, so any non-empty id is accepted free-form.
+os.environ["ZOMBIE_PROVIDER"] = "lmstudio"
+os.environ["LMSTUDIO_API_KEY"] = "local"
+if _pr.list_models() != []:
+    raise SystemExit("lmstudio should expose an empty catalogue")
+prov, chosen = _pr.set_active_model("qwen/qwen3-coder")
+if (prov, chosen) != ("lmstudio", "qwen/qwen3-coder"):
+    raise SystemExit(f"lmstudio free-form selection wrong: {(prov, chosen)!r}")
+
+# Server App wrappers: GET /api/models and POST /api/model payloads.
+os.environ["ZOMBIE_PROVIDER"] = "openai"
+os.environ.pop("ZOMBIE_MODEL", None)
+app = server.App()
+info = app.models_info()
+if info.get("provider") != "openai" or info.get("current") != "gpt-4o-mini":
+    raise SystemExit(f"models_info wrong: {info!r}")
+if [m["id"] for m in info.get("models", [])] != ["gpt-4o-mini", "gpt-4o", "o3-mini"]:
+    raise SystemExit(f"models_info models wrong: {info!r}")
+ok = app.set_model("gpt-4o")
+if ok != {"ok": True, "provider": "openai", "model": "gpt-4o"}:
+    raise SystemExit(f"App.set_model ok payload wrong: {ok!r}")
+bad = app.set_model("nope")
+if "error" not in bad:
+    raise SystemExit(f"App.set_model bad payload should carry error: {bad!r}")
+app.history.close()
+PY
+
 
     # produce a soft failure (synthetic ``budget_exceeded``
     # observation) once exceeded so the model ends the turn cleanly
