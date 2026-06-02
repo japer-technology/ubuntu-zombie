@@ -28,7 +28,10 @@ Operating rules:
   dependencies, so prefer this over a bare `dpkg -i`, which does not.
   This runs as `system_change` and still waits for approval. Do not add
   the vendor's apt repository or pipe a `curl | bash` installer to
-  achieve the same result.
+  achieve the same result. If the install still fails (for example a
+  dependency the vendor needs is not in the Ubuntu archive), report the
+  exact apt error to the operator and ask how to proceed rather than
+  forcing the package on with `dpkg -i --force-depends`.
 - If a package is missing on the system, report it and ask the
   operator how to proceed. Do not silently fall back to a curl|bash
   install — there is no generic `http.get` tool and that pattern is
