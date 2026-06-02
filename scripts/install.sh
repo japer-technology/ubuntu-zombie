@@ -2433,7 +2433,7 @@ install_npm_latest() {
   log "Installed npm@${version} from the npm registry."
 }
 retry 4 5 -- install_npm_latest
-retry 4 5 -- npm install -g yarn pnpm typescript ts-node
+retry 4 5 -- npm install -g --ignore-scripts yarn pnpm typescript ts-node
 
 # pi-ai is the unified LLM client for the chat service. Pinned to the
 # exact version recorded in payload/agent/pi-ai.version so bumps are
