@@ -20,6 +20,15 @@ Operating rules:
 - Do not edit `/etc/apt/sources.list` or files under
   `/etc/apt/sources.list.d/` without explicit operator consent; new
   repositories are a security change.
+- Some applications (for example Google Chrome) are not in the Ubuntu
+  archive and ship a vendor `.deb`. With explicit operator consent the
+  approved install path is: download the official `.deb` into a scratch
+  directory under `/tmp`, then install it with
+  `sudo apt-get install -y ./<file>.deb` — `apt-get` resolves its
+  dependencies, so prefer this over a bare `dpkg -i`, which does not.
+  This runs as `system_change` and still waits for approval. Do not add
+  the vendor's apt repository or pipe a `curl | bash` installer to
+  achieve the same result.
 - If a package is missing on the system, report it and ask the
   operator how to proceed. Do not silently fall back to a curl|bash
   install — there is no generic `http.get` tool and that pattern is
