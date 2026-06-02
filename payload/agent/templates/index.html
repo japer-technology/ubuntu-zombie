@@ -197,8 +197,8 @@ function renderInline(escaped) {
       `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`);
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-  out = out.replace(/(^|[^*])\*([^*\s][^*]*?)\*/g, "$1<em>$2</em>");
-  out = out.replace(/(^|[^_\w])_([^_\s][^_]*?)_/g, "$1<em>$2</em>");
+  out = out.replace(/(^|[^*])\*([^*\s](?:[^*]*[^*\s])?)\*/g, "$1<em>$2</em>");
+  out = out.replace(/(^|[^_\w])_([^_\s](?:[^_]*[^_\s])?)_/g, "$1<em>$2</em>");
   out = out.replace(/\u0000CODE(\d+)\u0000/g,
     (_m, i) => `<code>${codes[Number(i)]}</code>`);
   return out;
@@ -233,6 +233,7 @@ function renderMarkdown(src) {
     if (fence) {
       flush();
       const marker = fence[1][0];
+      const lang = fence[2];
       const body = [];
       i++;
       while (i < lines.length &&
@@ -241,7 +242,8 @@ function renderMarkdown(src) {
         i++;
       }
       i++; // skip closing fence (if present)
-      html.push("<pre><code>" + escapeHtml(body.join("\n")) + "</code></pre>");
+      const cls = lang ? ` class="language-${lang}"` : "";
+      html.push(`<pre><code${cls}>` + escapeHtml(body.join("\n")) + "</code></pre>");
       continue;
     }
     if (/^\s*$/.test(line)) { flush(); i++; continue; }
