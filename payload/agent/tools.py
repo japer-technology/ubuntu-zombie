@@ -201,10 +201,10 @@ def _shim_fs_list(args: dict[str, Any]) -> dict[str, Any]:
             st = child.lstat()
         except OSError:
             continue
-        if child.is_dir():
-            kind = "dir"
-        elif child.is_symlink():
+        if child.is_symlink():
             kind = "symlink"
+        elif child.is_dir():
+            kind = "dir"
         elif child.is_file():
             kind = "file"
         else:
