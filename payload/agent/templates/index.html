@@ -51,6 +51,29 @@
   .examples { font-size: .8rem; opacity: .75;
               max-width: 60rem; margin: 0 auto; padding: .3rem 1rem 0; }
   .examples summary { cursor: pointer; }
+  /* Rendered Markdown inside an assistant bubble. The bubble keeps
+     white-space: pre-wrap for plain text, but once we render Markdown to
+     real HTML we want normal wrapping with the block elements supplying
+     their own spacing. */
+  .msg .md { white-space: normal; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p { margin: .5rem 0; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 {
+    margin: .8rem 0 .4rem; line-height: 1.25; }
+  .md h1 { font-size: 1.3rem; } .md h2 { font-size: 1.15rem; }
+  .md h3 { font-size: 1.05rem; } .md h4, .md h5, .md h6 { font-size: 1rem; }
+  .md ul, .md ol { margin: .5rem 0; padding-left: 1.4rem; }
+  .md li { margin: .15rem 0; }
+  .md code { font-family: ui-monospace, monospace; font-size: .85em;
+             background: #0002; padding: .1rem .3rem; border-radius: .3rem; }
+  .md pre { background: #0003; padding: .5rem .7rem; border-radius: .4rem;
+            max-height: 24rem; overflow: auto; margin: .5rem 0; }
+  .md pre code { background: none; padding: 0; font-size: .8rem;
+                 white-space: pre; }
+  .md a { color: #4a90e2; }
+  .md blockquote { margin: .5rem 0; padding: .2rem .8rem;
+                   border-left: 3px solid #8886; opacity: .85; }
   .result { margin-top: .5rem; }
   .result pre { background: #0003; padding: .4rem .6rem;
                 border-radius: .3rem; max-height: 16rem; overflow: auto;
@@ -128,10 +151,138 @@ function addMessage(role, content, opts = {}) {
   const cls = opts.error ? `msg ${role} error` : `msg ${role}`;
   const wrap = el("div", { class: cls });
   wrap.appendChild(el("div", { class: "role", text: role }));
-  wrap.appendChild(el("div", { text: content }));
+  // Assistant replies are Markdown: render them to safe HTML so code
+  // blocks, lists, headings and emphasis display nicely instead of as
+  // raw characters. Every other role (user/system) stays as plain text.
+  if (role === "assistant" && !opts.error && content) {
+    const body = el("div", { class: "md" });
+    body.innerHTML = renderMarkdown(content);
+    wrap.appendChild(body);
+  } else {
+    wrap.appendChild(el("div", { text: content }));
+  }
   log.appendChild(wrap);
   log.scrollTop = log.scrollHeight;
   return wrap;
+}
+
+// Minimal, dependency-free Markdown → HTML renderer. The chat UI is
+// served offline as a single inline document, so we cannot pull a
+// library from a CDN. Correctness here is less important than safety:
+// the input is untrusted model output, so every raw character is
+// HTML-escaped *before* we add any markup of our own, and the only
+// links we emit are http(s). Supported: fenced/indented code, inline
+// code, **bold**/_italic_, # headings, -/*/+ and 1. lists, > quotes,
+// and [text](url) links.
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderInline(escaped) {
+  // ``escaped`` is already HTML-escaped. Protect inline code spans from
+  // further substitution by stashing them behind placeholders.
+  const codes = [];
+  let out = escaped.replace(/`([^`]+)`/g, (_m, c) => {
+    codes.push(c);
+    return `\u0000CODE${codes.length - 1}\u0000`;
+  });
+  // Links: only http(s); the URL was escaped above so quotes are safe.
+  out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_m, text, url) =>
+      `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`);
+  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  out = out.replace(/__([^_]+)__/g, "<strong>$1</strong>");
+  out = out.replace(/(^|[^*])\*([^*\s](?:[^*]*[^*\s])?)\*/g, "$1<em>$2</em>");
+  out = out.replace(/(^|[^_\w])_([^_\s](?:[^_]*[^_\s])?)_/g, "$1<em>$2</em>");
+  out = out.replace(/\u0000CODE(\d+)\u0000/g,
+    (_m, i) => `<code>${codes[Number(i)]}</code>`);
+  return out;
+}
+
+function renderMarkdown(src) {
+  const lines = String(src).replace(/\r\n?/g, "\n").split("\n");
+  const html = [];
+  let i = 0;
+  let para = [];
+  let list = null; // { tag: "ul"|"ol", items: [string,...] }
+
+  function flushPara() {
+    if (para.length) {
+      html.push("<p>" + para.map(l => renderInline(escapeHtml(l))).join("<br>") + "</p>");
+      para = [];
+    }
+  }
+  function flushList() {
+    if (list) {
+      html.push(`<${list.tag}>` +
+        list.items.map(it => `<li>${renderInline(escapeHtml(it))}</li>`).join("") +
+        `</${list.tag}>`);
+      list = null;
+    }
+  }
+  function flush() { flushPara(); flushList(); }
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const fence = line.match(/^\s*(```+|~~~+)\s*([\w.+-]*)\s*$/);
+    if (fence) {
+      flush();
+      const marker = fence[1][0];
+      const lang = fence[2];
+      const body = [];
+      i++;
+      while (i < lines.length &&
+             !new RegExp("^\\s*" + marker + "{3,}\\s*$").test(lines[i])) {
+        body.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing fence (if present)
+      const cls = lang ? ` class="language-${lang}"` : "";
+      html.push(`<pre><code${cls}>` + escapeHtml(body.join("\n")) + "</code></pre>");
+      continue;
+    }
+    if (/^\s*$/.test(line)) { flush(); i++; continue; }
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      flush();
+      const level = heading[1].length;
+      html.push(`<h${level}>${renderInline(escapeHtml(heading[2]))}</h${level}>`);
+      i++;
+      continue;
+    }
+    const quote = line.match(/^\s*>\s?(.*)$/);
+    if (quote) {
+      flushPara(); flushList();
+      const buf = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) {
+        buf.push(lines[i].replace(/^\s*>\s?/, ""));
+        i++;
+      }
+      html.push("<blockquote>" + renderMarkdown(buf.join("\n")) + "</blockquote>");
+      continue;
+    }
+    const ul = line.match(/^\s*[-*+]\s+(.*)$/);
+    const ol = line.match(/^\s*\d+[.)]\s+(.*)$/);
+    if (ul || ol) {
+      flushPara();
+      const tag = ul ? "ul" : "ol";
+      const item = (ul ? ul[1] : ol[1]);
+      if (!list || list.tag !== tag) { flushList(); list = { tag, items: [] }; }
+      list.items.push(item);
+      i++;
+      continue;
+    }
+    flushList();
+    para.push(line);
+    i++;
+  }
+  flush();
+  return html.join("\n");
 }
 
 function showThinking() {
