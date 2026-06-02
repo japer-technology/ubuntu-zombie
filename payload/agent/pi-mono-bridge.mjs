@@ -93,7 +93,7 @@ function buildPrompt(start) {
   if (history.length > 0) {
     const last = history[history.length - 1];
     if (last && last.role === "user" &&
-        String(last.content == null ? "" : last.content) === prompt) {
+        String(last.content != null ? last.content : "") === prompt) {
       history.pop();
     }
   }
@@ -104,7 +104,7 @@ function buildPrompt(start) {
       ? "Assistant"
       : m.role === "user" ? "User" : null;
     if (!role) continue;
-    lines.push(`${role}: ${m.content == null ? "" : String(m.content)}`);
+    lines.push(`${role}: ${m.content != null ? String(m.content) : ""}`);
   }
   if (lines.length === 0) return prompt;
   return "Conversation so far:\n" + lines.join("\n") +
