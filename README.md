@@ -4,7 +4,7 @@
 [![CI](https://github.com/japer-technology/ubuntu-zombie/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/japer-technology/ubuntu-zombie/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/japer-technology/ubuntu-zombie/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/japer-technology/ubuntu-zombie/actions/workflows/codeql.yml)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/japer-technology/ubuntu-zombie/badge)](https://securityscorecards.dev/viewer/?uri=github.com/japer-technology/ubuntu-zombie)
-[![Latest release](https://img.shields.io/github/v/release/japer-technology/ubuntu-zombie?sort=semver)](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/japer-technology/ubuntu-zombie?sort=date)](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
 [![Ubuntu LTS 22.04 | 24.04](https://img.shields.io/badge/Ubuntu_LTS-22.04%20%7C%2024.04-E95420?logo=ubuntu&logoColor=white)](docs/PLATFORMS.md)
 [![AI](https://img.shields.io/badge/Assisted-Development-2b2bff?logo=openai&logoColor=white)](https://www.japer.technology)
 

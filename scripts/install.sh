@@ -68,7 +68,7 @@ fi
 if [[ -f "${REPO_ROOT}/VERSION" ]]; then
   SCRIPT_VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
 else
-  SCRIPT_VERSION="0.2.0"
+  SCRIPT_VERSION="0000.00.00.00.00.00"
 fi
 readonly SCRIPT_VERSION
 

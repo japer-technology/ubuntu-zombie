@@ -1,9 +1,9 @@
 name: Release
 
-# Tag-driven release: pushing a SemVer tag (v0.3.0, v0.4.0, ...) builds
-# the source tarball, an SPDX SBOM, the SHA-256 checksum, a keyless
-# cosign signature, and the .deb package; everything is published to
-# the matching GitHub Release.
+# Tag-driven release: pushing a date-time version tag
+# (v2026.06.02.03.59.05, ...) builds the source tarball, an SPDX SBOM,
+# the SHA-256 checksum, a keyless cosign signature, and the .deb
+# package; everything is published to the matching GitHub Release.
 
 on:
   push:
