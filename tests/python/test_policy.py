@@ -59,7 +59,7 @@ def test_extract_commands_removed() -> None:
 
 def test_tool_registry_is_closed(tools_module) -> None:
     expected = {
-        "shell.run", "fs.read", "fs.write",
+        "shell.run", "fs.read", "fs.list", "fs.write",
         "pkg.query", "pkg.install",
         "svc.status", "svc.control",
         "net.status",
@@ -73,6 +73,7 @@ def test_tool_registry_is_closed(tools_module) -> None:
     ("tool", "args", "want"),
     [
         ("fs.read", {"path": "/etc/os-release"}, "read_only"),
+        ("fs.list", {"path": "/etc"}, "read_only"),
         ("pkg.install", {"names": ["curl"]}, "system_change"),
         ("svc.control", {"unit": "ssh", "action": "restart"}, "system_change"),
         ("shell.run", {"argv": ["ls", "-la"]}, "read_only"),

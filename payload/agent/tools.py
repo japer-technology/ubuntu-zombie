@@ -183,6 +183,37 @@ def _shim_fs_read(args: dict[str, Any]) -> dict[str, Any]:
             "truncated": truncated}
 
 
+def _shim_fs_list(args: dict[str, Any]) -> dict[str, Any]:
+    path = Path(str(args["path"])).expanduser()
+    if not _within(path, _read_allowed_prefixes()):
+        raise SchemaError(f"fs.list: {path} outside readable allow-list")
+    if not path.is_dir():
+        raise SchemaError(f"fs.list: {path} is not a directory")
+    max_entries = int(args.get("max_entries") or 1000)
+    if max_entries < 1:
+        raise SchemaError("fs.list: max_entries must be positive")
+    entries: list[dict[str, Any]] = []
+    names = sorted(p.name for p in path.iterdir())
+    truncated = len(names) > max_entries
+    for name in names[:max_entries]:
+        child = path / name
+        try:
+            st = child.lstat()
+        except OSError:
+            continue
+        if child.is_symlink():
+            kind = "symlink"
+        elif child.is_dir():
+            kind = "dir"
+        elif child.is_file():
+            kind = "file"
+        else:
+            kind = "other"
+        entries.append({"name": name, "type": kind, "bytes": st.st_size})
+    return {"path": str(path), "entries": entries, "count": len(names),
+            "truncated": truncated}
+
+
 def _shim_fs_write(args: dict[str, Any]) -> dict[str, Any]:
     path = Path(str(args["path"])).expanduser()
     if not _within(path, _write_allowed_prefixes()):
@@ -358,6 +389,20 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         shim=_shim_fs_read,
+    ),
+    "fs.list": _t(
+        classification="read_only",
+        description="List directory entries within the readable allow-list.",
+        schema={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "max_entries": {"type": "integer"},
+            },
+            "required": ["path"],
+            "additionalProperties": False,
+        },
+        shim=_shim_fs_list,
     ),
     "fs.write": _t(
         classification="user_change",

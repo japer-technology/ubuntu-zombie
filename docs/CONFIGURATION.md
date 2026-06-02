@@ -227,6 +227,7 @@ defined in `payload/agent/tools.py`:
 | ----------------- | ---------------------- | ---------------------------------------------------------- |
 | `shell.run`       | per-argv via `classify` | Run a shell command through the existing runner.          |
 | `fs.read`         | `read_only`            | Read a UTF-8 text file within the readable allow-list.     |
+| `fs.list`         | `read_only`            | List directory entries within the readable allow-list.     |
 | `fs.write`        | `user_change`          | Write text content to a path within the writable allow-list. |
 | `pkg.query`       | `read_only`            | Query installed package metadata via dpkg/apt-cache.       |
 | `pkg.install`     | `system_change`        | Install Debian packages via apt-get.                       |

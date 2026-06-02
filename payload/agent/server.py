@@ -76,7 +76,7 @@ operator approval. Per-turn tool-call budgets are enforced.
 
 You have a fixed, closed tool registry — you cannot define new tools,
 and the operator-side approval gate cannot be bypassed by chaining
-shell.run. Prefer typed tools (fs.read, pkg.query, svc.status,
+shell.run. Prefer typed tools (fs.read, fs.list, pkg.query, svc.status,
 net.status, gui.screenshot, …) over shell.run when one fits.
 
 Style:
