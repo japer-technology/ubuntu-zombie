@@ -574,12 +574,12 @@ def _render_index(app: App) -> bytes:
     if name == "none":
         banner = status
     elif status.startswith("model ") and "not set" not in status:
-        banner = f"connected ({name} \u00b7 {status[len('model '):]})"
+        banner = f"{name}({status[len('model '):]})"
     else:
         banner = f"{name}: {status}"
     text = INDEX_HTML_PATH.read_text(encoding="utf-8")
     text = text.replace("{{HOSTNAME}}", html.escape(facts.get("hostname", "?")))
-    text = text.replace("{{OS}}", html.escape(facts.get("os", "Ubuntu")))
+    text = text.replace("{{USERNAME}}", html.escape(AGENT_USER))
     text = text.replace("{{PROVIDER_STATUS}}", html.escape(banner))
     examples = (HERE / "examples.md").read_text(encoding="utf-8") if (HERE / "examples.md").exists() else ""
     text = text.replace("{{EXAMPLES}}", html.escape(examples))
