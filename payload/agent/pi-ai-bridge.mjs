@@ -159,7 +159,9 @@ async function loadPiAi() {
   } catch (err) {
     lastErr = err;
   }
+  const searched = [];
   for (const base of globalModuleDirs()) {
+    searched.push(base);
     const entry = piAiEntry(join(base, "@earendil-works", "pi-ai"));
     if (!entry) continue;
     try {
@@ -169,8 +171,11 @@ async function loadPiAi() {
       lastErr = err;
     }
   }
+  const where = searched.length
+    ? ` (searched: ${searched.join(", ")})`
+    : "";
   die(
-    `failed to load @earendil-works/pi-ai: ${lastErr ? lastErr.message : "not found"}. ` +
+    `failed to load @earendil-works/pi-ai: ${lastErr ? lastErr.message : "not found"}${where}. ` +
       "Reinstall via scripts/install.sh.",
     "pi_ai_missing",
   );
