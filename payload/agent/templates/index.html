@@ -126,12 +126,13 @@ const statusEl = document.getElementById("status");
 // client-side timeout) abort a request that the server is taking too
 // long to answer, so the UI can never wedge on a single prompt. The
 // default ceiling is generous — longer than the server-side idle
-// deadline — so a legitimately slow turn still completes server-side
-// before the browser gives up.
+// deadlines (Python max_turn_seconds and the bridge
+// ZOMBIE_PI_MONO_IDLE_TIMEOUT) — so a legitimately slow turn always
+// completes (or fails cleanly) server-side before the browser gives up.
 let turnController = null;
 let thinkingEl = null;
 let thinkingTimer = null;
-const CLIENT_TURN_TIMEOUT_MS = 180000;
+const CLIENT_TURN_TIMEOUT_MS = 720000;
 
 function el(tag, attrs = {}, ...children) {
   const e = document.createElement(tag);
