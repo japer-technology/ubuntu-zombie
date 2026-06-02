@@ -239,7 +239,7 @@ async function run() {
   const idleTimeoutMs = (() => {
     const raw = Number(process.env.ZOMBIE_PI_MONO_IDLE_TIMEOUT);
     if (Number.isFinite(raw)) return raw * 1000;
-    return 150 * 1000; // generous: longer than the Python-side default
+    return 660 * 1000; // generous: longer than the Python-side default (600s)
   })();
   let idleTimer = null;
   function clearIdle() {

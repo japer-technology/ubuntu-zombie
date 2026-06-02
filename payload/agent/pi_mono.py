@@ -59,8 +59,13 @@ DEFAULT_SETTINGS_PATH = Path(os.environ.get(
 # this long the turn is presumed wedged — a hung provider socket, a pi
 # child stuck mid-stream, or a bridge that never emits ``final`` — and
 # the subprocess is killed so the chat surfaces a clean error instead of
-# hanging the operator's request forever. ``0`` disables the watchdog.
-DEFAULT_TURN_TIMEOUT = 120.0
+# hanging the operator's request forever. This is an *idle* deadline:
+# every bridge event (and every operator-mediated tool result) resets it,
+# so a generous value does not slow active turns. It is the innermost of
+# three layered deadlines and the smallest, so it fires first with a
+# clean error (Python < bridge ZOMBIE_PI_MONO_IDLE_TIMEOUT < client
+# CLIENT_TURN_TIMEOUT_MS). ``0`` disables the watchdog.
+DEFAULT_TURN_TIMEOUT = 600.0
 
 
 class BridgeError(RuntimeError):
