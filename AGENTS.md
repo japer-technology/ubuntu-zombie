@@ -134,7 +134,6 @@ invariants the runtime relies on:
 
 ## Things to leave alone unless explicitly asked
 
-- `VERSION` — bumped only as part of a release.
 - `LICENSE`, `CODE_OF_CONDUCT.md`, `SECURITY.md` disclosure section.
 - `docs/design-notes/` — historical context; treat as read-only.
 - `.github/CODEOWNERS` and workflow permissions.
