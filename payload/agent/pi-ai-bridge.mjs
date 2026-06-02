@@ -42,6 +42,9 @@
 // payload/agent/providers.py forwards from the secrets file.
 
 import { readFileSync } from "node:fs";
+import { delimiter, dirname, join, resolve } from "node:path";
+import { execPath } from "node:process";
+import { pathToFileURL } from "node:url";
 
 // Map Ubuntu Zombie provider names (operator-visible) to the provider
 // ids that @earendil-works/pi-ai uses internally. Keep this list in
@@ -78,6 +81,104 @@ function emit(obj) {
 function die(error, code = "bridge_error") {
   emit({ ok: false, error: String(error), code });
   process.exit(1);
+}
+
+// Resolve and import @earendil-works/pi-ai.
+//
+// The package is installed *globally* (npm install -g, see
+// scripts/install.sh) and this bridge is deployed to
+// /opt/ai-zombie/agent/, which is outside any node_modules tree. Node's
+// ESM loader resolves bare specifiers by walking node_modules up from
+// the importing file and — unlike CommonJS require — ignores NODE_PATH,
+// so a plain `import("@earendil-works/pi-ai")` cannot see a global
+// install and dies with ERR_MODULE_NOT_FOUND. That broke the /model
+// command (and every completion) on a normal deployment.
+//
+// We therefore try the bare import first (covers a local/dev install or
+// a bundled node_modules) and, if that fails, locate the package inside
+// the known global node_modules directories and import its real entry
+// file by absolute URL. Reading the entry from package.json honours
+// pi-ai's "exports" map (it exposes only an "import" condition, so
+// require.resolve cannot be used here).
+let PI_AI_CACHE;
+
+function piAiEntry(packageDir) {
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
+  } catch {
+    return null;
+  }
+  let rel;
+  const exp = pkg.exports;
+  if (typeof exp === "string") {
+    rel = exp;
+  } else if (exp && typeof exp === "object") {
+    const dot = exp["."];
+    if (typeof dot === "string") {
+      rel = dot;
+    } else if (dot && typeof dot === "object") {
+      rel = dot.import || dot.node || dot.default;
+    }
+  }
+  if (!rel) rel = pkg.module || pkg.main || "index.js";
+  return resolve(packageDir, rel);
+}
+
+function globalModuleDirs() {
+  const dirs = [];
+  const seen = new Set();
+  const add = (dir) => {
+    if (dir && !seen.has(dir)) {
+      seen.add(dir);
+      dirs.push(dir);
+    }
+  };
+  // NODE_PATH (forwarded by providers.py) — split on the platform
+  // delimiter and honour each entry even though ESM ignores it natively.
+  if (process.env.NODE_PATH) {
+    for (const part of process.env.NODE_PATH.split(delimiter)) add(part);
+  }
+  // Standard global prefix for the running node: <prefix>/lib/node_modules
+  // (e.g. /usr/bin/node -> /usr/lib/node_modules on the NodeSource build
+  // this project installs).
+  add(resolve(dirname(execPath), "..", "lib", "node_modules"));
+  // Windows-style layout and common Unix fallbacks.
+  add(resolve(dirname(execPath), "node_modules"));
+  add("/usr/lib/node_modules");
+  add("/usr/local/lib/node_modules");
+  return dirs;
+}
+
+async function loadPiAi() {
+  if (PI_AI_CACHE) return PI_AI_CACHE;
+  let lastErr;
+  try {
+    PI_AI_CACHE = await import("@earendil-works/pi-ai");
+    return PI_AI_CACHE;
+  } catch (err) {
+    lastErr = err;
+  }
+  const searched = [];
+  for (const base of globalModuleDirs()) {
+    searched.push(base);
+    const entry = piAiEntry(join(base, "@earendil-works", "pi-ai"));
+    if (!entry) continue;
+    try {
+      PI_AI_CACHE = await import(pathToFileURL(entry).href);
+      return PI_AI_CACHE;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  const where = searched.length
+    ? ` (searched: ${searched.join(", ")})`
+    : "";
+  die(
+    `failed to load @earendil-works/pi-ai: ${lastErr ? lastErr.message : "not found"}${where}. ` +
+      "Reinstall via scripts/install.sh.",
+    "pi_ai_missing",
+  );
 }
 
 async function readStdin() {
@@ -120,16 +221,7 @@ async function main() {
   // checks and return early.
   const op = String(req.op || "complete").toLowerCase();
   if (op === "list_models") {
-    let pi;
-    try {
-      pi = await import("@earendil-works/pi-ai");
-    } catch (err) {
-      die(
-        `failed to load @earendil-works/pi-ai: ${err.message}. ` +
-          "Reinstall via scripts/install.sh.",
-        "pi_ai_missing",
-      );
-    }
+    const pi = await loadPiAi();
     let models;
     try {
       models = pi.getModels(piProvider) || [];
@@ -177,16 +269,7 @@ async function main() {
     }
   }
 
-  let pi;
-  try {
-    pi = await import("@earendil-works/pi-ai");
-  } catch (err) {
-    die(
-      `failed to load @earendil-works/pi-ai: ${err.message}. ` +
-        "Reinstall via scripts/install.sh.",
-      "pi_ai_missing",
-    );
-  }
+  const pi = await loadPiAi();
 
   let modelHandle;
   try {
