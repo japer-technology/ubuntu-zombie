@@ -16,7 +16,7 @@ settings:
   # once a workflow is proven safe; the ``sudo_allow_list:`` block
   # below keeps common privileged commands at ``system_change``
   # despite the conservative default.
-  default_class: destructive
+  default_class: system_change
 
 # Curated ``sudo`` targets pre-classified as ``system_change``. The
 # standard approval prompt still fires for these — they do not
@@ -46,19 +46,24 @@ sudo_allow_list:
   - install
   - update-grub
   - update-initramfs
+  - docker
+  - git
+  - nginx
+  - certbot
 
 classes:
   read_only:
     approval: auto
     description: Diagnostics and inspection only.
   user_change:
-    approval: required
+    approval: auto
     description: Changes within the agent account's home directory or user-owned files.
   system_change:
-    approval: required
+    approval: auto
     description: Package, service, file, or Docker mutation.
   network_change:
-    approval: required
+    approval: auto
+    confirm_phrase: true
     description: Firewall, Tailscale, sshd, interface mutation.
   destructive:
     approval: required
@@ -232,6 +237,6 @@ tool_classes: {}
 #   Python (this value) < bridge ZOMBIE_PI_MONO_IDLE_TIMEOUT < client
 #   CLIENT_TURN_TIMEOUT_MS (templates/index.html).
 agent:
-  max_tool_calls_per_turn: 12
-  max_elevated_calls_per_turn: 3
+  max_tool_calls_per_turn: 128
+  max_elevated_calls_per_turn: 32
   max_turn_seconds: 600
