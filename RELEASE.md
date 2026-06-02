@@ -13,7 +13,11 @@ There is no fixed cadence. Cut a release when:
 - The `[Unreleased]` section of `CHANGELOG.md` has grown to "enough
   to justify a tag".
 
-We follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+We use **date-time versioning**. Every version is the UTC timestamp
+of the release, formatted `yyyy.mm.dd.hh.nn.ss` (year, month, day,
+hour, minute, second — each zero-padded). For example, a release cut
+at 2026-06-02 03:59:05 UTC has version `2026.06.02.03.59.05`. Versions
+therefore sort chronologically and are never reused.
 
 ## Steps
 
@@ -22,10 +26,11 @@ We follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
    workflows.
 
 2. **Update `VERSION`** to the new version (no `v` prefix, no
-   leading/trailing whitespace).
+   leading/trailing whitespace). Use the current UTC timestamp in
+   `yyyy.mm.dd.hh.nn.ss` form:
 
    ```bash
-   echo "0.4.0" > VERSION
+   date -u +%Y.%m.%d.%H.%M.%S > VERSION
    ```
 
 3. **Update `CHANGELOG.md`**: rename the `[Unreleased]` heading to
@@ -36,14 +41,14 @@ We follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
    version.
 
    ```
-   ubuntu-zombie (0.4.0) UNRELEASED; urgency=medium
+   ubuntu-zombie (2026.06.02.03.59.05) UNRELEASED; urgency=medium
 
      * See /CHANGELOG.md.
 
     -- Japer Technology <ops@japer.technology>  <RFC-2822 date>
    ```
 
-5. **Open a "Release X.Y.Z" PR** with the three file changes above.
+5. **Open a "Release `<version>`" PR** with the three file changes above.
    Merge once green.
 
 6. **Tag from `main`**:
@@ -80,13 +85,14 @@ We follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
    [Discussions › Announcements](https://github.com/japer-technology/ubuntu-zombie/discussions/categories/announcements)
    category. Link the release page.
 
-## Hotfix (patch) releases
+## Hotfix releases
 
 For a single security-impacting fix:
 
-1. Branch from the previous release tag: `git checkout -b release/0.3.x v0.3.0`.
+1. Branch from the previous release tag: `git checkout -b hotfix v2026.06.02.03.59.05`.
 2. Cherry-pick the fix.
-3. Follow steps 2–9 above with the patch version (`0.3.1`).
+3. Follow steps 2–9 above. The new `VERSION` is simply the current
+   UTC timestamp, so it naturally sorts after the release being fixed.
 
 ## Rolling back a release
 

@@ -3,7 +3,8 @@
 All notable changes to Ubuntu Zombie are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
-and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and the project uses **date-time versioning**: each release is stamped
+with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
@@ -124,6 +125,10 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
     `repair`-vs-`install` fixes.
 
 ### Changed
+- **Version scheme is now date-time based.** Releases are versioned
+  `yyyy.mm.dd.hh.nn.ss` (UTC release timestamp) instead of Semantic
+  Versioning. `VERSION`, `RELEASE.md`, `debian/changelog`,
+  `.github/workflows/release.yml`, and `README.md` updated accordingly.
 - **Tailscale is now off by default.** `scripts/install.sh` no longer
   installs or enrols Tailscale unless you opt in with
   `ZOMBIE_SKIP_TAILSCALE=0`. With the default, inbound SSH is allowed
