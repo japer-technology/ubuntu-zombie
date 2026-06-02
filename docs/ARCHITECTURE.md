@@ -329,14 +329,20 @@ opened.
   `EnvironmentFile=-/opt/ai-zombie/secrets/env`, `Restart=on-failure`,
   loopback-only port from `ZOMBIE_CHAT_PORT` (default 7878, also set
   as a fallback `Environment=` so the unit starts even with an empty
-  `secrets/env`). Hardened with `ProtectSystem=full`, `PrivateTmp=true`,
+  `secrets/env`). Hardened with `PrivateTmp=true`,
   `ProtectKernelTunables/Modules/ControlGroups`, `RestrictRealtime`,
   `RestrictSUIDSGID`, `LockPersonality`. **`NoNewPrivileges` is
   intentionally absent** because the whole product elevates via
   passwordless `sudo` once the policy gate has approved a tool call —
-  `NoNewPrivileges` would block every approved elevation. The policy
-  gate plus the closed tool registry is the security boundary, not the
-  systemd sandbox.
+  `NoNewPrivileges` would block every approved elevation. **For the same
+  reason `ProtectSystem` is disabled (`false`):** `ProtectSystem=full`
+  read-only bind-mounts `/usr`, `/boot`, and `/etc` inside the unit's
+  private mount namespace, and because `sudo` does not open a new
+  namespace, every approved elevation (`pkg.install`, `/etc` edits)
+  would inherit a read-only `/usr` and fail with "Read-only file
+  system" — defeating the agent's core job of installing and
+  configuring software. The policy gate plus the closed tool registry is
+  the security boundary, not the systemd sandbox.
 - `ubuntu-zombie-health.service` — oneshot. Runs
   `/opt/ai-zombie/bin/health-check` and exits.
 - `ubuntu-zombie-health.timer` — fires the health service at
