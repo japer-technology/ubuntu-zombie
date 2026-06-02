@@ -48,7 +48,7 @@ therefore sort chronologically and are never reused.
     -- Japer Technology <ops@japer.technology>  <RFC-2822 date>
    ```
 
-5. **Open a "Release &lt;version&gt;" PR** with the three file changes above.
+5. **Open a "Release `<version>`" PR** with the three file changes above.
    Merge once green.
 
 6. **Tag from `main`**:
