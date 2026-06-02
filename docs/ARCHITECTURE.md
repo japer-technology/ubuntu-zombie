@@ -329,9 +329,14 @@ opened.
   `EnvironmentFile=-/opt/ai-zombie/secrets/env`, `Restart=on-failure`,
   loopback-only port from `ZOMBIE_CHAT_PORT` (default 7878, also set
   as a fallback `Environment=` so the unit starts even with an empty
-  `secrets/env`). Hardened with `PrivateTmp=true`,
-  `ProtectKernelTunables/Modules/ControlGroups`, `RestrictRealtime`,
-  `RestrictSUIDSGID`, `LockPersonality`. **`NoNewPrivileges` is
+  `secrets/env`). **No systemd sandbox is applied** — the pi-mono agent
+  is a full Systems Administrator and must have fully unfettered access
+  to the entire host, not a sandpit. `PrivateTmp`, `ProtectKernelTunables/Modules/ControlGroups`,
+  `RestrictRealtime`, `RestrictSUIDSGID`, and `LockPersonality` are all
+  intentionally omitted because a private `/tmp` would hide the
+  operator's own files and the `Protect*`/`Restrict*` knobs block
+  legitimate administrative work (sysctls, kernel modules, cgroups,
+  setuid installs). **`NoNewPrivileges` is
   intentionally absent** because the whole product elevates via
   passwordless `sudo` once the policy gate has approved a tool call —
   `NoNewPrivileges` would block every approved elevation. **For the same

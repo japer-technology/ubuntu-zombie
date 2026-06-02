@@ -23,39 +23,41 @@ RestartSec=3
 StandardOutput=journal
 StandardError=journal
 
-# Security hardening — note ProtectSystem is deliberately disabled
-# (see FIX-3-03 below) so the agent can write /usr and /etc; /var/log
-# (the audit log) therefore stays writable too.
+# Sandboxing is deliberately *off*. The pi-mono agent is a full Systems
+# Administrator: it must have full, unfettered access to the entire
+# host — not a sandpit. Safety comes from the policy gate in
+# payload/etc/policy.yaml (classify → propose → approve → run → log),
+# not from confining the process inside a systemd mount/namespace
+# sandbox. Every directive below is therefore set to grant access, and
+# the restrictive ones (PrivateTmp, ProtectKernel*, ProtectControlGroups,
+# RestrictRealtime, RestrictSUIDSGID, LockPersonality) are intentionally
+# omitted.
 #
 # FIX-3-01: ``NoNewPrivileges=true`` is intentionally absent here. The
 # whole product is designed around the agent account elevating via
 # passwordless ``sudo`` (a setuid binary) once the policy gate has
 # approved a command; NoNewPrivileges would block every such elevation.
-# The policy gate in payload/etc/policy.yaml is the security boundary,
-# not the systemd sandbox. For extra defence-in-depth use a dedicated
-# AppArmor profile that allows /usr/bin/sudo.
 #
-# FIX-3-03: ``ProtectSystem`` is intentionally disabled for the same
-# reason. ``ProtectSystem=full`` (and ``strict``) read-only bind-mounts
-# /usr, /boot and /etc *inside this unit's private mount namespace*.
-# ``sudo`` does not create a new mount namespace, so every approved
-# elevation the agent runs — ``pkg.install`` (``apt-get install``),
-# config edits under /etc, and so on — inherits that read-only /usr and
-# fails with "Read-only file system", even after a successful live
-# ``mount -o remount,rw /usr`` (the namespace override cannot be undone
-# from inside the unit). Writing /usr and /etc *is* the agent's job, so
-# the systemd mount sandbox must not block it. Defence-in-depth here is
-# the policy gate plus the optional AppArmor profile, not a read-only
-# system tree.
+# FIX-3-03: ``ProtectSystem`` is intentionally disabled. ``ProtectSystem=full``
+# (and ``strict``) read-only bind-mounts /usr, /boot and /etc *inside
+# this unit's private mount namespace*. ``sudo`` does not create a new
+# mount namespace, so every approved elevation the agent runs —
+# ``pkg.install`` (``apt-get install``), config edits under /etc, and so
+# on — inherits that read-only /usr and fails with "Read-only file
+# system", even after a successful live ``mount -o remount,rw /usr`` (the
+# namespace override cannot be undone from inside the unit). Writing /usr
+# and /etc *is* the agent's job, so the systemd mount sandbox must not
+# block it.
+#
+# PrivateTmp / ProtectKernelTunables / ProtectKernelModules /
+# ProtectControlGroups / RestrictRealtime / RestrictSUIDSGID /
+# LockPersonality are likewise omitted: a private /tmp hides the
+# operator's own files from the agent, and the Protect*/Restrict*
+# directives block legitimate administrative work (tuning sysctls,
+# loading kernel modules, managing cgroups, installing setuid binaries).
+# The policy gate is the security boundary, not these knobs.
 ProtectSystem=false
 ProtectHome=false
-PrivateTmp=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictRealtime=true
-RestrictSUIDSGID=true
-LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target
