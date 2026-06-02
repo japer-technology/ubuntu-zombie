@@ -1024,6 +1024,27 @@ run_diagnostics() {
     exit 1
   fi
   rm -rf "${td}"
+
+  echo "[smoke] health-check timer warn-only mode"
+  td="$(mktemp -d)"
+  cat > "${td}/systemctl" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+  chmod +x "${td}/systemctl"
+  if PATH="${td}:${PATH}" ZOMBIE_DIR="${td}/missing" \
+      bash payload/bin/health-check >/dev/null 2>&1; then
+    rm -rf "${td}"
+    echo "FAIL: health-check should exit non-zero for manual failed checks" >&2
+    exit 1
+  fi
+  if ! PATH="${td}:${PATH}" ZOMBIE_DIR="${td}/missing" ZOMBIE_HEALTH_WARN_ONLY=1 \
+      bash payload/bin/health-check >/dev/null 2>&1; then
+    rm -rf "${td}"
+    echo "FAIL: health-check timer warn-only mode should not fail the systemd unit" >&2
+    exit 1
+  fi
+  rm -rf "${td}"
 }
 
 run_standards() {
@@ -1075,6 +1096,10 @@ run_standards() {
 
   grep -q "__ZOMBIE_DIR__" payload/systemd/ubuntu-zombie-chat.service \
     || { echo "chat systemd template must keep __ZOMBIE_DIR__ placeholder" >&2; exit 1; }
+  grep -q "ExecStart=__ZOMBIE_DIR__/bin/health-check" payload/systemd/ubuntu-zombie-health.service \
+    || { echo "health systemd template must use __ZOMBIE_DIR__ placeholder" >&2; exit 1; }
+  grep -q "ZOMBIE_HEALTH_WARN_ONLY=1" payload/systemd/ubuntu-zombie-health.service \
+    || { echo "health timer must not leave a failed unit after reporting unhealthy state" >&2; exit 1; }
   grep -q "s|__ZOMBIE_DIR__|\\\${ZOMBIE_DIR}|g" scripts/install.sh \
     || { echo "install.sh must render __ZOMBIE_DIR__ in systemd units" >&2; exit 1; }
 

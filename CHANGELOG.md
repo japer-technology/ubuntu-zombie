@@ -7,6 +7,11 @@ and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- Periodic post-install health checks now report unhealthy runtime state in
+  the journal without leaving `ubuntu-zombie-health.service` failed after the
+  timer runs.
+
 ### Added
 - **Local LLM discovery on the LAN.** On an interactive install,
   `scripts/install.sh install` now scans the host's IPv4 `/24` (all 256

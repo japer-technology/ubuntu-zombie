@@ -5,4 +5,6 @@ Description=Periodic Ubuntu Zombie health check
 Type=oneshot
 User=__AGENT_USER__
 Group=__AGENT_USER__
-ExecStart=/opt/ai-zombie/bin/health-check
+Environment=ZOMBIE_DIR=__ZOMBIE_DIR__
+Environment=ZOMBIE_HEALTH_WARN_ONLY=1
+ExecStart=__ZOMBIE_DIR__/bin/health-check

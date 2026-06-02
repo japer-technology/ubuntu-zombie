@@ -4,6 +4,7 @@ set -uo pipefail
 
 ZOMBIE_DIR="${ZOMBIE_DIR:-/opt/ai-zombie}"
 SECRETS_FILE="${ZOMBIE_DIR}/secrets/env"
+ZOMBIE_HEALTH_WARN_ONLY="${ZOMBIE_HEALTH_WARN_ONLY:-0}"
 
 if [[ -t 1 ]]; then
   C_RESET=$'\033[0m'; C_RED=$'\033[31m'; C_GREEN=$'\033[32m'
@@ -114,4 +115,4 @@ fi
 
 echo
 printf '%sResult:%s %d ok, %d warn, %d fail\n' "${C_BOLD}" "${C_RESET}" "${PASS}" "${WARN}" "${FAIL}"
-if [[ "${FAIL}" -gt 0 ]]; then exit 1; fi
+if [[ "${FAIL}" -gt 0 && "${ZOMBIE_HEALTH_WARN_ONLY}" != "1" ]]; then exit 1; fi
