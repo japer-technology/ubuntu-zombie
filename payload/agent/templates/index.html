@@ -48,9 +48,6 @@
   textarea { flex: 1; min-height: 3rem; padding: .5rem;
              border-radius: .3rem; border: 1px solid #8888;
              font: inherit; resize: vertical; background: #fff2; }
-  .examples { font-size: .8rem; opacity: .75;
-              max-width: 60rem; margin: 0 auto; padding: .3rem 1rem 0; }
-  .examples summary { cursor: pointer; }
   /* Rendered Markdown inside an assistant bubble. The bubble keeps
      white-space: pre-wrap for plain text, but once we render Markdown to
      real HTML we want normal wrapping with the block elements supplying
@@ -96,14 +93,11 @@
 </head>
 <body>
 <header>
-  <h1>Ubuntu Zombie · {{HOSTNAME}} · {{OS}}</h1>
-  <div class="status">Provider: {{PROVIDER_STATUS}}</div>
+  <h1>{{HOSTNAME}}({{USERNAME}})</h1>
+  <div class="status">{{PROVIDER_STATUS}}</div>
 </header>
 <main id="log" aria-live="polite"></main>
-<details class="examples">
-  <summary>Safe example prompts</summary>
-  <pre>{{EXAMPLES}}</pre>
-</details>
+<pre id="examples" hidden>{{EXAMPLES}}</pre>
 <footer>
   <form id="form">
     <textarea id="prompt" placeholder="Ask the administrator…  (Enter to send, Shift+Enter for newline, /help for commands)" required></textarea>
@@ -478,7 +472,7 @@ const SLASH_COMMANDS = [
   ["/tools", "List the agent tools and their risk classification."],
   ["/health", "Show this machine's facts (hostname, OS, kernel, arch)."],
   ["/status", "Show a compact host + provider status line."],
-  ["/version", "Show the payload and provider-bridge versions."],
+  ["/version", "Show the ubuntu-zombie and provider-bridge versions."],
   ["/model", "List the provider's models, or switch: /model <id>."],
   ["/audit", "Show the most recent audit-log entries."],
   ["/conversations", "List recent conversations (alias: /history)."],
@@ -554,9 +548,7 @@ async function handleSlashCommand(input) {
     }
     case "/examples": {
       addMessage("user", input);
-      const details = document.querySelector("details.examples");
-      if (details) details.open = true;
-      const pre = details ? details.querySelector("pre") : null;
+      const pre = document.getElementById("examples");
       addMessage("system", pre && pre.textContent.trim()
         ? pre.textContent
         : "No example prompts are available.");
@@ -629,7 +621,7 @@ async function handleSlashCommand(input) {
       addMessage("user", input);
       try {
         const data = await fetchJson("/api/version");
-        const lines = [`payload: ${data.version || "unknown"}`];
+        const lines = [`ubuntu-zombie: ${data.version || "unknown"}`];
         if (data.pi_mono) lines.push(`pi-mono: ${data.pi_mono}`);
         if (data.pi_ai) lines.push(`pi-ai: ${data.pi_ai}`);
         addMessage("system", lines.join("\n"));
