@@ -14,6 +14,15 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   timer runs.
 
 ### Added
+- **`/model` chat command.** The chat UI now lists the models the
+  configured provider offers and lets the operator switch between them at
+  runtime. `/model` (no argument) lists the provider's catalogue with the
+  active model marked `*`; `/model <id>` pins a different model for the
+  running chat service. Backed by pi-ai's bundled model catalogue
+  (`getModels`) via a new `list_models` op in `pi-ai-bridge.mjs`, the
+  `providers.list_models` / `current_model` / `set_active_model` helpers,
+  and the `GET /api/models` + `POST /api/model` endpoints. Providers
+  without a catalogue (e.g. `lmstudio`) accept a free-form id.
 - **Local LLM discovery on the LAN.** On an interactive install,
   `scripts/install.sh install` now scans the host's IPv4 `/24` (all 256
   addresses) for an OpenAI-compatible local LLM server answering on

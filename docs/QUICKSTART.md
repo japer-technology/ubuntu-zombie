@@ -299,6 +299,9 @@ list them. Highlights:
   conversation; `/examples` shows the safe example prompts.
 - `/tools` lists the agent tools and their risk class; `/health`,
   `/status`, and `/version` report machine facts and versions.
+- `/model` lists the models your configured provider offers (the
+  current one is marked `*`); `/model <id>` switches to another model
+  for the running service.
 - `/audit` shows the most recent audit-log entries; `/conversations`
   (alias `/history`) lists past conversations and `/load <id>` reopens
   one; `/shortcuts` lists the keyboard shortcuts.
