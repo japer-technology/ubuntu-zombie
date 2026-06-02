@@ -24,7 +24,7 @@ StandardOutput=journal
 StandardError=journal
 
 # Sandboxing is deliberately *off*. The pi-mono agent is a full Systems
-# Administrator: it must have fully and unfettered access to the entire
+# Administrator: it must have full, unfettered access to the entire
 # host — not a sandpit. Safety comes from the policy gate in
 # payload/etc/policy.yaml (classify → propose → approve → run → log),
 # not from confining the process inside a systemd mount/namespace
