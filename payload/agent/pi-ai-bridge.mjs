@@ -156,6 +156,9 @@ async function fetchLiveModels(baseUrl, keyEnv) {
       id: String(m.id),
       name: String(m.name || m.id),
       reasoning: !!m.reasoning,
+      // `context_length` is the snake_case field local OpenAI-compatible
+      // servers (LM Studio, llama.cpp) emit; `contextWindow` mirrors the
+      // pi-ai catalogue shape. Honour whichever the server provided.
       contextWindow:
         typeof m.contextWindow === "number"
           ? m.contextWindow
