@@ -19,51 +19,35 @@ document is a bug.
 Ubuntu Zombie has **three layers** that talk to each other over
 well-defined, narrow interfaces:
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│ L3  Operator (human)                                                 │
-│                                                                      │
-│       browser                                          shell         │
-│         │                                                │           │
-│         │  SSH local-forward  -L 7878:127.0.0.1:7878     │  SSH      │
-│         ▼                                                ▼           │
-└──────────────────────────────────────────────────────────────────────┘
-                              │  Tailscale (WireGuard) — only path in
-                              ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│ L2  Chat service     systemd unit: ubuntu-zombie-chat.service        │
-│                      runs as: zombie  (loopback 127.0.0.1:7878)      │
-│                                                                      │
-│   ┌──────────────┐  ┌──────────────┐  ┌────────────────────────┐     │
-│   │ pi-mono      │  │ Closed tool  │  │ Policy gate            │     │
-│   │ agent loop   │─▶│ registry     │─▶│ policy.yaml +          │     │
-│   │ via pi-ai    │  │ (tools.py)   │  │ classify_tool / classify│    │
-│   └──────────────┘  └──────────────┘  └────────────────────────┘     │
-│         │                  │                       │                 │
-│         │                  ▼                       ▼                 │
-│         │           Tool shims (runner.run,        Per-turn budgets  │
-│         │           Path.read_text, xdotool, …)    (12 / 3 elevated) │
-│         ▼                                                            │
-│    Skill catalogue (Markdown)    Audit log (JSONL)    Conversations  │
-│    /opt/ai-zombie/skills/        audit.log + tool_call events        │
-│    /etc/ubuntu-zombie/skills.d/  + logrotate          SQLite history │
-└──────────────────────────────────────────────────────────────────────┘
-                              │  sudo (passwordless, log-traced)
-                              ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│ L1  Host body          provisioned by scripts/install.sh             │
-│                                                                      │
-│   zombie user (passwordless sudo, docker group)                      │
-│   SSH (key-only; Tailscale-only by default)                          │
-│   UFW (deny inbound, allow outbound, SSH only on tailscale0)         │
-│   Xorg + GDM (optional autologin for zombie)                         │
-│   x11vnc on 127.0.0.1:5900 (loopback only, password-protected)       │
-│   Docker CE  ·  Node toolchain  ·  Python venv at ~zombie/agent-env  │
-│   @earendil-works/pi-ai + pi-coding-agent (pinned versions)          │
-│   Playwright + Chromium (browser automation)                         │
-│   GUI helpers (gui-env, screenshot, click, type-text, key)           │
-│   Health timer: ubuntu-zombie-health.timer  (every 15 min)           │
-└──────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph L3["L3 · Operator (human)"]
+        browser["browser"]
+        shell["shell"]
+    end
+
+    subgraph L2["L2 · Chat service — ubuntu-zombie-chat.service (runs as zombie, loopback 127.0.0.1:7878)"]
+        pimono["pi-mono agent loop<br/>via pi-ai"]
+        registry["Closed tool registry<br/>(tools.py)"]
+        policy["Policy gate<br/>policy.yaml +<br/>classify_tool / classify"]
+        shims["Tool shims<br/>(runner.run, Path.read_text, xdotool, …)"]
+        budgets["Per-turn budgets<br/>(12 / 3 elevated)"]
+        skills["Skill catalogue (Markdown)<br/>/opt/ai-zombie/skills/<br/>/etc/ubuntu-zombie/skills.d/"]
+        audit["Audit log (JSONL)<br/>audit.log + tool_call events + logrotate"]
+        convos["Conversations<br/>SQLite history"]
+        pimono --> registry --> policy
+        registry --> shims
+        policy --> budgets
+    end
+
+    subgraph L1["L1 · Host body — provisioned by scripts/install.sh"]
+        host["zombie user (passwordless sudo, docker group)<br/>SSH (key-only; Tailscale-only by default)<br/>UFW (deny inbound, allow outbound, SSH only on tailscale0)<br/>Xorg + GDM (optional autologin for zombie)<br/>x11vnc on 127.0.0.1:5900 (loopback, password-protected)<br/>Docker CE · Node toolchain · Python venv at ~zombie/agent-env<br/>@earendil-works/pi-ai + pi-coding-agent (pinned versions)<br/>Playwright + Chromium (browser automation)<br/>GUI helpers (gui-env, screenshot, click, type-text, key)<br/>Health timer: ubuntu-zombie-health.timer (every 15 min)"]
+    end
+
+    browser -->|"SSH local-forward -L 7878:127.0.0.1:7878"| L2
+    shell -->|"SSH"| L2
+    L3 -.->|"Tailscale (WireGuard) — only path in"| L2
+    L2 -->|"sudo (passwordless, log-traced)"| L1
 ```
 
 Each layer is owned by a different principal:
@@ -470,53 +454,42 @@ appears in `audit.log`; the `tool_call_id` ties the queued approval to
 the executed observation, so the operator can trace any state change
 back to a prompt.
 
-```
-Operator               Chat service                              Host
-   │                          │                                   │
-   │ POST /api/message        │                                   │
-   │ {prompt}                 │                                   │
-   ├─────────────────────────▶│                                   │
-   │                          │ history.add_message(user)         │
-   │                          │ audit("prompt", …)                │
-   │                          │ skill_loader.select_skills(…)     │
-   │                          │ → append skill bodies + provenance│
-   │                          │ pi_mono.run_turn(prompt, system,  │
-   │                          │   history, on_tool_call, tools)   │
-   │                          │   ────── spawn pi-mono ──────▶    │
-   │                          │   ◀─ {tool_call, name, args, id}  │
-   │                          │ tools.validate_args(name, args)   │
-   │                          │ policy.classify_tool(name, args)  │
-   │                          │ budget check (12 / 3 elevated)    │
-   │                          │ if read_only:                     │
-   │                          │   tools.dispatch(name, args)      │
-   │                          │   audit("tool_call",              │
-   │                          │     decision="executed", …)       │
-   │                          │ else:                             │
-   │                          │   queue pending_tool_call         │
-   │                          │   audit("tool_call",              │
-   │                          │     decision="queued", …)         │
-   │                          │   reply "operator_approval_required"│
-   │                          │ ─── tool_result ──────────────▶   │
-   │                          │ … repeat until pi emits "final"   │
-   │                          │ history.add_message(assistant)    │
-   │   reply + events ◀───────┤                                   │
-   │                          │                                   │
-   │ POST /api/approve        │                                   │
-   │ {tool_call_id, decision, │                                   │
-   │  phrase?}                │                                   │
-   ├─────────────────────────▶│                                   │
-   │                          │ verify approval (+phrase for      │
-   │                          │   destructive)                    │
-   │                          │ audit("tool_call",                │
-   │                          │   decision="approved", …)         │
-   │                          │ tools.dispatch(name, args)        │
-   │                          │   ─── subprocess ───▶             │
-   │                          │   ◀── stdout/stderr/exit ──       │
-   │                          │ audit(exit_code, duration_ms,     │
-   │                          │   stdout_sha256, stderr_sha256)   │
-   │                          │ history.add_event(tool_observation)│
-   │   result ◀───────────────┤                                   │
-   │                          │                                   │
+```mermaid
+sequenceDiagram
+    actor Operator
+    participant Chat as Chat service
+    participant Host
+
+    Operator->>Chat: POST /api/message {prompt}
+    Chat->>Chat: history.add_message(user)
+    Chat->>Chat: audit("prompt", …)
+    Chat->>Chat: skill_loader.select_skills(…)
+    Note over Chat: append skill bodies + provenance
+    Chat->>Host: pi_mono.run_turn(...) — spawn pi-mono
+    Host-->>Chat: {tool_call, name, args, id}
+    Chat->>Chat: tools.validate_args(name, args)
+    Chat->>Chat: policy.classify_tool(name, args)
+    Chat->>Chat: budget check (12 / 3 elevated)
+    alt read_only
+        Chat->>Chat: tools.dispatch(name, args)
+        Chat->>Chat: audit("tool_call", decision="executed")
+    else mutating
+        Chat->>Chat: queue pending_tool_call
+        Chat->>Chat: audit("tool_call", decision="queued")
+        Chat-->>Host: reply "operator_approval_required"
+    end
+    Note over Chat,Host: repeat tool_result until pi emits "final"
+    Chat->>Chat: history.add_message(assistant)
+    Chat-->>Operator: reply + events
+
+    Operator->>Chat: POST /api/approve {tool_call_id, decision, phrase?}
+    Chat->>Chat: verify approval (+phrase for destructive)
+    Chat->>Chat: audit("tool_call", decision="approved")
+    Chat->>Host: tools.dispatch(name, args) — subprocess
+    Host-->>Chat: stdout/stderr/exit
+    Chat->>Chat: audit(exit_code, duration_ms, stdout_sha256, stderr_sha256)
+    Chat->>Chat: history.add_event(tool_observation)
+    Chat-->>Operator: result
 ```
 
 Auto-execution rule: `read_only` tool calls skip the approval
@@ -602,13 +575,15 @@ The chat service runs as `AGENT_USER`, which has **passwordless
 `sudo`** via `/etc/sudoers.d/ubuntu-zombie-<user>`. Every privileged
 action follows the same path:
 
-```
-tool_call → tools.validate_args → policy.classify_tool
-          → operator approval (UI, +phrase for destructive)
-          → audit("tool_call", decision="approved")
-          → tools.dispatch (which may runner.run a sudo'd argv)
-          → audit("tool_call", decision="executed", exit_code, …)
-          → tool_observation echoed back to the model
+```mermaid
+flowchart LR
+    A["tool_call"] --> B["tools.validate_args"]
+    B --> C["policy.classify_tool"]
+    C --> D["operator approval<br/>(UI, +phrase for destructive)"]
+    D --> E["audit tool_call decision=approved"]
+    E --> F["tools.dispatch<br/>(may runner.run a sudo'd argv)"]
+    F --> G["audit tool_call decision=executed, exit_code, …"]
+    G --> H["tool_observation echoed back to the model"]
 ```
 
 The approval is recorded in the audit log *before* `sudo` is invoked.

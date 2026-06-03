@@ -14,6 +14,14 @@ to publish when the Git tag does not match `VERSION`
 are the highest-value moves that are **not yet done** and that move the
 release from "signed files" to "verifiable provenance".
 
+```mermaid
+flowchart LR
+    A["Signed files<br/>tarball · deb · SHA256SUMS<br/>SBOM · cosign"] --> B["Step 1<br/>SLSA provenance"]
+    B --> C["Step 2<br/>verify-release command"]
+    C --> D["Step 3<br/>checksum-pin bridges"]
+    D --> E["Verifiable provenance<br/>Phase 1 complete"]
+```
+
 ---
 
 ## Step 1 — Add build provenance attestation (SLSA)
@@ -35,6 +43,20 @@ single biggest jump in supply-chain posture.
 **Done when:** a consumer can independently verify the provenance of any
 published `.deb`/tarball back to its tag and workflow run.
 
+```mermaid
+sequenceDiagram
+    participant Tag as Git tag
+    participant WF as Release workflow
+    participant Art as Artifacts
+    participant Rel as GitHub Release
+    Tag->>WF: trigger on tag matching VERSION
+    WF->>Art: build tarball + deb
+    WF->>Art: generate SBOM + cosign signatures
+    WF->>Art: generate SLSA provenance (*.intoto.jsonl)
+    Art->>Rel: upload artifacts + attestations
+    Note over Rel: provenance binds artifact to<br/>commit, tag, builder, workflow run
+```
+
 ---
 
 ## Step 2 — Ship a release verification command
@@ -53,6 +75,17 @@ can verify them in one step, including offline/air-gapped.
 
 **Done when:** a fresh download can be verified end-to-end with a single
 documented command and clear pass/fail output.
+
+```mermaid
+flowchart TD
+    Start(["ubuntu-zombie verify-release"]) --> S1{"SHA256SUMS<br/>match?"}
+    S1 -- no --> Fail(["FAIL"])
+    S1 -- yes --> S2{"cosign signature<br/>valid?"}
+    S2 -- no --> Fail
+    S2 -- yes --> S3{"SLSA provenance<br/>verifies?"}
+    S3 -- no --> Fail
+    S3 -- yes --> Pass(["PASS"])
+```
 
 ---
 
@@ -81,3 +114,13 @@ command (Step 2) something authoritative to check, and bridge pinning
 (Step 3) then ensures the inputs feeding that provenance are themselves
 trustworthy. Together they complete Phase 1 of the roadmap and set up the
 package split (Phase 2) and APT distribution (Phase 3).
+
+```mermaid
+flowchart LR
+    subgraph P1["Phase 1 — Harden release"]
+        direction TB
+        S1["Step 1 · provenance"] --> S2["Step 2 · verify-release"] --> S3["Step 3 · pin bridges"]
+    end
+    P1 --> P2["Phase 2<br/>package split"]
+    P2 --> P3["Phase 3<br/>APT distribution"]
+```
