@@ -18,7 +18,7 @@ is the brand. Capture footage per the shot-list in
 | 6 | 0:52–1:02 | Commands execute; success status | "Then it acts — with real authority on the real machine." |
 | 7 | 1:02–1:10 | Audit log scrolls | "Every step is audit-logged and reversible." |
 | 8 | 1:10–1:18 | Terminal: `sudo ./scripts/install.sh install --dry-run` | "Preview the whole install first. Key-only SSH. Local-first. You hold the kill switch." |
-| 9 | 1:18–1:15 | End card: logo + repo URL + "MIT · Ubuntu LTS 22.04 / 24.04" | "Ubuntu Zombie. Open source. github.com/japer-technology/ubuntu-zombie" |
+| 9 | 1:18–1:25 | End card: logo + repo URL + "MIT · Ubuntu LTS 22.04 / 24.04" | "Ubuntu Zombie. Open source. github.com/japer-technology/ubuntu-zombie" |
 
 ## Production notes
 - Use a clean throwaway VM so nothing sensitive appears on screen.
