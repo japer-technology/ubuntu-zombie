@@ -99,6 +99,7 @@ Non-interactive variants and every environment variable: see
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md)                     | First successful install in ten steps             |
 | [`docs/PLATFORMS.md`](docs/PLATFORMS.md)                       | Supported Ubuntu versions and architectures       |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)               | Provider keys, Tailscale, VNC, chat, policy       |
+| [`docs/VNC.md`](docs/VNC.md)                                   | Why/how the VNC password is used, and if required |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)           | Common failures and their fixes                   |
 | [`docs/FAQ.md`](docs/FAQ.md)                                   | Quick answers distilled from the above            |
 | [`docs/UPGRADING.md`](docs/UPGRADING.md)                       | Version-by-version upgrade notes                  |
