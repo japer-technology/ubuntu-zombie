@@ -21,8 +21,12 @@
 //                    "content": "..." }, ...]
 //   }
 //
-//   list_models — list the models pi-ai knows for a provider. Needs no
-//   API key (the catalogue is static) and no model:
+//   list_models — list the models a provider exposes. Needs no model.
+//   For hosted providers the catalogue is pi-ai's static one (no API
+//   key required). For a local, OpenAI-compatible provider (lmstudio)
+//   the catalogue is fetched live from the server's /models endpoint —
+//   its base URL is read from ~/.pi/agent/models.json — so the operator
+//   sees the models their server actually serves:
 //   {
 //     "op":       "list_models",
 //     "provider": "openai" | ...
@@ -81,6 +85,87 @@ function emit(obj) {
 function die(error, code = "bridge_error") {
   emit({ ok: false, error: String(error), code });
   process.exit(1);
+}
+
+// Resolve the OpenAI-compatible base URL for a local/custom provider.
+//
+// Providers such as `lmstudio` have no static catalogue in pi-ai; their
+// models live on the server itself. scripts/install.sh records the
+// server URL in ~/.pi/agent/models.json (the same file pi-mono reads),
+// so we look the provider's `baseUrl` up there. The path is overridable
+// via ZOMBIE_PI_MODELS_JSON for tests. An explicit OPENAI_BASE_URL /
+// OPENAI_API_BASE env wins for the openai provider so an operator
+// pointing the hosted client at a local server still gets a live list.
+// Returns the trimmed base URL string, or "" when none is configured or
+// the configured value is not an absolute http(s) URL.
+function localBaseUrl(provider) {
+  let baseUrl = "";
+  if (provider === "openai") {
+    const envUrl = process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE;
+    if (envUrl) baseUrl = String(envUrl).trim();
+  }
+  if (!baseUrl) {
+    const path =
+      process.env.ZOMBIE_PI_MODELS_JSON ||
+      (process.env.HOME ? join(process.env.HOME, ".pi", "agent", "models.json") : "");
+    if (!path) return "";
+    let cfg;
+    try {
+      cfg = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      return "";
+    }
+    const entry = cfg && cfg.providers && cfg.providers[provider];
+    const fromCfg = entry && entry.baseUrl;
+    baseUrl = typeof fromCfg === "string" ? fromCfg.trim() : "";
+  }
+  // Only an absolute http(s) URL can be queried; anything else (a
+  // relative path, a bare host, an empty string) is unusable here.
+  return /^https?:\/\//i.test(baseUrl) ? baseUrl : "";
+}
+
+// How long to wait for the local server's /models endpoint before giving
+// up, so `/model` never blocks on an unreachable or wedged server.
+const LOCAL_MODELS_TIMEOUT_MS = 8000;
+
+// Fetch the catalogue a local OpenAI-compatible server advertises via
+// GET {baseUrl}/models (the standard /v1/models route — baseUrl already
+// includes the /v1 segment). Returns the normalised model list, or
+// throws on a network/parse error so the caller can fall back to the
+// static catalogue. Bounded by a short timeout so /model never hangs on
+// an unreachable server.
+async function fetchLiveModels(baseUrl, keyEnv) {
+  const url = `${baseUrl.replace(/\/+$/, "")}/models`;
+  const headers = { Accept: "application/json" };
+  const key = keyEnv && process.env[keyEnv];
+  if (key) headers.Authorization = "Bearer " + key;
+  const resp = await fetch(url, {
+    headers,
+    signal: AbortSignal.timeout(LOCAL_MODELS_TIMEOUT_MS),
+  });
+  if (!resp.ok) {
+    throw new Error(`GET ${url} -> HTTP ${resp.status}`);
+  }
+  const body = await resp.json();
+  // OpenAI lists models under `data`; tolerate a bare array too.
+  const rows = Array.isArray(body) ? body : Array.isArray(body?.data) ? body.data : [];
+  return rows
+    .map((m) => (typeof m === "string" ? { id: m } : m))
+    .filter((m) => m && m.id)
+    .map((m) => ({
+      id: String(m.id),
+      name: String(m.name || m.id),
+      reasoning: !!m.reasoning,
+      // `context_length` is the snake_case field local OpenAI-compatible
+      // servers (LM Studio, llama.cpp) emit; `contextWindow` mirrors the
+      // pi-ai catalogue shape. Honour whichever the server provided.
+      contextWindow:
+        typeof m.contextWindow === "number"
+          ? m.contextWindow
+          : typeof m.context_length === "number"
+            ? m.context_length
+            : null,
+    }));
 }
 
 // Resolve and import @earendil-works/pi-ai.
@@ -216,11 +301,35 @@ async function main() {
     );
   }
 
-  // list_models is satisfied entirely from pi-ai's static catalogue, so
-  // it needs neither an API key nor a model id — handle it before those
-  // checks and return early.
+  // list_models: a local, OpenAI-compatible provider (lmstudio, or any
+  // provider pointed at a custom base URL) has no static catalogue in
+  // pi-ai, so query the server's live /models endpoint first. Only fall
+  // back to pi-ai's bundled catalogue when no live source is configured
+  // or the server cannot be reached — this is what restores the model
+  // list for the local-LLM deployments that ship by default.
   const op = String(req.op || "complete").toLowerCase();
   if (op === "list_models") {
+    const baseUrl = localBaseUrl(provider);
+    if (baseUrl) {
+      try {
+        const live = await fetchLiveModels(baseUrl, KEY_ENV[provider]);
+        if (live.length) {
+          emit({ ok: true, models: live });
+          return;
+        }
+      } catch (err) {
+        // A local provider has no static fallback, so surface why the
+        // live query failed instead of silently returning an empty list.
+        if (provider === "lmstudio") {
+          die(
+            `failed to list models from local server at ${baseUrl}: ${err.message}`,
+            "list_failed",
+          );
+        }
+        // Hosted provider with a base-URL override: fall through to the
+        // bundled catalogue below.
+      }
+    }
     const pi = await loadPiAi();
     let models;
     try {

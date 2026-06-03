@@ -552,6 +552,72 @@ app.history.close()
 PY
 
 
+    # The real pi-ai-bridge.mjs must list a local OpenAI-compatible
+    # provider's models live from its /models endpoint (lmstudio has no
+    # static pi-ai catalogue). Drive the real bridge against a hermetic
+    # stub HTTP server + temp models.json so no @earendil-works/pi-ai
+    # install or LAN server is needed; the live path returns before the
+    # bridge ever loads pi-ai.
+    echo "  pi-ai bridge live local model listing"
+    _LM_DIR="$(mktemp -d)"
+    cat > "${_LM_DIR}/models.json" <<JSON
+{ "providers": { "lmstudio": { "baseUrl": "http://127.0.0.1:7891/v1",
+  "apiKey": "LMSTUDIO_API_KEY", "models": [ { "id": "placeholder" } ] } } }
+JSON
+    cat > "${_LM_DIR}/server.mjs" <<'JS'
+import { createServer } from "node:http";
+const s = createServer((req, res) => {
+  if (req.url === "/v1/models") {
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ object: "list", data: [
+      { id: "qwen/qwen3-coder", object: "model" },
+      { id: "llama-3.1-8b", object: "model", context_length: 131072 },
+    ] }));
+    return;
+  }
+  res.statusCode = 404;
+  res.end("no");
+});
+s.listen(7891, "127.0.0.1", () => process.stdout.write("ready\n"));
+JS
+    node "${_LM_DIR}/server.mjs" >"${_LM_DIR}/server.log" 2>&1 &
+    _LM_PID=$!
+    # Wait for the stub server to report ready (bounded); fail fast if it
+    # never comes up so the assertions below give a clear diagnostic.
+    _LM_READY=0
+    for _ in $(seq 1 50); do
+        if grep -q ready "${_LM_DIR}/server.log" 2>/dev/null; then
+            _LM_READY=1
+            break
+        fi
+        sleep 0.1
+    done
+    if [ "${_LM_READY}" -ne 1 ]; then
+        kill "${_LM_PID}" 2>/dev/null || true
+        echo "stub model server failed to start:" >&2
+        cat "${_LM_DIR}/server.log" >&2 || true
+        exit 1
+    fi
+    _LM_OUT="$(printf '%s' '{"op":"list_models","provider":"lmstudio"}' \
+        | ZOMBIE_PI_MODELS_JSON="${_LM_DIR}/models.json" \
+          LMSTUDIO_API_KEY=local \
+          node payload/agent/pi-ai-bridge.mjs)"
+    kill "${_LM_PID}" 2>/dev/null || true
+    ZOMBIE_LM_OUT="${_LM_OUT}" python3 - <<'PY'
+import json, os
+out = json.loads(os.environ["ZOMBIE_LM_OUT"])
+if not out.get("ok"):
+    raise SystemExit(f"live list_models failed: {out!r}")
+ids = [m["id"] for m in out.get("models", [])]
+if ids != ["qwen/qwen3-coder", "llama-3.1-8b"]:
+    raise SystemExit(f"live list_models ids wrong: {ids!r}")
+ctx = {m["id"]: m["contextWindow"] for m in out["models"]}
+if ctx["llama-3.1-8b"] != 131072 or ctx["qwen/qwen3-coder"] is not None:
+    raise SystemExit(f"live list_models context window wrong: {ctx!r}")
+PY
+    rm -rf "${_LM_DIR}"
+
+
     # produce a soft failure (synthetic ``budget_exceeded``
     # observation) once exceeded so the model ends the turn cleanly
     # rather than looping.
