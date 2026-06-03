@@ -455,13 +455,15 @@ def current_model(name: str | None = None) -> str | None:
 
 
 def list_models(name: str | None = None) -> list[dict]:
-    """List the models pi-ai knows for the active (or named) provider.
+    """List the models the active (or named) provider exposes.
 
     Returns a list of ``{"id", "name", "reasoning", "context_window"}``
-    dicts. The catalogue is static (pi-ai bundles it), so no API key is
-    required. Providers without a bundled catalogue — notably
-    ``lmstudio`` — return an empty list; the operator must pin the model
-    id their local server serves via :func:`set_active_model`.
+    dicts. For hosted providers the catalogue is static (pi-ai bundles
+    it), so no API key is required. For a local, OpenAI-compatible
+    provider (``lmstudio``) the bridge instead queries the server's live
+    ``/models`` endpoint — using the base URL recorded in
+    ``~/.pi/agent/models.json`` — so the operator sees the models their
+    server actually serves rather than an empty list.
 
     Raises :class:`NoProviderConfigured` when no provider is configured
     and :class:`ProviderError` when the bridge cannot be reached.
