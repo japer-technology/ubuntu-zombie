@@ -582,11 +582,22 @@ s.listen(7891, "127.0.0.1", () => process.stdout.write("ready\n"));
 JS
     node "${_LM_DIR}/server.mjs" >"${_LM_DIR}/server.log" 2>&1 &
     _LM_PID=$!
-    # Wait for the stub server to report ready (bounded).
+    # Wait for the stub server to report ready (bounded); fail fast if it
+    # never comes up so the assertions below give a clear diagnostic.
+    _LM_READY=0
     for _ in $(seq 1 50); do
-        grep -q ready "${_LM_DIR}/server.log" 2>/dev/null && break
+        if grep -q ready "${_LM_DIR}/server.log" 2>/dev/null; then
+            _LM_READY=1
+            break
+        fi
         sleep 0.1
     done
+    if [ "${_LM_READY}" -ne 1 ]; then
+        kill "${_LM_PID}" 2>/dev/null || true
+        echo "stub model server failed to start:" >&2
+        cat "${_LM_DIR}/server.log" >&2 || true
+        exit 1
+    fi
     _LM_OUT="$(printf '%s' '{"op":"list_models","provider":"lmstudio"}' \
         | ZOMBIE_PI_MODELS_JSON="${_LM_DIR}/models.json" \
           LMSTUDIO_API_KEY=local \

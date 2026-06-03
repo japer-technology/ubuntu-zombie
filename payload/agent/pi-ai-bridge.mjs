@@ -96,26 +96,37 @@ function die(error, code = "bridge_error") {
 // via ZOMBIE_PI_MODELS_JSON for tests. An explicit OPENAI_BASE_URL /
 // OPENAI_API_BASE env wins for the openai provider so an operator
 // pointing the hosted client at a local server still gets a live list.
-// Returns the trimmed base URL string, or "" when none is configured.
+// Returns the trimmed base URL string, or "" when none is configured or
+// the configured value is not an absolute http(s) URL.
 function localBaseUrl(provider) {
+  let baseUrl = "";
   if (provider === "openai") {
     const envUrl = process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE;
-    if (envUrl) return String(envUrl).trim();
+    if (envUrl) baseUrl = String(envUrl).trim();
   }
-  const path =
-    process.env.ZOMBIE_PI_MODELS_JSON ||
-    (process.env.HOME ? join(process.env.HOME, ".pi", "agent", "models.json") : "");
-  if (!path) return "";
-  let cfg;
-  try {
-    cfg = JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return "";
+  if (!baseUrl) {
+    const path =
+      process.env.ZOMBIE_PI_MODELS_JSON ||
+      (process.env.HOME ? join(process.env.HOME, ".pi", "agent", "models.json") : "");
+    if (!path) return "";
+    let cfg;
+    try {
+      cfg = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      return "";
+    }
+    const entry = cfg && cfg.providers && cfg.providers[provider];
+    const fromCfg = entry && entry.baseUrl;
+    baseUrl = typeof fromCfg === "string" ? fromCfg.trim() : "";
   }
-  const entry = cfg && cfg.providers && cfg.providers[provider];
-  const baseUrl = entry && entry.baseUrl;
-  return typeof baseUrl === "string" ? baseUrl.trim() : "";
+  // Only an absolute http(s) URL can be queried; anything else (a
+  // relative path, a bare host, an empty string) is unusable here.
+  return /^https?:\/\//i.test(baseUrl) ? baseUrl : "";
 }
+
+// How long to wait for the local server's /models endpoint before giving
+// up, so `/model` never blocks on an unreachable or wedged server.
+const LOCAL_MODELS_TIMEOUT_MS = 8000;
 
 // Fetch the catalogue a local OpenAI-compatible server advertises via
 // GET {baseUrl}/models (the standard /v1/models route — baseUrl already
@@ -130,7 +141,7 @@ async function fetchLiveModels(baseUrl, keyEnv) {
   if (key) headers.Authorization = "Bearer " + key;
   const resp = await fetch(url, {
     headers,
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(LOCAL_MODELS_TIMEOUT_MS),
   });
   if (!resp.ok) {
     throw new Error(`GET ${url} -> HTTP ${resp.status}`);
