@@ -1,125 +1,124 @@
-# Tailscale, VNC, and the VNC password
+# Tailscale
 
-This document explains the remote-access model of `ubuntu-zombie` and,
-in particular, **why** and **how** the VNC password is used, and
-**whether it is required**.
+This document explains how `ubuntu-zombie` authenticates to Tailscale,
+**why** that credential is used, and **whether it is required**.
 
-## The access path
+## There is no "Tailscale password"
 
-The host exposes no graphical service to the network. The only
-externally reachable port is SSH (22), and by default that is allowed
-only on the `tailscale0` interface:
+Tailscale does not use a password. A machine joins your private network
+(your *tailnet*) by **authenticating**, in one of two ways:
+
+- **Interactive login** — `tailscale up` prints a URL; you open it and
+  approve the machine against your existing Tailscale identity (Google,
+  Microsoft, GitHub, Okta, etc.). The identity provider, not a local
+  password, is what authenticates you.
+- **A pre-auth key** (`TAILSCALE_AUTHKEY`, a `tskey-auth-…` token) —
+  generated in the Tailscale admin console for unattended enrolment.
+
+So when this repo refers to a Tailscale "credential" it means one of
+these, never a password.
+
+## Why Tailscale is used
+
+Tailscale is the **intended remote-ingress path** for the host. When it
+is enabled, the security posture becomes:
 
 - UFW is `default deny incoming`, `default allow outgoing`.
-- SSH is restricted to the Tailscale interface (set
-  `ZOMBIE_SKIP_TAILSCALE=1` to open SSH on every interface instead,
-  with a loud warning).
-- `x11vnc` binds to `127.0.0.1:${VNC_PORT:-5900}` only (`-localhost`),
-  and never listens on the network.
-- The chat UI likewise binds to `127.0.0.1` only.
+- Inbound SSH (22) is allowed **only** on the `tailscale0` interface,
+  so the machine is reachable for administration only from devices on
+  your tailnet.
+- The desktop (`x11vnc`) and chat UI bind to `127.0.0.1` only and are
+  reached by tunnelling over that SSH connection.
 
-So the desktop is reached by joining the machine's private Tailscale
-network and tunnelling VNC over SSH:
+In other words, Tailscale authentication is what lets you reach the box
+at all in the hardened configuration; the loopback-only services then
+sit behind that boundary.
 
-```bash
-ssh -L 5900:127.0.0.1:5900 zombie@<tailscale-name-or-ip>
-# then point a VNC viewer at localhost:5900
-```
+## Is Tailscale required?
 
-The VNC password is the credential that the viewer presents once that
-tunnel is open.
+**No — Tailscale is off by default.** The installer ships with
+`ZOMBIE_SKIP_TAILSCALE=1`, which means it does **not** install or enrol
+Tailscale and does not ask for any Tailscale credential. In that mode
+inbound SSH is allowed on **every** interface (with a loud warning),
+and you are expected to put the host behind your own network boundary
+(a private LAN you control, another VPN, etc.).
 
-## Why the VNC password exists
-
-`x11vnc` is installed for **emergency, loopback-only desktop access** —
-for example to watch or take over the GNOME session the agent is
-driving when something needs a human at the screen. Because the VNC
-server runs inside the agent's GNOME session and shares its X display,
-it needs an authentication step of its own so that simply reaching the
-loopback socket (over the SSH tunnel) is not enough to attach to the
-live desktop.
-
-The password is therefore a second factor *behind* the SSH/Tailscale
-boundary, not a replacement for it:
-
-- **Tailscale + SSH key** controls who can reach the host and open the
-  tunnel at all.
-- **The VNC password** controls who can then attach to the running
-  desktop through that tunnel.
-
-It is deliberately scoped to this single job. It is not a login
-password, not a sudo password, and is never used for the chat service
-or for any provider credential.
-
-## How the VNC password is used
-
-At install time the installer (`scripts/install.sh`) provisions
-`x11vnc` for the agent account (default `zombie`):
-
-1. It creates `~/.vnc` with mode `0700`, owned by the agent user.
-2. It stores the password by piping it to `x11vnc -storepasswd`, which
-   writes the obfuscated password file `~/.vnc/passwd` (mode `0600`).
-3. It writes a GNOME autostart entry,
-   `~/.config/autostart/x11vnc.desktop`, that launches:
-
-   ```
-   x11vnc -display :0 -forever -shared -localhost \
-          -rfbauth ~/.vnc/passwd -rfbport ${VNC_PORT}
-   ```
-
-   `-localhost` keeps the listener on `127.0.0.1`, and `-rfbauth`
-   points at the stored password file so every connection must
-   authenticate.
-
-The password is supplied to the installer in one of three ways:
-
-- **Interactively** — the installer prompts (twice, masked) and calls
-  `x11vnc -storepasswd`, retrying on a mismatch.
-- **Via the `VNC_PASSWORD` environment variable** — used for
-  unattended installs; the installer stores it without prompting.
-- **Reused from disk** — if `~/.vnc/passwd` already exists (for example
-  on a re-run or upgrade), the installer keeps it and does not prompt.
-
-`VNC_PASSWORD` is treated as a secret throughout: the audit logger
-redacts it, and the install receipt records only a set/unset flag, not
-the value.
-
-### Resetting or changing it
-
-Reset the password at any time as the agent user:
+You opt in by setting `ZOMBIE_SKIP_TAILSCALE=0`:
 
 ```bash
-sudo -u zombie x11vnc -storepasswd
+sudo ZOMBIE_SKIP_TAILSCALE=0 ./scripts/install.sh install
 ```
 
-The VNC port is fixed at install time. To change it, re-run the
-installer with `VNC_PORT=<n>` (and re-tunnel accordingly):
+This installs Tailscale from its official apt repository, enables
+`tailscaled`, restricts inbound SSH to `tailscale0`, and enrols the
+machine. You can re-run the installer with `ZOMBIE_SKIP_TAILSCALE=0` at
+any later time to switch a host over to the Tailscale-only posture.
+
+| `ZOMBIE_SKIP_TAILSCALE` | Tailscale credential | SSH exposure |
+| ----------------------- | -------------------- | ------------ |
+| `1` (default)           | none — not installed/enrolled | every interface (warned) |
+| `0`                     | required — interactive login or `TAILSCALE_AUTHKEY` | `tailscale0` only |
+
+## How the Tailscale credential is used
+
+When `ZOMBIE_SKIP_TAILSCALE=0`, `scripts/install.sh` enrols the machine
+in this order:
+
+1. **Already logged in?** If `tailscale status` shows the node is up and
+   not "Logged out", enrolment is skipped.
+2. **`TAILSCALE_AUTHKEY` set?** The installer runs
+   `tailscale up --ssh=false --authkey "$TAILSCALE_AUTHKEY"` for fully
+   unattended enrolment. (`--ssh=false` keeps Tailscale SSH disabled;
+   access is plain SSH restricted to the `tailscale0` interface.)
+3. **Otherwise (interactive):** the installer runs `tailscale up` and
+   prints the login URL for you to approve in a browser.
+
+`TAILSCALE_AUTHKEY` is only consulted when `ZOMBIE_SKIP_TAILSCALE=0`; it
+is ignored in the default skip mode. It is treated as a secret
+throughout — the audit logger redacts `tskey-…` tokens and the
+`TAILSCALE_AUTHKEY` environment value, and the install receipt never
+records it.
+
+### Fully unattended example
 
 ```bash
-sudo VNC_PORT=5901 ./scripts/install.sh install
+sudo SSH_PUBLIC_KEY="ssh-ed25519 AAAA… you@host" \
+     ZOMBIE_NONINTERACTIVE=1 \
+     ZOMBIE_SKIP_TAILSCALE=0 \
+     VNC_PASSWORD="replace-me" \
+     TAILSCALE_AUTHKEY="tskey-auth-…" \
+     ./scripts/install.sh install
 ```
 
-## Is the VNC password required?
+### Re-authenticating later
 
-**Yes — a VNC password must exist for the install to complete, but you
-are not always asked to type one.** The rules are:
+```bash
+sudo tailscale logout
+sudo tailscale up
+```
 
-| Situation | Behaviour |
-| --------- | --------- |
-| `~/.vnc/passwd` already exists | Reused; you are not prompted. |
-| Interactive install, no stored password | You are **prompted** to set one (required to proceed). |
-| `VNC_PASSWORD` env var is set | Used directly; no prompt. |
-| Non-interactive install (`ZOMBIE_NONINTERACTIVE=1`), no stored password | `VNC_PASSWORD` is **mandatory**; the installer aborts if it is missing. |
+If interactive enrolment does not complete during install, the
+installer warns and you can finish it from the console with
+`sudo tailscale up` before relying on the Tailscale-only SSH rule.
 
-In other words, the installer never configures `x11vnc` without a
-password. There is no "no password" mode — the desktop is always
-behind both the Tailscale/SSH boundary and the VNC password.
+## Tailscale vs the VNC password
+
+These are independent credentials at different layers and are both used
+when Tailscale is enabled:
+
+- **Tailscale login / auth key** — controls which devices can reach the
+  host and open an SSH tunnel.
+- **VNC password** (`VNC_PASSWORD`, stored in `~/.vnc/passwd`) — a
+  separate credential that controls who can then attach to the running
+  desktop through that tunnel. Unlike Tailscale, the VNC password is
+  always required for an install to complete, because `x11vnc` is never
+  configured without one. See `docs/CONFIGURATION.md` (VNC section).
 
 ## Related documents
 
-- `docs/CONFIGURATION.md` — VNC and chat tunnelling, port changes.
-- `docs/QUICKSTART.md` — required inputs (`SSH_PUBLIC_KEY`,
-  `VNC_PASSWORD`) and unattended installs.
-- `docs/TROUBLESHOOTING.md` — recovering VNC access.
+- `docs/CONFIGURATION.md` — opting in to Tailscale, re-enrolling, and
+  tunnelling VNC/chat over it.
+- `docs/QUICKSTART.md` — required inputs and unattended installs.
+- `docs/TROUBLESHOOTING.md` — recovering Tailscale/SSH access.
 - `SECURITY.md` and `docs/ARCHITECTURE.md` — the full network and
   privilege model.
