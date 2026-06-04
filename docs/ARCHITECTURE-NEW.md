@@ -822,6 +822,178 @@ If a change passes `make lint && make test` and the relevant section
 of this document still describes reality, the change is ready to
 review.
 
+---
+
+## 12. Experimental: Sovereign mode (standing-superuser, browser-only)
+
+> **Status: experimental design proposal — _not_ the shipped default.**
+> Everything in §§1–11 describes the product as it ships today, where the
+> operator-approval round-trip is the privilege boundary. This section
+> describes a deliberately more aggressive posture that grants the agent
+> loop **extreme authority**: it runs as a standing super user and the
+> operator reaches it **only** through the browser. It is documented here
+> so the trade-offs are explicit and reviewable before any code lands.
+> When the two disagree, §§1–11 (and the code) are reality; this section
+> is a target, not a description.
+
+### 12.1  What changes, in one breath
+
+Sovereign mode collapses the system to a **single human seam** and a
+**single, always-elevated principal**:
+
+1. **Browser-only access.** The operator interacts *only* with the
+   pi-mono agent loop through the chat UI. The direct interactive shell
+   to the `zombie` user (§1, the `shell` node) is removed from the
+   supported surface — it is **not required** to drive or recover the host.
+2. **Standing sudo.** pi-mono executes inside the `zombie` account, which
+   holds passwordless `sudo` **at all times** — not just for the duration
+   of an approved tool call.
+3. **Super user at all times.** The agent acts as the super user
+   continuously: the operator-approval gate (§4, §6.3) is switched from a
+   *blocking* control to an *advisory + audit* one, so privileged tool
+   calls auto-execute rather than queueing for a click.
+
+This is the opposite end of the dial from the shipped default
+(`settings.default_class: destructive`, `destructive.approval: required`).
+It buys uninterrupted autonomy at the cost of the human-in-the-loop
+checkpoint. **Adopt it only on a single-purpose, disposable, or
+network-isolated host** where the blast radius of a mistaken or
+manipulated agent is acceptable.
+
+### 12.2  Access model
+
+```mermaid
+flowchart TB
+    subgraph L3["L3 · Operator (human)"]
+        browser["browser<br/>(the only seam)"]
+    end
+
+    subgraph L1["L1 · Host body"]
+        subgraph chat["Chat service — ubuntu-zombie-chat.service<br/>(runs as zombie, loopback 127.0.0.1:7878)"]
+            pimono["pi-mono agent loop"]
+            registry["Closed tool registry"]
+            policy["Policy gate<br/>(advisory + audit only)"]
+            audit["Audit log (JSONL)"]
+            pimono --> registry --> policy --> audit
+        end
+        host["zombie user · passwordless sudo (standing)"]
+        policy -->|"sudo (auto, log-traced)"| host
+    end
+
+    browser -->|"SSH tunnel — port-forward only, no shell/PTY<br/>-L 7878:127.0.0.1:7878"| chat
+```
+
+Compared with §1, the `shell` node and the `shell --> host` edge are
+gone. The SSH daemon stays running — the browser still needs the
+loopback tunnel — but the agent key is **restricted to port-forwarding**.
+Concretely, the single entry in `~zombie/.ssh/authorized_keys` is
+prefixed with the OpenSSH restrictions that forbid an interactive
+session while still permitting the local forward:
+
+```
+restrict,port-forwarding,permitlisten="127.0.0.1:7878" ssh-ed25519 AAAA… operator
+```
+
+`restrict` removes agent/X11 forwarding, PTY allocation, and
+`ForceCommand` execution; `port-forwarding` re-enables only the tunnel;
+`permitlisten` pins it to the chat port. An operator who SSHes in gets
+no shell — only the forward — so the **browser is the sole driver** of
+the host. (`sshd_config.d/zz-zombie.conf` can additionally set
+`PermitTTY no` for the agent account as belt-and-braces.)
+
+> **Recovery caveat.** With no shell seam, a wedged chat service can no
+> longer be repaired over SSH. Sovereign-mode hosts must keep an
+> **out-of-band** recovery path — physical/VNC console, cloud serial
+> console, or a separate break-glass admin account that is *not* the
+> `zombie` user — or accept reprovisioning as the recovery story. This is
+> the single biggest operational cost of dropping the shell.
+
+### 12.3  Authority model
+
+The policy machinery (`policy.py`, `policy.yaml`) is unchanged in shape;
+only its **effect** is dialled down. A new run-time switch selects the
+posture:
+
+| `ZOMBIE_AUTHORITY` | Approval behaviour | Maps to |
+|--------------------|--------------------|---------|
+| `gated` (default)  | Mutating calls queue for an operator click; `destructive` needs the typed phrase. | §4 turn lifecycle as shipped. |
+| `sovereign`        | Every class auto-executes; the policy gate still **classifies, budgets, and audits** every call, but `approval: required` and `confirm_phrase` are treated as advisory. | This section. |
+
+`sovereign` is equivalent to setting every entry under `classes:` to
+`approval: auto` and clearing `confirm_phrase`, but exposing it as one
+named switch keeps the intent legible and auditable (one grep, one
+log field) instead of scattering it across five class definitions. The
+switch is **fail-safe-toward-gated**: any unset, malformed, or
+unrecognised value resolves to `gated`, so a typo can never silently
+unlock the host.
+
+What the agent gains: it can install packages, edit `/etc`, restart
+services, change the firewall, and run `destructive` operations within a
+single turn without a human round-trip — acting as a true resident
+super user.
+
+What stays in force even under `sovereign` — the controls that are
+*not* the approval gate:
+
+- **Closed tool registry (§6.4).** Authority is breadth-of-action, not
+  new capabilities. The model still cannot invent tools; `shell.run` is
+  still classified per-argv; adding a tool still needs a code release.
+- **Per-turn budgets (§3.9).** `max_tool_calls_per_turn` and
+  `max_elevated_calls_per_turn` still cap a runaway loop — and become the
+  *primary* automatic brake, since the human click no longer paces the
+  agent. Sovereign hosts should tune these down deliberately.
+- **Audit trail (§3.3, §6.3).** Every auto-executed call is still logged
+  with classification, `decision="executed"`, exit code, duration, and
+  stdout/stderr digests. The decision field gains an `auto_sovereign`
+  value so post-hoc review can distinguish an auto-elevation from a
+  human-approved one — preserving the §6.3 guarantee that AI-initiated
+  and human-initiated elevations remain distinguishable after the fact.
+- **Network + secrets boundaries (§6.2, §6.5).** UFW posture, loopback
+  binding, key-only SSH, and `secrets/env` redaction are untouched.
+
+### 12.4  Why "the policy gate is the boundary" still (mostly) holds
+
+§6.3 states the policy gate plus the closed registry — not the systemd
+sandbox — is the security boundary. Sovereign mode does **not** remove
+that boundary; it removes the *human* from one half of it. The gate
+still classifies and records; what changes is that classification no
+longer pauses for consent. The honest framing is:
+
+- **Shipped default:** boundary = closed registry **+ operator consent**.
+- **Sovereign:** boundary = closed registry **+ after-the-fact audit**.
+
+The second is strictly weaker against a manipulated or mistaken model,
+which is why it is opt-in, off by default, fail-safe-toward-gated, and
+flagged in `health-check` / `verify` so an operator is never in
+sovereign mode without knowing it.
+
+### 12.5  Implementation sketch (for a future release)
+
+This is intentionally a sketch — no code ships with this document. A
+minimal, reviewable path that respects the existing seams:
+
+| Concern | Where | Change |
+|---------|-------|--------|
+| Posture switch | `policy.py` | Read `ZOMBIE_AUTHORITY`; expose `is_sovereign()`; resolve anything other than `sovereign` to `gated`. |
+| Auto-execute | `server.py` turn loop | When sovereign, dispatch mutating/destructive calls inline (still after `validate_args` → `classify_tool` → budget check) instead of queueing a `pending_tool_call`. |
+| Audit fidelity | `audit.py` | Emit `decision="auto_sovereign"` for elevations that bypassed a click; keep all other fields identical. |
+| Browser-only SSH | `install.sh` | Write the `restrict,port-forwarding,permitlisten=…` prefix on the agent's `authorized_keys`; optionally set `PermitTTY no`. Gate behind an explicit install-time flag. |
+| Visibility | `health-check`, `install.sh verify` | Report the active authority posture so it is never silent. |
+| Config surface | §8 of this document + `CONFIGURATION.md` | Document `ZOMBIE_AUTHORITY` and the browser-only SSH flag. |
+
+### 12.6  Relationship to the Non-goals (§10)
+
+Sovereign mode is a *considered* relaxation, not a repudiation, of §10:
+
+- It does **not** add a remote API — access is still loopback + tunnel.
+- It does **not** add free-form shell — `shell.run` stays classified and
+  the registry stays closed.
+- It **does** consciously trade the human-in-the-loop approval that the
+  shipped default treats as load-bearing. That is the whole point, and
+  the reason it is quarantined in this experimental section with an
+  off-by-default, fail-safe-toward-gated switch rather than folded into
+  the default turn lifecycle.
+
 <p align="right">
   <picture>
     <img src="https://raw.githubusercontent.com/japer-technology/ubuntu-zombie/main/LOGO.png" alt="Ubuntu Zombie" width="80">
