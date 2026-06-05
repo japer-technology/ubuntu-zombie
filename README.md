@@ -55,6 +55,22 @@ install. Tailscale is **off by default**; opt in with
 full list of inputs and their defaults is in
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md#parameters-required-to-allow-the-install-to-proceed).
 
+If you do not already have an SSH key on the workstation you will use
+to control this PC, create one there (not on the Ubuntu Zombie box)
+with `ssh-keygen -t ed25519`, then pass the public half
+(`~/.ssh/id_ed25519.pub`, the line starting `ssh-ed25519 …`) as
+`SSH_PUBLIC_KEY`. Full steps — including copying the key from GitHub —
+are in [`docs/QUICKSTART.md`](docs/QUICKSTART.md#how-to-get-an-ssh-key).
+
+During an **interactive** install the script can also auto-detect a
+local LLM: it scans your LAN for an OpenAI-compatible server (LM
+Studio, Ollama, `llama.cpp`) and offers any models it finds as the
+starting model, wiring it up as the `lmstudio` provider so you can run
+fully offline with no cloud API key. Skip it with
+`ZOMBIE_SKIP_LLM_SCAN=1`. See
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md#optional-use-a-local-llm-auto-detected-on-your-lan)
+and [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#local-llm-discovery-lan-scan).
+
 Prefer a `.deb`? Each [GitHub Release](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
 ships `ubuntu-zombie_<version>_all.deb` plus a SHA-256 checksum file and
 keyless cosign signatures. After `sudo apt install ./ubuntu-zombie_<ver>_all.deb`,

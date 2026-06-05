@@ -28,6 +28,12 @@ You need:
   - `OPENROUTER_API_KEY=…` (also requires `ZOMBIE_MODEL=…`)
   - `MISTRAL_API_KEY=…`
   - `GROQ_API_KEY=…`
+
+  **Or no cloud key at all:** if you run a local OpenAI-compatible LLM
+  server (LM Studio, Ollama, `llama.cpp`) on your LAN, the interactive
+  installer auto-detects it and offers its models as the starting model
+  — see [Optional: use a local LLM (auto-detected on your
+  LAN)](#optional-use-a-local-llm-auto-detected-on-your-lan) in step 1.
 - A keyboard physically attached to the PC for the first run.
 - **Optional:** a Tailscale account and a [pre-auth key](https://login.tailscale.com/admin/settings/keys).
   Tailscale is **off by default**. Opt in with `ZOMBIE_SKIP_TAILSCALE=0`
@@ -166,6 +172,38 @@ session), run:
 sudo ./scripts/install.sh repair
 ```
 
+### Optional: use a local LLM (auto-detected on your LAN)
+
+During an **interactive** install (not `--yes`, not
+`ZOMBIE_NONINTERACTIVE=1`, and on a real TTY) the installer scans the
+host's IPv4 `/24` — all 256 addresses — for an OpenAI-compatible local
+LLM server answering on `http://<ip>:1234/v1`. Servers such as
+[LM Studio](https://lmstudio.ai/) (which listens on port `1234` by
+default), Ollama, and `llama.cpp` are detected automatically. Any
+models the responders advertise are listed in the parameter-review
+step, where you can pick one as the **starting model** (or skip and
+configure a cloud provider later).
+
+When you select a discovered model, the installer records it as the
+`lmstudio` provider — writing `ZOMBIE_PROVIDER=lmstudio`,
+`ZOMBIE_MODEL=<model id>`, and `LMSTUDIO_API_KEY` into
+`/opt/ai-zombie/secrets/env`, and the server URL into the agent's
+`~/.pi/agent/models.json` — so the box can answer entirely offline with
+**no cloud API key**. You can skip step 4 (Add an API key) in that case.
+
+Knobs:
+
+- `ZOMBIE_SKIP_LLM_SCAN=1` — skip the LAN scan entirely.
+- `ZOMBIE_LLM_SCAN_PORT=<port>` — probe a different port (default
+  `1234`, LM Studio's default).
+- `ZOMBIE_LOCAL_LLM_API_KEY=<key>` — record a non-default key for the
+  local server (most local servers ignore it).
+
+The scan is best-effort, needs `curl` and `python3` (both already
+required by the product), and is skipped automatically on `--yes`,
+non-interactive, and non-TTY runs. Full details are in
+[`CONFIGURATION.md`](CONFIGURATION.md#local-llm-discovery-lan-scan).
+
 ### Upgrade / refresh from GitHub
 
 The same `install` subcommand is also the upgrade path. There is no
@@ -234,6 +272,10 @@ sudo ./scripts/install.sh repair
 ```
 
 ## 4. Add an API key
+
+(Skip this step if you selected a local LLM during install — the
+`lmstudio` provider is already configured in `secrets/env`. You only
+need it to switch to, or add, a cloud provider.)
 
 ```bash
 sudo /opt/ai-zombie/bin/secrets-edit     # also on PATH as: secrets-edit
