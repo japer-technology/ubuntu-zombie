@@ -15,9 +15,16 @@ You need:
 - A physical Ubuntu Desktop **22.04 LTS** or **24.04 LTS** machine,
   freshly installed and updated.
 - One SSH public key (`ssh-ed25519 …` is preferred) from the machine
-  you will use to control this PC.
-- A VNC password you choose, for emergency loopback-only desktop access
-  over an SSH tunnel.
+  you will use to control this PC. **What it is for:** it is how you log
+  in to the Ubuntu Zombie box remotely. The installer turns off password
+  logins and disables the `root` account, so SSH is **key-only** — only a
+  machine holding the matching *private* key can connect. See
+  [What the SSH key is for](#what-the-ssh-key-is-for-and-what-the-vnc-password-is-for).
+- A VNC password you choose. **What it is for:** it guards an
+  emergency, loopback-only "watch and drive the desktop" screen-sharing
+  service (over an SSH tunnel) for the rare times the AI needs a human at
+  the screen. It is **not** your login password. See
+  [What the VNC password is for](#what-the-ssh-key-is-for-and-what-the-vnc-password-is-for).
 - One LLM API key from a supported provider (added **after** install in
   step 4, not required to start the installer). All providers are routed
   through `@earendil-works/pi-ai`; pick exactly one:
@@ -67,6 +74,43 @@ step 4 after the first reboot.
 Do **not** run the installer over a public SSH session. The installer
 restarts `sshd` and tightens the firewall; you can lock yourself out.
 
+### What the SSH key is for, and what the VNC password is for
+
+These are the two inputs the installer cannot guess, and they confuse
+newcomers because they look similar but do completely different jobs.
+Here is the plain-English version.
+
+**The SSH key — remote login to the box.**
+
+- SSH (Secure Shell) is how you reach the machine from another computer:
+  to run commands, and to open the private chat through a tunnel.
+- A key comes in two halves: a **private** key (a secret file that never
+  leaves your control computer) and a **public** key (safe to share). You
+  give the installer the **public** half as `SSH_PUBLIC_KEY`.
+- The installer hardens SSH: **passwords are turned off** and the `root`
+  account is disabled, so the *only* way in is a computer that holds the
+  matching private key. Lose the private key and you lose remote access —
+  keep it safe and backed up.
+- It is **not** a password you type. You never paste the private key into
+  the installer. Pasting a private key is always a mistake.
+
+**The VNC password — emergency desktop screen sharing.**
+
+- VNC lets a human *see and control the actual graphical desktop* the AI
+  is using — for the rare cases where something on screen needs a person
+  (a stuck dialog, a frozen session, or just watching what the AI does).
+- The VNC service is bound to `127.0.0.1` (loopback) only and is **never**
+  exposed to the network; you reach it by SSH-tunnelling its port. The
+  VNC password is a second lock in front of full keyboard and mouse
+  control of that desktop.
+- It is a password **you invent** during install. It is **not** your
+  Ubuntu login password and **not** related to the SSH key. It is stored
+  in an obfuscated VNC password file, never in plain text, and is not
+  written to logs. Full detail: [`VNC.md`](VNC.md).
+
+In one line: **the SSH key lets you in; the VNC password protects the
+emergency desktop you might tunnel to once you are in.**
+
 ### How to get an SSH key
 
 If you do not already have an SSH key on the workstation you will use
@@ -105,9 +149,13 @@ wl-copy < ~/.ssh/id_ed25519.pub                       # Wayland
 ```
 
 If you already manage keys through GitHub, any key listed at
-<https://github.com/settings/keys> works; fetch them with
-`curl https://github.com/<your-username>.keys` and pick the
-`ssh-ed25519 …` line you recognise.
+<https://github.com/settings/keys> works. Fetch them with the command
+below (replace `<your-username>` with your GitHub username) and pick the
+`ssh-ed25519 …` line you recognise:
+
+```bash
+curl https://github.com/<your-username>.keys
+```
 
 Older RSA keys (`ssh-rsa …`, 3072-bit or larger) are accepted, but
 `ed25519` is preferred: shorter, faster, and the default on modern
@@ -145,6 +193,78 @@ already configured on disk.
 `zombie`. Set it to any valid local username if you would rather the
 AI Systems Administrator live in (for example) `admin` or `ai`.
 
+### Environment variables, and how to make them permanent
+
+The non-interactive install is driven by **environment variables** —
+the `NAME=value` pairs you see in front of the command above
+(`SSH_PUBLIC_KEY=…`, `VNC_PASSWORD=…`, and so on). If you are new to
+Ubuntu, this is the part that trips people up, so here is exactly how it
+works and how to make it stick.
+
+**1. Inline — set them for one single command (they vanish afterwards).**
+
+Putting `NAME=value` *before* a command sets that variable for **only
+that one command**. Nothing is saved; the next command knows nothing
+about it. This is what every example above does:
+
+```bash
+sudo ZOMBIE_NONINTERACTIVE=1 \
+     SSH_PUBLIC_KEY="ssh-ed25519 AAAA… you@workstation" \
+     VNC_PASSWORD="replace-me" \
+     ./scripts/install.sh install
+```
+
+**2. For your current terminal — `export` them (they last until you close it).**
+
+`export` keeps a variable for the rest of the **current** terminal
+session, so later commands can reuse it. Close the terminal (or reboot)
+and the values are gone:
+
+```bash
+export ZOMBIE_NONINTERACTIVE=1
+export SSH_PUBLIC_KEY="ssh-ed25519 AAAA… you@workstation"
+export VNC_PASSWORD="replace-me"
+sudo -E ./scripts/install.sh install
+```
+
+Note the `-E` on `sudo`: by default `sudo` **drops** your environment,
+so without `-E` the installer would not see the variables you exported.
+
+**3. Permanent — save them to a file you can re-use.**
+
+To keep the values across reboots (handy when you re-run `install` to
+upgrade), write them to a small file and `source` it before installing.
+Keep this file private — it can contain your `VNC_PASSWORD`:
+
+```bash
+cat > ~/zombie.env <<'EOF'
+export ZOMBIE_NONINTERACTIVE=1
+export SSH_PUBLIC_KEY="ssh-ed25519 AAAA… you@workstation"
+export VNC_PASSWORD="replace-me"
+EOF
+chmod 600 ~/zombie.env
+```
+
+Then, now and after any reboot, load it and run the installer:
+
+```bash
+source ~/zombie.env
+sudo -E ./scripts/install.sh install
+```
+
+**Do not** put secrets such as `VNC_PASSWORD` into system-wide files
+like `/etc/environment` or a shared `~/.bashrc`: those are readable by
+other processes and easy to leak. A private, `chmod 600` file that you
+`source` on demand is safer.
+
+You normally only need this for the **first** install. Afterwards the
+installer remembers your SSH key and VNC password on disk, so later
+upgrades usually need nothing more than `ZOMBIE_NONINTERACTIVE=1` (see
+[Upgrade / refresh from GitHub](#upgrade--refresh-from-github)). The
+**LLM provider key and model** are a separate, already-permanent file
+you edit in [step 4](#4-add-an-api-key) — not shell environment
+variables.
+
 Tailscale is **off by default**: the installer does not install or
 enrol it, and inbound SSH is allowed on every interface (still
 key-only, root-disabled). To opt in — install and enrol Tailscale and
@@ -171,6 +291,78 @@ session), run:
 ```bash
 sudo ./scripts/install.sh repair
 ```
+
+### Alternative: install from the signed `.deb` (and check the SHA-256)
+
+If you would rather not clone the source, every
+[GitHub Release](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
+ships a ready-to-install package, `ubuntu-zombie_<version>_all.deb`,
+**plus a `SHA256SUMS` checksum file and a cosign signature**. The
+checksum is the fiddly bit for newcomers, so here is every step.
+
+**Why bother?** The SHA-256 checksum is a unique fingerprint of the
+file. Re-computing it on your machine and confirming it matches the
+published one proves the download is the genuine, unaltered package and
+not a corrupted or tampered copy. Skipping this means trusting a file
+you have not checked.
+
+**Step A — download the package and its checksum file.** From the
+release page, download both `ubuntu-zombie_<version>_all.deb` and the
+`SHA256SUMS` file **into the same folder**, then move into that folder.
+For example, in your `~/Downloads`:
+
+```bash
+cd ~/Downloads
+```
+
+**Step B — verify the checksum.** Run the check from the folder that
+holds both files. `<version>` is the release number, e.g. `1.2.3`:
+
+```bash
+sha256sum --check --ignore-missing SHA256SUMS
+```
+
+- `--ignore-missing` tells it to check only the files you actually
+  downloaded (the `SHA256SUMS` file also lists the source tarball).
+- A good result prints a line ending in `: OK`, for example:
+
+  ```text
+  ubuntu-zombie_1.2.3_all.deb: OK
+  ```
+
+- If you instead see `FAILED`, **stop** — do not install. Delete the
+  `.deb` and download it again; a `FAILED` line means the file does not
+  match its fingerprint.
+
+**Step C (optional, stronger) — verify the cosign signature.** This
+proves the file was published by this project's GitHub release pipeline,
+not just that it is internally consistent. It needs
+[`cosign`](https://docs.sigstore.dev/system_config/installation/)
+installed and the matching `.pem`/`.sig` files from the release:
+
+```bash
+cosign verify-blob \
+  --certificate ubuntu-zombie_<version>_all.deb.pem \
+  --signature   ubuntu-zombie_<version>_all.deb.sig \
+  --certificate-identity-regexp 'https://github.com/japer-technology/ubuntu-zombie/.+' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ubuntu-zombie_<version>_all.deb
+```
+
+A successful run prints `Verified OK`.
+
+**Step D — install the verified package.** Only after the checksum (and,
+ideally, the signature) checks out:
+
+```bash
+sudo apt install ./ubuntu-zombie_<version>_all.deb
+```
+
+The leading `./` matters: it tells `apt` to install the local file in
+this folder rather than search the online repositories. Once installed,
+the `ubuntu-zombie` command accepts the same subcommands as
+`scripts/install.sh` (for example `sudo ubuntu-zombie install`), and the
+[Reboot](#2-reboot) and [Verify](#3-verify) steps below are identical.
 
 ### Optional: use a local LLM (auto-detected on your LAN)
 
