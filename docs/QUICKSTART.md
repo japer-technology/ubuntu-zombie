@@ -240,22 +240,27 @@ Keep this file private — it can contain your `VNC_PASSWORD`:
 cat > ~/zombie.env <<'EOF'
 export ZOMBIE_NONINTERACTIVE=1
 export SSH_PUBLIC_KEY="ssh-ed25519 AAAA… you@workstation"
-export VNC_PASSWORD="replace-me"
+export VNC_PASSWORD="choose-a-strong-password"   # placeholder — replace with your own
 EOF
 chmod 600 ~/zombie.env
 ```
 
-Then, now and after any reboot, load it and run the installer:
+Replace `choose-a-strong-password` with a real password of your own —
+do not ship the placeholder. Then, now and after any reboot, load the
+file and run the installer:
 
 ```bash
 source ~/zombie.env
 sudo -E ./scripts/install.sh install
 ```
 
-**Do not** put secrets such as `VNC_PASSWORD` into system-wide files
-like `/etc/environment` or a shared `~/.bashrc`: those are readable by
-other processes and easy to leak. A private, `chmod 600` file that you
-`source` on demand is safer.
+**Do not** put secrets such as `VNC_PASSWORD` into shell start-up files
+like `/etc/environment` or `~/.bashrc`. Even your own personal
+`~/.bashrc` is read by **every** shell you open, so the secret ends up
+in the environment of unrelated processes (visible via process and
+environment inspection) — not just files other users can read. A
+private, `chmod 600` file that you `source` only when you need it is
+safer.
 
 You normally only need this for the **first** install. Afterwards the
 installer remembers your SSH key and VNC password on disk, so later
