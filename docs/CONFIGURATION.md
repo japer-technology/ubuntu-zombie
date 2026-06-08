@@ -24,15 +24,15 @@ Supported variables:
 | `OPENROUTER_API_KEY` | API key for the OpenRouter aggregator. Requires `ZOMBIE_MODEL` to be set to a fully-qualified id such as `anthropic/claude-3.5-sonnet`. |
 | `MISTRAL_API_KEY`    | API key for the Mistral provider         |
 | `GROQ_API_KEY`       | API key for the Groq provider            |
-| `ZOMBIE_PROVIDER`    | One of `openai`, `anthropic`, `gemini`, `xai`, `mistral`, `groq`, `openrouter` (default: first key found, in that order) |
-| `ZOMBIE_MODEL`       | Model used by both the agent loop and the chat surface; required for `openrouter` unless `ZOMBIE_OPENROUTER_MODEL` is set; overrides the provider's default |
+| `ZOMBIE_PROVIDER`    | One of `openai`, `anthropic`, `gemini`, `xai`, `mistral`, `groq`, `openrouter`, `lmstudio` (default: first matching key found, in that order) |
+| `ZOMBIE_MODEL`       | Model used by both the agent loop and the chat surface; required for `openrouter`/`lmstudio` unless their provider-specific model env var is set; overrides provider-specific model env vars and defaults |
 | `ZOMBIE_OPENAI_MODEL`     | Override the default model used when the active provider is `openai` |
 | `ZOMBIE_ANTHROPIC_MODEL`  | Override the default model used when the active provider is `anthropic` |
 | `ZOMBIE_GEMINI_MODEL`     | Override the default model used when the active provider is `gemini` |
 | `ZOMBIE_XAI_MODEL`        | Override the default model used when the active provider is `xai` |
 | `ZOMBIE_MISTRAL_MODEL`    | Override the default model used when the active provider is `mistral` |
 | `ZOMBIE_GROQ_MODEL`       | Override the default model used when the active provider is `groq` |
-| `ZOMBIE_OPENROUTER_MODEL` | Fully-qualified OpenRouter model id (e.g. `anthropic/claude-3.5-sonnet`); takes precedence over `ZOMBIE_MODEL` for `openrouter` |
+| `ZOMBIE_OPENROUTER_MODEL` | Fully-qualified OpenRouter model id (e.g. `anthropic/claude-3.5-sonnet`); used only when `ZOMBIE_MODEL` is unset |
 | `ZOMBIE_CHAT_PORT`   | Loopback port for the chat UI (default `7878`) |
 | `LMSTUDIO_API_KEY`   | API key for a local OpenAI-compatible server (LM Studio / Ollama / llama.cpp). Pair with `ZOMBIE_PROVIDER=lmstudio` and `ZOMBIE_MODEL`; the server URL lives in `~/.pi/agent/models.json` (most local servers ignore the key). |
 | `DISPLAY`            | X display for desktop helpers (default `:0`; pre-seeded in the generated `secrets/env`) |
@@ -58,18 +58,27 @@ bridge at `/opt/ai-zombie/agent/pi-ai-bridge.mjs`; there are no
 bespoke per-provider Python clients.
 
 `ZOMBIE_PROVIDER` + `ZOMBIE_MODEL` (plus the matching `*_API_KEY`) are
-the **single source of truth** for both the status banner and the
-agent loop that produces every chat answer. `payload/agent/pi_mono.py`
-resolves the active provider/model through the same
-`payload/agent/providers.py` registry and passes them to the `pi` CLI
-(`--provider` / `--model`), forwarding only the active provider's key.
-This means the `pi` CLI's own native configuration (`~/.pi`) and its
-built-in default provider are **not** consulted when a provider is
-configured here — there is no second place to set the model. The one
-exception is the `lmstudio` provider: because a local server has no
-fixed endpoint, the installer writes its base URL to the `pi` custom
-provider file `~/.pi/agent/models.json` (the model id and key still
-come from `secrets/env`). See [Local LLM discovery](#local-llm-discovery-lan-scan).
+the **single source of truth** for both the status banner and the agent
+loop that produces every chat answer. Resolution is:
+
+1. explicit provider argument (internal API only), else
+   `ZOMBIE_PROVIDER`, else the first configured key in the provider
+   table order above;
+2. explicit model argument (internal API only), else `ZOMBIE_MODEL`,
+   else the provider-specific `ZOMBIE_<PROVIDER>_MODEL`, else the
+   registry default.
+
+`payload/agent/pi_mono.py` resolves the active provider/model through
+the same `payload/agent/providers.py` registry and passes them to the
+`pi` CLI (`--provider` / `--model`), forwarding only the active
+provider's key. This means the `pi` CLI's own native configuration
+(`~/.pi`) and its built-in default provider are **not** consulted when a
+provider is configured here — there is no second place to set the
+model. The one exception is the `lmstudio` provider: because a local
+server has no fixed endpoint, the installer writes its base URL to the
+`pi` custom provider file `~/.pi/agent/models.json` (the model id and
+key still come from `secrets/env`). See
+[Local LLM discovery](#local-llm-discovery-lan-scan).
 
 [pi-ai]: https://github.com/earendil-works/pi
 
