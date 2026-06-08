@@ -55,6 +55,13 @@ install. Tailscale is **off by default**; opt in with
 full list of inputs and their defaults is in
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md#parameters-required-to-allow-the-install-to-proceed).
 
+Provider and model selection are read from
+`/opt/ai-zombie/secrets/env`, not from `pi`'s native `~/.pi` defaults:
+set exactly one matching `*_API_KEY`, optionally set
+`ZOMBIE_PROVIDER`, and set `ZOMBIE_MODEL` when you need a non-default
+model (or when using `openrouter` / `lmstudio`). The chat service passes
+those values to `pi`/`@earendil-works/pi-ai` on every turn.
+
 If you do not already have an SSH key on the workstation you will use
 to control this PC, create one there (not on the Ubuntu Zombie box)
 with `ssh-keygen -t ed25519`, then pass the public half

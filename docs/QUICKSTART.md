@@ -298,6 +298,30 @@ ZOMBIE_PROVIDER=openai     # openai|anthropic|gemini|xai|openrouter|mistral|groq
 ZOMBIE_MODEL=gpt-4o-mini   # override default model (required for openrouter/lmstudio)
 ```
 
+The chat service does **not** use `pi`'s own default provider/model from
+`~/.pi`. It loads `/opt/ai-zombie/secrets/env`, resolves one active
+provider there, and passes `--provider` / `--model` to the `pi` CLI for
+each chat turn. Use the Ubuntu Zombie provider names in
+`ZOMBIE_PROVIDER`:
+
+| `ZOMBIE_PROVIDER` | Matching key env var  | pi-ai / `pi` provider id | Default model when `ZOMBIE_MODEL` is unset |
+| ----------------- | --------------------- | ------------------------ | ------------------------------------------ |
+| `openai`          | `OPENAI_API_KEY`      | `openai`                 | `gpt-4o-mini`                              |
+| `anthropic`       | `ANTHROPIC_API_KEY`   | `anthropic`              | `claude-3-5-sonnet-latest`                 |
+| `gemini`          | `GEMINI_API_KEY`      | `google`                 | `gemini-2.0-flash`                         |
+| `xai`             | `XAI_API_KEY`         | `xai`                    | `grok-2-1212`                              |
+| `mistral`         | `MISTRAL_API_KEY`     | `mistral`                | `mistral-small-latest`                     |
+| `groq`            | `GROQ_API_KEY`        | `groq`                   | `llama-3.1-8b-instant`                     |
+| `openrouter`      | `OPENROUTER_API_KEY`  | `openrouter`             | *(none; set `ZOMBIE_MODEL`)*               |
+| `lmstudio`        | `LMSTUDIO_API_KEY`    | `lmstudio`               | *(none; set `ZOMBIE_MODEL`)*               |
+
+If `ZOMBIE_PROVIDER` is omitted, Ubuntu Zombie uses the first key it
+finds in the table order above. If it is set, the matching key must also
+be present. `ZOMBIE_MODEL` overrides the provider default and any
+provider-specific `ZOMBIE_<PROVIDER>_MODEL` fallback. For Gemini, keep
+`ZOMBIE_PROVIDER=gemini`; Ubuntu Zombie maps that to pi-ai's `google`
+provider internally.
+
 Restart the chat service:
 
 ```bash

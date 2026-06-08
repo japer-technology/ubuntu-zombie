@@ -9,6 +9,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Fixed
+- Clarified provider/model setup in `README.md`, `docs/QUICKSTART.md`,
+  and `docs/CONFIGURATION.md`: Ubuntu Zombie reads
+  `/opt/ai-zombie/secrets/env`, maps `ZOMBIE_PROVIDER=gemini` to pi-ai's
+  `google` provider internally, passes the resolved provider/model to
+  `pi` on each turn, and treats `ZOMBIE_MODEL` as taking precedence over
+  provider-specific model fallback variables.
 - **Approved package installs and `/etc` edits no longer fail with
   "Read-only file system."** The chat service unit ran under
   `ProtectSystem=full`, which read-only bind-mounts `/usr`, `/boot`, and
