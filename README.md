@@ -47,7 +47,15 @@ ssh -L 7878:127.0.0.1:7878 zombie@<host-name-or-ip>
 ```
 
 The installer needs only two inputs from you to proceed: an
-`SSH_PUBLIC_KEY` and a `VNC_PASSWORD`. It prompts for both
+`SSH_PUBLIC_KEY` and a `VNC_PASSWORD`. In short: **the SSH key is how you
+log in to the machine remotely** (the installer makes SSH key-only and
+disables `root`, so only a computer holding the matching private key can
+connect), and **the VNC password protects an emergency, loopback-only
+"watch and drive the desktop" service** you reach over an SSH tunnel — it
+is not your login password. Both are explained step by step, for people
+new to Ubuntu, in
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md#what-the-ssh-key-is-for-and-what-the-vnc-password-is-for).
+The installer prompts for both
 interactively, or reads them from the environment in non-interactive
 mode (`ZOMBIE_NONINTERACTIVE=1`). An LLM API key is added *after*
 install. Tailscale is **off by default**; opt in with
@@ -79,11 +87,23 @@ fully offline with no cloud API key. Skip it with
 and [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#local-llm-discovery-lan-scan).
 
 Prefer a `.deb`? Each [GitHub Release](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
-ships `ubuntu-zombie_<version>_all.deb` plus a SHA-256 checksum file and
-keyless cosign signatures. After `sudo apt install ./ubuntu-zombie_<ver>_all.deb`,
-the `ubuntu-zombie` wrapper accepts the same subcommands as
-`scripts/install.sh`. See [`docs/UPGRADING.md`](docs/UPGRADING.md) and
-[`docs/FAQ.md`](docs/FAQ.md) for verification commands.
+ships `ubuntu-zombie_<version>_all.deb` plus a `SHA256SUMS` checksum file
+and keyless cosign signatures. Verify the checksum **before** installing
+so you know the download is genuine and unaltered — download the `.deb`
+and `SHA256SUMS` into the same folder, then:
+
+```bash
+# from the folder holding both files (replace <version>, e.g. 1.2.3):
+sha256sum --check --ignore-missing SHA256SUMS    # expect: ...deb: OK
+sudo apt install ./ubuntu-zombie_<version>_all.deb
+```
+
+The `ubuntu-zombie` wrapper then accepts the same subcommands as
+`scripts/install.sh`. A full, novice-friendly walkthrough of the
+checksum and cosign-signature checks is in
+[`docs/QUICKSTART.md`](docs/QUICKSTART.md#alternative-install-from-the-signed-deb-and-check-the-sha-256);
+see also [`docs/UPGRADING.md`](docs/UPGRADING.md) and
+[`docs/FAQ.md`](docs/FAQ.md).
 
 Full walkthrough with expected output and failure branches:
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md).
