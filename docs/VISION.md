@@ -54,9 +54,6 @@ the machine the whole time.
 
 - **Autonomous ownership of the machine.** The operator is the
   principal. The agent is a tool with hands, not a tenant.
-- **Local-only inference.** The MVP relies on a configured cloud
-  provider. Local and on-device models are tracked in
-  [`ROADMAP.md`](ROADMAP.md), not shipped here.
 - **Multi-tenant or fleet management.** One machine, one operator,
   one trust boundary. Fleet orchestration is out of scope.
 - **Replacement of the human users on the desktop.** Existing logins,
