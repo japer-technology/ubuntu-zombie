@@ -1634,9 +1634,7 @@ on_error() {
 # numbered phase.
 INSTALL_T0="$(date +%s)"
 if ! (( ZOMBIE_QUIET )); then
-  printf '\n%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
-  printf '%s%s %s  —  install%s\n' "${C_BOLD}" "${SCRIPT_NAME}" "${SCRIPT_VERSION}" "${C_RESET}"
-  printf '%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
+  brand_splash "install" "${SCRIPT_VERSION}"
 fi
 
 info "Log file: ${LOG_FILE}"

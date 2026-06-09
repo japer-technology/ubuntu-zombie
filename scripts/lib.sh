@@ -143,6 +143,63 @@ brand_banner() {
   brand_rule
 }
 
+# _brand_panel_row WIDTH "text" [colour]
+#   Internal helper for brand_splash: prints one "│ ... │" row of the panel,
+#   left-indented by two spaces and right-padded so the trailing border lines
+#   up. "text" is assumed ASCII so its byte length equals its column width.
+_brand_panel_row() {
+  local width="$1" text="$2" colour="${3:-${C_RESET}}"
+  local pad=$(( width - 2 - ${#text} ))
+  (( pad < 0 )) && pad=0
+  printf '%s│%s  %s%s%s%*s%s│%s\n' \
+    "${C_BRAND}" "${C_RESET}" "${colour}" "${text}" "${C_RESET}" \
+    "${pad}" "" "${C_BRAND}" "${C_RESET}"
+}
+
+# brand_splash "subtitle" "version"
+#   The full-dress startup splash: an ANSI-Shadow "UBUNTU ZOMBIE" wordmark in
+#   the Zombie Orchid palette, framed by a rounded panel that states who the
+#   account is, the version, and how to reach it. Used to open the installer
+#   the way a polished agent CLI greets you. Honours ZOMBIE_QUIET and the
+#   colour policy (degrades to plain text with no ANSI).
+brand_splash() {
+  (( ZOMBIE_QUIET )) && return 0
+  local subtitle="${1:-}" version="${2:-}"
+  printf '\n'
+  # Wordmark: UBUNTU in the primary orchid, ZOMBIE in the lighter tint.
+  printf '%s' "${C_BRAND}"
+  printf '%s\n' \
+'██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗' \
+'██║   ██║██╔══██╗██║   ██║████╗  ██║╚══██╔══╝██║   ██║' \
+'██║   ██║██████╔╝██║   ██║██╔██╗ ██║   ██║   ██║   ██║' \
+'██║   ██║██╔══██╗██║   ██║██║╚██╗██║   ██║   ██║   ██║' \
+'╚██████╔╝██████╔╝╚██████╔╝██║ ╚████║   ██║   ╚██████╔╝' \
+' ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝ '
+  printf '%s' "${C_BRAND2}"
+  printf '%s\n' \
+'███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗' \
+'╚══███╔╝██╔═══██╗████╗ ████║██╔══██╗██║██╔════╝' \
+'  ███╔╝ ██║   ██║██╔████╔██║██████╔╝██║█████╗  ' \
+' ███╔╝  ██║   ██║██║╚██╔╝██║██╔══██╗██║██╔══╝  ' \
+'███████╗╚██████╔╝██║ ╚═╝ ██║██████╔╝██║███████╗' \
+'╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═════╝ ╚═╝╚══════╝'
+  printf '%s\n' "${C_RESET}"
+  # Rounded info panel beneath the wordmark.
+  local W=66 line="" i
+  for (( i = 0; i < W; i++ )); do line+="─"; done
+  printf '%s╭%s╮%s\n' "${C_BRAND}" "${line}" "${C_RESET}"
+  _brand_panel_row "${W}" "AI Systems Administrator for Ubuntu Desktop LTS" "${C_BOLD}"
+  local tagline="v${version}"
+  [[ -n "${subtitle}" ]] && tagline+="  --  ${subtitle}"
+  _brand_panel_row "${W}" "${tagline}" "${C_DIM}"
+  _brand_panel_row "${W}" ""
+  _brand_panel_row "${W}" "Ask the machine to diagnose, explain, configure, repair," "${C_ACCENT}"
+  _brand_panel_row "${W}" "and operate itself - every action is audit-logged." "${C_ACCENT}"
+  _brand_panel_row "${W}" ""
+  _brand_panel_row "${W}" "Chat http://127.0.0.1:7878    You hold the kill switch." "${C_BRAND2}"
+  printf '%s╰%s╯%s\n' "${C_BRAND}" "${line}" "${C_RESET}"
+}
+
 # field "Label" "value" [accent_color]
 #   Render an aligned "label : value" row with a brand-coloured label and an
 #   optionally accented value. Used by the parameter review screen so every
