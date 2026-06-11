@@ -1,4 +1,4 @@
-# Architecture
+# Architecture - IDEA
 
 Ubuntu Zombie turns an Ubuntu Desktop LTS PC into a workstation with a
 resident AI Systems Administrator. The whole product is deliberately
