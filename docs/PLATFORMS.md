@@ -39,10 +39,10 @@ CHANGELOG.md for the gory detail). Do not override.
 - **Outbound**: HTTPS to `archive.ubuntu.com`, `download.docker.com`,
   `pkgs.tailscale.com`, `deb.nodesource.com`, `registry.npmjs.org`,
   `pypi.org`, and the configured LLM provider's API endpoint.
-- **Inbound**: none by default. When Tailscale is enrolled, SSH on
-  port 22 is allowed on `tailscale0` only. When
-  `ZOMBIE_SKIP_TAILSCALE=1` is set, SSH is allowed on every
-  interface; you are responsible for the perimeter.
+- **Inbound**: SSH on port 22 is allowed by default on every interface,
+  with password login and root login disabled. When you opt in with
+  `ZOMBIE_SKIP_TAILSCALE=0`, Tailscale is enrolled and SSH is allowed
+  on `tailscale0` only.
 
 ## What "Supported" means
 

@@ -24,10 +24,11 @@
 It is a normal Ubuntu PC with an administrator inside it. Any local
 user can open a private chat, ask the machine to do something, see
 exactly what is proposed, approve it, and watch it happen. Everything
-the AI does is audit-logged. SSH is key-only and root-disabled;
-optionally restrict inbound access to a private Tailscale tailnet by
-opting in at install time. The operator owns the machine, the SSH
-key, the API key, and the kill switch.
+the AI does is audit-logged. SSH is key-only and root-disabled; that is
+a safe default for a machine behind a trusted perimeter. Tailscale is
+optional: opt in at install time if you also want inbound SSH confined
+to a private tailnet. The operator owns the machine, the SSH key, the
+API key, and the kill switch.
 
 ## Quickstart
 
@@ -58,9 +59,10 @@ new to Ubuntu, in
 The installer prompts for both
 interactively, or reads them from the environment in non-interactive
 mode (`ZOMBIE_NONINTERACTIVE=1`). An LLM API key is added *after*
-install. Tailscale is **off by default**; opt in with
-`ZOMBIE_SKIP_TAILSCALE=0` to restrict inbound SSH to your tailnet. The
-full list of inputs and their defaults is in
+install. Tailscale is **off by default**; key-only, root-disabled SSH
+is the default remote-access posture. Opt in with
+`ZOMBIE_SKIP_TAILSCALE=0` only if you want to restrict inbound SSH to
+your tailnet. The full list of inputs and their defaults is in
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md#parameters-required-to-allow-the-install-to-proceed).
 
 Provider and model selection are read from
@@ -166,9 +168,11 @@ the machine, the SSH private key, the API key, and (if Tailscale is
 enabled) the Tailscale account, and can rotate, revoke, or uninstall
 any of them at any time. Privileged actions go through a local policy
 gate before `sudo`. Every action is audit-logged. The chat and VNC
-services bind to `127.0.0.1` only. Tailscale is off by default; opt in
-with `ZOMBIE_SKIP_TAILSCALE=0` to confine inbound SSH to your tailnet.
-Read [`SECURITY.md`](SECURITY.md) before running the installer.
+services bind to `127.0.0.1` only. Tailscale is off by default; the
+default key-only, root-disabled SSH setup is suitable behind a trusted
+network perimeter. Opt in with `ZOMBIE_SKIP_TAILSCALE=0` if you want to
+confine inbound SSH to your tailnet. Read [`SECURITY.md`](SECURITY.md)
+before running the installer.
 
 ## License
 

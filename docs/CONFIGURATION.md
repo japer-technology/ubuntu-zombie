@@ -298,8 +298,11 @@ below (look for the `ZOMBIE_PI_MONO_*` variables).
 
 By default the installer does **not** install or enrol Tailscale, and
 inbound SSH is allowed on **every** interface (key-only, root-disabled).
-See [Opting in to Tailscale](#opting-in-to-tailscale) below to enable
-the Tailscale-only ingress posture.
+That SSH posture is secure enough for hosts behind a perimeter you
+control, such as a home/office LAN, private cloud network, security
+group, bastion, or existing VPN. See
+[Opting in to Tailscale](#opting-in-to-tailscale) below if you also
+want a Tailscale-only ingress posture.
 
 ### Opting in to Tailscale
 
@@ -341,10 +344,11 @@ installer will:
   only `tailscale0`.
 
 This means anyone who can route to port 22 on the host can attempt to
-authenticate. SSH is still key-only and root-disabled, and the
-chat/VNC services still bind to `127.0.0.1` only. Use the default only
-on a network you control (e.g. behind a home router/NAT) or behind
-another VPN, or opt in to Tailscale as above.
+authenticate, but SSH is still key-only and root-disabled, and the
+chat/VNC services still bind to `127.0.0.1` only. This is a suitable
+default behind a network perimeter you control. Opt in to Tailscale as
+above when you want the additional guarantee that SSH is reachable only
+from devices in your tailnet.
 
 Re-run the installer with `ZOMBIE_SKIP_TAILSCALE=0` at any time to
 enrol the machine into Tailscale and re-tighten UFW.

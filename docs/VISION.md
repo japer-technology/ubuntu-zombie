@@ -69,10 +69,10 @@ The local `zombie` account (renameable with `ZOMBIE_USER=<name>`)
 holds passwordless `sudo` and is the operating identity of the AI
 Systems Administrator. The configured token provider authenticates
 the administrator. The operator owns the machine and can rotate the
-API key, revoke the SSH key, disable the Tailscale account, or
-uninstall the system at any time. Inbound network access is
-restricted to a private Tailscale tailnet; the public internet is
-never a control plane for this machine.
+API key, revoke the SSH key, disable any optional Tailscale enrolment,
+or uninstall the system at any time. Inbound administration uses
+key-only, root-disabled SSH; operators can optionally confine SSH to a
+private Tailscale tailnet with `ZOMBIE_SKIP_TAILSCALE=0`.
 
 ## How to read the rest of the docs
 

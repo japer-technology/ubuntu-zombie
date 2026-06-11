@@ -52,7 +52,7 @@ These are **not** installed by the script; the operator brings them.
   (`TAILSCALE_AUTHKEY=…`) — **only if you opt in** to Tailscale with
   `ZOMBIE_SKIP_TAILSCALE=0`. Tailscale is off by default; with the
   default there is no tailnet trust boundary and SSH is reachable on
-  every interface.
+  every interface, but remains key-only and root-disabled.
 
 ## 3. Third-party apt repositories
 
