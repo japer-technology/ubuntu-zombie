@@ -66,10 +66,10 @@ command". Provenance and signatures are only class-leading if a consumer
 can verify them in one step, including offline/air-gapped.
 
 **Outcome:**
-- A first-class verification entry point (e.g. `ubuntu-zombie
-  `payload/bin/verify-release` in the release bundle) that, given the
-  downloaded artifacts, checks: `SHA256SUMS`, cosign signatures, and
-  the SLSA provenance attestation from Step 1.
+- A first-class verification entry point (`payload/bin/verify-release` in
+  the release bundle) that, given the downloaded artifacts, checks:
+  `SHA256SUMS`, cosign signatures, and the SLSA provenance attestation
+  from Step 1.
 - Documented in `RELEASE.md` and the upgrade docs, with an offline
   verification path.
 
@@ -78,7 +78,7 @@ documented command and clear pass/fail output.
 
 ```mermaid
 flowchart TD
-    Start(["ubuntu-zombie verify-release"]) --> S1{"SHA256SUMS<br/>match?"}
+    Start(["payload/bin/verify-release"]) --> S1{"SHA256SUMS<br/>match?"}
     S1 -- no --> Fail(["FAIL"])
     S1 -- yes --> S2{"cosign signature<br/>valid?"}
     S2 -- no --> Fail
