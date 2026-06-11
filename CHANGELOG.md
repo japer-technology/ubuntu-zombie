@@ -41,6 +41,8 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `payload/agent/bridge-dependencies.lock` with source URLs, SHA-256 hashes,
   integrity strings, and license metadata; release builds verify the pins and
   installs consume the checksum-verified tarballs.
+- Changing `VERSION` on `main` now triggers the release workflow, creates the
+  matching `v<VERSION>` tag when needed, and publishes the release artifacts.
 - **`/model` chat command.** The chat UI now lists the models the
   configured provider offers and lets the operator switch between them at
   runtime. `/model` (no argument) lists the provider's catalogue with the

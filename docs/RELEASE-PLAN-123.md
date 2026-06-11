@@ -14,6 +14,13 @@ to publish when the Git tag does not match `VERSION`
 are the highest-value moves that move the release from "signed files"
 to "verifiable provenance".
 
+**Implementation status:** complete. The release workflow now implements
+all three steps below and is driven by `VERSION`: when a `VERSION` change
+lands on `main`, the workflow builds the release, creates the matching
+`v<VERSION>` tag if needed, and publishes the GitHub Release. Tag and
+manual releases are still accepted only when the requested tag matches
+`VERSION`.
+
 ```mermaid
 flowchart LR
     A["Signed files<br/>tarball · deb · SHA256SUMS<br/>SBOM · cosign"] --> B["Step 1<br/>SLSA provenance"]
