@@ -162,7 +162,8 @@ jobs:
           if git show-ref --tags --verify --quiet "refs/tags/${RELEASE_TAG}"; then
             existing_sha="$(git rev-list -n 1 "${RELEASE_TAG}")"
             if [[ "${existing_sha}" != "${GITHUB_SHA}" ]]; then
-              echo "::error::Tag ${RELEASE_TAG} already points to ${existing_sha}, not ${GITHUB_SHA}." >&2
+              echo "::error::Tag ${RELEASE_TAG} already points to ${existing_sha}, not ${GITHUB_SHA};" \
+                "bump VERSION before releasing this commit." >&2
               exit 1
             fi
           else
