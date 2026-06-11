@@ -162,8 +162,8 @@ jobs:
           if git show-ref --tags --verify --quiet "refs/tags/${RELEASE_TAG}"; then
             existing_sha="$(git rev-list -n 1 "${RELEASE_TAG}")"
             if [[ "${existing_sha}" != "${GITHUB_SHA}" ]]; then
-              echo "::error::Tag ${RELEASE_TAG} already points to ${existing_sha}, not ${GITHUB_SHA};" \
-                "increment VERSION again to create a new release for this commit." >&2
+              echo "::error::Tag ${RELEASE_TAG} already exists and points to ${existing_sha} instead of ${GITHUB_SHA}." \
+                "Increment VERSION to create a new release." >&2
               exit 1
             fi
           else
