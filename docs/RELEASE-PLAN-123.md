@@ -11,8 +11,8 @@ The release already ships a tarball, `.deb`, `SHA256SUMS`, an SPDX
 SBOM, and keyless cosign signatures, and the workflow already refuses
 to publish when the Git tag does not match `VERSION`
 (`.github/workflows/release.yml`, `RELEASE.md`). The three steps below
-are the highest-value moves that are **not yet done** and that move the
-release from "signed files" to "verifiable provenance".
+are the highest-value moves that move the release from "signed files"
+to "verifiable provenance".
 
 ```mermaid
 flowchart LR
@@ -67,9 +67,9 @@ can verify them in one step, including offline/air-gapped.
 
 **Outcome:**
 - A first-class verification entry point (e.g. `ubuntu-zombie
-  verify-release` and/or a standalone script in the release bundle) that,
-  given the downloaded artifacts, checks: `SHA256SUMS`, cosign
-  signatures, and the SLSA provenance attestation from Step 1.
+  `payload/bin/verify-release` in the release bundle) that, given the
+  downloaded artifacts, checks: `SHA256SUMS`, cosign signatures, and
+  the SLSA provenance attestation from Step 1.
 - Documented in `RELEASE.md` and the upgrade docs, with an offline
   verification path.
 

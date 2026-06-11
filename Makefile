@@ -5,12 +5,13 @@ SHELL := bash
 
 VERSION := $(shell cat VERSION)
 
-.PHONY: help lint test install-local verify package deb clean
+.PHONY: help lint test verify-bridge-pins install-local verify package deb clean
 
 help:
 	@echo "Targets:"
 	@echo "  lint           ShellCheck + bash -n + python compile"
 	@echo "  test           non-root smoke and repository checks"
+	@echo "  verify-bridge-pins  checksum pinned Node bridge inputs"
 	@echo "  install-local  sudo ./scripts/install.sh install (RUN ON A VM)"
 	@echo "  verify         sudo ./scripts/install.sh verify"
 	@echo "  package        tar a release bundle into dist/"
@@ -31,6 +32,9 @@ lint:
 
 test:
 	bash tests/smoke.sh all
+
+verify-bridge-pins:
+	bash scripts/verify-bridge-pins.sh
 
 install-local:
 	@if [ "$$(id -u)" -ne 0 ]; then echo 'install-local must be run as root (sudo make install-local)'; exit 1; fi

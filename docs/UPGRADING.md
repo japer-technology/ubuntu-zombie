@@ -21,6 +21,18 @@ sudo systemctl restart ubuntu-zombie-chat.service
 sudo ubuntu-zombie verify
 ```
 
+Before installing a downloaded release, verify the release assets in one
+directory:
+
+```bash
+mkdir ubuntu-zombie-<version>
+tar -xzf ubuntu-zombie-<version>.tar.gz -C ubuntu-zombie-<version>
+bash ubuntu-zombie-<version>/payload/bin/verify-release .
+```
+
+The verifier checks `SHA256SUMS`, cosign signatures, and the local SLSA
+provenance attestation bundle without contacting the installed host.
+
 A reboot is **only** required when the upgrade touches the kernel,
 GDM session type (Wayland → Xorg), or Tailscale's kernel module.
 `install` will tell you when that is the case.
@@ -43,7 +55,7 @@ beyond `git pull && install`. The complete changelog lives in
 
 - **No breaking changes.** New: `install.sh --dry-run`, step-trace
   log on `ERR`, `secrets-edit` writes backups before opening the
-  editor, `.deb` packaging, signed releases.
+  editor, `.deb` packaging, signed and provenance-attested releases.
 
 ### 0.3.0
 

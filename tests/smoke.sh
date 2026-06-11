@@ -1238,11 +1238,14 @@ run_standards() {
     docs/UPGRADING.md
     docs/FAQ.md
     docs/research/README.md
+    payload/agent/bridge-dependencies.lock
+    payload/bin/verify-release
     debian/control.in
     debian/postinst
     debian/prerm
     debian/copyright
     scripts/build-deb.sh
+    scripts/verify-bridge-pins.sh
   )
   local f
   for f in "${required[@]}"; do
@@ -1266,6 +1269,11 @@ run_standards() {
     || { echo "health timer must not leave a failed unit after reporting unhealthy state" >&2; exit 1; }
   grep -q "s|__ZOMBIE_DIR__|\\\${ZOMBIE_DIR}|g" scripts/install.sh \
     || { echo "install.sh must render __ZOMBIE_DIR__ in systemd units" >&2; exit 1; }
+  grep -q "actions/attest@" .github/workflows/release.yml \
+    || { echo "release workflow must generate provenance attestations" >&2; exit 1; }
+  grep -q "verify-bridge-pins" .github/workflows/release.yml \
+    || { echo "release workflow must verify bridge dependency checksums" >&2; exit 1; }
+  bash payload/bin/verify-release --help >/dev/null
 
   # Keep the release bundle source list honest without creating dist/.
   tar --exclude-vcs --exclude='dist' --exclude='__pycache__' \
