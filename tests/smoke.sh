@@ -1273,6 +1273,12 @@ run_standards() {
     || { echo "release workflow must generate provenance attestations" >&2; exit 1; }
   grep -q "verify-bridge-pins" .github/workflows/release.yml \
     || { echo "release workflow must verify bridge dependency checksums" >&2; exit 1; }
+  grep -q "paths:" .github/workflows/release.yml \
+    || { echo "release workflow must watch VERSION changes" >&2; exit 1; }
+  grep -q "VERSION" .github/workflows/release.yml \
+    || { echo "release workflow must watch VERSION changes" >&2; exit 1; }
+  grep -q "Ensure release tag exists" .github/workflows/release.yml \
+    || { echo "release workflow must create the VERSION tag on main" >&2; exit 1; }
   bash payload/bin/verify-release --help >/dev/null
 
   # Keep the release bundle source list honest without creating dist/.

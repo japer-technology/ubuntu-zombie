@@ -49,9 +49,27 @@ therefore sort chronologically and are never reused.
    ```
 
 5. **Open a "Release `<version>`" PR** with the three file changes above.
-   Merge once green.
+   Merge once green. When the `VERSION` change lands on `main`, the
+   `Release` workflow automatically builds and publishes the matching
+   GitHub Release.
 
-6. **Tag from `main`**:
+6. **Watch the `Release` workflow** finish. It will:
+
+   - Re-run lint + smoke.
+   - Verify checksum-pinned Node bridge inputs.
+   - Build the source tarball (`make package`).
+   - Build the `.deb` (`make deb`).
+   - Compute `SHA256SUMS`.
+   - Generate an SPDX SBOM with Syft.
+   - Generate a SLSA provenance attestation for the artifacts.
+   - Keyless-sign every artifact with cosign.
+   - Create the `v<VERSION>` tag if the workflow was triggered by the
+     `VERSION` change on `main`.
+   - Create the GitHub Release and upload everything.
+
+7. **Manual fallback:** if you need to re-run a release for an already
+   merged version, dispatch the `Release` workflow with the existing tag or
+   push the matching tag from `main`:
 
    ```bash
    git fetch origin
@@ -63,18 +81,6 @@ therefore sort chronologically and are never reused.
 
    The tag *must* match `v<VERSION>` exactly; the release workflow
    refuses to publish otherwise.
-
-7. **Watch the `Release` workflow** finish. It will:
-
-   - Re-run lint + smoke.
-   - Verify checksum-pinned Node bridge inputs.
-   - Build the source tarball (`make package`).
-   - Build the `.deb` (`make deb`).
-   - Compute `SHA256SUMS`.
-   - Generate an SPDX SBOM with Syft.
-   - Generate a SLSA provenance attestation for the artifacts.
-   - Keyless-sign every artifact with cosign.
-   - Create the GitHub Release and upload everything.
 
 8. **Verify the release page**:
 
@@ -119,6 +125,7 @@ pinned to the tarball URL by SHA.
 
 ## What goes in a "non-release" build
 
-Pushing to `main` does **not** create a release. CI builds the source
-bundle on every push for sanity, but it is never published. Operators
-who track `main` use `git pull && sudo ./scripts/install.sh install`.
+Pushing to `main` creates a release only when `VERSION` changes. Other
+pushes run CI and build the source bundle for sanity, but are never
+published. Operators who track `main` use
+`git pull && sudo ./scripts/install.sh install`.
