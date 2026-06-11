@@ -43,8 +43,10 @@ You need:
   LAN)](#optional-use-a-local-llm-auto-detected-on-your-lan) in step 1.
 - A keyboard physically attached to the PC for the first run.
 - **Optional:** a Tailscale account and a [pre-auth key](https://login.tailscale.com/admin/settings/keys).
-  Tailscale is **off by default**. Opt in with `ZOMBIE_SKIP_TAILSCALE=0`
-  to restrict inbound SSH to your tailnet (see step 1).
+  Tailscale is **off by default**. The default SSH setup is key-only and
+  root-disabled, which is enough for a normal trusted LAN, private
+  cloud network, or existing VPN. Opt in with `ZOMBIE_SKIP_TAILSCALE=0`
+  only if you want inbound SSH restricted to your tailnet (see step 1).
 
 ### Parameters required to allow the install to proceed
 
@@ -272,8 +274,10 @@ variables.
 
 Tailscale is **off by default**: the installer does not install or
 enrol it, and inbound SSH is allowed on every interface (still
-key-only, root-disabled). To opt in — install and enrol Tailscale and
-restrict inbound SSH to the `tailscale0` interface — set
+key-only, root-disabled). That default is a reasonable posture for a
+host behind a LAN/router, private cloud network, security group, or
+other perimeter you already control. To opt in — install and enrol
+Tailscale and restrict inbound SSH to the `tailscale0` interface — set
 `ZOMBIE_SKIP_TAILSCALE=0`:
 
 ```bash

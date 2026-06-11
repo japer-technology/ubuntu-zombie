@@ -54,9 +54,10 @@ will be unused. It is not supported. See
 
 Yes — that is the default. Tailscale is off unless you opt in with
 `ZOMBIE_SKIP_TAILSCALE=0`. With the default, SSH is allowed on every
-interface and you are responsible for the perimeter. To confine
-inbound SSH to a private tailnet, install with
-`ZOMBIE_SKIP_TAILSCALE=0`. See [`docs/CONFIGURATION.md`](CONFIGURATION.md).
+interface, but it is key-only and root-disabled; that is suitable
+behind a network perimeter you control. To confine inbound SSH to a
+private tailnet, install with `ZOMBIE_SKIP_TAILSCALE=0`. See
+[`docs/CONFIGURATION.md`](CONFIGURATION.md).
 
 ## How do I preview what `install.sh` will do?
 

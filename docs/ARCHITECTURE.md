@@ -41,12 +41,12 @@ flowchart TB
     end
 
     subgraph L1["L1 · Host body — provisioned by scripts/install.sh"]
-        host["zombie user (passwordless sudo, docker group)<br/>SSH (key-only; Tailscale-only by default)<br/>UFW (deny inbound, allow outbound, SSH only on tailscale0)<br/>Xorg + GDM (optional autologin for zombie)<br/>x11vnc on 127.0.0.1:5900 (loopback, password-protected)<br/>Docker CE · Node toolchain · Python venv at ~zombie/agent-env<br/>@earendil-works/pi-ai + pi-coding-agent (pinned versions)<br/>Playwright + Chromium (browser automation)<br/>GUI helpers (gui-env, screenshot, click, type-text, key)<br/>Health timer: ubuntu-zombie-health.timer (every 15 min)"]
+        host["zombie user (passwordless sudo, docker group)<br/>SSH (key-only; Tailscale restriction optional)<br/>UFW (deny inbound, allow outbound, SSH on all interfaces by default)<br/>Xorg + GDM (optional autologin for zombie)<br/>x11vnc on 127.0.0.1:5900 (loopback, password-protected)<br/>Docker CE · Node toolchain · Python venv at ~zombie/agent-env<br/>@earendil-works/pi-ai + pi-coding-agent (pinned versions)<br/>Playwright + Chromium (browser automation)<br/>GUI helpers (gui-env, screenshot, click, type-text, key)<br/>Health timer: ubuntu-zombie-health.timer (every 15 min)"]
     end
 
     browser -->|"SSH local-forward -L 7878:127.0.0.1:7878"| L2
     shell -->|"SSH"| L2
-    L3 -.->|"Tailscale (WireGuard) — only path in"| L2
+    L3 -.->|"Optional Tailscale (WireGuard) ingress restriction"| L2
     L2 -->|"sudo (passwordless, log-traced)"| L1
 ```
 
@@ -60,8 +60,9 @@ Each layer is owned by a different principal:
 
 There is **no remote API surface**. The chat UI binds to `127.0.0.1`
 only; the only way in from another machine is an SSH tunnel over
-Tailscale, and the only way `root` is exercised is by an operator
-running `scripts/install.sh` or `scripts/uninstall.sh`.
+key-only SSH (optionally restricted to Tailscale), and the only way
+`root` is exercised is by an operator running `scripts/install.sh` or
+`scripts/uninstall.sh`.
 
 The model never emits free-form shell. Every action it takes is a
 structured **tool call** against the closed registry in
@@ -559,15 +560,18 @@ values from every line before write.
 ### 6.2  Network boundary
 
 - UFW: `default deny incoming`, `default allow outgoing`.
-- SSH: by default allowed only on the `tailscale0` interface
-  (`ZOMBIE_SKIP_TAILSCALE=1` opens SSH on every interface, with a loud
-  warning logged by `install.sh`).
+- SSH: by default allowed on every interface, but password login and
+  root login are disabled. Setting `ZOMBIE_SKIP_TAILSCALE=0` opts in to
+  Tailscale and narrows the SSH allow rule to the `tailscale0`
+  interface.
 - Chat service: binds to `127.0.0.1` only — `server.py` refuses any
   other host. There is no TLS because there is no remote listener.
 - x11vnc: bound to `127.0.0.1:5900` with `-localhost`, password
   required, autostarted in the agent session.
 
-The only externally reachable port is SSH/22 over Tailscale.
+The only externally reachable port is SSH/22. By default it is normal
+key-only OpenSSH on every interface; when Tailscale is enabled, it is
+reachable only on `tailscale0`.
 
 ### 6.3  Privilege boundary
 
@@ -696,7 +700,7 @@ plain files read at run time. There is no separate config registry.
 | `ZOMBIE_DIR`              | `/opt/ai-zombie` | Workspace root. |
 | `ZOMBIE_NONINTERACTIVE`   | `0`            | When `1`, no prompts; `SSH_PUBLIC_KEY` and `VNC_PASSWORD` must be set unless already on disk. |
 | `ZOMBIE_ENABLE_AUTOLOGIN` | `0`            | Enable graphical autologin for the agent account. |
-| `ZOMBIE_SKIP_TAILSCALE`   | `0`            | Skip Tailscale install/enrol; allow SSH on every interface instead. |
+| `ZOMBIE_SKIP_TAILSCALE`   | `1`            | Skip Tailscale install/enrol; allow key-only SSH on every interface. Set `0` to opt in to Tailscale-only SSH ingress. |
 | `ZOMBIE_CHAT_PORT`        | `7878`         | Loopback port for the chat service. |
 | `VNC_PORT`                | `5900`         | Loopback port for x11vnc. |
 | `LOG_FILE`                | `/var/log/ubuntu-zombie-install.log` | Installer log destination. |
@@ -759,8 +763,8 @@ See `docs/CONFIGURATION.md` for operator-facing detail.
 | Runaway tool-call loop                           | `max_tool_calls_per_turn` / `max_elevated_calls_per_turn` budgets convert further calls into synthetic `budget_exceeded` observations so the turn closes. |
 | Audit log lost to logrotate race                 | `audit.py` reopens on every append; no SIGHUP needed; rotated file is preserved by `delaycompress`.    |
 | x11vnc password missing                          | `install.sh` aborts with a clear error before writing autostart entries.                               |
-| Tailscale logged out                             | `health-check` flags it; `repair` retries `tailscale up`; SSH-on-tailscale0 keeps working until the link drops. |
-| Agent account compromised                        | UFW + Tailscale-only SSH limit blast radius; `secrets/env` is the only credential material on disk; the closed tool registry bounds what the agent loop can touch; `uninstall.sh --archive` snapshots state before remediation. |
+| Tailscale logged out                             | When Tailscale is enabled, `health-check` flags it; `repair` retries `tailscale up`; SSH-on-tailscale0 keeps working until the link drops. |
+| Agent account compromised                        | Key-only, root-disabled SSH plus any configured network perimeter limits blast radius; `secrets/env` is the only credential material on disk; the closed tool registry bounds what the agent loop can touch; `uninstall.sh --archive` snapshots state before remediation. |
 
 The health timer runs `/opt/ai-zombie/bin/health-check` every 15
 minutes (and at boot + 5 min), giving the operator a passive trip-wire

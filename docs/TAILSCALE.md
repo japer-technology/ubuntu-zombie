@@ -18,10 +18,14 @@ Tailscale does not use a password. A machine joins your private network
 So when this repo refers to a Tailscale "credential" it means one of
 these, never a password.
 
-## Why Tailscale is used
+## Why you might opt in to Tailscale
 
-Tailscale is the **intended remote-ingress path** for the host. When it
-is enabled, the security posture becomes:
+Tailscale is an optional extra ingress boundary. The default remote
+access path is normal OpenSSH: key-only authentication, password login
+disabled, and root login disabled. That is secure enough for a host
+behind a trusted LAN, private cloud network, security group, bastion,
+or existing VPN. When Tailscale is enabled, the security posture
+becomes:
 
 - UFW is `default deny incoming`, `default allow outgoing`.
 - Inbound SSH (22) is allowed **only** on the `tailscale0` interface,
@@ -30,9 +34,9 @@ is enabled, the security posture becomes:
 - The desktop (`x11vnc`) and chat UI bind to `127.0.0.1` only and are
   reached by tunnelling over that SSH connection.
 
-In other words, Tailscale authentication is what lets you reach the box
-at all in the hardened configuration; the loopback-only services then
-sit behind that boundary.
+In other words, Tailscale is not required to make SSH safe; it narrows
+which devices can even attempt SSH authentication. The loopback-only
+chat and VNC services still sit behind SSH in both modes.
 
 ## Is Tailscale required?
 
@@ -40,8 +44,9 @@ sit behind that boundary.
 `ZOMBIE_SKIP_TAILSCALE=1`, which means it does **not** install or enrol
 Tailscale and does not ask for any Tailscale credential. In that mode
 inbound SSH is allowed on **every** interface (with a loud warning),
-and you are expected to put the host behind your own network boundary
-(a private LAN you control, another VPN, etc.).
+but SSH remains key-only and root-disabled. Use that default behind a
+network boundary you already trust (a private LAN, cloud firewall,
+bastion, another VPN, etc.).
 
 You opt in by setting `ZOMBIE_SKIP_TAILSCALE=0`:
 

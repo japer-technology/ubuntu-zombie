@@ -81,11 +81,12 @@ If you see `Logged out` and you supplied a pre-auth key, the key is
 expired or scoped to the wrong tailnet. Generate a new one at
 <https://login.tailscale.com/admin/settings/keys>.
 
-If you intentionally installed without Tailscale
-(`ZOMBIE_SKIP_TAILSCALE=1`), `doctor` and `health-check` will skip the
+If you intentionally installed without Tailscale (the default,
+`ZOMBIE_SKIP_TAILSCALE=1`), `doctor` and `health-check` will skip the
 Tailscale check; SSH is allowed on every interface instead of being
-scoped to `tailscale0`. Run any repair with the same variable set so
-the firewall rule is rewritten correctly:
+scoped to `tailscale0`, but remains key-only and root-disabled. Run any
+repair with the same variable set so the firewall rule is rewritten
+correctly:
 
 ```bash
 sudo ZOMBIE_SKIP_TAILSCALE=1 ./scripts/install.sh repair

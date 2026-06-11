@@ -9,6 +9,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Fixed
+- Clarified that Tailscale is optional and off by default: key-only,
+  root-disabled SSH is the default remote-access posture, while
+  `ZOMBIE_SKIP_TAILSCALE=0` opts in to tailnet-only SSH ingress.
 - Clarified provider/model setup in `README.md`, `docs/QUICKSTART.md`,
   and `docs/CONFIGURATION.md`: Ubuntu Zombie reads
   `/opt/ai-zombie/secrets/env`, maps `ZOMBIE_PROVIDER=gemini` to pi-ai's
