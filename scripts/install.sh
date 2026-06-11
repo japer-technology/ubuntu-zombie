@@ -2433,26 +2433,50 @@ install_npm_latest() {
 retry 4 5 -- install_npm_latest
 retry 4 5 -- npm install -g --ignore-scripts yarn pnpm typescript ts-node
 
+install_pinned_node_bridge() {
+  local name="$1" version_file="$2"
+  local pinned_version package version url sha256 tmp_dir tarball
+  local _integrity _license
+
+  pinned_version="$(tr -d '[:space:]' < "${version_file}")"
+  if [[ -z "${pinned_version}" ]]; then
+    die "${version_file#${ROOT}/} is empty; refusing to install ${name} unpinned." 1
+  fi
+
+  if ! read -r package version url sha256 _integrity _license < <(
+    awk -v want="${name}" '
+      $0 !~ /^#/ && $1 == want { print $2, $3, $4, $5, $6, $7 }
+    ' "${PAYLOAD_DIR}/agent/bridge-dependencies.lock"
+  ); then
+    die "Missing bridge dependency lock entry for ${name}." 1
+  fi
+  if [[ -z "${package:-}" || -z "${version:-}" || -z "${url:-}" || -z "${sha256:-}" ]]; then
+    die "Incomplete bridge dependency lock entry for ${name}." 1
+  fi
+  if [[ "${version}" != "${pinned_version}" ]]; then
+    die "${version_file#${ROOT}/} pins ${pinned_version}, but bridge lock pins ${version}." 1
+  fi
+
+  tmp_dir="$(mktemp -d)"
+  tarball="${tmp_dir}/${name}.tgz"
+  curl_get "${url}" -o "${tarball}" \
+    || { rm -rf "${tmp_dir}"; return 1; }
+  printf '%s  %s\n' "${sha256}" "${tarball}" | sha256sum -c - >/dev/null \
+    || { rm -rf "${tmp_dir}"; die "Checksum mismatch for ${package}@${version} from ${url}." 1; }
+
+  log "Installing ${package}@${version} globally from checksum-pinned tarball."
+  npm install -g --ignore-scripts "${tarball}" \
+    || { rm -rf "${tmp_dir}"; return 1; }
+  rm -rf "${tmp_dir}"
+}
+
 # pi-ai is the unified LLM client for the chat service. Pinned to the
-# exact version recorded in payload/agent/pi-ai.version so bumps are
-# deliberate PRs with smoke evidence.
-PI_AI_VERSION="$(tr -d '[:space:]' < "${PAYLOAD_DIR}/agent/pi-ai.version")"
-if [[ -z "${PI_AI_VERSION}" ]]; then
-  die "payload/agent/pi-ai.version is empty; refusing to install pi-ai unpinned." 1
-fi
-log "Installing @earendil-works/pi-ai@${PI_AI_VERSION} globally."
-retry 4 5 -- npm install -g --ignore-scripts "@earendil-works/pi-ai@${PI_AI_VERSION}"
+# exact version and checksum recorded in payload/agent/bridge-dependencies.lock.
+retry 4 5 -- install_pinned_node_bridge pi-ai "${PAYLOAD_DIR}/agent/pi-ai.version"
 
 # pi-mono is the agent loop the chat service drives via
-# payload/agent/pi-mono-bridge.mjs. Pinned the same way as pi-ai —
-# the exact version is in payload/agent/pi-mono.version so version
-# bumps land as deliberate PRs with their own smoke evidence.
-PI_MONO_VERSION="$(tr -d '[:space:]' < "${PAYLOAD_DIR}/agent/pi-mono.version")"
-if [[ -z "${PI_MONO_VERSION}" ]]; then
-  die "payload/agent/pi-mono.version is empty; refusing to install pi-mono unpinned." 1
-fi
-log "Installing @earendil-works/pi-coding-agent@${PI_MONO_VERSION} globally."
-retry 4 5 -- npm install -g --ignore-scripts "@earendil-works/pi-coding-agent@${PI_MONO_VERSION}"
+# payload/agent/pi-mono-bridge.mjs. Pinned the same way as pi-ai.
+retry 4 5 -- install_pinned_node_bridge pi-mono "${PAYLOAD_DIR}/agent/pi-mono.version"
 
 # ---------------------------------------------------------------------------
 # Deploy payload: chat service, helpers, policy, systemd, logrotate.
@@ -2533,7 +2557,7 @@ if [[ -f "${ZOMBIE_DIR}/state/conversations.db" ]]; then
 fi
 
 # Operator helpers.
-for f in audit-recent health-check collect-diagnostics secrets-edit zombie-chat setup-agent-venv; do
+for f in audit-recent health-check collect-diagnostics secrets-edit zombie-chat setup-agent-venv verify-release; do
   install -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
     "${PAYLOAD_DIR}/bin/${f}" "${ZOMBIE_DIR}/bin/${f}"
 done

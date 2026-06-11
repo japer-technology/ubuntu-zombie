@@ -67,19 +67,29 @@ therefore sort chronologically and are never reused.
 7. **Watch the `Release` workflow** finish. It will:
 
    - Re-run lint + smoke.
+   - Verify checksum-pinned Node bridge inputs.
    - Build the source tarball (`make package`).
    - Build the `.deb` (`make deb`).
    - Compute `SHA256SUMS`.
    - Generate an SPDX SBOM with Syft.
+   - Generate a SLSA provenance attestation for the artifacts.
    - Keyless-sign every artifact with cosign.
    - Create the GitHub Release and upload everything.
 
 8. **Verify the release page**:
 
-   - Tarball, `.deb`, `SHA256SUMS`, SPDX, and `.sig`/`.pem`/`.cosign.bundle`
-     for each artifact must all be attached.
+   - Tarball, `.deb`, `SHA256SUMS`, SPDX, provenance (`*.intoto.jsonl`), and
+     `.sig`/`.pem`/`.cosign.bundle` for each artifact must all be attached.
+   - Download the assets into one directory, unpack the tarball, then run:
+
+     ```bash
+     mkdir ubuntu-zombie-<version>
+     tar -xzf ubuntu-zombie-<version>.tar.gz -C ubuntu-zombie-<version>
+     bash ubuntu-zombie-<version>/payload/bin/verify-release .
+     ```
+
    - Release notes should contain the relevant CHANGELOG section and
-     the cosign verification snippet.
+     the verification command above.
 
 9. **Announce** in the
    [Discussions › Announcements](https://github.com/japer-technology/ubuntu-zombie/discussions/categories/announcements)

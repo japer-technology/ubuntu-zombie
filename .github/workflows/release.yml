@@ -2,8 +2,9 @@ name: Release
 
 # Tag-driven release: pushing a date-time version tag
 # (v2026.06.02.03.59.05, ...) builds the source tarball, an SPDX SBOM,
-# the SHA-256 checksum, a keyless cosign signature, and the .deb
-# package; everything is published to the matching GitHub Release.
+# the SHA-256 checksum, SLSA provenance, a keyless cosign signature,
+# and the .deb package; everything is published to the matching GitHub
+# Release.
 
 on:
   push:
@@ -26,6 +27,7 @@ jobs:
     permissions:
       contents: read
       id-token: write   # cosign keyless signing
+      attestations: write
     outputs:
       version: ${{ steps.meta.outputs.version }}
     steps:
@@ -58,6 +60,9 @@ jobs:
           make lint
           bash tests/smoke.sh all
 
+      - name: Verify checksum-pinned bridge inputs
+        run: make verify-bridge-pins
+
       - name: Build source tarball
         run: make package
 
@@ -78,6 +83,19 @@ jobs:
           format: spdx-json
           output-file: dist/ubuntu-zombie-${{ steps.meta.outputs.version }}.spdx.json
 
+      - name: Generate SLSA provenance attestation
+        id: provenance
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26  # v4.1.0
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Stage provenance attestation
+        run: |
+          set -euo pipefail
+          cp "${{ steps.provenance.outputs.bundle-path }}" \
+            "dist/ubuntu-zombie-${{ steps.meta.outputs.version }}.intoto.jsonl"
+          test -s "dist/ubuntu-zombie-${{ steps.meta.outputs.version }}.intoto.jsonl"
+
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
 
@@ -87,7 +105,7 @@ jobs:
           COSIGN_YES: "true"
         run: |
           set -euo pipefail
-          for f in *.tar.gz *.deb SHA256SUMS *.spdx.json; do
+          for f in *.tar.gz *.deb SHA256SUMS *.spdx.json *.intoto.jsonl; do
             [[ -f "$f" ]] || continue
             cosign sign-blob --yes "$f" \
               --bundle "${f}.cosign.bundle" \
@@ -143,13 +161,9 @@ jobs:
             echo "## Verifying release artifacts"
             echo
             echo '```bash'
-            echo "sha256sum -c SHA256SUMS"
-            echo "cosign verify-blob \\"
-            echo "  --certificate ubuntu-zombie-${version}.tar.gz.pem \\"
-            echo "  --signature   ubuntu-zombie-${version}.tar.gz.sig \\"
-            echo "  --certificate-identity-regexp 'https://github.com/japer-technology/ubuntu-zombie/.+' \\"
-            echo "  --certificate-oidc-issuer https://token.actions.githubusercontent.com \\"
-            echo "  ubuntu-zombie-${version}.tar.gz"
+            echo "mkdir ubuntu-zombie-${version}"
+            echo "tar -xzf ubuntu-zombie-${version}.tar.gz -C ubuntu-zombie-${version}"
+            echo "bash ubuntu-zombie-${version}/payload/bin/verify-release ."
             echo '```'
             echo
             echo "See [SUPPORT.md](../blob/main/SUPPORT.md) for help channels."
@@ -169,6 +183,7 @@ jobs:
             dist/*.deb
             dist/SHA256SUMS
             dist/*.spdx.json
+            dist/*.intoto.jsonl
             dist/*.sig
             dist/*.pem
             dist/*.cosign.bundle

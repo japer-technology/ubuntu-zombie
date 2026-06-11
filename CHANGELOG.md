@@ -34,6 +34,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   timer runs.
 
 ### Added
+- Release builds now generate a SLSA provenance attestation, publish it with
+  the release assets, and ship `payload/bin/verify-release` so consumers can
+  check `SHA256SUMS`, cosign signatures, and provenance in one command.
+- Node bridge inputs are now recorded in
+  `payload/agent/bridge-dependencies.lock` with source URLs, SHA-256 hashes,
+  integrity strings, and license metadata; release builds verify the pins and
+  installs consume the checksum-verified tarballs.
 - **`/model` chat command.** The chat UI now lists the models the
   configured provider offers and lets the operator switch between them at
   runtime. `/model` (no argument) lists the provider's catalogue with the
