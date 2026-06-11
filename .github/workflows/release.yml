@@ -159,7 +159,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --tags --force origin
-          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+          if git rev-parse --quiet --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
             existing_sha="$(git rev-list -n 1 "${RELEASE_TAG}")"
             if [[ "${existing_sha}" != "${GITHUB_SHA}" ]]; then
               echo "::error::Tag ${RELEASE_TAG} already points to ${existing_sha}, not ${GITHUB_SHA}." >&2
