@@ -135,6 +135,24 @@ note_changed()   { STEPS_CHANGED=$((STEPS_CHANGED + 1)); }
 
 PAYLOAD_DIR="${PAYLOAD_DIR:-${REPO_ROOT}/payload}"
 
+# Pinned versions of the Node bridges, read from their single source of
+# truth (the *.version files deployed alongside the agent). They are
+# embedded into the generated verify script and used by the install-time
+# pin checks, so define them up front to avoid unbound-variable aborts
+# under `set -u`. Fall back to "unknown" if a file is somehow missing so
+# the installer degrades gracefully instead of crashing.
+read_pinned_version() {
+  local file="$1"
+  if [[ -r "${file}" ]]; then
+    tr -d '[:space:]' < "${file}"
+  else
+    printf 'unknown'
+  fi
+}
+PI_AI_VERSION="$(read_pinned_version "${PAYLOAD_DIR}/agent/pi-ai.version")"
+PI_MONO_VERSION="$(read_pinned_version "${PAYLOAD_DIR}/agent/pi-mono.version")"
+readonly PI_AI_VERSION PI_MONO_VERSION
+
 # Exit codes:
 #   0  ok
 #   1  generic failure

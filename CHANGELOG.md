@@ -9,6 +9,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Fixed
+- **The installer no longer aborts at "Install verification script" with
+  `PI_AI_VERSION: unbound variable`.** The generated `verify` script and
+  the install-time pin checks referenced `PI_AI_VERSION` and
+  `PI_MONO_VERSION`, but those variables were never defined, so under
+  `set -u` the installer crashed on line ~2780. They are now read once
+  from their source of truth (`payload/agent/pi-ai.version` and
+  `payload/agent/pi-mono.version`) and degrade to `unknown` if a pin file
+  is missing rather than aborting.
 - Clarified that Tailscale is optional and off by default: key-only,
   root-disabled SSH is the default remote-access posture, while
   `ZOMBIE_SKIP_TAILSCALE=0` opts in to tailnet-only SSH ingress.
