@@ -42,6 +42,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   timer runs.
 
 ### Added
+- **`payload/README.md`** — a world-class tour of the payload tree: what
+  each file is, where the installer deploys it, and the four runtime
+  invariants (loopback-only, closed tool surface, policy gate +
+  approval, full audit), with Mermaid diagrams for deployment, the
+  per-turn tool-call flow, the `agent/` module graph, and the action
+  classes.
 - Release builds now generate a SLSA provenance attestation, publish it with
   the release assets, and ship `payload/bin/verify-release` so consumers can
   check `SHA256SUMS`, cosign signatures, and provenance in one command.
