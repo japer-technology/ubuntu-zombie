@@ -48,32 +48,6 @@
     • /skin — Show or change the display skin/theme [name]                                                                                                
     • /indicator — Pick the TUI busy-indicator style [kaomoji|emoji|unicode|ascii]                                                                        
     • /voice — Toggle voice mode [on|off|tts|status]                                                                                                      
-    • /queue — Queue a prompt for the next turn <prompt>                                                                                                  
-    • /steer — Inject a message after the next tool call <prompt>                                                                                         
-    • /goal — Set a standing goal Hermes works on [text | pause | resume | clear | status]                                                                
-    • /subgoal — Add/manage extra criteria on the active goal [text | remove N | clear]                                                                   
-    • /status — Show session info.                                                                                                                        
-    • /sethome — Set this chat as the home channel.                                                                                                       
-    • /resume — Resume a previously-named session [name]                                                                                                  
-    • /sessions — Browse and resume previous sessions.                                                                                                    
-    • /restart — Gracefully restart the gateway.                                                                                                          
-                                                                                                                                                          
-    ⚙️  Configuration & Personalization                                                                                                                    
-                                                                                                                                                          
-    • /config — Show current configuration.                                                                                                               
-    • /model — Switch model for this session [model] [--provider name] [--global] [--refresh]                                                             
-    • /codex-runtime — Toggle codex app-server runtime [auto|codex_app_server]                                                                            
-    • /gquota — Show Google Gemini Code Assist quota usage.                                                                                               
-    • /personality — Set a predefined personality [name]                                                                                                  
-    • /statusbar — Toggle the context/model status bar.                                                                                                   
-    • /verbose — Cycle tool progress display: off -> new -> all -> verbose                                                                                
-    • /footer — Toggle gateway runtime-metadata footer [on|off|status]                                                                                    
-    • /yolo — Toggle YOLO mode (skip all dangerous command approvals).                                                                                    
-    • /reasoning — Manage reasoning effort and display [level|show|hide]                                                                                  
-    • /fast — Toggle fast mode (Priority Processing) [normal|fast|status]                                                                                 
-    • /skin — Show or change the display skin/theme [name]                                                                                                
-    • /indicator — Pick the TUI busy-indicator style [kaomoji|emoji|unicode|ascii]                                                                        
-    • /voice — Toggle voice mode [on|off|tts|status]                                                                                                      
     • /busy — Control what Enter does while Hermes is working [queue|steer|interrupt|status]                                                              
                                                                                                                                                           
     🛠️  Tools & Skills                                                                                                                                     
