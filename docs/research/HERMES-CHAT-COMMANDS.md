@@ -86,3 +86,73 @@
     🚪 Exit                                                                                                                                               
                                                                                                                                                           
     • /quit — Exit the CLI (can also --delete session history) [--delete]                                                                                 
+
+    Beyond the slash-command registry above, Hermes Chat leans on a set
+    of interactive command-line affordances — history recall, line
+    editing, input prefixes, and variable expansion — that make the chat
+    box feel like a real shell. They are catalogued here for the same
+    "what could our chat UI borrow" reason as the commands.
+
+    ⌨️  Keyboard & Line Editing
+
+    • ↑ / ↓ — Walk backwards/forwards through your input history; recall a
+      previous prompt to re-run or edit it without retyping.
+    • ↑ after typing a prefix — Prefix-filtered recall: only step through
+      earlier inputs that start with what you have already typed.
+    • Ctrl-R — Reverse-incremental search across the whole input history.
+    • Tab — Autocomplete slash commands, sub-commands, skill names, file
+      paths, and @mentions.
+    • Shift+Enter / Alt+Enter — Insert a newline for multi-line prompts
+      instead of sending.
+    • Enter — Send (its behaviour while Hermes is working is governed by
+      /busy: queue, steer, or interrupt).
+    • Ctrl-C — Interrupt the current turn and cancel running tool calls
+      (see /stop).
+    • Ctrl-L — Clear the screen and repaint (see /clear, /redraw).
+    • Ctrl-A / Ctrl-E, Alt-←/→, Ctrl-W, Ctrl-U / Ctrl-K — Emacs-style line
+      editing: jump to start/end, move by word, delete word/line.
+    • Esc — Dismiss the autocomplete/command palette or cancel the
+      in-progress edit.
+    • PageUp / PageDown — Scroll the transcript without disturbing your
+      draft input.
+
+    🔣 Input Shortcuts & Prefixes
+
+    • / — Open the slash-command palette; keep typing to fuzzy-filter the
+      catalog above.
+    • @ — Mention or attach a workspace file/path into the prompt (with
+      path autocompletion).
+    • ! — Run the rest of the line as a one-off shell command (still
+      subject to the approval gate).
+    • # — Drop a quick memory/note for Hermes to remember (see /memory).
+    • Drag-and-drop / paste — Attach an image or file inline (see /image,
+      /paste).
+    • Markdown — Compose prompts and read replies with Markdown and
+      fenced code blocks.
+
+    🧩 Variables & Templating
+
+    • $VAR / ${VAR} — Expand environment variables from the session's
+      .env inside a prompt; refresh them live with /reload.
+    • Command & skill arguments — Pass positional and --named arguments to
+      slash commands and skills (e.g. /model gpt-5 --provider openai
+      --global).
+    • Custom commands / aliases — Save a frequently used prompt or command
+      chain under a short name and re-invoke it.
+    • Standing goals & subgoals — /goal and /subgoal behave like
+      persistent variables Hermes keeps working against across turns.
+
+    🧰 Other Command-Line Usefulness
+
+    • Persistent, named sessions — History survives restarts; resume,
+      branch, or browse it (/resume, /branch, /sessions).
+    • Queue / steer while busy — Line up the next prompt or inject
+      mid-tool guidance without waiting (/queue, /steer, /busy).
+    • Copy output — Yank the last assistant reply to the clipboard
+      (/copy).
+    • Status bar & footer — Live model/context/runtime readout you can
+      toggle (/statusbar, /footer).
+    • Verbose & reasoning toggles — Control how much tool and reasoning
+      detail is shown inline (/verbose, /reasoning).
+    • Themes & indicators — Re-skin the TUI and pick a busy-indicator
+      style (/skin, /indicator).
