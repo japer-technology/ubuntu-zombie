@@ -181,4 +181,4 @@ your contributions are released under the same license.
 
 ## LLM Usage Disclaimer
 
-In accordance with Japer Technology's LLM usage policy guidelines, this project is classified as having Magor LLM Usage (meaningful portions of the code, documentation, release notes, etc. may have been generated with AI, but the overall project is still being largely human-managed). For more information on the usage of generative AI for this project, please navigate to the Credits section of the README.
+In accordance with Japer Technology's LLM usage policy guidelines, this project is classified as having LLM Usage (meaningful portions of the code, documentation, release notes, etc. may have been generated with AI, but the overall project is still being largely human-managed). For more information on the usage of generative AI for this project, please navigate to the Credits section of the README.
