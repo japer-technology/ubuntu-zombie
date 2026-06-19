@@ -100,6 +100,11 @@ class History:
             self._conn.commit()
             return cur
 
+    @property
+    def path(self) -> Path:
+        """Return the SQLite database path backing this history store."""
+        return self._path
+
     def create_conversation(self, title: str = "") -> int:
         cur = self._execute(
             "INSERT INTO conversations(created_at, title) VALUES (?, ?)",
@@ -119,6 +124,16 @@ class History:
                 for row in cur.fetchall()
             ]
 
+    def get_conversation(self, conversation_id: int) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, created_at, title FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"id": row[0], "created_at": row[1], "title": row[2]}
+
     def conversation_exists(self, conversation_id: int) -> bool:
         with self._lock:
             row = self._conn.execute(
@@ -126,6 +141,13 @@ class History:
                 (conversation_id,),
             ).fetchone()
         return row is not None
+
+    def set_title(self, conversation_id: int, title: str) -> bool:
+        cur = self._execute(
+            "UPDATE conversations SET title = ? WHERE id = ?",
+            (title[:120], conversation_id),
+        )
+        return cur.rowcount > 0
 
     def add_message(self, conversation_id: int, role: str, content: str,
                     meta: dict[str, Any] | None = None) -> int:
@@ -177,6 +199,116 @@ class History:
                 "meta": meta,
             })
         return out
+
+    def latest_user_message(self, conversation_id: int,
+                            offset: int = 0) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, created_at, role, content, meta FROM messages "
+                "WHERE conversation_id = ? AND role = 'user' "
+                "ORDER BY id DESC LIMIT 1 OFFSET ?",
+                (conversation_id, max(offset, 0)),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            meta = json.loads(row[4])
+        except json.JSONDecodeError:
+            meta = {}
+        return {
+            "id": row[0],
+            "created_at": row[1],
+            "role": row[2],
+            "content": row[3],
+            "meta": meta,
+        }
+
+    def latest_summary(self, conversation_id: int) -> str | None:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT content, meta FROM messages "
+                "WHERE conversation_id = ? AND role = 'system' "
+                "ORDER BY id DESC",
+                (conversation_id,),
+            ).fetchall()
+        for content, meta_json in rows:
+            try:
+                meta = json.loads(meta_json)
+            except json.JSONDecodeError:
+                meta = {}
+            if meta.get("kind") == "summary":
+                return str(content)
+        return None
+
+    def copy_conversation(self, conversation_id: int, *,
+                          title: str = "",
+                          before_message_id: int | None = None) -> int:
+        """Copy a conversation, optionally truncating before a message.
+
+        The source conversation is left untouched. When truncating, tool
+        events at or after the cutoff message timestamp are omitted so a
+        retry/undo branch does not replay events from turns it no longer
+        contains.
+        """
+        with self._lock:
+            source = self._conn.execute(
+                "SELECT title FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
+            if source is None:
+                raise KeyError(f"conversation {conversation_id} not found")
+            cutoff_ts: float | None = None
+            message_where = "conversation_id = ?"
+            message_params: list[Any] = [conversation_id]
+            if before_message_id is not None:
+                row = self._conn.execute(
+                    "SELECT created_at FROM messages "
+                    "WHERE conversation_id = ? AND id = ?",
+                    (conversation_id, before_message_id),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"message {before_message_id} not found")
+                cutoff_ts = float(row[0])
+                message_where += " AND id < ?"
+                message_params.append(before_message_id)
+
+            chosen_title = (title or f"Branch of #{conversation_id}")[:120]
+            cur = self._conn.execute(
+                "INSERT INTO conversations(created_at, title) VALUES (?, ?)",
+                (time.time(), chosen_title),
+            )
+            new_id = int(cur.lastrowid or 0)
+
+            messages = self._conn.execute(
+                "SELECT created_at, role, content, meta FROM messages "
+                f"WHERE {message_where} ORDER BY id ASC",
+                tuple(message_params),
+            ).fetchall()
+            for created_at, role, content, meta in messages:
+                self._conn.execute(
+                    "INSERT INTO messages(conversation_id, created_at, role, "
+                    "content, meta) VALUES (?, ?, ?, ?, ?)",
+                    (new_id, created_at, role, content, meta),
+                )
+
+            event_where = "conversation_id = ?"
+            event_params: list[Any] = [conversation_id]
+            if cutoff_ts is not None:
+                event_where += " AND created_at < ?"
+                event_params.append(cutoff_ts)
+            events = self._conn.execute(
+                "SELECT created_at, kind, payload FROM events "
+                f"WHERE {event_where} ORDER BY id ASC",
+                tuple(event_params),
+            ).fetchall()
+            for created_at, kind, payload in events:
+                self._conn.execute(
+                    "INSERT INTO events(conversation_id, created_at, kind, "
+                    "payload) VALUES (?, ?, ?, ?)",
+                    (new_id, created_at, kind, payload),
+                )
+            self._conn.commit()
+            return new_id
 
     # ------------------------------------------------------------------
     # Events (Phase 2: tool_call / tool_observation / pending_tool_call)

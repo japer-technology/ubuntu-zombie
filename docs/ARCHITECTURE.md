@@ -275,8 +275,26 @@ HTTP surface (loopback only):
 | `GET  /api/conversations`      | List conversation ids and titles. |
 | `GET  /api/conversation/{id}`  | Fetch one conversation's messages **and** structured events. |
 | `GET  /api/audit`              | Recent audit-log entries for the UI panel. |
+| `GET  /api/config`             | Redacted runtime configuration for `/config`. |
+| `GET  /api/profile`            | Agent identity, host facts, and local paths for `/profile` / `/whoami`. |
+| `GET  /api/policy`             | Policy classes, tool overrides, and rule counts for `/policy`. |
+| `GET  /api/skills`             | Skill catalogue for `/skills`. |
+| `GET  /api/skill/{name}`       | Read one skill body for `/skills <name>`. |
+| `GET  /api/pending`            | Pending approval queue for text `/approve` / `/deny`. |
 | `POST /api/message`            | Send a user prompt; run one pi-mono turn; return reply + events. |
 | `POST /api/approve`            | Approve or deny a queued tool call by `tool_call_id` (with confirmation phrase for `destructive`). The legacy `proposal_id` field is rejected. |
+| `POST /api/conversation/{id}/title` | Rename one conversation. |
+| `POST /api/conversation/{id}/branch` | Copy a conversation into a new branch. |
+| `POST /api/conversation/{id}/retry` | Branch before the last user turn and return that prompt for retry. |
+| `POST /api/conversation/{id}/undo` | Branch before the last N user turns; host side effects and audit entries remain unchanged. |
+| `POST /api/conversation/{id}/compress` | Store a local deterministic summary for future context without deleting raw history. |
+
+The slash-command support endpoints are intentionally narrow. `/config`,
+`/profile`, `/policy`, and `/skills` return redacted or non-secret local
+metadata only. `/title`, `/branch`, `/retry`, `/undo`, and `/compress`
+mutate conversation state in SQLite, not host state. `/approve` and
+`/deny` resolve only already queued tool calls, so they remain inside the
+same policy and audit path as the approval buttons.
 
 Read-only tool calls execute inline and stream their observation back
 to the model in the same turn. Anything that mutates state is queued

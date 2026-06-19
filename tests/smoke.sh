@@ -956,6 +956,9 @@ PY
   echo "  server conversation endpoint (existing / bad id / not found)"
   _CONV_TMP="$(mktemp -d)"
   ZOMBIE_HISTORY_DB="${_CONV_TMP}/conversations.db" \
+  ZOMBIE_AUDIT_LOG="${_CONV_TMP}/audit.log" \
+  ZOMBIE_POLICY=payload/etc/policy.yaml \
+  ZOMBIE_SKILLS_DIR=payload/agent/skills \
   PYTHONPATH=payload/agent python3 - <<'PY'
 import atexit
 import json
@@ -972,22 +975,27 @@ if _db:
 import server
 
 class _FakeRFile:
-    """Minimal stand-in for a socket rfile; do_GET never reads a body."""
+    """Minimal stand-in for a socket rfile."""
+
+    def __init__(self, body=b""):
+        self._body = body
 
     def read(self, *_a, **_k):
-        return b""
+        body, self._body = self._body, b""
+        return body
 
     def readline(self, *_a, **_k):
         return b""
 
 class _Recorder(server.Handler):
-    """Drive Handler.do_GET without a real socket; capture the reply."""
+    """Drive Handler methods without a real socket; capture the reply."""
 
-    def __init__(self, app, path):  # noqa: D107 - test shim
+    def __init__(self, app, path, body=None):  # noqa: D107 - test shim
         self.app = app
         self.path = path
-        self.rfile = _FakeRFile()
-        self.headers = {}
+        raw = json.dumps(body or {}).encode("utf-8")
+        self.rfile = _FakeRFile(raw)
+        self.headers = {"Content-Length": str(len(raw))}
         self.status = None
         self.body = b""
 
@@ -1022,14 +1030,23 @@ def get(app, path):
     return h.status, payload
 
 
+def post(app, path, body=None):
+    h = _Recorder(app, path, body)
+    h.do_POST()
+    payload = json.loads(h.body.decode("utf-8")) if h.body else {}
+    return h.status, payload
+
+
 app = server.App()
 cid = app.history.create_conversation()
 app.history.add_message(cid, "user", "hello there")
+app.history.add_message(cid, "assistant", "hi")
 
 # Existing conversation: 200 with the stored messages, no error.
 status, body = get(app, f"/api/conversation/{cid}")
 assert status == 200, (status, body)
 assert "error" not in body, body
+assert body["conversation"]["id"] == cid, body
 assert any(m["content"] == "hello there" for m in body["messages"]), body
 
 # Unknown id: a 404 with an error body the UI can surface, rather than
@@ -1042,6 +1059,113 @@ assert "error" in body and "999999" in body["error"], body
 status, body = get(app, "/api/conversation/not-a-number")
 assert status == 400, (status, body)
 assert body.get("error") == "bad id", body
+
+# Title updates are small state mutations and are audit-visible.
+status, body = post(app, f"/api/conversation/{cid}/title",
+                    {"title": "   "})
+assert status == 400, (status, body)
+assert body["error"] == "title is required", body
+status, body = post(app, f"/api/conversation/{cid}/title",
+                    {"title": "  Demo title  "})
+assert status == 200, (status, body)
+assert body["title"] == "Demo title", body
+status, body = get(app, f"/api/conversation/{cid}")
+assert body["conversation"]["title"] == "Demo title", body
+
+# Branch copies the transcript without changing the source.
+status, body = post(app, f"/api/conversation/{cid}/branch",
+                    {"title": "side path"})
+assert status == 200, (status, body)
+branch_id = body["conversation_id"]
+assert branch_id != cid, body
+status, branch = get(app, f"/api/conversation/{branch_id}")
+assert status == 200, (status, branch)
+assert [m["content"] for m in branch["messages"]] == [
+    "hello there", "hi",
+], branch
+
+# Retry creates a branch before the last user message and returns the
+# prompt for the browser to re-submit. The original remains intact.
+app.history.add_message(cid, "user", "try this")
+app.history.add_message(cid, "assistant", "old answer")
+status, body = post(app, f"/api/conversation/{cid}/retry")
+assert status == 200, (status, body)
+assert body["prompt"] == "try this", body
+status, retry = get(app, f"/api/conversation/{body['conversation_id']}")
+assert [m["content"] for m in retry["messages"]] == [
+    "hello there", "hi",
+], retry
+
+# Undo also branches instead of deleting evidence or pretending host
+# side effects were reverted.
+status, body = post(app, f"/api/conversation/{cid}/undo", {"turns": 1})
+assert status == 200, (status, body)
+assert "host changes" in body["warning"], body
+status, undone = get(app, f"/api/conversation/{body['conversation_id']}")
+assert [m["content"] for m in undone["messages"]] == [
+    "hello there", "hi",
+], undone
+
+# Compress stores a local system summary that future turns can inject
+# into the system prompt; raw messages stay present.
+status, body = post(app, f"/api/conversation/{cid}/compress")
+assert status == 200, (status, body)
+assert "Local summary" in body["summary"], body
+assert app.history.latest_summary(cid) == body["summary"], body
+status, original = get(app, f"/api/conversation/{cid}")
+assert any(m["content"] == "try this" for m in original["messages"]), original
+
+# Read-only command-support endpoints.
+for path in ("/api/config", "/api/profile", "/api/policy", "/api/skills"):
+    status, body = get(app, path)
+    assert status == 200, (path, status, body)
+assert any(s["name"] == "apt" for s in get(app, "/api/skills")[1]["skills"])
+status, body = get(app, "/api/skill/apt")
+assert status == 200 and "content" in body and body["name"] == "apt", body
+status, body = get(app, "/api/pending")
+assert status == 200 and body["pending"] == [], body
+
+# Pending approval commands expose the same queue as the approval
+# buttons. Denial removes the call; a bad destructive phrase does not.
+pending = {
+    "id": "audit-1",
+    "conversation_id": cid,
+    "tool_call_id": "tool-1",
+    "tool": "shell.run",
+    "args": {"argv": ["true"]},
+    "classification": "elevated",
+    "requires_phrase": False,
+}
+app.pending["audit-1"] = pending
+app.pending["tool-1"] = pending
+status, body = get(app, "/api/pending")
+assert status == 200 and len(body["pending"]) == 1, body
+status, body = post(app, "/api/approve",
+                    {"tool_call_id": "audit-1", "decision": "deny"})
+assert status == 200 and body["status"] == "denied", body
+assert body["tool_call_id"] == "tool-1", body
+assert app.pending_calls() == [], app.pending_calls()
+
+pending = {
+    "id": "audit-2",
+    "conversation_id": cid,
+    "tool_call_id": "tool-2",
+    "tool": "shell.run",
+    "args": {"argv": ["rm", "-rf", "/tmp/nope"]},
+    "classification": "destructive",
+    "requires_phrase": True,
+}
+app.pending["audit-2"] = pending
+app.pending["tool-2"] = pending
+status, body = post(app, "/api/approve",
+                    {"tool_call_id": "tool-2", "decision": "approve",
+                     "phrase": "wrong"})
+assert status == 200 and body["status"] == "awaiting_confirmation", body
+assert len(app.pending_calls()) == 1, app.pending_calls()
+status, body = post(app, "/api/approve",
+                    {"tool_call_id": "audit-2", "decision": "deny"})
+assert status == 200 and body["status"] == "denied", body
+assert app.pending_calls() == [], app.pending_calls()
 
 app.history.close()
 PY

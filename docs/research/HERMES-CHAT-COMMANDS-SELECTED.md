@@ -34,33 +34,37 @@ Zombie:
   Aliases, history search, export, copy, skill preview, policy display, and
   snapshots are higher leverage than cosmetic skins or platform controls.
 
-## Current baseline
+## Current implementation baseline
 
-Ubuntu Zombie already implements a useful subset in the web chat UI:
+Ubuntu Zombie now implements the full "Ship or keep now" set in the web
+chat UI:
 
-- `/help`
-- `/clear`
-- `/new` with `/reset` alias
-- `/examples`
-- `/tools`
-- `/health`
-- `/status`
-- `/version`
-- `/model`
-- `/audit`
-- `/conversations` with `/history` alias
-- `/load <id>`
-- `/shortcuts`
-- `/stop`
+- Discovery and local view control: `/help`, `/commands`, `/clear`,
+  `/redraw`, `/new`, `/reset`, `/examples`, `/shortcuts`, and `/stop`.
+- Conversation navigation: `/conversations`, `/history`, `/sessions`,
+  `/load <id>`, and `/resume <id>`.
+- Conversation state controls: `/title <text>`, `/branch [name]`,
+  `/retry`, `/undo [n]`, and `/compress`.
+- Local transcript utilities: `/export`, `/save`, and `/copy [n]`.
+- Runtime/status inspection: `/tools`, `/skills [name]`, `/health`,
+  `/status`, `/version`, `/model [id]`, `/config`, `/policy`,
+  `/whoami`, `/profile`, and `/audit`.
+- Approval queue controls: `/approve [id] [phrase]` and `/deny [id]`.
 
-The backend already exposes the read-only data needed for several of
-those commands: `/api/health`, `/api/version`, `/api/conversations`,
-`/api/conversation/<id>`, `/api/audit`, `/api/tools`, and `/api/models`.
-Model selection uses `POST /api/model`; tool approval uses
-`POST /api/approve`.
+The backend exposes only the local state needed to support those
+commands: `/api/health`, `/api/version`, `/api/conversations`,
+`/api/conversation/{id}`, `/api/audit`, `/api/tools`, `/api/models`,
+`/api/config`, `/api/profile`, `/api/policy`, `/api/skills`,
+`/api/skill/{name}`, and `/api/pending`. State-changing command support
+is scoped to conversation metadata/history and the existing approval
+queue: `POST /api/model`, `POST /api/approve`, and
+`POST /api/conversation/{id}/{title,branch,retry,undo,compress}`.
 
-The immediate work should therefore be additive polish and carefully
-chosen read-only/state-only commands, not a wholesale import of Hermes.
+This keeps the implementation aligned with the selection rules: no
+slash command adds a new privileged host action, `/retry` is the only
+one that intentionally spends model tokens, `/undo` rewinds only the
+conversation branch, and `/compress` stores a summary without deleting
+raw SQLite history or audit entries.
 
 ## Recommended command set
 
@@ -86,7 +90,7 @@ need new privileged host capability.
 | `/retry` | Add. | Re-send the last user message after removing the last assistant turn/events from display; backend should preserve an audit-visible retry marker. |
 | `/undo [n]` | Add carefully. | Conversation-only rewind; never undo host side effects. Must say that host changes remain real. |
 | `/branch [name]` | Add after title/export. | Copy messages/events up to current point into a new conversation. |
-| `/compress` | Add later. | Create a conversation summary for future context, but never delete raw SQLite history or audit entries. |
+| `/compress` | Add. | Create a conversation summary for future context, but never delete raw SQLite history or audit entries. |
 | `/status` | Keep. | Compact host/provider status. |
 | `/version` | Keep. | Ubuntu Zombie and bridge versions. |
 | `/model [id]` | Keep. | Existing provider catalogue and process-local model selection. |
@@ -204,13 +208,14 @@ privilege.
 
 ## Proposed implementation order
 
-1. Normalize the existing command surface: add `/commands`, `/sessions`,
+1. Done: normalize the command surface with `/commands`, `/sessions`,
    `/resume`, `/save`/`/export`, `/copy`, `/title`, `/whoami`,
    `/profile`, `/config`, `/skills`, and `/policy`.
 2. Add browser ergonomics: prompt history, prefix recall, command palette,
    and autocomplete for commands, skills, and conversations.
-3. Add conversation controls: `/retry`, `/undo`, `/branch`, and transcript
-   export with a clear warning that host side effects are not undone.
+3. Done: add conversation controls: `/retry`, `/undo`, `/branch`, and
+   transcript export with a clear warning that host side effects are not
+   undone.
 4. Add observability commands: richer `/audit`, `/usage`, `/insights`,
    visible budgets, and UI toggles for status/footer/verbosity.
 5. Add safety-backed operations: `/snapshot`, `/rollback`, `/approve`,
@@ -233,7 +238,8 @@ The high-confidence set Ubuntu Zombie should grow toward is:
 `/paste`, `/image`, `/reload`, `/reload-skills`, `/verbose`,
 `/reasoning`, `/statusbar`, and `/footer`.
 
-Of those, the first implementation tranche should be the commands that
-need no new privileged host power: `/commands`, `/sessions`, `/resume`,
-`/export`, `/copy`, `/title`, `/skills`, `/config`, `/policy`,
-`/whoami`, `/profile`, prompt history, and autocomplete.
+Of those, the first command implementation tranche is now implemented:
+`/commands`, `/sessions`, `/resume`, `/export`, `/copy`, `/title`,
+`/skills`, `/config`, `/policy`, `/whoami`, and `/profile`. Prompt
+history and autocomplete remain browser ergonomics, not slash-command
+capabilities, and should be implemented separately.

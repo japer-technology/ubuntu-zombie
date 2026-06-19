@@ -559,21 +559,34 @@ Try one of the safe examples shipped with the chat:
 
 Read-only questions are answered without prompting for approval.
 
-The chat also understands a few client-side commands. Type `/help` to
-list them. Highlights:
+The chat also understands client-side commands. Type `/help` to list
+them, or `/commands <text>` to filter the command list. Highlights:
 
 - `/clear` clears the view; `/new` (alias `/reset`) starts a fresh
-  conversation; `/examples` shows the safe example prompts.
+  conversation; `/redraw` reloads the current transcript from SQLite;
+  `/examples` shows the safe example prompts.
 - `/tools` lists the agent tools and their risk class; `/health`,
   `/status`, and `/version` report machine facts and versions.
+- `/skills` lists the loaded skill briefs; `/skills apt` previews one.
+- `/config`, `/policy`, `/whoami`, and `/profile` show local runtime
+  state without exposing secrets.
 - `/model` lists the models your configured provider offers (the
   current one is marked `*`); `/model <id>` switches to another model
   for the running service.
 - `/audit` shows the most recent audit-log entries; `/conversations`
-  (alias `/history`) lists past conversations and `/load <id>` reopens
-  one; `/shortcuts` lists the keyboard shortcuts.
+  (aliases `/history` and `/sessions`) lists past conversations and
+  `/load <id>` (alias `/resume <id>`) reopens one.
+- `/title`, `/branch`, `/retry`, `/undo`, and `/compress` manage the
+  current conversation only. `/retry` and `/undo` create new branches;
+  they do not undo host changes or remove audit entries.
+- `/export` (alias `/save`) downloads Markdown and JSON transcripts;
+  `/copy [n]` copies assistant replies; `/approve [id] [phrase]` and
+  `/deny [id]` are text alternatives to the approval buttons;
+  `/shortcuts` lists keyboard shortcuts.
 
-These commands run in the browser and never reach the agent.
+Most of these commands run in the browser or call small local JSON
+endpoints. They do not reach the agent unless they explicitly submit a
+prompt, as `/retry` does.
 
 ## 7. Approve a safe command
 

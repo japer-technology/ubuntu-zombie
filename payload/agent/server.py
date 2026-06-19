@@ -37,13 +37,14 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from audit import log_event, log_tool_call, tail as audit_tail  # noqa: E402
+from audit import AUDIT_PATH, log_event, log_tool_call, tail as audit_tail  # noqa: E402
 from history import History  # noqa: E402
-from policy import load_policy  # noqa: E402
+from policy import POLICY_PATH, load_policy  # noqa: E402
 from providers import provider_status  # noqa: E402
 import providers  # noqa: E402
 import pi_mono  # noqa: E402
@@ -223,8 +224,9 @@ def version_info() -> dict[str, str]:
 class App:
     def __init__(self) -> None:
         self.history = History()
-        # Pending tool calls awaiting operator approval. Keyed by the
-        # ``tool_call_id`` we surface in the UI (audit-log entry id).
+        # Pending tool calls awaiting operator approval. Each item is
+        # addressable by both the audit entry id and provider tool-call id
+        # so legacy buttons and text commands resolve the same queue item.
         self.pending: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
@@ -237,6 +239,13 @@ class App:
 
         facts = ", ".join(f"{k}={v}" for k, v in machine_facts().items())
         system_prompt = render_append_system(facts)
+        summary = self.history.latest_summary(conv_id)
+        if summary:
+            system_prompt = (
+                system_prompt.rstrip()
+                + "\n\nConversation summary retained from /compress:\n"
+                + summary
+            )
         history_payload = [
             {"role": m["role"], "content": m["content"]}
             for m in self.history.get_messages(conv_id)
@@ -343,7 +352,8 @@ class App:
 
             if requires_approval:
                 with self._lock:
-                    self.pending[entry_id] = {
+                    pending = {
+                        "id": entry_id,
                         "conversation_id": conv_id,
                         "tool_call_id": call_id,
                         "tool": name,
@@ -351,6 +361,8 @@ class App:
                         "classification": classification,
                         "requires_phrase": requires_phrase,
                     }
+                    self.pending[entry_id] = pending
+                    self.pending[call_id] = pending
                 self.history.add_event(conv_id, "pending_tool_call", {
                     "id": entry_id, "tool_call_id": call_id, "tool": name,
                     "classification": classification,
@@ -429,25 +441,40 @@ class App:
     def approve(self, tool_call_id: str, decision: str,
                 phrase: str | None = None) -> dict[str, Any]:
         with self._lock:
-            pending = self.pending.pop(tool_call_id, None)
+            pending = self.pending.get(tool_call_id)
         if not pending:
             return {"error": "Unknown or already-handled tool call."}
         conv_id = pending["conversation_id"]
         tool = pending["tool"]
         args = pending["args"]
         classification = pending["classification"]
+        audit_id = str(pending.get("id") or tool_call_id)
+        call_id = str(pending.get("tool_call_id") or tool_call_id)
+
+        def pop_pending() -> dict[str, Any] | None:
+            with self._lock:
+                current = self.pending.pop(audit_id, None)
+                if current is None:
+                    current = self.pending.pop(call_id, None)
+                if current:
+                    self.pending.pop(str(current.get("id", "")), None)
+                    self.pending.pop(str(current.get("tool_call_id", "")), None)
+                return current
 
         if decision != "approve":
+            if pop_pending() is None:
+                return {"error": "Unknown or already-handled tool call."}
             log_tool_call(tool=tool, classification=classification,
                           decision="denied",
                           args_summary=_summarize(args),
-                          conversation_id=conv_id, tool_call_id=tool_call_id)
+                          conversation_id=conv_id, tool_call_id=call_id,
+                          approval_id=audit_id)
             self.history.add_event(conv_id, "tool_observation", {
-                "tool_call_id": tool_call_id, "tool": tool,
+                "tool_call_id": call_id, "tool": tool,
                 "ok": False, "decision": "denied",
                 "error": "operator denied",
             })
-            return {"status": "denied", "tool_call_id": tool_call_id}
+            return {"status": "denied", "tool_call_id": call_id}
 
         if pending["requires_phrase"]:
             policy = load_policy()
@@ -456,17 +483,19 @@ class App:
                               decision="denied",
                               args_summary=_summarize(args),
                               error="missing or wrong confirmation phrase",
-                              conversation_id=conv_id,
-                              tool_call_id=tool_call_id)
-                return {"status": "denied",
+                              conversation_id=conv_id, tool_call_id=call_id,
+                              approval_id=audit_id)
+                return {"status": "awaiting_confirmation",
                         "error": "Destructive action requires the exact "
                                  f"confirmation phrase: "
                                  f"{policy.destructive_confirmation!r}"}
 
+        if pop_pending() is None:
+            return {"error": "Unknown or already-handled tool call."}
         try:
             result = tools_mod.dispatch(tool, args)
             self.history.add_event(conv_id, "tool_observation", {
-                "tool_call_id": tool_call_id, "tool": tool,
+                "tool_call_id": call_id, "tool": tool,
                 "ok": True, "result": _truncate_obs(result),
                 "decision": "approved",
             })
@@ -477,21 +506,249 @@ class App:
                 duration_ms=result.get("duration_ms") if isinstance(result, dict) else None,
                 stdout=(result.get("stdout") if isinstance(result, dict) else None),
                 stderr=(result.get("stderr") if isinstance(result, dict) else None),
-                conversation_id=conv_id, tool_call_id=tool_call_id,
+                conversation_id=conv_id, tool_call_id=call_id,
+                approval_id=audit_id,
             )
-            return {"status": "approved", "tool_call_id": tool_call_id,
+            return {"status": "approved", "tool_call_id": call_id,
                     "result": result}
         except Exception as exc:  # noqa: BLE001
             self.history.add_event(conv_id, "tool_observation", {
-                "tool_call_id": tool_call_id, "tool": tool,
+                "tool_call_id": call_id, "tool": tool,
                 "ok": False, "error": str(exc),
             })
             log_tool_call(tool=tool, classification=classification,
                           decision="error",
                           args_summary=_summarize(args), error=str(exc),
-                          conversation_id=conv_id, tool_call_id=tool_call_id)
-            return {"status": "error", "tool_call_id": tool_call_id,
+                          conversation_id=conv_id, tool_call_id=call_id,
+                          approval_id=audit_id)
+            return {"status": "error", "tool_call_id": call_id,
                     "error": str(exc)}
+
+    # ---- command support APIs ----
+    def conversation_payload(self, conversation_id: int) -> dict[str, Any]:
+        conv = self.history.get_conversation(conversation_id)
+        if conv is None:
+            raise KeyError(f"No conversation #{conversation_id}.")
+        return {
+            "conversation": conv,
+            "messages": self.history.get_messages(conversation_id),
+            "events": self.history.get_events(conversation_id),
+        }
+
+    def set_conversation_title(self, conversation_id: int,
+                               title: str) -> dict[str, Any]:
+        cleaned = " ".join(title.strip().split())[:120]
+        if not cleaned:
+            return {"error": "title is required"}
+        if not self.history.set_title(conversation_id, cleaned):
+            return {"error": f"No conversation #{conversation_id}."}
+        log_event("conversation_title", conversation_id=conversation_id,
+                  title=cleaned)
+        return {"ok": True, "conversation_id": conversation_id,
+                "title": cleaned}
+
+    def branch_conversation(self, conversation_id: int,
+                            title: str = "") -> dict[str, Any]:
+        # Branching is a SQLite copy only. It must not imply rollback of
+        # host mutations, approvals, or audit records from the source.
+        if not self.history.conversation_exists(conversation_id):
+            return {"error": f"No conversation #{conversation_id}."}
+        chosen = " ".join(title.strip().split())[:120]
+        if not chosen:
+            chosen = f"Branch of #{conversation_id}"
+        try:
+            new_id = self.history.copy_conversation(conversation_id,
+                                                    title=chosen)
+        except KeyError as exc:
+            return {"error": str(exc)}
+        log_event("conversation_branch", conversation_id=conversation_id,
+                  new_conversation_id=new_id, title=chosen)
+        return {"ok": True, "conversation_id": new_id, "title": chosen}
+
+    def retry_conversation(self, conversation_id: int) -> dict[str, Any]:
+        # Retry starts a new branch before the last user message, then
+        # returns that prompt for the browser to submit again. The source
+        # transcript and audit trail remain intact.
+        last_user = self.history.latest_user_message(conversation_id)
+        if last_user is None:
+            return {"error": "No user message to retry."}
+        title = f"Retry of #{conversation_id}"
+        try:
+            new_id = self.history.copy_conversation(
+                conversation_id,
+                title=title,
+                before_message_id=int(last_user["id"]),
+            )
+        except KeyError as exc:
+            return {"error": str(exc)}
+        prompt = str(last_user["content"])
+        log_event("conversation_retry", conversation_id=conversation_id,
+                  new_conversation_id=new_id,
+                  retried_message_id=last_user["id"])
+        return {"ok": True, "conversation_id": new_id, "title": title,
+                "prompt": prompt,
+                "warning": ("Created a retry branch. The original "
+                            "conversation and audit log were preserved.")}
+
+    def undo_conversation(self, conversation_id: int,
+                          turns: int = 1) -> dict[str, Any]:
+        # Undo is deliberately conversation-only. It creates a branch
+        # before the selected user turn instead of deleting messages or
+        # pretending tool side effects were reverted.
+        count = max(turns, 1)
+        cutoff = self.history.latest_user_message(conversation_id,
+                                                  offset=count - 1)
+        if cutoff is None:
+            return {"error": f"Conversation #{conversation_id} has fewer "
+                             f"than {count} user turn(s)."}
+        title = f"Undo {count} turn{'s' if count != 1 else ''} from #{conversation_id}"
+        try:
+            new_id = self.history.copy_conversation(
+                conversation_id,
+                title=title,
+                before_message_id=int(cutoff["id"]),
+            )
+        except KeyError as exc:
+            return {"error": str(exc)}
+        log_event("conversation_undo", conversation_id=conversation_id,
+                  new_conversation_id=new_id, turns=count,
+                  cutoff_message_id=cutoff["id"])
+        return {
+            "ok": True,
+            "conversation_id": new_id,
+            "title": title,
+            "warning": (
+                "Created a rewind branch only. Any host changes, tool "
+                "runs, approvals, and audit entries from the original "
+                "conversation remain real and unchanged."
+            ),
+        }
+
+    def compress_conversation(self, conversation_id: int) -> dict[str, Any]:
+        # Local deterministic summary: no model call, no deletion of raw
+        # messages, and future turns inject only the latest summary.
+        if not self.history.conversation_exists(conversation_id):
+            return {"error": f"No conversation #{conversation_id}."}
+        messages = [
+            m for m in self.history.get_messages(conversation_id)
+            if m["role"] in {"user", "assistant"}
+        ]
+        if not messages:
+            return {"error": "No conversation content to summarize."}
+        summary = _local_summary(messages)
+        self.history.add_message(conversation_id, "system", summary,
+                                 {"kind": "summary"})
+        self.history.add_event(conversation_id, "conversation_summary",
+                               {"summary": summary})
+        log_event("conversation_summary", conversation_id=conversation_id,
+                  summary_chars=len(summary))
+        return {"ok": True, "conversation_id": conversation_id,
+                "summary": summary}
+
+    def pending_calls(self) -> list[dict[str, Any]]:
+        policy = load_policy()
+        with self._lock:
+            unique = {
+                str(item.get("id")): item
+                for item in self.pending.values()
+                if item.get("id")
+            }
+        out: list[dict[str, Any]] = []
+        for item in unique.values():
+            out.append({
+                "id": item.get("id"),
+                "tool_call_id": item.get("tool_call_id"),
+                "conversation_id": item.get("conversation_id"),
+                "tool": item.get("tool"),
+                "args": _summarize(item.get("args")),
+                "classification": item.get("classification"),
+                "requires_phrase": bool(item.get("requires_phrase")),
+                "confirm_phrase": (
+                    policy.destructive_confirmation
+                    if item.get("requires_phrase") else None
+                ),
+            })
+        out.sort(key=lambda p: str(p.get("id") or ""))
+        return out
+
+    def config_info(self) -> dict[str, Any]:
+        # Redacted runtime metadata for slash commands. Presence bits are
+        # fine; secret values and secret file contents are never returned.
+        provider, status = provider_status()
+        return {
+            "agent_user": AGENT_USER,
+            "host": DEFAULT_HOST,
+            "port": DEFAULT_PORT,
+            "zombie_dir": os.environ.get("ZOMBIE_DIR", "/opt/ai-zombie"),
+            "provider": provider,
+            "provider_status": status,
+            "policy_path": str(POLICY_PATH),
+            "history_db": str(self.history.path),
+            "audit_log": str(AUDIT_PATH),
+            "skill_dirs": [str(p) for p in skill_loader.default_skill_dirs()],
+            "secrets": "configured" if SECRETS_FILE.exists() else "missing",
+        }
+
+    def profile_info(self) -> dict[str, Any]:
+        facts = machine_facts()
+        data = self.config_info()
+        return {
+            "agent_user": AGENT_USER,
+            "hostname": facts.get("hostname", socket.gethostname()),
+            "os": facts.get("os", ""),
+            "kernel": facts.get("kernel", ""),
+            "arch": facts.get("arch", ""),
+            "loopback_only": True,
+            "chat_url": f"http://{DEFAULT_HOST}:{DEFAULT_PORT}/",
+            "zombie_dir": data["zombie_dir"],
+            "history_db": data["history_db"],
+        }
+
+    def policy_info(self) -> dict[str, Any]:
+        policy = load_policy()
+        return {
+            "path": str(POLICY_PATH),
+            "default_class": policy.default_class,
+            "destructive_confirmation": "configured",
+            "classes": {
+                name: {
+                    "approval": cls.approval,
+                    "confirm_phrase": cls.confirm_phrase,
+                    "description": cls.description,
+                }
+                for name, cls in policy.classes.items()
+            },
+            "sudo_allow_list": list(policy.sudo_allow_list),
+            "tool_classes": dict(policy.tool_classes),
+            "rule_count": len(policy.rules),
+            "agent": {
+                "max_tool_calls_per_turn": policy.max_tool_calls_per_turn,
+                "max_elevated_calls_per_turn": policy.max_elevated_calls_per_turn,
+                "max_turn_seconds": policy.max_turn_seconds,
+            },
+        }
+
+    def skills_info(self) -> dict[str, Any]:
+        skills = skill_loader.load_skills()
+        return {"skills": [
+            {"name": s.name, "path": str(s.path),
+             "triggers": list(s.triggers)}
+            for s in skills
+        ]}
+
+    def skill_info(self, name: str) -> dict[str, Any]:
+        wanted = name.strip()
+        if not wanted.replace("-", "").replace("_", "").isalnum():
+            return {"error": "bad skill name"}
+        for skill in skill_loader.load_skills():
+            if skill.name == wanted:
+                return {
+                    "name": skill.name,
+                    "path": str(skill.path),
+                    "triggers": list(skill.triggers),
+                    "content": skill.read(),
+                }
+        return {"error": f"No skill named {wanted!r}."}
 
     # ---- model catalogue / selection ----
     def models_info(self) -> dict[str, Any]:
@@ -542,6 +799,41 @@ def _summarize(args: Any) -> dict[str, Any]:
         else:
             out[k] = repr(v)[:120]
     return out
+
+
+def _clip_text(text: str, limit: int = 240) -> str:
+    compact = " ".join(str(text).split())
+    if len(compact) <= limit:
+        return compact
+    return compact[:limit - 1].rstrip() + "..."
+
+
+def _local_summary(messages: list[dict[str, Any]], limit: int = 12) -> str:
+    """Create a deterministic, local summary without spending tokens."""
+    total = len(messages)
+    head = messages[:3]
+    tail = messages[-max(limit - len(head), 0):]
+    selected: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for msg in head + tail:
+        mid = int(msg.get("id") or 0)
+        if mid in seen:
+            continue
+        seen.add(mid)
+        selected.append(msg)
+    lines = [
+        f"Local summary of {total} user/assistant message"
+        f"{'' if total == 1 else 's'}."
+    ]
+    if total > len(selected):
+        lines.append(
+            f"Middle {total - len(selected)} message"
+            f"{'' if total - len(selected) == 1 else 's'} omitted."
+        )
+    for msg in selected:
+        role = str(msg.get("role") or "?").capitalize()
+        lines.append(f"- {role}: {_clip_text(str(msg.get('content') or ''))}")
+    return "\n".join(lines)
 
 
 def _truncate_obs(result: Any, limit: int = 4000) -> Any:
@@ -613,8 +905,13 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         return data if isinstance(data, dict) else {}
 
+    def _path_parts(self) -> list[str]:
+        path = self.path.split("?", 1)[0]
+        return [unquote(p) for p in path.strip("/").split("/") if p]
+
     # ---- routes ----
     def do_GET(self) -> None:  # noqa: N802
+        parts = self._path_parts()
         if self.path == "/" or self.path == "/index.html":
             body = _render_index(self.app)
             self.send_response(200)
@@ -632,19 +929,16 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/conversations":
             self._send_json({"conversations": self.app.history.list_conversations()})
             return
-        if self.path.startswith("/api/conversation/"):
+        if len(parts) == 3 and parts[:2] == ["api", "conversation"]:
             try:
-                cid = int(self.path.rsplit("/", 1)[1])
+                cid = int(parts[2])
             except ValueError:
                 self._send_json({"error": "bad id"}, 400)
                 return
             if not self.app.history.conversation_exists(cid):
                 self._send_json({"error": f"No conversation #{cid}."}, 404)
                 return
-            self._send_json({
-                "messages": self.app.history.get_messages(cid),
-                "events": self.app.history.get_events(cid),
-            })
+            self._send_json(self.app.conversation_payload(cid))
             return
         if self.path == "/api/audit":
             self._send_json({"entries": audit_tail(50)})
@@ -659,9 +953,29 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/models":
             self._send_json(self.app.models_info())
             return
+        if self.path == "/api/config":
+            self._send_json(self.app.config_info())
+            return
+        if self.path == "/api/profile":
+            self._send_json(self.app.profile_info())
+            return
+        if self.path == "/api/policy":
+            self._send_json(self.app.policy_info())
+            return
+        if self.path == "/api/skills":
+            self._send_json(self.app.skills_info())
+            return
+        if len(parts) == 3 and parts[:2] == ["api", "skill"]:
+            data = self.app.skill_info(parts[2])
+            self._send_json(data, 404 if data.get("error") else 200)
+            return
+        if self.path == "/api/pending":
+            self._send_json({"pending": self.app.pending_calls()})
+            return
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
+        parts = self._path_parts()
         if self.path == "/api/message":
             data = self._read_json()
             prompt = (data.get("prompt") or "").strip()
@@ -696,6 +1010,48 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send_json(self.app.set_model(model))
             return
+        if len(parts) == 4 and parts[:2] == ["api", "conversation"]:
+            try:
+                cid = int(parts[2])
+            except ValueError:
+                self._send_json({"error": "bad id"}, 400)
+                return
+            data = self._read_json()
+            action = parts[3]
+            if action == "title":
+                title = str(data.get("title") or "")
+                result = self.app.set_conversation_title(cid, title)
+                if result.get("error"):
+                    status = (
+                        400 if result["error"] == "title is required" else 404
+                    )
+                else:
+                    status = 200
+                self._send_json(result, status)
+                return
+            if action == "branch":
+                title = str(data.get("title") or "")
+                result = self.app.branch_conversation(cid, title)
+                self._send_json(result, 404 if result.get("error") else 200)
+                return
+            if action == "retry":
+                result = self.app.retry_conversation(cid)
+                self._send_json(result, 404 if result.get("error") else 200)
+                return
+            if action == "undo":
+                raw_turns = data.get("turns", 1)
+                try:
+                    turns = int(raw_turns)
+                except (TypeError, ValueError):
+                    self._send_json({"error": "turns must be an integer"}, 400)
+                    return
+                result = self.app.undo_conversation(cid, turns)
+                self._send_json(result, 404 if result.get("error") else 200)
+                return
+            if action == "compress":
+                result = self.app.compress_conversation(cid)
+                self._send_json(result, 404 if result.get("error") else 200)
+                return
         self.send_error(HTTPStatus.NOT_FOUND)
 
 

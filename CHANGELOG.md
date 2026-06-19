@@ -105,6 +105,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `/load <id>`, and `/shortcuts`. Diagnostic commands read the existing
   read-only API endpoints; `/version` is backed by a new
   `GET /api/version` endpoint and the deployed `VERSION` file.
+- **Expanded chat command surface.** The web UI now also supports
+  `/commands`, `/redraw`, `/sessions`, `/resume`, `/export`/`/save`,
+  `/copy`, `/title`, `/retry`, `/undo`, `/branch`, `/compress`,
+  `/skills`, `/config`, `/policy`, `/whoami`, `/profile`, `/approve`,
+  and `/deny`. Conversation rewinds and retries create new branches so
+  the original transcript and audit trail stay intact, and destructive
+  approval phrase mistakes keep the pending action available for retry.
 - **`install.sh --dry-run`.** Prints the agent user, install root,
   package groups, file paths, and firewall rules that a real
   `install` would change, then exits without modifying the host.

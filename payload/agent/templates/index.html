@@ -115,6 +115,7 @@ const promptEl = document.getElementById("prompt");
 const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
 const statusEl = document.getElementById("status");
+let visibleMessages = [];
 
 // In-flight turn state. ``turnController`` lets the operator (or a
 // client-side timeout) abort a request that the server is taking too
@@ -157,6 +158,7 @@ function addMessage(role, content, opts = {}) {
     wrap.appendChild(el("div", { text: content }));
   }
   log.appendChild(wrap);
+  if (opts.record !== false) visibleMessages.push({ role, content });
   log.scrollTop = log.scrollHeight;
   return wrap;
 }
@@ -407,10 +409,14 @@ function renderPendingToolCall(p) {
       body: JSON.stringify(body),
     });
     const data = await r.json();
-    actions.remove();
-    if (data.error) wrap.appendChild(el("div", { class: "system error", text: data.error }));
-    else if (data.result) wrap.appendChild(renderResult(data.result));
-    else wrap.appendChild(el("div", { text: `(${data.status})` }));
+    if (data.error) {
+      approve.disabled = deny.disabled = false;
+      wrap.appendChild(el("div", { class: "system error", text: data.error }));
+    } else {
+      actions.remove();
+      if (data.result) wrap.appendChild(renderResult(data.result));
+      else wrap.appendChild(el("div", { text: `(${data.status})` }));
+    }
   });
   deny.addEventListener("click", async () => {
     approve.disabled = deny.disabled = true;
@@ -458,34 +464,44 @@ function renderEvent(ev) {
   return null;
 }
 
-// Client-side slash commands. Most are handled entirely in the
-// browser; the diagnostic commands fetch a read-only backend endpoint
-// (the same data the chat-service CLI exposes) and render it locally
-// without ever reaching the agent. ``handleSlashCommand`` resolves to
-// true when the input was a recognised command (so the caller skips
-// the network round-trip to the model) and false otherwise.
+// Client-side slash commands. Most commands run entirely in the
+// browser or call small loopback JSON endpoints that expose already
+// local state. None of these commands adds a new host-privileged path:
+// conversation edits mutate only SQLite, approval commands resolve the
+// existing pending tool queue, and /retry is the only command that
+// intentionally sends a prompt back through the model.
 const SLASH_COMMANDS = [
-  ["/help", "List the available chat commands."],
-  ["/clear", "Clear the messages from this view."],
+  ["/help", "List available commands."],
+  ["/commands [filter]", "Browse or filter the command list."],
+  ["/clear", "Clear this browser view only."],
+  ["/redraw", "Reload the current conversation from SQLite."],
   ["/new", "Start a new conversation (alias: /reset)."],
-  ["/examples", "Show the safe example prompts."],
-  ["/tools", "List the agent tools and their risk classification."],
-  ["/health", "Show this machine's facts (hostname, OS, kernel, arch)."],
-  ["/status", "Show a compact host + provider status line."],
-  ["/version", "Show the ubuntu-zombie and provider-bridge versions."],
-  ["/model", "List the provider's models, or switch: /model <id>."],
-  ["/audit", "Show the most recent audit-log entries."],
-  ["/conversations", "List recent conversations (alias: /history)."],
-  ["/load", "Load a past conversation: /load <id>."],
-  ["/shortcuts", "Show the keyboard shortcuts."],
-  ["/stop", "Cancel the turn that is currently running."],
+  ["/examples", "Show safe example prompts."],
+  ["/tools", "List the closed tool registry."],
+  ["/skills [name]", "List skills or preview one skill."],
+  ["/health", "Show basic machine facts."],
+  ["/status", "Show compact host and provider status."],
+  ["/version", "Show Ubuntu Zombie and bridge versions."],
+  ["/model [id]", "List or switch the active model."],
+  ["/config", "Show redacted runtime configuration."],
+  ["/policy", "Show policy classes and rule counts."],
+  ["/whoami", "Show the active agent identity."],
+  ["/profile", "Show the active local profile."],
+  ["/audit", "Show recent audit entries."],
+  ["/conversations", "List recent conversations (aliases: /history, /sessions)."],
+  ["/load <id>", "Load a past conversation (alias: /resume <id>)."],
+  ["/title <text>", "Set the current conversation title."],
+  ["/branch [name]", "Copy the current conversation to a new branch."],
+  ["/retry", "Retry the last user turn in a new branch."],
+  ["/undo [n]", "Rewind n user turns in a new branch."],
+  ["/compress", "Create a local summary for future context."],
+  ["/export", "Download Markdown and JSON transcript files (alias: /save)."],
+  ["/copy [n]", "Copy the nth most recent assistant response."],
+  ["/approve [id] [phrase]", "Approve a pending tool call."],
+  ["/deny [id]", "Deny a pending tool call."],
+  ["/shortcuts", "Show keyboard shortcuts."],
+  ["/stop", "Cancel the turn that is currently running."]
 ];
-
-async function fetchJson(path) {
-  const r = await fetch(path);
-  if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
-  return r.json();
-}
 
 function timestamp(value) {
   if (typeof value === "number" && isFinite(value)) {
@@ -523,26 +539,243 @@ function renderConversation(messages, events) {
   for (const item of items) item.node();
 }
 
+function uzClearLog() {
+  log.replaceChildren();
+  visibleMessages = [];
+}
+
+async function uzFetchJson(path) {
+  const r = await fetch(path);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || data.error) throw new Error(data.error || `${path} -> HTTP ${r.status}`);
+  return data;
+}
+
+async function uzPostJson(path, body = {}) {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || data.error) throw new Error(data.error || `${path} -> HTTP ${r.status}`);
+  return data;
+}
+
+function uzCommandLines(filter = "") {
+  const needle = filter.trim().toLowerCase();
+  return SLASH_COMMANDS
+    .filter(([c, d]) => !needle || c.toLowerCase().includes(needle) ||
+      d.toLowerCase().includes(needle))
+    .map(([c, d]) => `${c} - ${d}`);
+}
+
+async function uzLoadConversation(id, notice = null) {
+  const data = await uzFetchJson(`/api/conversation/${id}`);
+  uzClearLog();
+  conversationId = id;
+  addMessage("system", notice || `Loaded conversation #${id}.`);
+  renderConversation(data.messages, data.events);
+  log.scrollTop = log.scrollHeight;
+  return data;
+}
+
+function uzFormat(value, prefix = "") {
+  if (Array.isArray(value)) return value.map(v => `${prefix}- ${v}`).join("\n");
+  if (value && typeof value === "object") {
+    return Object.entries(value).map(([k, v]) => {
+      if (v && typeof v === "object") return `${prefix}${k}:\n${uzFormat(v, prefix + "  ")}`;
+      return `${prefix}${k}: ${v}`;
+    }).join("\n");
+  }
+  return `${prefix}${value}`;
+}
+
+function uzSafeName(value) {
+  return String(value || "conversation").toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "conversation";
+}
+
+function uzConversationMarkdown(data) {
+  const conv = data.conversation || {};
+  const title = conv.title || `Conversation #${conv.id || conversationId || "unknown"}`;
+  const lines = [`# ${title}`, ""];
+  if (conv.id) lines.push(`Conversation: #${conv.id}`);
+  if (conv.created_at) lines.push(`Created: ${timestamp(conv.created_at)}`);
+  lines.push("", "## Transcript", "");
+  for (const m of data.messages || []) {
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    lines.push(`### ${m.role}`, "", m.content || "", "");
+  }
+  return lines.join("\n");
+}
+
+function uzDownload(name, content, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function uzExportConversation() {
+  if (!conversationId) throw new Error("No active conversation to export.");
+  const data = await uzFetchJson(`/api/conversation/${conversationId}`);
+  const conv = data.conversation || {};
+  const base = `ubuntu-zombie-${uzSafeName(conv.title || `conversation-${conversationId}`)}`;
+  uzDownload(`${base}.md`, uzConversationMarkdown(data), "text/markdown;charset=utf-8");
+  uzDownload(`${base}.json`, JSON.stringify(data, null, 2), "application/json;charset=utf-8");
+}
+
+async function uzCopyText(text) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.position = "fixed";
+  area.style.left = "-9999px";
+  document.body.appendChild(area);
+  area.focus();
+  area.select();
+  document.execCommand("copy");
+  area.remove();
+}
+
+function uzPendingSummary(p) {
+  return `id=${p.id || p.tool_call_id} ${p.tool || "?"} ${p.classification || "?"} ` +
+    JSON.stringify(p.args || {});
+}
+
+async function uzDecidePending(decision, arg) {
+  const data = await uzFetchJson("/api/pending");
+  const pending = data.pending || [];
+  if (!pending.length) {
+    addMessage("system", "No tool calls are awaiting approval.");
+    return;
+  }
+  let selected = null;
+  let phrase = "";
+  if (pending.length === 1) {
+    selected = pending[0];
+    const parts = arg.split(/\s+/).filter(Boolean);
+    if (parts[0] === selected.id || parts[0] === selected.tool_call_id) {
+      parts.shift();
+    }
+    phrase = parts.join(" ");
+  } else {
+    const parts = arg.split(/\s+/).filter(Boolean);
+    const id = parts.shift();
+    selected = pending.find(p => p.id === id || p.tool_call_id === id);
+    phrase = parts.join(" ");
+    if (!selected) {
+      addMessage("system",
+        "Multiple pending calls. Use /approve <id> or /deny <id>:\n" +
+        pending.map(uzPendingSummary).join("\n"), { error: true });
+      return;
+    }
+  }
+  if (decision === "approve" && selected.requires_phrase &&
+      phrase !== selected.confirm_phrase) {
+    addMessage("system",
+      `This action requires the exact phrase:\n${selected.confirm_phrase}\n` +
+      `Use: /approve ${selected.confirm_phrase}`, { error: true });
+    return;
+  }
+  const result = await uzPostJson("/api/approve", {
+    tool_call_id: selected.id || selected.tool_call_id,
+    decision,
+    phrase,
+  });
+  addMessage("system", `${decision === "approve" ? "Approved" : "Denied"} ${selected.tool}.`);
+  if (result.result) log.appendChild(renderResult(result.result));
+}
+
+async function uzSendPrompt(prompt, convId = conversationId) {
+  addMessage("user", prompt);
+  setBusy(true);
+  thinkingEl = showThinking();
+  turnController = new AbortController();
+  const timeoutId = setTimeout(
+    () => abortTurn(`No response after ${Math.round(CLIENT_TURN_TIMEOUT_MS / 1000)}s - giving up.`),
+    CLIENT_TURN_TIMEOUT_MS);
+  try {
+    const r = await fetch("/api/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, conversation_id: convId }),
+      signal: turnController.signal,
+    });
+    const data = await r.json();
+    clearThinking();
+    conversationId = data.conversation_id ?? conversationId;
+    if (data.error) addMessage("system", data.error, { error: true });
+    if (data.reply) addMessage("assistant", data.reply);
+    const events = data.events || [];
+    for (const ev of events) {
+      const node = renderEvent(ev);
+      if (node) log.appendChild(node);
+    }
+    if (events.length) log.appendChild(renderTurnCounter(events));
+    log.scrollTop = log.scrollHeight;
+    return data;
+  } catch (err) {
+    clearThinking();
+    if (err && err.name === "AbortError") {
+      addMessage("system",
+        "Request cancelled. The agent may still finish in the background; " +
+        "reload to see the latest conversation.", { error: true });
+    } else {
+      addMessage("system", String(err), { error: true });
+    }
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+    clearThinking();
+    turnController = null;
+    setBusy(false);
+    promptEl.focus();
+  }
+}
+
 async function handleSlashCommand(input) {
   const parts = input.split(/\s+/);
   const cmd = parts[0].toLowerCase();
   const arg = parts.slice(1).join(" ").trim();
   if (!cmd.startsWith("/")) return false;
   switch (cmd) {
-    case "/help": {
+    case "/help":
+    case "/commands": {
       addMessage("user", input);
-      const lines = SLASH_COMMANDS.map(([c, d]) => `${c} — ${d}`);
-      addMessage("system", "Available commands:\n" + lines.join("\n"));
+      const lines = uzCommandLines(cmd === "/commands" ? arg : "");
+      addMessage("system", lines.length ? "Available commands:\n" + lines.join("\n")
+        : "No commands matched.");
       return true;
     }
     case "/clear": {
-      log.replaceChildren();
+      uzClearLog();
+      return true;
+    }
+    case "/redraw": {
+      addMessage("user", input);
+      if (!conversationId) addMessage("system", "No active conversation to redraw.", { error: true });
+      else {
+        try { await uzLoadConversation(conversationId, `Redrew conversation #${conversationId}.`); }
+        catch (err) { addMessage("system", String(err), { error: true }); }
+      }
       return true;
     }
     case "/new":
     case "/reset": {
       conversationId = null;
-      log.replaceChildren();
+      uzClearLog();
       addMessage("system", "Started a new conversation.");
       return true;
     }
@@ -558,16 +791,16 @@ async function handleSlashCommand(input) {
       addMessage("user", input);
       addMessage("system",
         "Keyboard shortcuts:\n" +
-        "Enter — send the current message\n" +
-        "Shift+Enter (or Ctrl/Cmd+Enter) — insert a newline\n" +
-        "/stop — cancel the in-flight turn");
+        "Enter - send the current message\n" +
+        "Shift+Enter (or Ctrl/Cmd+Enter) - insert a newline\n" +
+        "/stop - cancel the in-flight turn");
       return true;
     }
     case "/stop": {
       addMessage("user", input);
       if (turnController) {
         abortTurn("Stopped.");
-        addMessage("system", "Cancelling the current turn…");
+        addMessage("system", "Cancelling the current turn...");
       } else {
         addMessage("system", "Nothing is running.");
       }
@@ -576,70 +809,74 @@ async function handleSlashCommand(input) {
     case "/tools": {
       addMessage("user", input);
       try {
-        const data = await fetchJson("/api/tools");
+        const data = await uzFetchJson("/api/tools");
         const tools = data.tools || [];
-        if (!tools.length) { addMessage("system", "No tools are registered."); return true; }
-        const lines = tools.map(t =>
-          `${t.name} · ${t.classification}` +
-          (t.description ? ` — ${t.description}` : ""));
-        addMessage("system", "Agent tools:\n" + lines.join("\n"));
-      } catch (err) {
-        addMessage("system", String(err), { error: true });
-      }
+        addMessage("system", tools.length
+          ? "Agent tools:\n" + tools.map(t => `${t.name} - ${t.classification}` +
+            (t.description ? ` - ${t.description}` : "")).join("\n")
+          : "No tools are registered.");
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/skills": {
+      addMessage("user", input);
+      try {
+        if (!arg) {
+          const data = await uzFetchJson("/api/skills");
+          const skills = data.skills || [];
+          addMessage("system", skills.length
+            ? "Skills:\n" + skills.map(s => `${s.name} - ${s.path}`).join("\n")
+            : "No skills are available.");
+        } else {
+          const s = await uzFetchJson(`/api/skill/${encodeURIComponent(arg)}`);
+          addMessage("system",
+            `${s.name} - ${s.path}\nTriggers: ${(s.triggers || []).join(", ")}\n\n${s.content || ""}`);
+        }
+      } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
     case "/health": {
       addMessage("user", input);
       try {
-        const data = await fetchJson("/api/health");
-        const facts = data.facts || {};
-        const lines = Object.entries(facts).map(([k, v]) => `${k}: ${v}`);
-        addMessage("system", lines.length
-          ? "Machine facts:\n" + lines.join("\n")
-          : "No machine facts are available.");
-      } catch (err) {
-        addMessage("system", String(err), { error: true });
-      }
+        const data = await uzFetchJson("/api/health");
+        addMessage("system", "Machine facts:\n" + uzFormat(data.facts || {}));
+      } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
     case "/status": {
       addMessage("user", input);
       try {
-        const data = await fetchJson("/api/health");
+        const data = await uzFetchJson("/api/health");
         const f = data.facts || {};
         const provider = document.querySelector("header .status");
         const providerText = provider ? provider.textContent : "";
         addMessage("system",
-          `${f.hostname || "?"} · ${f.os || "Ubuntu"} · ${f.kernel || "?"} ` +
-          `(${f.arch || "?"})` + (providerText ? ` · ${providerText}` : ""));
-      } catch (err) {
-        addMessage("system", String(err), { error: true });
-      }
+          `${f.hostname || "?"} - ${f.os || "Ubuntu"} - ${f.kernel || "?"} ` +
+          `(${f.arch || "?"})` + (providerText ? ` - ${providerText}` : ""));
+      } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
     case "/version": {
       addMessage("user", input);
       try {
-        const data = await fetchJson("/api/version");
+        const data = await uzFetchJson("/api/version");
         const lines = [`ubuntu-zombie: ${data.version || "unknown"}`];
         if (data.pi_mono) lines.push(`pi-mono: ${data.pi_mono}`);
         if (data.pi_ai) lines.push(`pi-ai: ${data.pi_ai}`);
         addMessage("system", lines.join("\n"));
-      } catch (err) {
-        addMessage("system", String(err), { error: true });
-      }
+      } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
     case "/model": {
       addMessage("user", input);
       if (!arg) {
         try {
-          const data = await fetchJson("/api/models");
-          if (data.error && !(data.models || []).length) {
+          const data = await uzFetchJson("/api/models");
+          const models = data.models || [];
+          if (data.error && !models.length) {
             addMessage("system", data.error, { error: true });
             return true;
           }
-          const models = data.models || [];
           if (!models.length) {
             addMessage("system",
               `Provider ${data.provider || "?"} exposes no model catalogue` +
@@ -654,99 +891,199 @@ async function handleSlashCommand(input) {
               m.reasoning ? "reasoning" : null,
               m.context_window ? `${m.context_window} ctx` : null,
             ].filter(Boolean).join(", ");
-            return `${mark}${m.id}` + (extra ? ` — ${extra}` : "");
+            return `${mark}${m.id}` + (extra ? ` - ${extra}` : "");
           });
           addMessage("system",
             `Models for ${data.provider} (use /model <id> to switch` +
             (data.current ? "; * = current" : "") + "):\n" + lines.join("\n"));
-        } catch (err) {
-          addMessage("system", String(err), { error: true });
-        }
+        } catch (err) { addMessage("system", String(err), { error: true }); }
         return true;
       }
       try {
-        const r = await fetch("/api/model", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ model: arg }),
-        });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok || data.error) {
-          addMessage("system", data.error || `/api/model → HTTP ${r.status}`,
-            { error: true });
-          return true;
-        }
+        const data = await uzPostJson("/api/model", { model: arg });
         addMessage("system", `Model set to ${data.model} (provider ${data.provider}).`);
         const banner = document.querySelector("header .status");
         if (banner && data.provider && data.model) {
-          banner.textContent = `Provider: connected (${data.provider} \u00b7 ${data.model})`;
+          banner.textContent = `Provider: connected (${data.provider} - ${data.model})`;
         }
-      } catch (err) {
-        addMessage("system", String(err), { error: true });
-      }
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/config":
+    case "/profile":
+    case "/whoami": {
+      addMessage("user", input);
+      try {
+        const data = await uzFetchJson(cmd === "/config" ? "/api/config" : "/api/profile");
+        if (cmd === "/whoami") {
+          addMessage("system",
+            `agent_user: ${data.agent_user}\n` +
+            `hostname: ${data.hostname}\n` +
+            `chat_url: ${data.chat_url}\n` +
+            `loopback_only: ${data.loopback_only}`);
+        } else {
+          addMessage("system", uzFormat(data));
+        }
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/policy": {
+      addMessage("user", input);
+      try { addMessage("system", uzFormat(await uzFetchJson("/api/policy"))); }
+      catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
     case "/audit": {
       addMessage("user", input);
       try {
-        const data = await fetchJson("/api/audit");
+        const data = await uzFetchJson("/api/audit");
         const entries = data.entries || [];
         if (!entries.length) { addMessage("system", "The audit log is empty."); return true; }
         const lines = entries.slice(-25).map(e => {
           const head = `${e.ts || ""} ${e.type || "?"}`.trim();
           const detail = [e.tool, e.decision, e.classification,
             (typeof e.exit_code !== "undefined" ? `exit ${e.exit_code}` : null)]
-            .filter(Boolean).join(" · ");
-          return detail ? `${head} — ${detail}` : head;
+            .filter(Boolean).join(" - ");
+          return detail ? `${head} - ${detail}` : head;
         });
         addMessage("system", "Recent audit entries:\n" + lines.join("\n"));
-      } catch (err) {
-        addMessage("system", String(err), { error: true });
-      }
+      } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
     case "/conversations":
-    case "/history": {
+    case "/history":
+    case "/sessions": {
       addMessage("user", input);
       try {
-        const data = await fetchJson("/api/conversations");
+        const data = await uzFetchJson("/api/conversations");
         const convs = data.conversations || [];
         if (!convs.length) { addMessage("system", "No conversations yet."); return true; }
         const lines = convs.map(c =>
-          `#${c.id} · ${timestamp(c.created_at)} · ${c.title || "(untitled)"}`);
-        addMessage("system",
-          "Recent conversations (use /load <id>):\n" + lines.join("\n"));
-      } catch (err) {
-        addMessage("system", String(err), { error: true });
-      }
+          `#${c.id} - ${timestamp(c.created_at)} - ${c.title || "(untitled)"}`);
+        addMessage("system", "Recent conversations (use /load <id>):\n" + lines.join("\n"));
+      } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
-    case "/load": {
+    case "/load":
+    case "/resume": {
       addMessage("user", input);
       const id = parseInt(arg, 10);
       if (!arg || isNaN(id)) {
-        addMessage("system", "Usage: /load <id>", { error: true });
+        addMessage("system", `Usage: ${cmd} <id>`, { error: true });
+        return true;
+      }
+      try { await uzLoadConversation(id); }
+      catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/title": {
+      addMessage("user", input);
+      if (!conversationId) {
+        addMessage("system", "No active conversation to title.", { error: true });
+        return true;
+      }
+      if (!arg) {
+        addMessage("system", "Usage: /title <text>", { error: true });
         return true;
       }
       try {
-        // Read the JSON body regardless of HTTP status so a
-        // server-provided message (bad id / no such conversation)
-        // surfaces instead of a bare "HTTP 404".
-        const r = await fetch(`/api/conversation/${id}`);
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok || data.error) {
-          addMessage("system", data.error || `/api/conversation/${id} → HTTP ${r.status}`,
-            { error: true });
-          return true;
-        }
-        log.replaceChildren();
-        conversationId = id;
-        addMessage("system", `Loaded conversation #${id}.`);
-        renderConversation(data.messages, data.events);
-        log.scrollTop = log.scrollHeight;
-      } catch (err) {
-        addMessage("system", String(err), { error: true });
+        const data = await uzPostJson(`/api/conversation/${conversationId}/title`, { title: arg });
+        addMessage("system", `Conversation #${data.conversation_id} title set to: ${data.title}`);
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/branch": {
+      addMessage("user", input);
+      if (!conversationId) {
+        addMessage("system", "No active conversation to branch.", { error: true });
+        return true;
       }
+      try {
+        const data = await uzPostJson(`/api/conversation/${conversationId}/branch`, { title: arg });
+        await uzLoadConversation(data.conversation_id, `Created branch #${data.conversation_id}.`);
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/retry": {
+      addMessage("user", input);
+      if (!conversationId) {
+        addMessage("system", "No active conversation to retry.", { error: true });
+        return true;
+      }
+      try {
+        const data = await uzPostJson(`/api/conversation/${conversationId}/retry`);
+        await uzLoadConversation(data.conversation_id, data.warning);
+        await uzSendPrompt(data.prompt, data.conversation_id);
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/undo": {
+      addMessage("user", input);
+      if (!conversationId) {
+        addMessage("system", "No active conversation to undo.", { error: true });
+        return true;
+      }
+      const turns = arg ? parseInt(arg, 10) : 1;
+      if (isNaN(turns) || turns < 1) {
+        addMessage("system", "Usage: /undo [positive-turn-count]", { error: true });
+        return true;
+      }
+      try {
+        const data = await uzPostJson(`/api/conversation/${conversationId}/undo`, { turns });
+        await uzLoadConversation(data.conversation_id, data.warning);
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/compress": {
+      addMessage("user", input);
+      if (!conversationId) {
+        addMessage("system", "No active conversation to compress.", { error: true });
+        return true;
+      }
+      try {
+        const data = await uzPostJson(`/api/conversation/${conversationId}/compress`);
+        addMessage("system", "Stored local conversation summary:\n" + data.summary);
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/export":
+    case "/save": {
+      addMessage("user", input);
+      try {
+        await uzExportConversation();
+        addMessage("system", "Exported Markdown and JSON transcript files.");
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/copy": {
+      addMessage("user", input);
+      const n = arg ? parseInt(arg, 10) : 1;
+      if (isNaN(n) || n < 1) {
+        addMessage("system", "Usage: /copy [positive-response-number]", { error: true });
+        return true;
+      }
+      const replies = visibleMessages.filter(m => m.role === "assistant" && m.content);
+      const selected = replies[replies.length - n];
+      if (!selected) {
+        addMessage("system", "No assistant response matched that number.", { error: true });
+        return true;
+      }
+      try {
+        await uzCopyText(selected.content);
+        addMessage("system", `Copied assistant response ${n}.`);
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/approve": {
+      addMessage("user", input);
+      try { await uzDecidePending("approve", arg); }
+      catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/deny": {
+      addMessage("user", input);
+      try { await uzDecidePending("deny", arg); }
+      catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
     default: {
@@ -769,50 +1106,8 @@ form.addEventListener("submit", async (event) => {
     promptEl.focus();
     return;
   }
-  addMessage("user", prompt);
   promptEl.value = "";
-  setBusy(true);
-  thinkingEl = showThinking();
-
-  turnController = new AbortController();
-  const timeoutId = setTimeout(
-    () => abortTurn(`No response after ${Math.round(CLIENT_TURN_TIMEOUT_MS / 1000)}s — giving up.`),
-    CLIENT_TURN_TIMEOUT_MS);
-  try {
-    const r = await fetch("/api/message", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, conversation_id: conversationId }),
-      signal: turnController.signal,
-    });
-    const data = await r.json();
-    clearThinking();
-    conversationId = data.conversation_id ?? conversationId;
-    if (data.error) addMessage("system", data.error, { error: true });
-    if (data.reply) addMessage("assistant", data.reply);
-    const events = data.events || [];
-    for (const ev of events) {
-      const node = renderEvent(ev);
-      if (node) log.appendChild(node);
-    }
-    if (events.length) log.appendChild(renderTurnCounter(events));
-    log.scrollTop = log.scrollHeight;
-  } catch (err) {
-    clearThinking();
-    if (err && err.name === "AbortError") {
-      addMessage("system",
-        "Request cancelled. The agent may still finish in the background; "
-        + "reload to see the latest conversation.", { error: true });
-    } else {
-      addMessage("system", String(err), { error: true });
-    }
-  } finally {
-    clearTimeout(timeoutId);
-    clearThinking();
-    turnController = null;
-    setBusy(false);
-    promptEl.focus();
-  }
+  await uzSendPrompt(prompt);
 });
 
 promptEl.addEventListener("keydown", (event) => {
