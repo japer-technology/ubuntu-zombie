@@ -130,6 +130,9 @@ invariants the runtime relies on:
       (subcommands, env vars, defaults).
 - [ ] `CHANGELOG.md` has an entry under the appropriate unreleased
       section for user-visible changes.
+- [ ] If `CHANGELOG.md` was updated, `VERSION` was also updated in
+      `yyyy.mm.dd.hh.nn.ss` UTC format with:
+      `date -u +%Y.%m.%d.%H.%M.%S > VERSION`
 - [ ] No secrets, screenshots, or local state are staged.
 
 ## Things to leave alone unless explicitly asked
