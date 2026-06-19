@@ -914,7 +914,10 @@ async function handleSlashCommand(input) {
     case "/whoami": {
       addMessage("user", input);
       try {
-        const data = await uzFetchJson(cmd === "/config" ? "/api/config" : "/api/profile");
+        const endpoint = cmd === "/config"
+          ? "/api/config"
+          : (cmd === "/whoami" ? "/api/whoami" : "/api/profile");
+        const data = await uzFetchJson(endpoint);
         if (cmd === "/whoami") {
           addMessage("system",
             `agent_user: ${data.agent_user}\n` +

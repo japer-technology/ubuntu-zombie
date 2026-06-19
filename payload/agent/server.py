@@ -691,7 +691,7 @@ class App:
 
     def profile_info(self) -> dict[str, Any]:
         facts = machine_facts()
-        data = self.config_info()
+        zombie_dir = os.environ.get("ZOMBIE_DIR", "/opt/ai-zombie")
         return {
             "agent_user": AGENT_USER,
             "hostname": facts.get("hostname", socket.gethostname()),
@@ -700,8 +700,17 @@ class App:
             "arch": facts.get("arch", ""),
             "loopback_only": True,
             "chat_url": f"http://{DEFAULT_HOST}:{DEFAULT_PORT}/",
-            "zombie_dir": data["zombie_dir"],
-            "history_db": data["history_db"],
+            "zombie_dir": zombie_dir,
+            "history_db": str(self.history.path),
+        }
+
+    def whoami_info(self) -> dict[str, Any]:
+        facts = machine_facts()
+        return {
+            "agent_user": AGENT_USER,
+            "hostname": facts.get("hostname", socket.gethostname()),
+            "chat_url": f"http://{DEFAULT_HOST}:{DEFAULT_PORT}/",
+            "loopback_only": True,
         }
 
     def policy_info(self) -> dict[str, Any]:
@@ -958,6 +967,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/profile":
             self._send_json(self.app.profile_info())
+            return
+        if self.path == "/api/whoami":
+            self._send_json(self.app.whoami_info())
             return
         if self.path == "/api/policy":
             self._send_json(self.app.policy_info())

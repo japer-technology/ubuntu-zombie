@@ -1116,9 +1116,24 @@ status, original = get(app, f"/api/conversation/{cid}")
 assert any(m["content"] == "try this" for m in original["messages"]), original
 
 # Read-only command-support endpoints.
-for path in ("/api/config", "/api/profile", "/api/policy", "/api/skills"):
+saved_provider = os.environ.get("ZOMBIE_PROVIDER")
+os.environ["ZOMBIE_PROVIDER"] = "bogus"
+for path in ("/api/config", "/api/profile", "/api/whoami",
+             "/api/policy", "/api/skills"):
     status, body = get(app, path)
     assert status == 200, (path, status, body)
+status, whoami = get(app, "/api/whoami")
+assert whoami["agent_user"], whoami
+assert whoami["hostname"], whoami
+assert whoami["chat_url"].startswith("http://127.0.0.1:"), whoami
+assert whoami["loopback_only"] is True, whoami
+status, profile = get(app, "/api/profile")
+assert profile["zombie_dir"] == os.environ.get("ZOMBIE_DIR", "/opt/ai-zombie"), profile
+assert profile["history_db"] == os.environ["ZOMBIE_HISTORY_DB"], profile
+if saved_provider is None:
+    os.environ.pop("ZOMBIE_PROVIDER", None)
+else:
+    os.environ["ZOMBIE_PROVIDER"] = saved_provider
 assert any(s["name"] == "apt" for s in get(app, "/api/skills")[1]["skills"])
 status, body = get(app, "/api/skill/apt")
 assert status == 200 and "content" in body and body["name"] == "apt", body

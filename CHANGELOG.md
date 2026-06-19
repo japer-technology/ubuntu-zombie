@@ -9,6 +9,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Fixed
+- **`/whoami` no longer errors when provider configuration is broken or
+  incomplete.** The chat UI now calls a dedicated `/api/whoami`
+  endpoint, and `/profile` no longer builds itself through `/config`, so
+  local identity commands stay available even before a model provider is
+  configured.
 - **The installer no longer aborts at "Install verification script" with
   `PI_AI_VERSION: unbound variable`.** The generated `verify` script and
   the install-time pin checks referenced `PI_AI_VERSION` and

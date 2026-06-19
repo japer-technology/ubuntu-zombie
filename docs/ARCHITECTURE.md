@@ -276,7 +276,8 @@ HTTP surface (loopback only):
 | `GET  /api/conversation/{id}`  | Fetch one conversation's messages **and** structured events. |
 | `GET  /api/audit`              | Recent audit-log entries for the UI panel. |
 | `GET  /api/config`             | Redacted runtime configuration for `/config`. |
-| `GET  /api/profile`            | Agent identity, host facts, and local paths for `/profile` / `/whoami`. |
+| `GET  /api/profile`            | Agent identity, host facts, and local paths for `/profile`. |
+| `GET  /api/whoami`             | Minimal agent identity and loopback chat URL for `/whoami`. |
 | `GET  /api/policy`             | Policy classes, tool overrides, and rule counts for `/policy`. |
 | `GET  /api/skills`             | Skill catalogue for `/skills`. |
 | `GET  /api/skill/{name}`       | Read one skill body for `/skills <name>`. |
@@ -290,8 +291,9 @@ HTTP surface (loopback only):
 | `POST /api/conversation/{id}/compress` | Store a local deterministic summary for future context without deleting raw history. |
 
 The slash-command support endpoints are intentionally narrow. `/config`,
-`/profile`, `/policy`, and `/skills` return redacted or non-secret local
-metadata only. `/title`, `/branch`, `/retry`, `/undo`, and `/compress`
+`/profile`, `/whoami`, `/policy`, and `/skills` return redacted or
+non-secret local metadata only. `/title`, `/branch`, `/retry`, `/undo`,
+and `/compress`
 mutate conversation state in SQLite, not host state. `/approve` and
 `/deny` resolve only already queued tool calls, so they remain inside the
 same policy and audit path as the approval buttons.

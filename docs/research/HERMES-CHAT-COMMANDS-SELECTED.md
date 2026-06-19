@@ -54,10 +54,11 @@ chat UI:
 The backend exposes only the local state needed to support those
 commands: `/api/health`, `/api/version`, `/api/conversations`,
 `/api/conversation/{id}`, `/api/audit`, `/api/tools`, `/api/models`,
-`/api/config`, `/api/profile`, `/api/policy`, `/api/skills`,
-`/api/skill/{name}`, and `/api/pending`. State-changing command support
-is scoped to conversation metadata/history and the existing approval
-queue: `POST /api/model`, `POST /api/approve`, and
+`/api/config`, `/api/profile`, `/api/whoami`, `/api/policy`,
+`/api/skills`, `/api/skill/{name}`, and `/api/pending`.
+State-changing command support is scoped to conversation
+metadata/history and the existing approval queue: `POST /api/model`,
+`POST /api/approve`, and
 `POST /api/conversation/{id}/{title,branch,retry,undo,compress}`.
 
 This keeps the implementation aligned with the selection rules: no
