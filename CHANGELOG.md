@@ -47,6 +47,8 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   timer runs.
 
 ### Added
+- The installer, `zombie-chat` helper, and browser chat UI now start with
+  the full ANSI Shadow `UBUNTU ZOMBIE` wordmark.
 - **`payload/README.md`** — a world-class tour of the payload tree: what
   each file is, where the installer deploys it, and the four runtime
   invariants (loopback-only, closed tool surface, policy gate +

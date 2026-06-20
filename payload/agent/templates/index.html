@@ -14,6 +14,10 @@
   header .status { font-size: .8rem; opacity: .8; }
   main { flex: 1; overflow-y: auto; padding: 1rem; max-width: 60rem;
          width: 100%; margin: 0 auto; box-sizing: border-box; }
+  .wordmark { margin: 0 0 1rem; overflow-x: auto; color: #ac43d9;
+             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+             font-size: clamp(.34rem, 1vw, .72rem); line-height: 1.05;
+             white-space: pre; }
   .msg { margin: .8rem 0; padding: .6rem .8rem; border-radius: .5rem;
          white-space: pre-wrap; word-wrap: break-word; }
   .user { background: #4a90e220; border: 1px solid #4a90e266; }
@@ -96,7 +100,15 @@
   <h1>{{HOSTNAME}}({{USERNAME}})</h1>
   <div class="status">{{PROVIDER_STATUS}}</div>
 </header>
-<main id="log" aria-live="polite"></main>
+<main id="viewport">
+<pre class="wordmark" aria-label="Ubuntu Zombie">██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗
+██║   ██║██╔══██╗██║   ██║████╗  ██║╚══██╔══╝██║   ██║    ╚══███╔╝██╔═══██╗████╗ ████║██╔══██╗██║██╔════╝
+██║   ██║██████╔╝██║   ██║██╔██╗ ██║   ██║   ██║   ██║      ███╔╝ ██║   ██║██╔████╔██║██████╔╝██║█████╗
+██║   ██║██╔══██╗██║   ██║██║╚██╗██║   ██║   ██║   ██║     ███╔╝  ██║   ██║██║╚██╔╝██║██╔══██╗██║██╔══╝
+╚██████╔╝██████╔╝╚██████╔╝██║ ╚████║   ██║   ╚██████╔╝    ███████╗╚██████╔╝██║ ╚═╝ ██║██████╔╝██║███████╗
+ ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝     ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═════╝ ╚═╝╚══════╝</pre>
+<div id="log" aria-live="polite"></div>
+</main>
 <pre id="examples" hidden>{{EXAMPLES}}</pre>
 <footer>
   <form id="form">
@@ -110,6 +122,7 @@
 "use strict";
 let conversationId = null;
 const log = document.getElementById("log");
+const viewport = document.getElementById("viewport");
 const form = document.getElementById("form");
 const promptEl = document.getElementById("prompt");
 const sendBtn = document.getElementById("send");
@@ -159,8 +172,12 @@ function addMessage(role, content, opts = {}) {
   }
   log.appendChild(wrap);
   if (opts.record !== false) visibleMessages.push({ role, content });
-  log.scrollTop = log.scrollHeight;
+  scrollLog();
   return wrap;
+}
+
+function scrollLog() {
+  viewport.scrollTop = viewport.scrollHeight;
 }
 
 // Minimal, dependency-free Markdown → HTML renderer. The chat UI is
@@ -290,7 +307,7 @@ function showThinking() {
   wrap.appendChild(dots);
   wrap.appendChild(label);
   log.appendChild(wrap);
-  log.scrollTop = log.scrollHeight;
+  scrollLog();
   const started = Date.now();
   thinkingTimer = setInterval(() => {
     const secs = Math.round((Date.now() - started) / 1000);
@@ -576,7 +593,7 @@ async function uzLoadConversation(id, notice = null) {
   conversationId = id;
   addMessage("system", notice || `Loaded conversation #${id}.`);
   renderConversation(data.messages, data.events);
-  log.scrollTop = log.scrollHeight;
+  scrollLog();
   return data;
 }
 
@@ -724,7 +741,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       if (node) log.appendChild(node);
     }
     if (events.length) log.appendChild(renderTurnCounter(events));
-    log.scrollTop = log.scrollHeight;
+    scrollLog();
     return data;
   } catch (err) {
     clearThinking();

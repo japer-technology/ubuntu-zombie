@@ -156,8 +156,23 @@ _brand_panel_row() {
     "${pad}" "" "${C_BRAND}" "${C_RESET}"
 }
 
+# brand_wordmark
+#   ANSI Shadow "UBUNTU ZOMBIE" wordmark, shared by startup screens.
+brand_wordmark() {
+  (( ZOMBIE_QUIET )) && return 0
+  printf '%s' "${C_BRAND}"
+  printf '%s\n' \
+'██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗' \
+'██║   ██║██╔══██╗██║   ██║████╗  ██║╚══██╔══╝██║   ██║    ╚══███╔╝██╔═══██╗████╗ ████║██╔══██╗██║██╔════╝' \
+'██║   ██║██████╔╝██║   ██║██╔██╗ ██║   ██║   ██║   ██║      ███╔╝ ██║   ██║██╔████╔██║██████╔╝██║█████╗  ' \
+'██║   ██║██╔══██╗██║   ██║██║╚██╗██║   ██║   ██║   ██║     ███╔╝  ██║   ██║██║╚██╔╝██║██╔══██╗██║██╔══╝  ' \
+'╚██████╔╝██████╔╝╚██████╔╝██║ ╚████║   ██║   ╚██████╔╝    ███████╗╚██████╔╝██║ ╚═╝ ██║██████╔╝██║███████╗' \
+' ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝     ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═════╝ ╚═╝╚══════╝'
+  printf '%s\n' "${C_RESET}"
+}
+
 # brand_splash "subtitle" "version"
-#   The full-dress startup splash: an ANSI-Shadow "UBUNTU ZOMBIE" wordmark in
+#   The full-dress startup splash: an ANSI Shadow "UBUNTU ZOMBIE" wordmark in
 #   the Zombie Orchid palette, framed by a rounded panel that states who the
 #   account is, the version, and how to reach it. Used to open the installer
 #   the way a polished agent CLI greets you. Honours ZOMBIE_QUIET and the
@@ -166,24 +181,7 @@ brand_splash() {
   (( ZOMBIE_QUIET )) && return 0
   local subtitle="${1:-}" version="${2:-}"
   printf '\n'
-  # Wordmark: UBUNTU in the primary orchid, ZOMBIE in the lighter tint.
-  printf '%s' "${C_BRAND}"
-  printf '%s\n' \
-'██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗' \
-'██║   ██║██╔══██╗██║   ██║████╗  ██║╚══██╔══╝██║   ██║' \
-'██║   ██║██████╔╝██║   ██║██╔██╗ ██║   ██║   ██║   ██║' \
-'██║   ██║██╔══██╗██║   ██║██║╚██╗██║   ██║   ██║   ██║' \
-'╚██████╔╝██████╔╝╚██████╔╝██║ ╚████║   ██║   ╚██████╔╝' \
-' ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝ '
-  printf '%s' "${C_BRAND2}"
-  printf '%s\n' \
-'███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗' \
-'╚══███╔╝██╔═══██╗████╗ ████║██╔══██╗██║██╔════╝' \
-'  ███╔╝ ██║   ██║██╔████╔██║██████╔╝██║█████╗  ' \
-' ███╔╝  ██║   ██║██║╚██╔╝██║██╔══██╗██║██╔══╝  ' \
-'███████╗╚██████╔╝██║ ╚═╝ ██║██████╔╝██║███████╗' \
-'╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═════╝ ╚═╝╚══════╝'
-  printf '%s\n' "${C_RESET}"
+  brand_wordmark
   # Rounded info panel beneath the wordmark.
   local W=66 line="" i
   for (( i = 0; i < W; i++ )); do line+="─"; done

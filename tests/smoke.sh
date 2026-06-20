@@ -8,6 +8,7 @@
 #   bad-usage     ensure scripts reject unexpected args and unsafe config
 #   noninteractive verify ZOMBIE_NONINTERACTIVE=1 with missing required env
 #                  exits with code 64
+#   branding      ensure installer and chat startup wordmarks stay present
 #   standards     ensure repository metadata and packaging inputs are present
 #   all (default) run everything
 
@@ -1187,6 +1188,15 @@ PY
   rm -rf "${_CONV_TMP}"
 }
 
+run_branding() {
+  echo "[smoke] startup branding"
+  local first_line
+  first_line='██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗'
+  grep -Fq "$first_line" scripts/lib.sh
+  grep -Fq "$first_line" payload/bin/zombie-chat
+  grep -Fq "$first_line" payload/agent/templates/index.html
+}
+
 run_subcommands() {
   echo "[smoke] subcommand parsing"
   ./scripts/install.sh --help    >/dev/null
@@ -1481,7 +1491,8 @@ run_flags() {
 case "${cmd}" in
   syntax)         run_syntax ;;
   python)         run_python ;;
-  subcommands)    run_subcommands ;;
+  branding) run_branding ;;
+  subcommands) run_subcommands ;;
   bad-usage)      run_bad_usage ;;
   flags)          run_flags ;;
   noninteractive) run_noninteractive ;;
@@ -1490,6 +1501,7 @@ case "${cmd}" in
   all)
     run_syntax
     run_python
+    run_branding
     run_subcommands
     run_bad_usage
     run_flags
