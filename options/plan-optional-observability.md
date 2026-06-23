@@ -86,8 +86,11 @@ is a first-class part of this plan, not an afterthought:
 - **HTTPS by design.** When an `OBSERVABILITY_DOMAIN` on the tailnet is
   supplied, Caddy obtains/renews a certificate (Tailscale/`tailscale
   cert` or an operator-supplied internal CA); otherwise it serves a
-  locally-trusted Caddy internal cert. The dashboard is never served
-  plaintext on a routable interface.
+  certificate from Caddy's built-in internal CA (`tls internal`). In the
+  internal-CA case the dashboard is reachable over HTTPS on the tailnet,
+  but the operator must trust Caddy's local root once (or accept the
+  one-time browser warning) — document this trust step. The dashboard is
+  never served plaintext on a routable interface.
 - **One toggle.** `ZOMBIE_OBSERVABILITY_WEB=1` (on in `maximum`) selects
   the Caddy front door; with it off, Grafana stays strictly on loopback
   for `ssh -L` access only. When the host-wide reverse-proxy candidate
