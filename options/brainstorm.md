@@ -137,7 +137,7 @@ to a spec once promoted. Flags all default to `0`.
 | B | Self-hosted secrets manager | `ZOMBIE_INSTALL_VAULT` | ★★ | candidate |
 | B | Local single-sign-on (OIDC) | `ZOMBIE_INSTALL_SSO` | ★ | candidate |
 | C | Metrics + logs + dashboards | `ZOMBIE_INSTALL_OBSERVABILITY` | ★★★ | [`plan-optional-observability.md`](plan-optional-observability.md) |
-| C | Host inventory + change journal | `ZOMBIE_INSTALL_INVENTORY` | ★★★ | candidate |
+| C | Host inventory + change journal | `ZOMBIE_INSTALL_INVENTORY` | ★★★ | [`plan-optional-inventory.md`](plan-optional-inventory.md) |
 | D | Reverse proxy + automatic HTTPS | `ZOMBIE_INSTALL_PROXY` | ★★ | candidate |
 | D | Self-hosted DNS / ad-block resolver | `ZOMBIE_INSTALL_DNS` | ★ | candidate |
 | E | Files + sync + docs | `ZOMBIE_INSTALL_NEXTCLOUD` | ★ | candidate |
@@ -204,11 +204,13 @@ best effort-to-value ratio.
   monitoring stacks sprawl; ship a curated minimum and resist becoming a
   general TSDB appliance.
 - **Structured host inventory + change journal** —
-  `ZOMBIE_INSTALL_INVENTORY`. A periodic, queryable snapshot of
-  installed packages, services, and config drift, complementing the
-  audit log. *Unlock:* "what changed since last week?" becomes a query
-  the agent answers from data. *Risk:* low; mostly read-only, but keep
-  collection best-effort (`|| true`) per the diagnostics convention.
+  `ZOMBIE_INSTALL_INVENTORY`. **Promoted to a full spec:**
+  [`plan-optional-inventory.md`](plan-optional-inventory.md). A periodic,
+  queryable snapshot of installed packages, services, and config drift,
+  complementing the audit log. *Unlock:* "what changed since last week?"
+  becomes a query the agent answers from data. *Risk:* low; mostly
+  read-only, but keep collection best-effort (`|| true`) per the
+  diagnostics convention.
 
 ### D. Networking and remote access (beyond the existing Tailscale option)
 
@@ -294,11 +296,12 @@ prerequisite many others share; **B (secrets)** is high value but needs
 careful gating. The application stacks (E), local AI (F), and build
 infrastructure (G) are best layered on *after* backup and the proxy
 exist, so every stateful service is recoverable and reachable from the
-moment it is installed. **A and C are already specified** in
-[`plan-optional-backup.md`](plan-optional-backup.md) and
-[`plan-optional-observability.md`](plan-optional-observability.md), so
-the natural next promotions are the **C companion (inventory)** and
-**D (reverse proxy)**.
+moment it is installed. **A, C and its inventory companion are already
+specified** in [`plan-optional-backup.md`](plan-optional-backup.md),
+[`plan-optional-observability.md`](plan-optional-observability.md) and
+[`plan-optional-inventory.md`](plan-optional-inventory.md), so the
+natural next promotion is **D (reverse proxy)**, which unlocks the whole
+web-app tier.
 
 ## Explicitly out of scope (kept out on purpose)
 
