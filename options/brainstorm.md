@@ -136,7 +136,7 @@ to a spec once promoted. Flags all default to `0`.
 | A | FS snapshots + boot rollback | `ZOMBIE_INSTALL_SNAPSHOTS` | ★★ | candidate |
 | B | Self-hosted secrets manager | `ZOMBIE_INSTALL_VAULT` | ★★ | candidate |
 | B | Local single-sign-on (OIDC) | `ZOMBIE_INSTALL_SSO` | ★ | candidate |
-| C | Metrics + logs + dashboards | `ZOMBIE_INSTALL_OBSERVABILITY` | ★★★ | candidate |
+| C | Metrics + logs + dashboards | `ZOMBIE_INSTALL_OBSERVABILITY` | ★★★ | [`plan-optional-observability.md`](plan-optional-observability.md) |
 | C | Host inventory + change journal | `ZOMBIE_INSTALL_INVENTORY` | ★★★ | candidate |
 | D | Reverse proxy + automatic HTTPS | `ZOMBIE_INSTALL_PROXY` | ★★ | candidate |
 | D | Self-hosted DNS / ad-block resolver | `ZOMBIE_INSTALL_DNS` | ★ | candidate |
@@ -193,7 +193,9 @@ best effort-to-value ratio.
 ### C. Observability and self-knowledge
 
 - **Local metrics + logs + dashboards** —
-  `ZOMBIE_INSTALL_OBSERVABILITY` (Node Exporter + a small Prometheus +
+  `ZOMBIE_INSTALL_OBSERVABILITY`. **Promoted to a full spec:**
+  [`plan-optional-observability.md`](plan-optional-observability.md)
+  (Node Exporter + a small Prometheus +
   Grafana or a Loki/Promtail log stack, all loopback/tailnet-bound). The
   Forgejo plan already proposes Node Exporter for one service; this is
   the host-wide version. *Unlock:* the agent can *read its own metrics*
@@ -292,10 +294,11 @@ prerequisite many others share; **B (secrets)** is high value but needs
 careful gating. The application stacks (E), local AI (F), and build
 infrastructure (G) are best layered on *after* backup and the proxy
 exist, so every stateful service is recoverable and reachable from the
-moment it is installed. **A is already specified** in
-[`plan-optional-backup.md`](plan-optional-backup.md), so the natural next
-promotions are **C (observability/inventory)** and **D (reverse
-proxy)**.
+moment it is installed. **A and C are already specified** in
+[`plan-optional-backup.md`](plan-optional-backup.md) and
+[`plan-optional-observability.md`](plan-optional-observability.md), so
+the natural next promotions are the **C companion (inventory)** and
+**D (reverse proxy)**.
 
 ## Explicitly out of scope (kept out on purpose)
 
