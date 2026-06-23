@@ -2,22 +2,44 @@
 
 ## Why this document exists
 
-The two existing option plans —
-[`plan-optional-forgejo-server.md`](plan-optional-forgejo-server.md) and
-[`plan-optional-forgejo-society.md`](plan-optional-forgejo-society.md) —
-prove a general point: once a machine carries a private, root-capable AI
-Systems Administrator that can install, verify, repair, and explain its
-own software *under human approval and audit*, whole classes of software
-that were previously "too complex to run unattended on a personal
-machine" become realistic **opt-in** components.
+The existing option plans —
+[`plan-optional-forgejo-server.md`](plan-optional-forgejo-server.md),
+[`plan-optional-forgejo-society.md`](plan-optional-forgejo-society.md),
+and [`plan-optional-backup.md`](plan-optional-backup.md) — prove a
+general point: once a machine carries a private, root-capable AI Systems
+Administrator that can install, verify, repair, and explain its own
+software *under human approval and audit*, whole classes of software that
+were previously "too complex to run unattended on a personal machine"
+become realistic **opt-in** components.
 
 This file is a brainstorm, not a commitment. It catalogues candidate
 "very complex Ubuntu solutions" that the AI assistance described in
 [`docs/VISION.md`](../docs/VISION.md) makes newly feasible, so they can
 be triaged into real `plan-optional-*.md` specs later. Each idea is
-sketched against the same opt-in shape the Forgejo plans already use; it
-is deliberately light on implementation detail and heavy on *why AI
-assistance changes the calculus*.
+sketched against the same opt-in shape the existing plans use; it is
+deliberately light on implementation detail and heavy on *why AI
+assistance changes the calculus*. Candidate **A** (backup/restore) has
+already been promoted to a full spec
+([`plan-optional-backup.md`](plan-optional-backup.md)) as the worked
+example of how an entry here graduates into a plan.
+
+### Promotion workflow and naming
+
+A candidate graduates from a bullet in this file to a real spec by
+clearing the bar in "How to triage these into real plans" (below) and
+being written up against the shared component checklist. Conventions:
+
+- **One spec per file**, named `plan-optional-<slug>.md` in this
+  `options/` directory, where `<slug>` is the master flag's component
+  name in lower kebab-case (e.g. `ZOMBIE_INSTALL_BACKUP` →
+  `plan-optional-backup.md`).
+- Each spec follows the **same section order** the existing plans use:
+  Goal · why AI assistance is the unlock · what "maximum" means ·
+  behaviour and options · non-negotiables (from `AGENTS.md`) ·
+  implementation steps · validation before hand-off · out of scope /
+  risks.
+- When a candidate is promoted, update its row in the index table below
+  to point at the new file so this brainstorm stays the map of record.
 
 ## The thesis: what AI assistance actually changes
 
@@ -102,20 +124,44 @@ Grouped by the operator need they serve. Each entry gives the proposed
 master flag, what it installs, *why AI assistance is the unlock*, and the
 sharpest risk to weigh in a future plan.
 
+### Candidate index
+
+A quick triage map. **Tier** is the group letter; **value-to-risk** is a
+rough ranking for sequencing (★★★ = best first mover); **status** links
+to a spec once promoted. Flags all default to `0`.
+
+| Tier | Candidate | Master flag | Value-to-risk | Status |
+| --- | --- | --- | --- | --- |
+| A | Whole-machine backup/restore | `ZOMBIE_INSTALL_BACKUP` | ★★★ | [`plan-optional-backup.md`](plan-optional-backup.md) |
+| A | FS snapshots + boot rollback | `ZOMBIE_INSTALL_SNAPSHOTS` | ★★ | candidate |
+| B | Self-hosted secrets manager | `ZOMBIE_INSTALL_VAULT` | ★★ | candidate |
+| B | Local single-sign-on (OIDC) | `ZOMBIE_INSTALL_SSO` | ★ | candidate |
+| C | Metrics + logs + dashboards | `ZOMBIE_INSTALL_OBSERVABILITY` | ★★★ | candidate |
+| C | Host inventory + change journal | `ZOMBIE_INSTALL_INVENTORY` | ★★★ | candidate |
+| D | Reverse proxy + automatic HTTPS | `ZOMBIE_INSTALL_PROXY` | ★★ | candidate |
+| D | Self-hosted DNS / ad-block resolver | `ZOMBIE_INSTALL_DNS` | ★ | candidate |
+| E | Files + sync + docs | `ZOMBIE_INSTALL_NEXTCLOUD` | ★ | candidate |
+| E | Read-it-later / wiki | `ZOMBIE_INSTALL_WIKI` | ★★ | candidate |
+| E | Curated container app platform | `ZOMBIE_INSTALL_APPS` | ★ | candidate |
+| F | Local LLM serving | `ZOMBIE_INSTALL_LOCALLLM` | ★ | candidate |
+| G | CI cache / artefact store / registry | `ZOMBIE_INSTALL_REGISTRY` | ★ | candidate |
+
+
 ### A. Data safety and recovery — the highest-value, lowest-risk tier
 
 These directly extend the "diagnose, repair, operate" loop and have the
 best effort-to-value ratio.
 
 - **Whole-machine backup and restore** —
-  `ZOMBIE_INSTALL_BACKUP`. Scheduled `restic`/`borg` snapshots of
-  operator-nominated paths to an operator-supplied repository, via a
-  systemd timer; the Forgejo plan already sketches `restic` for a single
-  service, so this generalises it to the host. *Unlock:* the agent can
-  answer "is my backup healthy?", run a test restore on request, and
-  explain a failed snapshot — the part people never do. *Risk:* restore
-  is destructive; gate it behind the confirmation phrase and never
-  auto-restore.
+  `ZOMBIE_INSTALL_BACKUP`. **Promoted to a full spec:**
+  [`plan-optional-backup.md`](plan-optional-backup.md). Scheduled
+  `restic`/`borg` snapshots of operator-nominated paths to an
+  operator-supplied repository, via a systemd timer; the Forgejo plan
+  already sketches `restic` for a single service, so this generalises it
+  to the host. *Unlock:* the agent can answer "is my backup healthy?",
+  run a test restore on request, and explain a failed snapshot — the part
+  people never do. *Risk:* restore is destructive; gate it behind the
+  confirmation phrase and never auto-restore.
 - **ZFS or Btrfs root with snapshots + boot rollback** —
   `ZOMBIE_INSTALL_SNAPSHOTS`. Configure filesystem snapshots and a
   pre-`apt` snapshot hook so a bad upgrade is one rollback away.
@@ -246,7 +292,10 @@ prerequisite many others share; **B (secrets)** is high value but needs
 careful gating. The application stacks (E), local AI (F), and build
 infrastructure (G) are best layered on *after* backup and the proxy
 exist, so every stateful service is recoverable and reachable from the
-moment it is installed.
+moment it is installed. **A is already specified** in
+[`plan-optional-backup.md`](plan-optional-backup.md), so the natural next
+promotions are **C (observability/inventory)** and **D (reverse
+proxy)**.
 
 ## Explicitly out of scope (kept out on purpose)
 
