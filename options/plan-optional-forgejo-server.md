@@ -1,4 +1,4 @@
-# Plan: optional Forgejo + PostgreSQL (with local runner) install
+# Plan: optional Forgejo Server with Local Runner (Forgejo + PostgreSQL) install
 
 ## Goal
 
