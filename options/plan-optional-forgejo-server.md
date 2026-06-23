@@ -41,6 +41,96 @@ Keep the first cut focused on Forgejo; only generalise the helper
 plumbing as far as Forgejo actually needs it, to avoid speculative
 abstraction.
 
+## What "maximum" means: the full forge-server software stack
+
+The first cut above mirrors `easy-install/` — the *minimum* viable
+forge (Forgejo + PostgreSQL, plus an optional co-located runner). A
+**maximum** Forgejo server is the forge-server role described by the
+Forgejo-Society `scripts/` installer and `install/` library, hardened
+and observable rather than merely functional. The
+`install/00-index.md` "Forge server" install order enumerates the
+target stack, and the [Forgejo admin docs](https://forgejo.org/docs/latest/admin)
+list the supporting services a production instance is expected to
+integrate. The additional software, beyond the Forgejo binary and its
+PostgreSQL database, is:
+
+### Already provided by the Ubuntu Zombie baseline (reuse, do not re-add)
+
+- **UFW firewall** — the baseline already manages UFW; the Forgejo
+  sections add rules to the existing instance rather than installing
+  it. (`install/02-ufw-firewall.md`.)
+- **Docker Engine** — the baseline installs it; the optional runner
+  reuses it instead of pulling a second container runtime.
+  (`install/04-docker-engine.md`.)
+
+### New components for a maximum forge server
+
+Each is its own opt-in `ZOMBIE_INSTALL_*` flag (defaulting to `0`),
+following the same per-component checklist (parameter table, dry-run
+plan, receipt, verify/doctor/repair, uninstall, policy, docs) the
+Forgejo flag uses. Order them by the forge-server install sequence so
+prerequisites land first.
+
+- **Caddy web server** (reverse proxy + automatic HTTPS) —
+  `ZOMBIE_INSTALL_FORGEJO_CADDY`. Terminates TLS for a public
+  `FORGE_DOMAIN`, fronts Forgejo on loopback, and obtains/renews
+  Let's Encrypt certificates automatically. When enabled, Forgejo's
+  `ROOT_URL`/`HTTP_ADDR` bind to `127.0.0.1` and only Caddy's
+  `80`/`443` are exposed; mutually exclusive with the plain
+  `FORGEJO_HTTP_PORT` exposure. (`install/08-caddy-web-server.md`;
+  admin docs "Reverse proxies".) This is the single biggest gap
+  between the minimum and maximum builds.
+- **fail2ban** (brute-force protection) —
+  `ZOMBIE_INSTALL_FORGEJO_FAIL2BAN`. Ship a Forgejo jail/filter that
+  reads the Forgejo log and bans IPs after repeated failed logins.
+  (`install/03-fail2ban.md`; admin docs "Fail2ban setup".)
+- **Restic backup** (off-host backups) —
+  `ZOMBIE_INSTALL_FORGEJO_BACKUP`. Scheduled `restic` snapshots of
+  `/var/lib/forgejo`, `/etc/forgejo/app.ini`, and a `pg_dump` of the
+  database to an operator-supplied repository, via a systemd timer.
+  Restic's repository/credentials are generated/required env, never
+  committed. (`install/05-restic-backup.md`.)
+- **Prometheus Node Exporter** (host metrics) —
+  `ZOMBIE_INSTALL_FORGEJO_METRICS`. Exposes host metrics for
+  monitoring; bind to loopback or `tailscale0` only, consistent with
+  the project's Tailscale-only posture. Optionally enable Forgejo's
+  own built-in `/metrics` endpoint guarded by a bearer token in
+  `app.ini`. (`install/06-prometheus-node-exporter.md`.)
+- **Git LFS** (large-file storage) — install `git-lfs` and set
+  `[server] LFS_START_SERVER = true` in `app.ini` so the forge serves
+  large binaries. This is light enough to fold into the core Forgejo
+  prerequisites rather than a separate flag. (Admin docs "Git LFS
+  setup".)
+
+### Optional integrations the admin docs recommend at scale
+
+These are worth listing in the plan as deliberately deferred, with a
+documented rationale, so "maximum" is understood as the hardened
+single-host forge rather than a multi-node cluster:
+
+- **Outbound mailer (SMTP)** — required for notifications, password
+  resets, and email-based sign-up. A maximum build should at least
+  expose `FORGEJO_SMTP_*` env to configure `app.ini`'s `[mailer]`
+  block against an operator-supplied relay; running a local Postfix
+  is out of scope. (Admin docs "Mail templates"/"Incoming email".)
+- **Search indexer** — Forgejo's default in-process Bleve indexer is
+  adequate for a single host; Elasticsearch/Meilisearch are only
+  needed for very large code search and stay out of scope. Document
+  enabling repository/issue indexing in `app.ini` as the maximum
+  single-host setting. (Admin docs "Repository indexer".)
+- **Redis for cache/session/queue** — Forgejo defaults (in-memory
+  cache, file session, level queue) are fine on one host. Redis only
+  pays off across nodes, so it is deferred; note it as the scale-out
+  upgrade path. (Admin docs "Config cheat sheet": `[cache]`,
+  `[session]`, `[queue]`.)
+
+The maximum profile is therefore the minimum profile **plus** Caddy +
+HTTPS, fail2ban, Restic backups, Node Exporter metrics, Git LFS, and a
+configurable SMTP mailer — reusing the baseline's UFW and Docker. A
+convenience meta-flag (e.g. `ZOMBIE_INSTALL_FORGEJO_PROFILE=minimum|
+maximum`) can switch the component flags on together while leaving
+each independently overridable.
+
 ## Behaviour and options
 
 New environment variables (document them all in
@@ -278,10 +368,16 @@ These are non-root, no-network checks, so keep them static:
   real host. All verification here is static (`lint`/`test`/`package`)
   plus dry-run reasoning. End-to-end Forgejo bring-up must be validated
   by a human on a disposable Ubuntu Desktop LTS VM.
-- HTTPS/reverse-proxy (Caddy/nginx), off-host backups, and the
-  multi-host production topology are explicitly out of scope; this
-  mirrors `easy-install/`, the demo path, not the production
-  `transition-plan/`.
+- The **first cut** (the `easy-install/`-shaped minimum) keeps
+  HTTPS/reverse-proxy, off-host backups, and metrics out of scope. The
+  **maximum** profile described above adds them back as further opt-in
+  components (Caddy + HTTPS, Restic, Node Exporter, fail2ban, Git LFS,
+  SMTP mailer); deliver the minimum first, then layer the maximum
+  components on once the base flow is proven.
+- The multi-host production topology, Elasticsearch/Meilisearch search,
+  and Redis-backed cache/session/queue remain out of scope even for the
+  maximum profile; those belong to the `transition-plan/` rollout, not
+  this single-host installer.
 - Downloading release binaries from `codeberg.org` adds a network
   dependency at install time; pin `FORGEJO_VERSION` for reproducibility
   where determinism matters and record the resolved value in the
