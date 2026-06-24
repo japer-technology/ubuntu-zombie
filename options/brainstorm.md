@@ -140,7 +140,7 @@ to a spec once promoted. Flags all default to `0`.
 | C | Host inventory + change journal | `ZOMBIE_INSTALL_INVENTORY` | ★★★ | [`plan-optional-inventory.md`](plan-optional-inventory.md) |
 | D | Reverse proxy + automatic HTTPS | `ZOMBIE_INSTALL_PROXY` | ★★ | [`plan-optional-proxy.md`](plan-optional-proxy.md) |
 | D | Self-hosted DNS / ad-block resolver | `ZOMBIE_INSTALL_DNS` | ★ | candidate |
-| E | Files + sync + docs | `ZOMBIE_INSTALL_NEXTCLOUD` | ★ | candidate |
+| E | Files + sync + docs | `ZOMBIE_INSTALL_NEXTCLOUD` | ★ | [`plan-optional-nextcloud.md`](plan-optional-nextcloud.md) |
 | E | Read-it-later / wiki | `ZOMBIE_INSTALL_WIKI` | ★★ | candidate |
 | E | Curated container app platform | `ZOMBIE_INSTALL_APPS` | ★ | candidate |
 | F | Local LLM serving | `ZOMBIE_INSTALL_LOCALLLM` | ★ | [`plan-optional-localllm.md`](plan-optional-localllm.md) |
@@ -240,8 +240,10 @@ scared me off" applications. The agent's day-2 ownership is the whole
 point.
 
 - **Files + sync + docs** — `ZOMBIE_INSTALL_NEXTCLOUD` (or a lighter
-  WebDAV/Syncthing pairing). *Unlock:* Nextcloud is notorious for
-  upgrade and PHP-tuning pain the agent can shepherd. *Risk:* data
+  WebDAV/Syncthing pairing). **Promoted to a full spec:**
+  [`plan-optional-nextcloud.md`](plan-optional-nextcloud.md). *Unlock:*
+  Nextcloud is notorious for upgrade and PHP-tuning pain the agent can
+  shepherd. *Risk:* data
   gravity — back it up (tier A) before enabling.
 - **Read-it-later / knowledge base / wiki** —
   `ZOMBIE_INSTALL_WIKI`. Low-risk, high-utility, pairs naturally with
