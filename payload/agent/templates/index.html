@@ -968,6 +968,7 @@ async function handleSlashCommand(input) {
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
+    case "/model": {
       addMessage("user", input);
       if (!arg) {
         try {
