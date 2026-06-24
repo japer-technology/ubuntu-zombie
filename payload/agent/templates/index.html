@@ -48,6 +48,27 @@
                      border: 1px solid #8888; background: #fff2;
                      min-width: 18rem; }
   footer { padding: .8rem 1rem; border-top: 1px solid #8884; }
+  /* Modal overlay for the password gate and the TTL tombstone. Covers
+     the whole viewport so a locked-out / expired zombie cannot be
+     driven from the chat box behind it. */
+  .overlay { position: fixed; inset: 0; z-index: 50;
+             background: #000a; backdrop-filter: blur(3px);
+             display: flex; align-items: center; justify-content: center;
+             padding: 1rem; }
+  .overlay[hidden] { display: none; }
+  .overlay .panel { background: Canvas; color: CanvasText;
+                    border: 1px solid #ac43d9; border-radius: .6rem;
+                    padding: 1.4rem 1.6rem; max-width: 28rem; width: 100%;
+                    box-shadow: 0 0 0 1px #ac43d955, 0 8px 40px #0008; }
+  .overlay h2 { margin: 0 0 .4rem; font-size: 1.1rem; color: #ac43d9; }
+  .overlay p { margin: .3rem 0 .9rem; font-size: .9rem; opacity: .85; }
+  .overlay form { display: flex; gap: .5rem; flex-direction: column; }
+  .overlay input[type=password] { padding: .5rem .6rem; border-radius: .3rem;
+                    border: 1px solid #8888; background: #fff2; font: inherit; }
+  .overlay .err { color: #e74c3c; font-size: .85rem; min-height: 1.1em; }
+  .overlay.tomb .panel { border-color: #e74c3c;
+                         box-shadow: 0 0 0 1px #e74c3c55, 0 8px 40px #0008; }
+  .overlay.tomb h2 { color: #e74c3c; }
   form { display: flex; gap: .5rem; max-width: 60rem; margin: 0 auto; }
   textarea { flex: 1; min-height: 3rem; padding: .5rem;
              border-radius: .3rem; border: 1px solid #8888;
@@ -118,6 +139,28 @@
   </form>
   <div id="status" class="turn-status" role="status" aria-live="polite"></div>
 </footer>
+
+<div id="login-overlay" class="overlay" hidden>
+  <div class="panel">
+    <h2>Ubuntu Zombie — sign in</h2>
+    <p>This administrator is protected by a password. Enter it to continue.</p>
+    <form id="login-form">
+      <input type="password" id="login-password" autocomplete="current-password"
+             placeholder="Password" aria-label="Password" required>
+      <div class="err" id="login-error" role="alert"></div>
+      <button type="submit" class="primary">Unlock</button>
+    </form>
+  </div>
+</div>
+
+<div id="tomb-overlay" class="overlay tomb" hidden>
+  <div class="panel">
+    <h2>This zombie has died</h2>
+    <p id="tomb-message">The Ubuntu Zombie Systems Administrator has reached
+      the end of its Time to Live and is permanently disabled. Reinstall
+      Ubuntu Zombie to bring it back.</p>
+  </div>
+</div>
 <script>
 "use strict";
 let conversationId = null;
@@ -499,6 +542,7 @@ const SLASH_COMMANDS = [
   ["/health", "Show basic machine facts."],
   ["/status", "Show compact host and provider status."],
   ["/version", "Show Ubuntu Zombie and bridge versions."],
+  ["/ttl [n|--die]", "Show, extend (by n days), or trip the Time to Live."],
   ["/model [id]", "List or switch the active model."],
   ["/config", "Show redacted runtime configuration."],
   ["/policy", "Show policy classes and rule counts."],
@@ -732,6 +776,12 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     });
     const data = await r.json();
     clearThinking();
+    if (r.status === 410 || data.dead) {
+      showTombstone(data);
+    }
+    if (r.status === 401) {
+      showLogin(true);
+    }
     conversationId = data.conversation_id ?? conversationId;
     if (data.error) addMessage("system", data.error, { error: true });
     if (data.reply) addMessage("assistant", data.reply);
@@ -881,6 +931,40 @@ async function handleSlashCommand(input) {
         if (data.pi_mono) lines.push(`pi-mono: ${data.pi_mono}`);
         if (data.pi_ai) lines.push(`pi-ai: ${data.pi_ai}`);
         addMessage("system", lines.join("\n"));
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/ttl": {
+      addMessage("user", input);
+      try {
+        if (!arg) {
+          const data = await uzFetchJson("/api/ttl");
+          if (data.dead) {
+            showTombstone(data);
+            addMessage("system",
+              `The Ubuntu Zombie is permanently disabled (${data.dead_reason || "expired"}).`,
+              { error: true });
+          } else {
+            addMessage("system", `Time to Live: ${data.remaining_human}.`);
+          }
+          return true;
+        }
+        if (arg === "--die" || arg.toLowerCase() === "die") {
+          const data = await uzPostJson("/api/ttl", { die: true });
+          addMessage("system", "The Ubuntu Zombie has been killed. It is now " +
+            "permanently disabled until a reinstall.", { error: true });
+          showTombstone(data);
+          return true;
+        }
+        const n = Number(arg);
+        if (!isFinite(n) || n <= 0) {
+          addMessage("system",
+            "Usage: /ttl <days> to extend, or /ttl --die to kill the zombie.",
+            { error: true });
+          return true;
+        }
+        const data = await uzPostJson("/api/ttl", { days: n });
+        addMessage("system", `Time to Live now ${data.remaining_human}.`);
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
@@ -1138,6 +1222,76 @@ promptEl.addEventListener("keydown", (event) => {
     form.requestSubmit();
   }
 });
+
+// --- Password gate + TTL tombstone ----------------------------------
+const loginOverlay = document.getElementById("login-overlay");
+const loginForm = document.getElementById("login-form");
+const loginPassword = document.getElementById("login-password");
+const loginError = document.getElementById("login-error");
+const tombOverlay = document.getElementById("tomb-overlay");
+const tombMessage = document.getElementById("tomb-message");
+
+function showLogin(show) {
+  loginOverlay.hidden = !show;
+  if (show) {
+    loginError.textContent = "";
+    setTimeout(() => loginPassword.focus(), 0);
+  }
+}
+
+function showTombstone(status) {
+  // A dead zombie can never be revived from the browser; lock the UI.
+  if (status && status.dead_reason === "killed") {
+    tombMessage.textContent =
+      "The Ubuntu Zombie Systems Administrator has been killed and is " +
+      "permanently disabled. Reinstall Ubuntu Zombie to bring it back.";
+  }
+  tombOverlay.hidden = false;
+  showLogin(false);
+  sendBtn.disabled = true;
+  promptEl.disabled = true;
+}
+
+loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  loginError.textContent = "";
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: loginPassword.value }),
+    });
+    if (r.ok) {
+      loginPassword.value = "";
+      showLogin(false);
+      promptEl.focus();
+      return;
+    }
+    const data = await r.json().catch(() => ({}));
+    loginError.textContent = data.error || "Sign in failed.";
+  } catch (err) {
+    loginError.textContent = String(err);
+  }
+});
+
+async function bootstrap() {
+  try {
+    const r = await fetch("/api/session");
+    const data = await r.json().catch(() => ({}));
+    if (data.dead) {
+      showTombstone(data);
+      return;
+    }
+    if (data.required && !data.authenticated) {
+      showLogin(true);
+    }
+  } catch (_err) {
+    // Network/parse failure: leave the UI usable; the first prompt
+    // will surface any real authentication error.
+  }
+}
+
+bootstrap();
 </script>
 </body>
 </html>
