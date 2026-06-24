@@ -133,7 +133,7 @@ to a spec once promoted. Flags all default to `0`.
 | Tier | Candidate | Master flag | Value-to-risk | Status |
 | --- | --- | --- | --- | --- |
 | A | Whole-machine backup/restore | `ZOMBIE_INSTALL_BACKUP` | ★★★ | [`plan-optional-backup.md`](plan-optional-backup.md) |
-| A | FS snapshots + boot rollback | `ZOMBIE_INSTALL_SNAPSHOTS` | ★★ | candidate |
+| A | FS snapshots + boot rollback | `ZOMBIE_INSTALL_SNAPSHOTS` | ★★ | [`plan-optional-snapshots.md`](plan-optional-snapshots.md) |
 | B | Self-hosted secrets manager | `ZOMBIE_INSTALL_VAULT` | ★★ | candidate |
 | B | Local single-sign-on (OIDC) | `ZOMBIE_INSTALL_SSO` | ★ | candidate |
 | C | Metrics + logs + dashboards | `ZOMBIE_INSTALL_OBSERVABILITY` | ★★★ | [`plan-optional-observability.md`](plan-optional-observability.md) |
@@ -163,8 +163,10 @@ best effort-to-value ratio.
   people never do. *Risk:* restore is destructive; gate it behind the
   confirmation phrase and never auto-restore.
 - **ZFS or Btrfs root with snapshots + boot rollback** —
-  `ZOMBIE_INSTALL_SNAPSHOTS`. Configure filesystem snapshots and a
-  pre-`apt` snapshot hook so a bad upgrade is one rollback away.
+  `ZOMBIE_INSTALL_SNAPSHOTS`. **Promoted to a full spec:**
+  [`plan-optional-snapshots.md`](plan-optional-snapshots.md). Configure
+  filesystem snapshots and a pre-`apt` snapshot hook so a bad upgrade is
+  one rollback away.
   *Unlock:* the agent can take a labelled snapshot before any risky
   `system_change` it proposes, then offer rollback if `verify` regresses
   — closing the loop the audit log already opens. *Risk:* root-filesystem
@@ -296,8 +298,10 @@ prerequisite many others share; **B (secrets)** is high value but needs
 careful gating. The application stacks (E), local AI (F), and build
 infrastructure (G) are best layered on *after* backup and the proxy
 exist, so every stateful service is recoverable and reachable from the
-moment it is installed. **A, C and its inventory companion are already
-specified** in [`plan-optional-backup.md`](plan-optional-backup.md),
+moment it is installed. **Both tier-A candidates (backup and snapshots),
+C and its inventory companion are already specified** in
+[`plan-optional-backup.md`](plan-optional-backup.md),
+[`plan-optional-snapshots.md`](plan-optional-snapshots.md),
 [`plan-optional-observability.md`](plan-optional-observability.md) and
 [`plan-optional-inventory.md`](plan-optional-inventory.md), so the
 natural next promotion is **D (reverse proxy)**, which unlocks the whole
