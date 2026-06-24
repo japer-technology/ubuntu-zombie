@@ -138,8 +138,8 @@ to a spec once promoted. Flags all default to `0`.
 | B | Local single-sign-on (OIDC) | `ZOMBIE_INSTALL_SSO` | ★ | candidate |
 | C | Metrics + logs + dashboards | `ZOMBIE_INSTALL_OBSERVABILITY` | ★★★ | [`plan-optional-observability.md`](plan-optional-observability.md) |
 | C | Host inventory + change journal | `ZOMBIE_INSTALL_INVENTORY` | ★★★ | [`plan-optional-inventory.md`](plan-optional-inventory.md) |
-| D | Reverse proxy + automatic HTTPS | `ZOMBIE_INSTALL_PROXY` | ★★ | candidate |
-| D | Self-hosted DNS / ad-block resolver | `ZOMBIE_INSTALL_DNS` | ★ | [`plan-optional-dns.md`](plan-optional-dns.md) |
+| D | Reverse proxy + automatic HTTPS | `ZOMBIE_INSTALL_PROXY` | ★★ | [`plan-optional-proxy.md`](plan-optional-proxy.md) |
+| D | Self-hosted DNS / ad-block resolver | `ZOMBIE_INSTALL_DNS` | ★ | candidate |
 | E | Files + sync + docs | `ZOMBIE_INSTALL_NEXTCLOUD` | ★ | candidate |
 | E | Read-it-later / wiki | `ZOMBIE_INSTALL_WIKI` | ★★ | candidate |
 | E | Curated container app platform | `ZOMBIE_INSTALL_APPS` | ★ | candidate |
@@ -217,10 +217,11 @@ best effort-to-value ratio.
 ### D. Networking and remote access (beyond the existing Tailscale option)
 
 - **Reverse proxy + automatic HTTPS for all local services** —
-  `ZOMBIE_INSTALL_PROXY` (Caddy). Promotes the Forgejo plan's
-  service-specific Caddy idea to a host-wide front door that terminates
-  TLS for every opt-in web component on one `*_DOMAIN`. *Unlock:*
-  certificate lifecycle and per-service routing are classic
+  `ZOMBIE_INSTALL_PROXY` (Caddy). **Promoted to a full spec:**
+  [`plan-optional-proxy.md`](plan-optional-proxy.md). Promotes the
+  Forgejo plan's service-specific Caddy idea to a host-wide front door
+  that terminates TLS for every opt-in web component on one `*_DOMAIN`.
+  *Unlock:* certificate lifecycle and per-service routing are classic
   "install-is-easy, operate-is-hard" toil the agent can own. *Risk:*
   exposing `80`/`443` widens the surface; keep it deliberate and
   consistent with the project's Tailscale-only posture.
@@ -300,14 +301,17 @@ prerequisite many others share; **B (secrets)** is high value but needs
 careful gating. The application stacks (E), local AI (F), and build
 infrastructure (G) are best layered on *after* backup and the proxy
 exist, so every stateful service is recoverable and reachable from the
-moment it is installed. **Both tier-A candidates (backup and snapshots),
-C and its inventory companion are already specified** in
+moment it is installed. **The tier-A candidates (backup and snapshots),
+C and its inventory companion, and D (the reverse proxy) are already
+specified** in
 [`plan-optional-backup.md`](plan-optional-backup.md),
 [`plan-optional-snapshots.md`](plan-optional-snapshots.md),
-[`plan-optional-observability.md`](plan-optional-observability.md) and
-[`plan-optional-inventory.md`](plan-optional-inventory.md), so the
-natural next promotion is **D (reverse proxy)**, which unlocks the whole
-web-app tier.
+[`plan-optional-observability.md`](plan-optional-observability.md),
+[`plan-optional-inventory.md`](plan-optional-inventory.md) and
+[`plan-optional-proxy.md`](plan-optional-proxy.md). With the web-app
+tier's shared front door now in place, the natural next promotions are
+the **B (secrets)** gate that several stacks want and the first **E**
+application stack to ride the proxy.
 
 ## Explicitly out of scope (kept out on purpose)
 
