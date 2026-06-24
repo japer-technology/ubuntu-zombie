@@ -227,6 +227,8 @@ best effort-to-value ratio.
   consistent with the project's Tailscale-only posture.
 - **Self-hosted DNS / ad-blocking resolver** —
   `ZOMBIE_INSTALL_DNS` (e.g. a local recursive resolver with blocklists).
+  **Promoted to a full spec:**
+  [`plan-optional-dns.md`](plan-optional-dns.md).
   *Unlock:* the agent can explain a resolution failure and tune lists
   conversationally. *Risk:* breaking DNS breaks everything; `verify`
   must include a resolver health check and `doctor` an obvious revert.
