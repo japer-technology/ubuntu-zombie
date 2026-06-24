@@ -139,7 +139,7 @@ to a spec once promoted. Flags all default to `0`.
 | C | Metrics + logs + dashboards | `ZOMBIE_INSTALL_OBSERVABILITY` | ★★★ | [`plan-optional-observability.md`](plan-optional-observability.md) |
 | C | Host inventory + change journal | `ZOMBIE_INSTALL_INVENTORY` | ★★★ | [`plan-optional-inventory.md`](plan-optional-inventory.md) |
 | D | Reverse proxy + automatic HTTPS | `ZOMBIE_INSTALL_PROXY` | ★★ | candidate |
-| D | Self-hosted DNS / ad-block resolver | `ZOMBIE_INSTALL_DNS` | ★ | candidate |
+| D | Self-hosted DNS / ad-block resolver | `ZOMBIE_INSTALL_DNS` | ★ | [`plan-optional-dns.md`](plan-optional-dns.md) |
 | E | Files + sync + docs | `ZOMBIE_INSTALL_NEXTCLOUD` | ★ | candidate |
 | E | Read-it-later / wiki | `ZOMBIE_INSTALL_WIKI` | ★★ | candidate |
 | E | Curated container app platform | `ZOMBIE_INSTALL_APPS` | ★ | candidate |
@@ -226,6 +226,8 @@ best effort-to-value ratio.
   consistent with the project's Tailscale-only posture.
 - **Self-hosted DNS / ad-blocking resolver** —
   `ZOMBIE_INSTALL_DNS` (e.g. a local recursive resolver with blocklists).
+  **Promoted to a full spec:**
+  [`plan-optional-dns.md`](plan-optional-dns.md).
   *Unlock:* the agent can explain a resolution failure and tune lists
   conversationally. *Risk:* breaking DNS breaks everything; `verify`
   must include a resolver health check and `doctor` an obvious revert.
