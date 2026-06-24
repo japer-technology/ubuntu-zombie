@@ -143,7 +143,7 @@ to a spec once promoted. Flags all default to `0`.
 | E | Files + sync + docs | `ZOMBIE_INSTALL_NEXTCLOUD` | ★ | candidate |
 | E | Read-it-later / wiki | `ZOMBIE_INSTALL_WIKI` | ★★ | candidate |
 | E | Curated container app platform | `ZOMBIE_INSTALL_APPS` | ★ | candidate |
-| F | Local LLM serving | `ZOMBIE_INSTALL_LOCALLLM` | ★ | candidate |
+| F | Local LLM serving | `ZOMBIE_INSTALL_LOCALLLM` | ★ | [`plan-optional-localllm.md`](plan-optional-localllm.md) |
 | G | CI cache / artefact store / registry | `ZOMBIE_INSTALL_REGISTRY` | ★ | candidate |
 
 
@@ -256,11 +256,12 @@ point.
 
 ### F. Local AI / compute workloads
 
-- **Local LLM serving** — `ZOMBIE_INSTALL_LOCALLLM`. The codebase
-  *already* discovers and configures a local LLM as the `lmstudio`
-  provider; this candidate would *install and manage* the serving stack
-  (e.g. an Ollama/llama.cpp service, optional GPU drivers) rather than
-  only discovering one. *Unlock:* GPU driver + runtime setup is a
+- **Local LLM serving** — `ZOMBIE_INSTALL_LOCALLLM`. **Promoted to a
+  full spec:** [`plan-optional-localllm.md`](plan-optional-localllm.md).
+  The codebase *already* discovers and configures a local LLM as the
+  `lmstudio` provider; this candidate *installs and manages* the serving
+  stack (e.g. an Ollama/llama.cpp service, optional GPU drivers) rather
+  than only discovering one. *Unlock:* GPU driver + runtime setup is a
   well-known Ubuntu pain the agent can own, and it dovetails with the
   existing provider plumbing so the agent could run on a model it also
   maintains. *Risk:* proprietary GPU drivers and kernel modules are the
