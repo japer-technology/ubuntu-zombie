@@ -45,6 +45,8 @@ sys.path.insert(0, str(HERE))
 from audit import AUDIT_PATH, log_event, log_tool_call, tail as audit_tail  # noqa: E402
 from history import History  # noqa: E402
 from policy import POLICY_PATH, load_policy  # noqa: E402
+import auth  # noqa: E402
+import lifecycle  # noqa: E402
 from providers import provider_status  # noqa: E402
 import providers  # noqa: E402
 import pi_mono  # noqa: E402
@@ -228,10 +230,83 @@ class App:
         # addressable by both the audit entry id and provider tool-call id
         # so legacy buttons and text commands resolve the same queue item.
         self.pending: dict[str, dict[str, Any]] = {}
+        # Active login session tokens (the password gate). Empty after a
+        # restart so every browser re-authenticates; tokens are opaque
+        # and never persisted.
+        self.sessions: set[str] = set()
         self._lock = threading.Lock()
+
+    # ---- authentication + lifecycle ----
+    def login(self, password: str) -> dict[str, Any] | None:
+        """Validate ``password`` and mint a session token, or ``None``."""
+        if not auth.check_password(password or ""):
+            log_event("login_failed")
+            return None
+        token = auth.new_session_token()
+        with self._lock:
+            self.sessions.add(token)
+        log_event("login_ok")
+        return {"ok": True, "token": token}
+
+    def logout(self, token: str | None) -> None:
+        if token:
+            with self._lock:
+                self.sessions.discard(token)
+
+    def session_valid(self, token: str | None) -> bool:
+        if not auth.auth_required():
+            return True
+        if not token:
+            return False
+        with self._lock:
+            return token in self.sessions
+
+    def session_info(self, token: str | None) -> dict[str, Any]:
+        life = lifecycle.status()
+        return {
+            "authenticated": self.session_valid(token),
+            "required": auth.auth_required(),
+            "dead": life["dead"],
+            "dead_reason": life["dead_reason"],
+            "remaining_human": life["remaining_human"],
+            "remaining_seconds": life["remaining_seconds"],
+        }
+
+    def ttl_status(self) -> dict[str, Any]:
+        return lifecycle.status()
+
+    def ttl_set(self, days: float) -> dict[str, Any]:
+        """Extend the Time to Live; refuse if the zombie is already dead."""
+        current = lifecycle.status()
+        if current["dead"]:
+            return {"error": "The Ubuntu Zombie is permanently disabled.",
+                    "dead": True, **current}
+        try:
+            result = lifecycle.set_ttl(days)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        log_event("ttl_extended", days=days,
+                  remaining_seconds=result["remaining_seconds"])
+        return result
+
+    def ttl_die(self) -> dict[str, Any]:
+        """Trip the kill switch immediately and permanently."""
+        result = lifecycle.kill()
+        log_event("ttl_killed")
+        return result
 
     # ---- conversation flow ----
     def post_message(self, conv_id: int | None, prompt: str) -> dict[str, Any]:
+        life = lifecycle.status()
+        if life["dead"]:
+            return {
+                "error": (
+                    "The Ubuntu Zombie has been permanently disabled "
+                    f"({life['dead_reason'] or 'expired'}). It is unusable "
+                    "until a reinstall."
+                ),
+                "dead": True,
+            }
         if not conv_id:
             conv_id = self.history.create_conversation()
         log_event("prompt", conversation_id=conv_id, prompt=prompt)
@@ -895,13 +970,33 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     # ---- helpers ----
-    def _send_json(self, payload: Any, status: int = 200) -> None:
+    def _send_json(self, payload: Any, status: int = 200,
+                   extra_headers: list[tuple[str, str]] | None = None) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        for name, value in extra_headers or ():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _cookies(self) -> dict[str, str]:
+        raw = self.headers.get("Cookie") if self.headers else None
+        jar: dict[str, str] = {}
+        if not raw:
+            return jar
+        for chunk in raw.split(";"):
+            name, _, value = chunk.strip().partition("=")
+            if name:
+                jar[name] = value
+        return jar
+
+    def _session_token(self) -> str | None:
+        return self._cookies().get("zombie_session")
+
+    def _authenticated(self) -> bool:
+        return self.app.session_valid(self._session_token())
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length") or 0)
@@ -919,8 +1014,26 @@ class Handler(BaseHTTPRequestHandler):
         return [unquote(p) for p in path.strip("/").split("/") if p]
 
     # ---- routes ----
+    # Endpoints reachable without a valid login. Everything else is
+    # gated when a password hash is configured (``auth.auth_required``).
+    _PUBLIC_PATHS = {"/", "/index.html", "/api/session", "/api/login",
+                     "/api/logout"}
+
+    def _guard(self) -> bool:
+        """Return True if the request may proceed; otherwise send 401."""
+        path = self.path.split("?", 1)[0]
+        if path in self._PUBLIC_PATHS:
+            return True
+        if self._authenticated():
+            return True
+        self._send_json({"error": "Authentication required.",
+                         "authenticated": False}, 401)
+        return False
+
     def do_GET(self) -> None:  # noqa: N802
         parts = self._path_parts()
+        if not self._guard():
+            return
         if self.path == "/" or self.path == "/index.html":
             body = _render_index(self.app)
             self.send_response(200)
@@ -928,6 +1041,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if self.path == "/api/session":
+            self._send_json(self.app.session_info(self._session_token()))
+            return
+        if self.path == "/api/ttl":
+            self._send_json(self.app.ttl_status())
             return
         if self.path == "/api/health":
             self._send_json({"ok": True, "facts": machine_facts()})
@@ -988,6 +1107,41 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parts = self._path_parts()
+        if self.path == "/api/login":
+            data = self._read_json()
+            result = self.app.login(str(data.get("password") or ""))
+            if not result:
+                self._send_json({"error": "Incorrect password."}, 401)
+                return
+            cookie = (
+                f"zombie_session={result['token']}; HttpOnly; "
+                "SameSite=Strict; Path=/"
+            )
+            self._send_json({"ok": True}, extra_headers=[("Set-Cookie", cookie)])
+            return
+        if self.path == "/api/logout":
+            self.app.logout(self._session_token())
+            expired = ("zombie_session=; HttpOnly; SameSite=Strict; Path=/; "
+                       "Max-Age=0")
+            self._send_json({"ok": True}, extra_headers=[("Set-Cookie", expired)])
+            return
+        if not self._guard():
+            return
+        if self.path == "/api/ttl":
+            data = self._read_json()
+            if data.get("die") is True:
+                self._send_json(self.app.ttl_die())
+                return
+            raw_days = data.get("days")
+            try:
+                days = float(raw_days)
+            except (TypeError, ValueError):
+                self._send_json({"error": "days must be a number"}, 400)
+                return
+            result = self.app.ttl_set(days)
+            self._send_json(result, 410 if result.get("dead") and
+                            result.get("error") else 200)
+            return
         if self.path == "/api/message":
             data = self._read_json()
             prompt = (data.get("prompt") or "").strip()
@@ -999,7 +1153,8 @@ class Handler(BaseHTTPRequestHandler):
                 cid = int(conv_id) if conv_id else None
             except (TypeError, ValueError):
                 cid = None
-            self._send_json(self.app.post_message(cid, prompt))
+            result = self.app.post_message(cid, prompt)
+            self._send_json(result, 410 if result.get("dead") else 200)
             return
         if self.path == "/api/approve":
             data = self._read_json()

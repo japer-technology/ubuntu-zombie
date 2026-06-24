@@ -8,6 +8,22 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Added
+- **Chat-UI password gate and Time-to-Live (TTL) kill switch.** The chat
+  service is reachable by every local user on `http://127.0.0.1:7878`, so
+  it is now protected by a shared password (the installer asks for it;
+  default `livelongandprosper`, stored only as a PBKDF2 hash in
+  `secrets/env` as `ZOMBIE_ADMIN_PASSWORD_HASH`). Each install also gets a
+  Time to Live (default 3 days, set with `ZOMBIE_TTL_DAYS` or the
+  interactive review). Once the TTL elapses — or an operator runs
+  `/ttl --die` — the zombie writes a durable tombstone and is permanently
+  disabled until the next reinstall. The new `/ttl` chat command shows the
+  remaining time, `/ttl <days>` extends it, and `/ttl --die` kills the
+  zombie immediately. New server endpoints back it: `GET /api/session`,
+  `POST /api/login`, `POST /api/logout`, and `GET`/`POST /api/ttl`. State
+  lives in `payload/agent/lifecycle.py`; the password helpers live in
+  `payload/agent/auth.py`.
+
 ### Fixed
 - **`/whoami` no longer errors when provider configuration is broken or
   incomplete.** The chat UI now calls a dedicated `/api/whoami`

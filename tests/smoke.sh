@@ -1186,6 +1186,227 @@ assert app.pending_calls() == [], app.pending_calls()
 app.history.close()
 PY
   rm -rf "${_CONV_TMP}"
+
+  echo "  lifecycle TTL kill switch"
+  _LIFE_TMP="$(mktemp -d)"
+  ZOMBIE_LIFECYCLE_STATE="${_LIFE_TMP}/lifecycle.json" \
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import time
+import lifecycle
+
+# format_remaining mirrors the documented "/ttl" example shape and
+# singularises units that equal one.
+assert lifecycle.format_remaining(9 * 86400 + 4 * 3600 + 23 * 60 + 12) == \
+    "9 days 4 hours 23 minutes 12 seconds"
+assert lifecycle.format_remaining(86400 + 3600 + 60 + 1) == \
+    "1 day 1 hour 1 minute 1 second"
+assert lifecycle.format_remaining(-5) == "0 days 0 hours 0 minutes 0 seconds"
+
+# A fresh install seeds a live countdown.
+st = lifecycle.initialize(3)
+assert st["dead"] is False and st["alive"] is True, st
+assert 2 * 86400 < st["remaining_seconds"] <= 3 * 86400, st
+
+# "/ttl N" extends from the current expiry, so +5 days on a ~3-day
+# clock leaves ~8 days (never shortens the countdown).
+st = lifecycle.set_ttl(5)
+assert 7 * 86400 < st["remaining_seconds"] <= 8 * 86400, st
+
+# Non-positive extensions are rejected.
+for bad in (0, -1):
+    try:
+        lifecycle.set_ttl(bad)
+    except ValueError:
+        pass
+    else:
+        raise SystemExit(f"set_ttl({bad}) should raise ValueError")
+
+# Killing trips the tombstone permanently; a later /ttl cannot revive it.
+st = lifecycle.kill()
+assert st["dead"] is True and st["dead_reason"] == "killed", st
+st = lifecycle.set_ttl(5)
+assert st["dead"] is True, "a dead zombie must not be revivable via set_ttl"
+
+# Only a fresh initialize() (a reinstall) clears the tombstone.
+st = lifecycle.initialize(1)
+assert st["dead"] is False, st
+
+# An elapsed TTL trips on the next status() read and writes the
+# tombstone durably (a restart cannot revive it).
+lifecycle.initialize(1)
+import json
+from pathlib import Path
+p = Path(__import__("os").environ["ZOMBIE_LIFECYCLE_STATE"])
+data = json.loads(p.read_text())
+data["expires_at"] = time.time() - 1
+p.write_text(json.dumps(data))
+st = lifecycle.status()
+assert st["dead"] is True and st["dead_reason"] == "expired", st
+assert json.loads(p.read_text())["dead"] is True, "expiry must be persisted"
+PY
+  rm -rf "${_LIFE_TMP}"
+
+  echo "  auth password gate"
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import os
+import auth
+
+os.environ.pop(auth.HASH_ENV, None)
+# Gate disabled when no hash is configured: every password passes and
+# auth_required() is False (this is what keeps the smoke server tests
+# from needing a login).
+assert auth.auth_required() is False
+assert auth.check_password("anything") is True
+
+h = auth.hash_password("livelongandprosper")
+assert h.startswith("pbkdf2_sha256$"), h
+assert auth.verify_password("livelongandprosper", h) is True
+assert auth.verify_password("wrong", h) is False
+# Malformed stored hashes never validate.
+for bad in ("", "garbage", "pbkdf2_sha256$nope"):
+    assert auth.verify_password("x", bad) is False, bad
+
+os.environ[auth.HASH_ENV] = h
+try:
+    assert auth.auth_required() is True
+    assert auth.check_password("livelongandprosper") is True
+    assert auth.check_password("nope") is False
+finally:
+    os.environ.pop(auth.HASH_ENV, None)
+
+# Session tokens are opaque and unique.
+assert auth.new_session_token() != auth.new_session_token()
+PY
+
+  echo "  server password gate + /ttl endpoints"
+  _GATE_TMP="$(mktemp -d)"
+  ZOMBIE_HISTORY_DB="${_GATE_TMP}/conversations.db" \
+  ZOMBIE_AUDIT_LOG="${_GATE_TMP}/audit.log" \
+  ZOMBIE_POLICY=payload/etc/policy.yaml \
+  ZOMBIE_LIFECYCLE_STATE="${_GATE_TMP}/lifecycle.json" \
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import json
+import os
+
+import auth
+import lifecycle
+import server
+
+
+class _RFile:
+    def __init__(self, body=b""):
+        self._body = body
+
+    def read(self, *_a, **_k):
+        body, self._body = self._body, b""
+        return body
+
+    def readline(self, *_a, **_k):
+        return b""
+
+
+class _Recorder(server.Handler):
+    def __init__(self, app, path, body=None, cookie=None):
+        self.app = app
+        self.path = path
+        raw = json.dumps(body or {}).encode("utf-8")
+        self.rfile = _RFile(raw)
+        self.headers = {"Content-Length": str(len(raw))}
+        if cookie:
+            self.headers["Cookie"] = cookie
+        self.status = None
+        self.body = b""
+        self.headers_sent = []
+
+    def send_response(self, code, message=None):
+        self.status = code
+
+    def send_header(self, name, value):
+        self.headers_sent.append((name, value))
+
+    def end_headers(self):
+        pass
+
+    def send_error(self, code, *a, **k):
+        self.status = int(code)
+
+    class _W:
+        def __init__(self, outer):
+            self._outer = outer
+
+        def write(self, data):
+            self._outer.body += data
+
+    @property
+    def wfile(self):
+        return _Recorder._W(self)
+
+
+def get(app, path, cookie=None):
+    h = _Recorder(app, path, cookie=cookie)
+    h.do_GET()
+    return h.status, (json.loads(h.body) if h.body else {}), h.headers_sent
+
+
+def post(app, path, body=None, cookie=None):
+    h = _Recorder(app, path, body, cookie=cookie)
+    h.do_POST()
+    return h.status, (json.loads(h.body) if h.body else {}), h.headers_sent
+
+
+# --- Gate enabled: protected endpoints require a login. ---
+os.environ[auth.HASH_ENV] = auth.hash_password("livelongandprosper")
+lifecycle.initialize(3)
+app = server.App()
+
+status, body, _ = get(app, "/api/session")
+assert body["required"] is True and body["authenticated"] is False, body
+
+status, body, _ = get(app, "/api/health")
+assert status == 401, (status, body)
+
+status, body, _ = post(app, "/api/login", {"password": "wrong"})
+assert status == 401, (status, body)
+
+status, body, headers = post(app, "/api/login", {"password": "livelongandprosper"})
+assert status == 200 and body.get("ok"), (status, body)
+cookie = next(v.split(";", 1)[0] for k, v in headers if k == "Set-Cookie")
+
+status, body, _ = get(app, "/api/health", cookie=cookie)
+assert status == 200, (status, body)
+
+# Logout invalidates the token.
+post(app, "/api/logout", cookie=cookie)
+status, body, _ = get(app, "/api/health", cookie=cookie)
+assert status == 401, (status, body)
+app.history.close()
+os.environ.pop(auth.HASH_ENV, None)
+
+# --- TTL endpoints (gate disabled). ---
+lifecycle.initialize(3)
+app = server.App()
+
+status, body, _ = get(app, "/api/ttl")
+assert status == 200 and body["dead"] is False, body
+
+status, body, _ = post(app, "/api/ttl", {"days": 5})
+assert status == 200 and 7 * 86400 < body["remaining_seconds"] <= 8 * 86400, body
+
+status, body, _ = post(app, "/api/ttl", {"days": "not-a-number"})
+assert status == 400, (status, body)
+
+# --die trips the kill switch and message/ttl are refused thereafter.
+status, body, _ = post(app, "/api/ttl", {"die": True})
+assert status == 200 and body["dead"] is True, body
+
+status, body, _ = post(app, "/api/message", {"prompt": "hello"})
+assert status == 410 and body.get("dead") is True, (status, body)
+
+status, body, _ = post(app, "/api/ttl", {"days": 5})
+assert body.get("dead") is True, body
+app.history.close()
+PY
+  rm -rf "${_GATE_TMP}"
 }
 
 run_branding() {

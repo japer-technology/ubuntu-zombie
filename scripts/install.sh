@@ -96,6 +96,20 @@ SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
 VNC_PASSWORD="${VNC_PASSWORD:-}"
 TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
 
+# Ubuntu Zombie chat-UI password gate and Time-to-Live (TTL) kill switch.
+# The chat service is reachable by every local user on http://127.0.0.1:PORT,
+# so it is protected by a shared password (only a PBKDF2 hash is stored in
+# secrets/env). The TTL bounds the lifetime of the root-capable agent: once
+# it elapses (or the operator runs `/ttl --die`) the zombie is permanently
+# disabled until the next reinstall.
+ZOMBIE_ADMIN_PASSWORD_DEFAULT="livelongandprosper"
+ADMIN_PASSWORD="${ZOMBIE_ADMIN_PASSWORD:-}"
+# 1 once the operator has explicitly chosen a password (env or prompt), so a
+# re-install does not silently overwrite a customised password with the default.
+ADMIN_PASSWORD_SET=0
+[[ -n "${ADMIN_PASSWORD}" ]] && ADMIN_PASSWORD_SET=1
+TTL_DAYS="${ZOMBIE_TTL_DAYS:-3}"
+
 # Local LLM discovery. During an interactive install the script can scan the
 # host's IPv4 /24 (all 256 addresses) for an OpenAI-compatible local LLM
 # server — LM Studio, Ollama, llama.cpp, etc. — answering on
@@ -284,6 +298,10 @@ Environment variables (selected; see docs/CONFIGURATION.md for all):
                               (default 'local'; most local servers ignore it).
   SSH_PUBLIC_KEY              SSH public key string.
   VNC_PASSWORD                Loopback-only VNC password.
+  ZOMBIE_ADMIN_PASSWORD       Chat-UI password gate (default
+                              'livelongandprosper'; only a hash is stored).
+  ZOMBIE_TTL_DAYS=<n>         Time to Live in days before the zombie is
+                              permanently disabled (default 3).
   TAILSCALE_AUTHKEY           Pre-auth key for unattended Tailscale
                               (used only when ZOMBIE_SKIP_TAILSCALE=0).
 
@@ -451,6 +469,13 @@ is_valid_tcp_port() {
   (( "$1" >= 1 && "$1" <= 65535 ))
 }
 
+# A Time-to-Live in whole days: a positive integer from 1 to 36500
+# (a century is plenty; the upper bound keeps the expiry timestamp sane).
+is_valid_ttl_days() {
+  [[ "$1" =~ ^[0-9]+$ ]] || return 1
+  (( "$1" >= 1 && "$1" <= 36500 ))
+}
+
 # Validate user-controlled install settings before they are interpolated into
 # paths, sudoers entries, generated unit files, or shell commands.
 validate_config() {
@@ -471,6 +496,9 @@ validate_config() {
   fi
   if ! is_valid_tcp_port "${CHAT_PORT}"; then
     die "ZOMBIE_CHAT_PORT must be an integer from 1 to 65535." 2
+  fi
+  if ! is_valid_ttl_days "${TTL_DAYS}"; then
+    die "ZOMBIE_TTL_DAYS must be an integer number of days from 1 to 36500." 2
   fi
 }
 
@@ -1060,10 +1088,12 @@ print_parameter_table() {
   field "8) Receipt file"    "${receipt_state}"
   field "9) SSH public key"  "${ssh_state}"
   field "10) VNC password"   "${vnc_state}"
+  field "11) Chat password"  "$([[ "${ADMIN_PASSWORD_SET}" == "1" ]] && echo 'set (hidden)' || printf 'default (%s)' "${ZOMBIE_ADMIN_PASSWORD_DEFAULT}")"
+  field "12) Time to Live"   "${TTL_DAYS} day(s) then permanently disabled"
   if [[ -n "${LOCAL_LLM_MODEL}" ]]; then
-    field "11) Local LLM"    "${LOCAL_LLM_MODEL} @ ${LOCAL_LLM_BASE_URL}"
+    field "13) Local LLM"    "${LOCAL_LLM_MODEL} @ ${LOCAL_LLM_BASE_URL}"
   else
-    field "11) Local LLM"    "none (scan LAN for an OpenAI-compatible server)" "${C_DIM}"
+    field "13) Local LLM"    "none (scan LAN for an OpenAI-compatible server)" "${C_DIM}"
   fi
   field "    Host"           "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
   printf '\n'
@@ -1162,6 +1192,29 @@ _edit_vnc_password() {
   VNC_PASSWORD="${p1}"
   ok "VNC password recorded."
 }
+_edit_admin_password() {
+  local p1 p2
+  read -r -s -p "New chat password (blank to keep the default '${ZOMBIE_ADMIN_PASSWORD_DEFAULT}'): " p1; echo
+  if [[ -z "${p1}" ]]; then
+    info "Chat password left at the default."
+    return 0
+  fi
+  read -r -s -p "Confirm chat password: " p2; echo
+  if [[ "${p1}" != "${p2}" ]]; then
+    warn "Passwords did not match; chat password unchanged."
+    return 0
+  fi
+  ADMIN_PASSWORD="${p1}"
+  ADMIN_PASSWORD_SET=1
+  ok "Chat password recorded."
+}
+_edit_ttl_days() {
+  local v
+  if prompt_until_valid "$(printf 'New Time to Live in days [%s]: ' "${TTL_DAYS}")" \
+       is_valid_ttl_days v 1 && [[ -n "${v}" ]]; then
+    TTL_DAYS="${v}"; ok "Time to Live set to ${TTL_DAYS} day(s)."
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Local LLM discovery on the LAN
@@ -1259,7 +1312,47 @@ EOF
   chmod 600 "${file}"
 }
 
-# Scan the local /24 and populate the global arrays DISCOVERED_ENDPOINTS /
+# Compute the PBKDF2 hash for the chat-UI password without exposing the
+# plaintext on a command line (it is piped to auth.py over stdin). An empty
+# password makes auth.py fall back to the documented default.
+admin_password_hash() {
+  printf '%s\n' "$1" | python3 "${PAYLOAD_DIR}/agent/auth.py"
+}
+
+# Ensure secrets/env carries a ZOMBIE_ADMIN_PASSWORD_HASH line. The hash is
+# (re)written when it is missing, or when the operator explicitly chose a
+# password this run (ADMIN_PASSWORD_SET=1); an existing hash is otherwise
+# preserved so a plain re-install never resets a customised password.
+ensure_admin_password_hash() {
+  local file="$1" hash has_line=0
+  grep -q '^ZOMBIE_ADMIN_PASSWORD_HASH=' "${file}" 2>/dev/null && has_line=1
+  if [[ "${has_line}" -eq 1 && "${ADMIN_PASSWORD_SET}" != "1" ]]; then
+    return 0
+  fi
+  if ! hash="$(admin_password_hash "${ADMIN_PASSWORD:-${ZOMBIE_ADMIN_PASSWORD_DEFAULT}}")"; then
+    die "Failed to hash the chat password." 1
+  fi
+  if [[ "${has_line}" -eq 1 ]]; then
+    sed -i -E '/^ZOMBIE_ADMIN_PASSWORD_HASH=/d' "${file}"
+  fi
+  [[ -s "${file}" ]] && [[ "$(tail -c1 "${file}" 2>/dev/null)" != $'\n' ]] && printf '\n' >> "${file}"
+  printf 'ZOMBIE_ADMIN_PASSWORD_HASH=%s\n' "${hash}" >> "${file}"
+}
+
+# Initialise (or reset) the Time-to-Live kill switch. A reinstall always
+# resets the tombstone and starts a fresh countdown — that is how a dead
+# zombie is brought back to life.
+init_lifecycle_state() {
+  local state="${ZOMBIE_DIR}/state/lifecycle.json"
+  if ! runuser -u "${AGENT_USER}" -- env \
+        ZOMBIE_LIFECYCLE_STATE="${state}" \
+        python3 "${ZOMBIE_DIR}/agent/lifecycle.py" init --days "${TTL_DAYS}" >/dev/null; then
+    die "Failed to initialise the Time-to-Live state." 1
+  fi
+  chown "${AGENT_USER}:${AGENT_USER}" "${state}"
+  chmod 600 "${state}"
+  ok "Time to Live set: ${TTL_DAYS} day(s) until the zombie is disabled."
+}
 # DISCOVERED_MODELS (parallel index) with every advertised model.
 DISCOVERED_ENDPOINTS=()
 DISCOVERED_MODELS=()
@@ -1372,7 +1465,7 @@ review_parameters() {
   local choice
   while true; do
     print_parameter_table
-    printf '  %s[a]%s accept and install    %s[1-11]%s edit a field    %s[q]%s cancel\n' \
+    printf '  %s[a]%s accept and install    %s[1-13]%s edit a field    %s[q]%s cancel\n' \
       "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
     if ! read -r -p "$(printf '%s➜%s your choice [a]: ' "${C_BRAND}" "${C_RESET}")" choice; then
       info "No input (EOF); cancelling."; exit 0
@@ -1397,8 +1490,10 @@ review_parameters() {
       8)  _toggle_receipt ;;
       9)  _edit_ssh_key ;;
       10) _edit_vnc_password ;;
-      11) _edit_local_llm ;;
-      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-11, 'a', or 'q'." ;;
+      11) _edit_admin_password ;;
+      12) _edit_ttl_days ;;
+      13) _edit_local_llm ;;
+      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-13, 'a', or 'q'." ;;
     esac
   done
 }
@@ -2211,7 +2306,11 @@ else
   chmod 600 "${ZOMBIE_DIR}/secrets/env"
 fi
 
-# ---------------------------------------------------------------------------
+# Stamp the chat-UI password hash into secrets/env (idempotent: keeps an
+# existing hash unless the operator chose a new password this run).
+ensure_admin_password_hash "${ZOMBIE_DIR}/secrets/env"
+chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/secrets/env"
+chmod 600 "${ZOMBIE_DIR}/secrets/env"
 # Docker CE (official repo)
 # ---------------------------------------------------------------------------
 
@@ -2509,7 +2608,7 @@ fi
 # Chat service source.
 install -d -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${ZOMBIE_DIR}/agent" "${ZOMBIE_DIR}/agent/templates"
-for f in server.py providers.py policy.py audit.py runner.py history.py tools.py pi_mono.py skill_loader.py examples.md; do
+for f in server.py providers.py policy.py audit.py runner.py history.py tools.py pi_mono.py skill_loader.py auth.py lifecycle.py examples.md; do
   install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
     "${PAYLOAD_DIR}/agent/${f}" "${ZOMBIE_DIR}/agent/${f}"
 done
@@ -2538,6 +2637,10 @@ install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/templates/settings.json.tmpl" "${ZOMBIE_DIR}/agent/templates/settings.json.tmpl"
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl" "${ZOMBIE_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl"
+
+# Initialise the Time-to-Live kill switch now that lifecycle.py is deployed.
+# Every install starts (or restarts) the countdown with a fresh tombstone.
+init_lifecycle_state
 
 # Render pi-mono runtime configs into /opt/ai-zombie/pi/. Root-owned,
 # world-readable; the chat service reads them but does not need to
