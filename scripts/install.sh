@@ -905,12 +905,23 @@ _toggle_receipt() {
 }
 _edit_admin_password() {
   local p1 p2
-  read -r -s -p "New chat password (blank to keep the default '${ZOMBIE_ADMIN_PASSWORD_DEFAULT}'): " p1; echo
+  [[ "${ZOMBIE_NONINTERACTIVE}" == "1" || ! -t 0 ]] && return 0
+  if ! read -r -s -p "New chat password (blank to keep the default '${ZOMBIE_ADMIN_PASSWORD_DEFAULT}'): " p1; then
+    echo
+    warn "No input (EOF); chat password unchanged."
+    return 0
+  fi
+  echo
   if [[ -z "${p1}" ]]; then
     info "Chat password left at the default."
     return 0
   fi
-  read -r -s -p "Confirm chat password: " p2; echo
+  if ! read -r -s -p "Confirm chat password: " p2; then
+    echo
+    warn "No input (EOF); chat password unchanged."
+    return 0
+  fi
+  echo
   if [[ "${p1}" != "${p2}" ]]; then
     warn "Passwords did not match; chat password unchanged."
     return 0
@@ -1703,7 +1714,7 @@ else
   runuser -l "${AGENT_USER}" -- "${ZOMBIE_DIR}/bin/setup-agent-venv"
 fi
 
-ok "Python venv ready at ${AGENT_HOME}/agent-env."ok "Python venv ready at ${AGENT_HOME}/agent-env."
+ok "Python venv ready at ${AGENT_HOME}/agent-env."
 
 # ---------------------------------------------------------------------------
 # Node runtime
@@ -1866,7 +1877,7 @@ install_pinned_node_bridge() {
 
   pinned_version="$(tr -d '[:space:]' < "${version_file}")"
   if [[ -z "${pinned_version}" ]]; then
-    die "${version_file#${ROOT}/} is empty; refusing to install ${name} unpinned." 1
+    die "${version_file#${REPO_ROOT}/} is empty; refusing to install ${name} unpinned." 1
   fi
 
   if ! read -r package version url sha256 _integrity _license < <(
@@ -1880,7 +1891,7 @@ install_pinned_node_bridge() {
     die "Incomplete bridge dependency lock entry for ${name}." 1
   fi
   if [[ "${version}" != "${pinned_version}" ]]; then
-    die "${version_file#${ROOT}/} pins ${pinned_version}, but bridge lock pins ${version}." 1
+    die "${version_file#${REPO_ROOT}/} pins ${pinned_version}, but bridge lock pins ${version}." 1
   fi
 
   tmp_dir="$(mktemp -d)"
