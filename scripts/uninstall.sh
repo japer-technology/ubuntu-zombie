@@ -47,6 +47,9 @@ DRY_RUN=0
 ARCHIVE=0
 ASSUME_YES=0
 KEEP_AGENT=0
+# Track recoverable failures from the start so early cleanup can continue
+# through later steps while still returning a non-zero final status.
+UNINSTALL_EXIT=0
 
 # Shared colours/logging come from lib.sh. Keep the legacy C_YEL alias so the
 # inline printf calls below (e.g. the [dry] glyph) need no churn.
@@ -154,6 +157,69 @@ run() {
   fi
 }
 
+shell_quote() {
+  # Quote a single token before embedding it in any composed command string
+  # that will be evaluated. Bash printf %q uses backslash-style escaping,
+  # which keeps dry-run output readable while preserving safety.
+  if (( $# != 1 )); then
+    printf '%s[x]%s shell_quote() takes exactly one token; got %d args: %s\n' \
+      "${C_RED}" "${C_RESET}" "$#" "$*" >&2
+    exit 1
+  fi
+  printf '%q' "$1"
+}
+
+run_or_warn() {
+  # Run a non-critical cleanup command. Failures are reported in the final
+  # exit code, but they must not stop later uninstall steps from running.
+  local description="$1"
+  local command="$2"
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    run "${command}"
+    return 0
+  fi
+  set +e
+  # shellcheck disable=SC2294 # Execute the composed cleanup command after shell_quote expansions.
+  eval "${command}"
+  local rc=$?
+  set -e
+  if (( rc != 0 )); then
+    warn "${description} failed (exit ${rc}); continuing cleanup."
+    UNINSTALL_EXIT=1
+  fi
+  return 0
+}
+
+remove_tree_checked() {
+  # Remove a directory tree and verify it is actually gone before reporting
+  # success; stubborn paths are errors, but cleanup should still continue.
+  local path="$1"
+  local label="$2"
+  local quoted
+  quoted="$(shell_quote "${path}")"
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    run "rm -rf -- ${quoted}"
+    ok "Would remove ${label}"
+    return 0
+  fi
+  set +e
+  rm -rf -- "${path}"
+  local rc=$?
+  set -e
+  if (( rc != 0 )); then
+    warn "Failed to remove ${label} (exit ${rc}); continuing cleanup."
+    UNINSTALL_EXIT=1
+    return 0
+  fi
+  if [[ -e "${path}" ]]; then
+    warn "Failed to remove ${label}; path still exists: ${path}"
+    UNINSTALL_EXIT=1
+    return 0
+  fi
+  ok "Removed ${label}"
+  return 0
+}
+
 confirm() {
   local prompt="$1"
   [[ "${ASSUME_YES}" == "1" ]] && return 0
@@ -179,7 +245,7 @@ info "Removing systemd units and sudoers drop-ins"
 for unit in ubuntu-zombie-chat.service ubuntu-zombie-health.service ubuntu-zombie-health.timer; do
   run "rm -f /etc/systemd/system/${unit}"
 done
-run "systemctl daemon-reload"
+run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
 
 run "rm -f /etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie"
 # Also remove drop-ins from any previous install that used a different
@@ -199,7 +265,7 @@ for f in /etc/sudoers.d/90-*-ubuntu-zombie; do
   if id "${orphan_name}" >/dev/null 2>&1; then
     warn "  account '${orphan_name}' still exists; remove it manually if no longer wanted."
   fi
-  run "rm -f $f"
+  run "rm -f -- $(shell_quote "${f}")"
 done
 shopt -u nullglob
 
@@ -237,8 +303,7 @@ fi
 # -------------------------------------------------------------------
 if [[ -d "${ZOMBIE_DIR}" ]]; then
   if confirm "Remove ${ZOMBIE_DIR} (includes secrets, state, and chat history)?"; then
-    run "rm -rf ${ZOMBIE_DIR}"
-    ok "Removed ${ZOMBIE_DIR}"
+    remove_tree_checked "${ZOMBIE_DIR}" "${ZOMBIE_DIR}"
   else
     warn "Keeping ${ZOMBIE_DIR}. Privileged code under it is still on disk."
   fi
@@ -256,7 +321,8 @@ if command -v npm >/dev/null 2>&1; then
   for _pkg in @earendil-works/pi-coding-agent @earendil-works/pi-ai; do
     if npm ls -g --depth=0 "${_pkg}" >/dev/null 2>&1; then
       if confirm "Remove global npm package ${_pkg}?"; then
-        run "npm uninstall -g ${_pkg}"
+        run_or_warn "Remove global npm package ${_pkg}" \
+          "npm uninstall -g $(shell_quote "${_pkg}")"
       fi
     fi
   done
@@ -276,11 +342,11 @@ for _shim in zombie-chat audit-recent secrets-edit zombie-health zombie-diagnost
   if [[ -L "${_path}" ]]; then
     _target="$(readlink -f "${_path}" 2>/dev/null || true)"
     case "${_target}" in
-      "${ZOMBIE_DIR}"/*) run "rm -f ${_path}" ;;
+      "${ZOMBIE_DIR}"/*) run "rm -f -- $(shell_quote "${_path}")" ;;
       "") # broken symlink; check the literal target instead.
         _literal="$(readlink "${_path}" 2>/dev/null || true)"
         case "${_literal}" in
-          "${ZOMBIE_DIR}"/*) run "rm -f ${_path}" ;;
+          "${ZOMBIE_DIR}"/*) run "rm -f -- $(shell_quote "${_path}")" ;;
         esac
         ;;
     esac
@@ -292,15 +358,13 @@ done
 # -------------------------------------------------------------------
 if [[ -d /etc/ubuntu-zombie ]]; then
   if confirm "Remove /etc/ubuntu-zombie (policy.yaml)?"; then
-    run "rm -rf /etc/ubuntu-zombie"
+    remove_tree_checked "/etc/ubuntu-zombie" "/etc/ubuntu-zombie"
   fi
 fi
 
 # -------------------------------------------------------------------
 # 7. Remove the agent user (last, so its home is still owned).
 # -------------------------------------------------------------------
-UNINSTALL_EXIT=0
-
 if [[ "${KEEP_AGENT}" == "1" ]]; then
   info "Keeping user ${AGENT_USER} (--keep-agent)."
 elif id "${AGENT_USER}" >/dev/null 2>&1; then

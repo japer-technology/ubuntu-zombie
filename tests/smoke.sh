@@ -1498,6 +1498,100 @@ run_bad_usage() {
     echo "FAIL: run() guard did not refuse extra args" >&2
     exit 1
   fi
+  # Uninstall must keep cleaning up even when host-level best-effort
+  # removals fail, and it must quote paths passed through its eval helper.
+  grep -Fq 'run_or_warn "systemctl daemon-reload"' scripts/uninstall.sh
+  grep -Fq 'remove_tree_checked "${ZOMBIE_DIR}" "${ZOMBIE_DIR}"' scripts/uninstall.sh
+  grep -Fq 'run_or_warn "Remove global npm package ${_pkg}"' scripts/uninstall.sh
+  grep -Fq 'rm -f -- $(shell_quote "${f}")' scripts/uninstall.sh
+  grep -Fq 'rm -f -- $(shell_quote "${_path}")' scripts/uninstall.sh
+  # uninstall.sh exits during top-level validation when sourced as non-root,
+  # so exercise a minimal copy of the helper bodies here. Keep this block in
+  # sync with the uninstall helpers above.
+  out="$(bash -c '
+    set -Eeuo pipefail
+    DRY_RUN=0
+    UNINSTALL_EXIT=0
+    warn() { printf "WARN:%s\n" "$*"; }
+    run() {
+      if (( $# != 1 )); then
+        echo "BADARGS" >&2
+        exit 1
+      fi
+      eval "$1"
+    }
+    shell_quote() {
+      if (( $# != 1 )); then
+        echo "BADQUOTE" >&2
+        exit 1
+      fi
+      printf "%q" "$1"
+    }
+    run_or_warn() {
+      local description="$1"
+      local command="$2"
+      if [[ "${DRY_RUN}" == "1" ]]; then
+        run "${command}"
+        return 0
+      fi
+      set +e
+      eval "${command}"
+      local rc=$?
+      set -e
+      if (( rc != 0 )); then
+        warn "${description} failed (exit ${rc}); continuing cleanup."
+        UNINSTALL_EXIT=1
+      fi
+      return 0
+    }
+    remove_tree_checked() {
+      local path="$1"
+      local label="$2"
+      local quoted
+      quoted="$(shell_quote "${path}")"
+      if [[ "${DRY_RUN}" == "1" ]]; then
+        run "rm -rf -- ${quoted}"
+        return 0
+      fi
+      set +e
+      rm -rf -- "${path}"
+      local rc=$?
+      set -e
+      if (( rc != 0 )); then
+        warn "Failed to remove ${label} (exit ${rc}); continuing cleanup."
+        UNINSTALL_EXIT=1
+        return 0
+      fi
+      if [[ -e "${path}" ]]; then
+        warn "Failed to remove ${label}; path still exists: ${path}"
+        UNINSTALL_EXIT=1
+        return 0
+      fi
+      return 0
+    }
+    tmp=""
+    trap '\''if [[ -n "${tmp}" && -d "${tmp}/parent" ]]; then chmod 700 "${tmp}/parent"; fi; [[ -n "${tmp}" ]] && rm -rf "${tmp}"'\'' EXIT
+    run_or_warn "expected success" "true"
+    [[ "${UNINSTALL_EXIT}" -eq 0 ]]
+    run_or_warn "expected failure" "false"
+    [[ "${UNINSTALL_EXIT}" -eq 1 ]]
+    tmp="$(mktemp -d)"
+    mkdir -p "${tmp}/parent/stubborn"
+    chmod 500 "${tmp}/parent"
+    remove_tree_checked "${tmp}/parent/stubborn" "stubborn"
+    [[ "${UNINSTALL_EXIT}" -eq 1 ]]
+    chmod 700 "${tmp}/parent"
+    rm -rf "${tmp}"
+    tmp=""
+  ' 2>&1)"
+  if [[ "${out}" != *"WARN:expected failure failed (exit 1); continuing cleanup."* ]]; then
+    echo "FAIL: run_or_warn warning was not emitted" >&2
+    exit 1
+  fi
+  if [[ "${out}" != *"WARN:Failed to remove stubborn"* ]]; then
+    echo "FAIL: remove_tree_checked warning was not emitted" >&2
+    exit 1
+  fi
 }
 
 run_noninteractive() {
