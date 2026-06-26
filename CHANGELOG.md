@@ -12,9 +12,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Chat-UI password gate and Time-to-Live (TTL) kill switch.** The chat
   service is reachable by every local user on `http://127.0.0.1:7878`, so
   it is now protected by a shared password (the installer asks for it;
-  default `livelongandprosper`, stored only as a PBKDF2 hash in
+  default `braaaains`, stored only as a PBKDF2 hash in
   `secrets/env` as `ZOMBIE_ADMIN_PASSWORD_HASH`). Each install also gets a
-  Time to Live (default 3 days, set with `ZOMBIE_TTL_DAYS` or the
+  Time to Live (default 7 days, set with `ZOMBIE_TTL_DAYS` or the
   interactive review). Once the TTL elapses — or an operator runs
   `/ttl --die` — the zombie writes a durable tombstone and is permanently
   disabled until the next reinstall. The new `/ttl` chat command shows the
@@ -25,6 +25,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `payload/agent/auth.py`.
 
 ### Changed
+- The installer now shows the Ubuntu Zombie logo as soon as install mode
+  starts, the uninstaller shows the same logo, the default TTL is 7 days,
+  and the default chat password is `braaaains`.
 - **Zombie Zero default footprint.** Removed the installer/runtime
   surfaces identified in `docs/analysis/ubuntu-zombie-zero.md`: SSH
   server setup, Tailscale, fail2ban/UFW wiring, VNC/x11vnc, graphical

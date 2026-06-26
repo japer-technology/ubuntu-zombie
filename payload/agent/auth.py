@@ -3,7 +3,7 @@
 The chat service binds to ``127.0.0.1`` only, but on a shared desktop
 *every* local user can reach ``http://127.0.0.1:7878``. A password gate
 keeps the root-capable administrator behind a shared secret. The
-installer asks for the password (default ``livelongandprosper``) and
+installer asks for the password (default ``braaaains``) and
 stores only a salted PBKDF2 hash in ``secrets/env`` as
 ``ZOMBIE_ADMIN_PASSWORD_HASH`` — the plaintext is never written to disk.
 
@@ -24,7 +24,7 @@ import os
 import secrets
 
 HASH_ENV = "ZOMBIE_ADMIN_PASSWORD_HASH"
-DEFAULT_PASSWORD = "livelongandprosper"
+DEFAULT_PASSWORD = "braaaains"
 
 _ALGO = "pbkdf2_sha256"
 _ITERATIONS = 200_000

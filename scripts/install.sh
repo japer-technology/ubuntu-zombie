@@ -80,13 +80,13 @@ ZOMBIE_NONINTERACTIVE="${ZOMBIE_NONINTERACTIVE:-0}"
 # secrets/env). The TTL bounds the lifetime of the root-capable agent: once
 # it elapses (or the operator runs `/ttl --die`) the zombie is permanently
 # disabled until the next reinstall.
-ZOMBIE_ADMIN_PASSWORD_DEFAULT="livelongandprosper"
+ZOMBIE_ADMIN_PASSWORD_DEFAULT="braaaains"
 ADMIN_PASSWORD="${ZOMBIE_ADMIN_PASSWORD:-}"
 # 1 once the operator has explicitly chosen a password (env or prompt), so a
 # re-install does not silently overwrite a customised password with the default.
 ADMIN_PASSWORD_SET=0
 [[ -n "${ADMIN_PASSWORD}" ]] && ADMIN_PASSWORD_SET=1
-TTL_DAYS="${ZOMBIE_TTL_DAYS:-3}"
+TTL_DAYS="${ZOMBIE_TTL_DAYS:-7}"
 
 # Local LLM discovery. During an interactive install the script can scan the
 # host's IPv4 /24 (all 256 addresses) for an OpenAI-compatible local LLM
@@ -265,10 +265,10 @@ Environment variables (selected; see docs/CONFIGURATION.md for all):
                               1234, LM Studio's default).
   ZOMBIE_LOCAL_LLM_API_KEY=<k>  API key recorded for the discovered local LLM
                               (default 'local'; most local servers ignore it).
-  ZOMBIE_ADMIN_PASSWORD       Chat-UI password gate (default
-                              'livelongandprosper'; only a hash is stored).
+  ZOMBIE_ADMIN_PASSWORD       Chat-UI password gate (default 'braaaains';
+                              only a hash is stored).
   ZOMBIE_TTL_DAYS=<n>         Time to Live in days before the zombie is
-                              permanently disabled (default 3).
+                              permanently disabled (default 7).
 
 Examples:
   # Preview the plan before granting anything:
@@ -324,6 +324,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 readonly DRY_RUN
+
+if [[ "${SUBCOMMAND}" == "install" ]] && ! (( ZOMBIE_QUIET )); then
+  brand_splash "install" "${SCRIPT_VERSION}"
+fi
 
 # ---------------------------------------------------------------------------
 # Helpers shared across subcommands
@@ -1442,9 +1446,6 @@ on_error() {
 # end. The title is printed as a plain banner so it is not counted as a
 # numbered phase.
 INSTALL_T0="$(date +%s)"
-if ! (( ZOMBIE_QUIET )); then
-  brand_splash "install" "${SCRIPT_VERSION}"
-fi
 
 info "Log file: ${LOG_FILE}"
 info "Agent user: ${AGENT_USER}"

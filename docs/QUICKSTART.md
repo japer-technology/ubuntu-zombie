@@ -46,8 +46,8 @@ sudo ZOMBIE_NONINTERACTIVE=1 \
 | `ZOMBIE_USER` | `zombie` | No |
 | `ZOMBIE_DIR` | `/opt/ai-zombie` | No |
 | `ZOMBIE_CHAT_PORT` | `7878` | No |
-| `ZOMBIE_ADMIN_PASSWORD` | `livelongandprosper` | No |
-| `ZOMBIE_TTL_DAYS` | `14` | No |
+| `ZOMBIE_ADMIN_PASSWORD` | `braaaains` | No |
+| `ZOMBIE_TTL_DAYS` | `7` | No |
 | `ZOMBIE_RECEIPT_FILE` | `/var/log/ubuntu-zombie/install-receipt.txt` | No |
 | `ZOMBIE_LOCAL_LLM_MODE` | `auto` | No |
 
