@@ -1726,6 +1726,12 @@ run_standards() {
     || { echo "health systemd template must use __ZOMBIE_DIR__ placeholder" >&2; exit 1; }
   grep -q "ZOMBIE_HEALTH_WARN_ONLY=1" payload/systemd/ubuntu-zombie-health.service \
     || { echo "health timer must not leave a failed unit after reporting unhealthy state" >&2; exit 1; }
+  grep -q 'id="logout"' payload/agent/templates/index.html \
+    || { echo "chat UI must expose the logoff button" >&2; exit 1; }
+  grep -q 'case "/logout"' payload/agent/templates/index.html \
+    || { echo "chat UI must expose the /logout command" >&2; exit 1; }
+  grep -q 'Available commands (alphabetic by group)' payload/agent/templates/index.html \
+    || { echo "chat /help must keep grouped alphabetic output" >&2; exit 1; }
   grep -q "s|__ZOMBIE_DIR__|\\\${ZOMBIE_DIR}|g" scripts/install.sh \
     || { echo "install.sh must render __ZOMBIE_DIR__ in systemd units" >&2; exit 1; }
   if grep -n '\[\[ "${JSON}"' scripts/install.sh; then
