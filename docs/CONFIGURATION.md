@@ -305,6 +305,11 @@ by a **password gate**: the installer asks for a chat password (default
 matches the trust model — but the password keeps casual local users
 out of the administrator.)
 
+In the chat UI, `/password new secret` changes the password after a
+browser confirmation and clears existing login sessions. `/password`
+removes the password after confirmation; because the gate is disabled,
+no logoff is required.
+
 ### Time to Live (the kill switch)
 
 Every install gives the root-capable agent a bounded lifetime. The
@@ -320,9 +325,15 @@ Chat commands:
 
 | Command       | Effect                                                        |
 | ------------- | ------------------------------------------------------------- |
-| `/ttl`        | Show the remaining Time to Live.                              |
-| `/ttl <days>` | Extend the Time to Live by `<days>` days from the current expiry. |
-| `/ttl --die`  | Trip the kill switch now — permanently disables the zombie.   |
+| `/ttl`                   | Show the remaining Time to Live.                              |
+| `/ttl <duration>`        | Extend the Time to Live by a duration from the current expiry. |
+| `/ttl reset [duration]`  | Reset the Time to Live from now (default: 7 days).             |
+| `/ttl --die`             | Trip the kill switch now — permanently disables the zombie.    |
+
+Durations are written as number/unit pairs such as `14 days`,
+`2 years 3 months`, or `3 hours`; a bare number is kept as the legacy
+days shorthand. Months and years are fixed approximations of 30 and
+365 days.
 
 State lives in `/opt/ai-zombie/state/lifecycle.json`. It can also be
 inspected from the agent account with

@@ -1194,6 +1194,12 @@ assert lifecycle.format_remaining(9 * 86400 + 4 * 3600 + 23 * 60 + 12) == \
 assert lifecycle.format_remaining(86400 + 3600 + 60 + 1) == \
     "1 day 1 hour 1 minute 1 second"
 assert lifecycle.format_remaining(-5) == "0 days 0 hours 0 minutes 0 seconds"
+assert lifecycle.parse_duration("14 days") == 14 * 86400
+assert lifecycle.parse_duration("2 years 3 months") == \
+    (2 * 365 + 3 * 30) * 86400
+assert lifecycle.parse_duration("3 hours") == 3 * 3600
+assert lifecycle.parse_duration("5") == 5 * 86400
+assert lifecycle.parse_duration("", default_seconds=7 * 86400) == 7 * 86400
 
 # A fresh install seeds a live countdown.
 st = lifecycle.initialize(3)
@@ -1204,6 +1210,10 @@ assert 2 * 86400 < st["remaining_seconds"] <= 3 * 86400, st
 # clock leaves ~8 days (never shortens the countdown).
 st = lifecycle.set_ttl(5)
 assert 7 * 86400 < st["remaining_seconds"] <= 8 * 86400, st
+
+# "/ttl reset D" resets from now instead of extending from the old expiry.
+st = lifecycle.reset_ttl_seconds(lifecycle.parse_duration("14 days"))
+assert 13 * 86400 < st["remaining_seconds"] <= 14 * 86400, st
 
 # Non-positive extensions are rejected.
 for bad in (0, -1):
@@ -1277,6 +1287,7 @@ PY
   ZOMBIE_AUDIT_LOG="${_GATE_TMP}/audit.log" \
   ZOMBIE_POLICY=payload/etc/policy.yaml \
   ZOMBIE_LIFECYCLE_STATE="${_GATE_TMP}/lifecycle.json" \
+  ZOMBIE_SECRETS="${_GATE_TMP}/secrets/env" \
   PYTHONPATH=payload/agent python3 - <<'PY'
 import json
 import os
@@ -1368,6 +1379,27 @@ cookie = next(v.split(";", 1)[0] for k, v in headers if k == "Set-Cookie")
 status, body, _ = get(app, "/api/health", cookie=cookie)
 assert status == 200, (status, body)
 
+# Password changes rewrite secrets/env without leaking plaintext, and a
+# changed password clears existing sessions.
+status, body, _ = post(app, "/api/password", {"password": "new-braaaains"},
+                       cookie=cookie)
+assert status == 200 and body["required"] is True, (status, body)
+assert auth.check_password("new-braaaains") is True
+status, body, _ = get(app, "/api/health", cookie=cookie)
+assert status == 401, (status, body)
+status, body, headers = post(app, "/api/login", {"password": "new-braaaains"})
+assert status == 200 and body.get("ok"), (status, body)
+cookie = next(v.split(";", 1)[0] for k, v in headers if k == "Set-Cookie")
+
+# Empty /password removes the gate; no logoff is required because auth is
+# disabled for every request.
+status, body, _ = post(app, "/api/password", {"password": ""}, cookie=cookie)
+assert status == 200 and body["required"] is False, (status, body)
+status, body, _ = get(app, "/api/health")
+assert status == 200, (status, body)
+
+os.environ[auth.HASH_ENV] = auth.hash_password("braaaains")
+
 # Logout invalidates the token.
 post(app, "/api/logout", cookie=cookie)
 status, body, _ = get(app, "/api/health", cookie=cookie)
@@ -1384,6 +1416,16 @@ assert status == 200 and body["dead"] is False, body
 
 status, body, _ = post(app, "/api/ttl", {"days": 5})
 assert status == 200 and 7 * 86400 < body["remaining_seconds"] <= 8 * 86400, body
+
+status, body, _ = post(app, "/api/ttl", {
+    "reset": True,
+    "duration": "14 days",
+})
+assert status == 200 and 13 * 86400 < body["remaining_seconds"] <= 14 * 86400, body
+
+status, body, _ = post(app, "/api/ttl", {"duration": "3 hours"})
+assert status == 200 and 14 * 86400 < body["remaining_seconds"] <= \
+    14 * 86400 + 3 * 3600, body
 
 status, body, _ = post(app, "/api/ttl", {"days": "not-a-number"})
 assert status == 400, (status, body)
