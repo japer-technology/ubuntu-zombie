@@ -1564,6 +1564,8 @@ run_bad_usage() {
     }
     tmp=""
     trap '\''if [[ -n "${tmp}" && -d "${tmp}/parent" ]]; then chmod 700 "${tmp}/parent"; fi; [[ -n "${tmp}" ]] && rm -rf "${tmp}"'\'' EXIT
+    run_or_warn "expected success" "true"
+    [[ "${UNINSTALL_EXIT}" -eq 0 ]]
     run_or_warn "expected failure" "false"
     [[ "${UNINSTALL_EXIT}" -eq 1 ]]
     tmp="$(mktemp -d)"

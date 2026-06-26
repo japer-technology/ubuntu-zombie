@@ -159,8 +159,8 @@ run() {
 
 shell_quote() {
   # Quote a single token before embedding it in any composed command string
-  # that will be evaluated. This keeps dry-run output readable while
-  # preserving safety.
+  # that will be evaluated. Bash printf %q uses backslash-style escaping,
+  # which keeps dry-run output readable while preserving safety.
   printf '%q' "$1"
 }
 
@@ -174,7 +174,7 @@ run_or_warn() {
     return 0
   fi
   set +e
-  # shellcheck disable=SC2294 # Re-evaluate the composed command string, like run().
+  # shellcheck disable=SC2294 # Re-evaluate shell_quote output in the composed command string.
   eval "${command}"
   local rc=$?
   set -e
