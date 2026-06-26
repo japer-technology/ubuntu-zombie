@@ -1498,6 +1498,13 @@ run_bad_usage() {
     echo "FAIL: run() guard did not refuse extra args" >&2
     exit 1
   fi
+  # Uninstall must keep cleaning up even when host-level best-effort
+  # removals fail, and it must quote paths passed through its eval helper.
+  grep -Fq 'run_or_warn "systemctl daemon-reload"' scripts/uninstall.sh
+  grep -Fq 'remove_tree_checked "${ZOMBIE_DIR}" "${ZOMBIE_DIR}"' scripts/uninstall.sh
+  grep -Fq 'npm uninstall -g "${_pkg}"' scripts/uninstall.sh
+  grep -Fq 'rm -f -- $(shell_quote "${f}")' scripts/uninstall.sh
+  grep -Fq 'rm -f -- $(shell_quote "${_path}")' scripts/uninstall.sh
 }
 
 run_noninteractive() {

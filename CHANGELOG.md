@@ -33,6 +33,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   policy/audit runtime.
 
 ### Fixed
+- **Uninstall now continues cleanup after non-critical host failures.** A
+  failed `systemctl daemon-reload`, global npm package removal, or stubborn
+  install directory now records an error but no longer prevents later cleanup
+  steps such as shim and user removal. Path removals are quoted before passing
+  through the dry-run/eval helper, and directory removals are verified before
+  printing success.
 - **`/whoami` no longer errors when provider configuration is broken or
   incomplete.** The chat UI now calls a dedicated `/api/whoami`
   endpoint, and `/profile` no longer builds itself through `/config`, so
