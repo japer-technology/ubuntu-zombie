@@ -1506,7 +1506,8 @@ run_bad_usage() {
   grep -Fq 'rm -f -- $(shell_quote "${f}")' scripts/uninstall.sh
   grep -Fq 'rm -f -- $(shell_quote "${_path}")' scripts/uninstall.sh
   # uninstall.sh exits during top-level validation when sourced as non-root,
-  # so exercise a minimal copy of the helper bodies here.
+  # so exercise a minimal copy of the helper bodies here. Keep this block in
+  # sync with the uninstall helpers above.
   out="$(bash -c '
     set -Eeuo pipefail
     DRY_RUN=0
