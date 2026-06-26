@@ -5,6 +5,16 @@
 <title>Ubuntu Zombie</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
+  /*
+     Single-file chat shell
+     ----------------------
+     This template is served directly by the local Python service, so it
+     deliberately has no external CSS/JS dependencies: the page must keep
+     working offline, on loopback, and before any package manager is
+     available. Keep styles semantic and token-light so browser light/dark
+     colour schemes, keyboard navigation, and assistive technology all get
+     first-class behaviour without a build step.
+   */
   :root { color-scheme: light dark; }
   body { font-family: system-ui, sans-serif; margin: 0; padding: 0;
          display: flex; flex-direction: column; height: 100vh; }
@@ -46,6 +56,9 @@
            border: 1px solid #8888; background: #fff2; cursor: pointer; }
   button.primary { background: #2ecc7140; border-color: #2ecc71; }
   button.danger { background: #e74c3c40; border-color: #e74c3c; }
+  button:disabled { cursor: not-allowed; opacity: .55; }
+  button:focus-visible, textarea:focus-visible, input:focus-visible {
+    outline: 2px solid #ac43d9; outline-offset: 2px; }
   input[type=text] { padding: .35rem .5rem; border-radius: .3rem;
                      border: 1px solid #8888; background: #fff2;
                      min-width: 18rem; }
@@ -122,7 +135,11 @@
 <header>
   <h1>{{HOSTNAME}}({{USERNAME}})</h1>
   <div class="header-actions">
-    <button type="button" id="logout" title="Log out and secure the chat" hidden>Logoff</button>
+    <!-- Session control is hidden unless the password gate is active and
+         this browser owns a valid session. Removing the password must also
+         remove this affordance because there is no session left to secure. -->
+    <button type="button" id="logout" title="Log out and secure the chat"
+            aria-label="Log off and require the chat password again" hidden>Logoff</button>
   </div>
   <div class="status">{{PROVIDER_STATUS}}</div>
 </header>
@@ -145,6 +162,9 @@
   <div id="status" class="turn-status" role="status" aria-live="polite"></div>
 </footer>
 
+<!-- Authentication overlay. The password is never persisted in the DOM after
+     submit; the server returns only session state, and the UI uses that state
+     to decide whether the Logoff control exists. -->
 <div id="login-overlay" class="overlay" hidden>
   <div class="panel">
     <h2>Ubuntu Zombie</h2>
@@ -158,6 +178,8 @@
   </div>
 </div>
 
+<!-- TTL tombstone. This is intentionally separate from login: expiry is
+     terminal and must disable the chat controls rather than prompt again. -->
 <div id="tomb-overlay" class="overlay tomb" hidden>
   <div class="panel">
     <h2>This Ubuntu Zombie is dead</h2>
@@ -926,6 +948,8 @@ async function handleSlashCommand(input) {
           addMessage("system", "Password updated. Please log in with the new password.");
           await logoutChat(true);
         } else {
+          setAuthState(false, false);
+          showLogin(false);
           addMessage("system", "Password removed. Logoff is not required.");
         }
       } catch (err) { addMessage("system", String(err), { error: true }); }
@@ -1291,6 +1315,10 @@ const tombOverlay = document.getElementById("tomb-overlay");
 const tombMessage = document.getElementById("tomb-message");
 
 function setAuthState(required, authenticated) {
+  // This is the single client-side authority for password-gate visibility.
+  // When ``required`` is false (for example after ``/password`` removes the
+  // hash), Logoff is always hidden even if this browser previously had a
+  // valid session token.
   authRequired = Boolean(required);
   logoutBtn.hidden = !(authRequired && authenticated);
 }
