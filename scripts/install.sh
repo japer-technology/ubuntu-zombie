@@ -182,7 +182,7 @@ diagnose_failure() {
   avail_kb="$(df -P / 2>/dev/null | awk 'NR==2 {print $4}')"
   if [[ -n "${avail_kb:-}" && "${avail_kb}" -lt 1000000 ]]; then
     printf '    Likely cause: the root filesystem is nearly full (%s MB free).\n' "$((avail_kb/1024))" >&2
-    printf '    Fix: free up space (e.g. `sudo apt-get clean`, `docker system prune`) and re-run.\n' >&2
+    printf '    Fix: free up space (e.g. `sudo apt-get clean`) and re-run.\n' >&2
     return
   fi
   if ! getent hosts archive.ubuntu.com >/dev/null 2>&1 \
@@ -465,23 +465,6 @@ load_os_release() {
   fi
 }
 
-# Map the running Ubuntu's VERSION_ID / *_CODENAME to a supported Ubuntu
-# apt-repo codename. Tailscale and Docker both publish per-codename repos,
-# so a wrong guess installs an incompatible package set. Returns 0 and
-# echoes the codename on success; returns non-zero with no output if the
-# host is not a supported Ubuntu LTS. See FIX-1-09.
-resolve_ubuntu_codename() {
-  local codename="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
-  if [[ -z "${codename}" ]]; then
-    case "${VERSION_ID:-}" in
-      22.04) codename="jammy" ;;
-      24.04) codename="noble" ;;
-      *)     return 1 ;;
-    esac
-  fi
-  printf '%s\n' "${codename}"
-}
-
 # ---------------------------------------------------------------------------
 # Preflight
 # ---------------------------------------------------------------------------
@@ -617,8 +600,8 @@ cmd_verify() {
     export ZOMBIE_JSON=1
   fi
   # The embedded verify script's checks ("running as ${AGENT_USER}",
-  # passwordless sudo, DISPLAY, xdotool against the live X session) only
-  # make sense when run by the agent account. If invoked as root, re-exec
+  # passwordless sudo, runtime files) only make sense when run by the
+  # agent account. If invoked as root, re-exec
   # under the agent identity. See FIX-2-09.
   if [[ ${EUID} -eq 0 ]] && [[ "$(id -un)" != "${AGENT_USER}" ]]; then
     if id "${AGENT_USER}" >/dev/null 2>&1; then
@@ -1208,7 +1191,10 @@ review_parameters() {
     print_parameter_table
     printf '  %s[a]%s accept and install    %s[1-8]%s edit a field    %s[q]%s cancel\n' \
       "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
-    case "${choice,,}" in    case "${choice,,}" in
+    if ! read -r -p "$(printf '%s➜%s your choice [a]: ' "${C_BRAND}" "${C_RESET}")" choice; then
+      info "No input (EOF); cancelling."; exit 0
+    fi
+    case "${choice,,}" in
       ""|a|accept|y|yes)
         # Edits are validated as they are entered, so this is a belt-and-
         # braces final check before committing to the install.
@@ -1255,7 +1241,6 @@ write_receipt_start() {
     return 0
   fi
 
-  if ! {
   if ! {
     printf '============================================================\n'
     printf 'Ubuntu Zombie — install receipt\n'
@@ -1750,7 +1735,7 @@ section "Node runtime"
 # official NodeSource apt repository so the global npm install below —
 # and the pi-ai / pi-coding-agent globals that follow — see a Node
 # runtime they actually support. Pattern mirrors the Tailscale and
-# Docker repo setup above (signed-by keyring + sources.list.d drop-in).
+# apt repo setup above (signed-by keyring + sources.list.d drop-in).
 NODESOURCE_KEYRING="/usr/share/keyrings/nodesource.gpg"
 NODESOURCE_SOURCES="/etc/apt/sources.list.d/nodesource.sources"
 NODESOURCE_PREF="/etc/apt/preferences.d/nodejs"
@@ -2255,8 +2240,6 @@ elif [[ "${CHAT_OK}" != "1" ]]; then
 else
   NEXT_STEP="open http://127.0.0.1:${CHAT_PORT}/ locally"
 fi
-
-ufw status verbose || true
 
 cat <<EOF
 

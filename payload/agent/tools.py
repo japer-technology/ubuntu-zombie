@@ -266,44 +266,11 @@ def _shim_svc_control(args: dict[str, Any]) -> dict[str, Any]:
 
 def _shim_net_status(args: dict[str, Any]) -> dict[str, Any]:
     target = str(args.get("target") or "all")
-    if target == "ufw":
-        cmd = "sudo ufw status verbose"
-    elif target == "tailscale":
-        cmd = "tailscale status"
-    elif target == "ip":
+    if target == "ip":
         cmd = "ip -brief addr"
     else:
-        cmd = "ip -brief addr; sudo ufw status; tailscale status 2>/dev/null || true"
+        cmd = "ip -brief addr; ss -ltn"
     res = run_command(cmd)
-    return {"exit_code": res.exit_code, "stdout": res.stdout, "stderr": res.stderr}
-
-
-def _shim_gui_screenshot(args: dict[str, Any]) -> dict[str, Any]:
-    out = Path(str(args.get("path") or (_state_dir() / "screen.png")))
-    if not _within(out, _write_allowed_prefixes()):
-        raise SchemaError(f"gui.screenshot: path {out} outside writable allow-list")
-    res = run_command(f"/opt/ai-zombie/bin/screenshot {shlex.quote(str(out))}")
-    return {"exit_code": res.exit_code, "path": str(out), "stdout": res.stdout,
-            "stderr": res.stderr}
-
-
-def _shim_gui_click(args: dict[str, Any]) -> dict[str, Any]:
-    x = int(args["x"]); y = int(args["y"])
-    button = str(args.get("button") or "1")
-    if button not in {"1", "2", "3"}:
-        raise SchemaError(f"gui.click: invalid button {button!r}")
-    res = run_command(
-        f"/opt/ai-zombie/bin/gui-env xdotool mousemove --sync "
-        f"{int(x)} {int(y)} click {shlex.quote(button)}"
-    )
-    return {"exit_code": res.exit_code, "stdout": res.stdout, "stderr": res.stderr}
-
-
-def _shim_gui_type(args: dict[str, Any]) -> dict[str, Any]:
-    text = str(args["text"])
-    res = run_command(
-        f"/opt/ai-zombie/bin/gui-env xdotool type --delay 25 -- {shlex.quote(text)}"
-    )
     return {"exit_code": res.exit_code, "stdout": res.stdout, "stderr": res.stderr}
 
 
@@ -470,53 +437,16 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
     ),
     "net.status": _t(
         classification="read_only",
-        description="Read-only firewall/Tailscale/interface inspection.",
+        description="Read-only interface and listening-port inspection.",
         schema={
             "type": "object",
             "properties": {
-                "target": {"type": "string", "enum": ["all", "ufw", "tailscale", "ip"]},
+                "target": {"type": "string", "enum": ["all", "ip"]},
             },
             "required": [],
             "additionalProperties": False,
         },
         shim=_shim_net_status,
-    ),
-    "gui.screenshot": _t(
-        classification="read_only",
-        description="Capture the desktop session into the state directory.",
-        schema={
-            "type": "object",
-            "properties": {"path": {"type": "string"}},
-            "required": [],
-            "additionalProperties": False,
-        },
-        shim=_shim_gui_screenshot,
-    ),
-    "gui.click": _t(
-        classification="user_change",
-        description="Move to (x, y) and click a mouse button via xdotool.",
-        schema={
-            "type": "object",
-            "properties": {
-                "x": {"type": "integer"},
-                "y": {"type": "integer"},
-                "button": {"type": "string", "enum": ["1", "2", "3"]},
-            },
-            "required": ["x", "y"],
-            "additionalProperties": False,
-        },
-        shim=_shim_gui_click,
-    ),
-    "gui.type": _t(
-        classification="user_change",
-        description="Type text into the focused window via xdotool.",
-        schema={
-            "type": "object",
-            "properties": {"text": {"type": "string"}},
-            "required": ["text"],
-            "additionalProperties": False,
-        },
-        shim=_shim_gui_type,
     ),
     "skill.list": _t(
         classification="read_only",
