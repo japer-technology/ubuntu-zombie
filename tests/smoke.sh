@@ -1519,7 +1519,13 @@ run_bad_usage() {
       fi
       eval "$1"
     }
-    shell_quote() { printf "%q" "$1"; }
+    shell_quote() {
+      if (( $# != 1 )); then
+        echo "BADQUOTE" >&2
+        exit 1
+      fi
+      printf "%q" "$1"
+    }
     run_or_warn() {
       local description="$1"
       local command="$2"

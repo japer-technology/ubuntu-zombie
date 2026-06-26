@@ -161,6 +161,11 @@ shell_quote() {
   # Quote a single token before embedding it in any composed command string
   # that will be evaluated. Bash printf %q uses backslash-style escaping,
   # which keeps dry-run output readable while preserving safety.
+  if (( $# != 1 )); then
+    printf '%s[x]%s shell_quote() takes exactly one token; got %d args: %s\n' \
+      "${C_RED}" "${C_RESET}" "$#" "$*" >&2
+    exit 1
+  fi
   printf '%q' "$1"
 }
 
