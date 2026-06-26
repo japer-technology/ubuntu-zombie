@@ -158,8 +158,9 @@ run() {
 }
 
 shell_quote() {
-  # Quote a single token before embedding it in a command string passed to
-  # run()/eval. This keeps dry-run output readable while preserving safety.
+  # Quote a single token before embedding it in any composed command string
+  # that will be evaluated. This keeps dry-run output readable while
+  # preserving safety.
   printf '%q' "$1"
 }
 
