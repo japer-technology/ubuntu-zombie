@@ -25,6 +25,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `payload/agent/auth.py`.
 
 ### Changed
+- Expanded the in-chat example prompt library with richer inspection,
+  recovery, maintenance, security, and Ubuntu Zombie self-operation
+  requests.
 - The chat interface now includes a top-centre **Logoff** control, a
   `/logout` slash command that reopens the password gate, and a grouped,
   alphabetised `/help` command list.
