@@ -276,15 +276,35 @@ class App:
 
     def ttl_set(self, days: float) -> dict[str, Any]:
         """Extend the Time to Live; refuse if the zombie is already dead."""
+        return self.ttl_set_seconds(days * lifecycle.DAY_SECONDS)
+
+    def ttl_set_seconds(self, seconds: float) -> dict[str, Any]:
+        """Extend the Time to Live; refuse if the zombie is already dead."""
         current = lifecycle.status()
         if current["dead"]:
             return {"error": "The Ubuntu Zombie is permanently disabled.",
                     "dead": True, **current}
         try:
-            result = lifecycle.set_ttl(days)
+            result = lifecycle.set_ttl_seconds(seconds)
         except ValueError as exc:
             return {"error": str(exc)}
-        log_event("ttl_extended", days=days,
+        log_event("ttl_extended", seconds=seconds,
+                  remaining_seconds=result["remaining_seconds"])
+        return result
+
+    def ttl_reset_seconds(
+        self, seconds: float = lifecycle.DEFAULT_TTL_SECONDS
+    ) -> dict[str, Any]:
+        """Reset the Time to Live; refuse if the zombie is already dead."""
+        current = lifecycle.status()
+        if current["dead"]:
+            return {"error": "The Ubuntu Zombie is permanently disabled.",
+                    "dead": True, **current}
+        try:
+            result = lifecycle.reset_ttl_seconds(seconds)
+        except ValueError as exc:
+            return {"error": str(exc)}
+        log_event("ttl_reset", seconds=seconds,
                   remaining_seconds=result["remaining_seconds"])
         return result
 
@@ -293,6 +313,20 @@ class App:
         result = lifecycle.kill()
         log_event("ttl_killed")
         return result
+
+    def set_password(self, password: str) -> dict[str, Any]:
+        """Set or remove the chat password without logging the secret."""
+        password = password or ""
+        stored = _write_password_hash(password if password else None)
+        with self._lock:
+            self.sessions.clear()
+        if stored:
+            os.environ[auth.HASH_ENV] = stored
+            log_event("password_set")
+            return {"ok": True, "required": True, "logoff_required": True}
+        os.environ.pop(auth.HASH_ENV, None)
+        log_event("password_removed")
+        return {"ok": True, "required": False, "logoff_required": False}
 
     # ---- conversation flow ----
     def post_message(self, conv_id: int | None, prompt: str) -> dict[str, Any]:
@@ -884,6 +918,62 @@ def _summarize(args: Any) -> dict[str, Any]:
     return out
 
 
+def _write_password_hash(password: str | None) -> str | None:
+    """Update ``ZOMBIE_ADMIN_PASSWORD_HASH`` in the secrets file."""
+    existing: list[str] = []
+    try:
+        existing = SECRETS_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        pass
+    lines = [
+        line for line in existing
+        if not line.lstrip().startswith(f"{auth.HASH_ENV}=")
+        and not line.lstrip().startswith(f"export {auth.HASH_ENV}=")
+    ]
+    stored = auth.hash_password(password) if password is not None else None
+    if stored:
+        lines.append(f"{auth.HASH_ENV}={stored}")
+    SECRETS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = SECRETS_FILE.with_name(SECRETS_FILE.name + ".tmp")
+    content = ("\n".join(lines).rstrip() + "\n") if lines else ""
+    tmp.write_text(content, encoding="utf-8")
+    os.replace(tmp, SECRETS_FILE)
+    try:
+        os.chmod(SECRETS_FILE, 0o600)
+    except OSError:  # pragma: no cover - best effort on odd filesystems
+        pass
+    return stored
+
+
+def _ttl_seconds_from_payload(
+    data: dict[str, Any], *, reset: bool = False
+) -> float:
+    if "duration" in data:
+        return lifecycle.parse_duration(
+            str(data.get("duration") or ""),
+            default_seconds=(lifecycle.DEFAULT_TTL_SECONDS if reset else None),
+        )
+    if "seconds" in data:
+        try:
+            seconds = float(data.get("seconds"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("seconds must be a number") from exc
+        if seconds <= 0:
+            raise ValueError("duration must be greater than zero")
+        return seconds
+    if "days" in data:
+        try:
+            days = float(data.get("days"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("days must be a number") from exc
+        if days <= 0:
+            raise ValueError("duration must be greater than zero")
+        return days * lifecycle.DAY_SECONDS
+    if reset:
+        return float(lifecycle.DEFAULT_TTL_SECONDS)
+    raise ValueError("duration is required")
+
+
 def _clip_text(text: str, limit: int = 240) -> str:
     compact = " ".join(str(text).split())
     if len(compact) <= limit:
@@ -1131,15 +1221,24 @@ class Handler(BaseHTTPRequestHandler):
             if data.get("die") is True:
                 self._send_json(self.app.ttl_die())
                 return
-            raw_days = data.get("days")
             try:
-                days = float(raw_days)
-            except (TypeError, ValueError):
-                self._send_json({"error": "days must be a number"}, 400)
+                seconds = _ttl_seconds_from_payload(
+                    data, reset=bool(data.get("reset"))
+                )
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
                 return
-            result = self.app.ttl_set(days)
+            result = (
+                self.app.ttl_reset_seconds(seconds)
+                if data.get("reset") else self.app.ttl_set_seconds(seconds)
+            )
             self._send_json(result, 410 if result.get("dead") and
                             result.get("error") else 200)
+            return
+        if self.path == "/api/password":
+            data = self._read_json()
+            password = str(data.get("password") or "")
+            self._send_json(self.app.set_password(password))
             return
         if self.path == "/api/message":
             data = self._read_json()

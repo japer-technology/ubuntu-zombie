@@ -23,6 +23,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `POST /api/login`, `POST /api/logout`, and `GET`/`POST /api/ttl`. State
   lives in `payload/agent/lifecycle.py`; the password helpers live in
   `payload/agent/auth.py`.
+- Added `/ttl reset [duration]` and duration-based `/ttl` inputs such as
+  `14 days`, `2 years 3 months`, and `3 hours`. Added `/password
+  [new password]` to change or remove the chat password after confirmation.
 
 ### Changed
 - Expanded the in-chat example prompt library with richer inspection,

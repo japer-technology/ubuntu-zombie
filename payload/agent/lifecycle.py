@@ -41,6 +41,27 @@ STATE_PATH = Path(
 )
 
 DAY_SECONDS = 86_400
+DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS
+_DURATION_UNITS = {
+    "s": 1,
+    "sec": 1,
+    "second": 1,
+    "m": 60,
+    "min": 60,
+    "minute": 60,
+    "h": 3_600,
+    "hr": 3_600,
+    "hour": 3_600,
+    "d": DAY_SECONDS,
+    "day": DAY_SECONDS,
+    "w": 7 * DAY_SECONDS,
+    "week": 7 * DAY_SECONDS,
+    "mo": 30 * DAY_SECONDS,
+    "month": 30 * DAY_SECONDS,
+    "y": 365 * DAY_SECONDS,
+    "yr": 365 * DAY_SECONDS,
+    "year": 365 * DAY_SECONDS,
+}
 
 
 def _now() -> float:
@@ -99,6 +120,48 @@ def format_remaining(seconds: float) -> str:
     )
 
 
+def parse_duration(text: str, *, default_seconds: float | None = None) -> float:
+    """Parse a human duration such as ``14 days`` or ``2 years 3 months``.
+
+    Singular/plural units are accepted. Months and years are fixed
+    operator-facing approximations: 30 and 365 days respectively.
+    """
+    value = " ".join(text.replace(",", " ").split())
+    if not value:
+        if default_seconds is None:
+            raise ValueError("duration is required")
+        if default_seconds <= 0:
+            raise ValueError("duration must be greater than zero")
+        return float(default_seconds)
+    tokens = value.split(" ")
+    if len(tokens) == 1:
+        try:
+            days = float(tokens[0])
+        except ValueError as exc:
+            raise ValueError("duration must be '<number> <unit>' pairs") from exc
+        if days <= 0:
+            raise ValueError("duration must be greater than zero")
+        return days * DAY_SECONDS
+    if len(tokens) % 2:
+        raise ValueError("duration must be '<number> <unit>' pairs")
+    total = 0.0
+    for idx in range(0, len(tokens), 2):
+        raw_amount = tokens[idx]
+        raw_unit = tokens[idx + 1].lower()
+        try:
+            amount = float(raw_amount)
+        except ValueError as exc:
+            raise ValueError(f"bad duration amount: {raw_amount}") from exc
+        unit = raw_unit[:-1] if raw_unit.endswith("s") else raw_unit
+        seconds = _DURATION_UNITS.get(unit)
+        if seconds is None:
+            raise ValueError(f"bad duration unit: {raw_unit}")
+        total += amount * seconds
+    if total <= 0:
+        raise ValueError("duration must be greater than zero")
+    return total
+
+
 def _mark_dead(reason: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
     if data is None:
         data = _load_raw()
@@ -155,8 +218,13 @@ def set_ttl(days: float) -> dict[str, Any]:
     cannot be revived: the returned status keeps ``dead`` true and the
     expiry is left untouched.
     """
-    if days <= 0:
-        raise ValueError("days must be greater than zero")
+    return set_ttl_seconds(days * DAY_SECONDS)
+
+
+def set_ttl_seconds(seconds: float) -> dict[str, Any]:
+    """Extend the Time to Live by ``seconds`` and return the new status."""
+    if seconds <= 0:
+        raise ValueError("duration must be greater than zero")
     current = status()
     if current["dead"]:
         return current
@@ -165,7 +233,23 @@ def set_ttl(days: float) -> dict[str, Any]:
     base = data.get("expires_at")
     if not isinstance(base, (int, float)) or base < now:
         base = now
-    data["expires_at"] = base + days * DAY_SECONDS
+    data["expires_at"] = base + seconds
+    data.setdefault("created_at", now)
+    data.setdefault("dead", False)
+    _save_raw(data)
+    return status()
+
+
+def reset_ttl_seconds(seconds: float = DEFAULT_TTL_SECONDS) -> dict[str, Any]:
+    """Reset the Time to Live to ``seconds`` from now."""
+    if seconds <= 0:
+        raise ValueError("duration must be greater than zero")
+    current = status()
+    if current["dead"]:
+        return current
+    data = _load_raw()
+    now = _now()
+    data["expires_at"] = now + seconds
     data.setdefault("created_at", now)
     data.setdefault("dead", False)
     _save_raw(data)

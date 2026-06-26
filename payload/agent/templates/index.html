@@ -557,6 +557,7 @@ const SLASH_COMMANDS = [
   ["/logout", "Log out and ask for the chat password again.", "Session"],
   ["/model [id]", "List or switch the active model.", "Configuration"],
   ["/new", "Start a new conversation (alias: /reset).", "Conversation"],
+  ["/password [new password]", "Set or remove the chat password after confirmation.", "Session"],
   ["/policy", "Show policy classes and rule counts.", "Configuration"],
   ["/profile", "Show the active local profile.", "Configuration"],
   ["/redraw", "Reload the current conversation from SQLite.", "Conversation"],
@@ -567,7 +568,7 @@ const SLASH_COMMANDS = [
   ["/stop", "Cancel the turn that is currently running.", "Session"],
   ["/title <text>", "Set the current conversation title.", "Conversation"],
   ["/tools", "List the closed tool registry.", "Tools"],
-  ["/ttl [n|--die]", "Show, extend (by n days), or trip the Time to Live.", "Session"],
+  ["/ttl [duration|reset [duration]|--die]", "Show, extend, reset, or trip the Time to Live.", "Session"],
   ["/undo [n]", "Rewind n user turns in a new branch.", "Conversation"],
   ["/version", "Show Ubuntu Zombie and bridge versions.", "Diagnostics"],
   ["/whoami", "Show the active agent identity.", "Configuration"]
@@ -909,6 +910,27 @@ async function handleSlashCommand(input) {
       await logoutChat(true);
       return true;
     }
+    case "/password": {
+      addMessage("user", arg ? "/password ********" : "/password");
+      const removing = !arg;
+      const prompt = removing
+        ? "Remove the chat password? Local users will not need to log in."
+        : "Set a new chat password? Current browser sessions will be logged out.";
+      if (!window.confirm(prompt)) {
+        addMessage("system", "Password change cancelled.");
+        return true;
+      }
+      try {
+        const data = await uzPostJson("/api/password", { password: arg });
+        if (data.required) {
+          addMessage("system", "Password updated. Please log in with the new password.");
+          await logoutChat(true);
+        } else {
+          addMessage("system", "Password removed. Logoff is not required.");
+        }
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
     case "/tools": {
       addMessage("user", input);
       try {
@@ -992,14 +1014,15 @@ async function handleSlashCommand(input) {
           showTombstone(data);
           return true;
         }
-        const n = Number(arg);
-        if (!isFinite(n) || n <= 0) {
-          addMessage("system",
-            "Usage: /ttl <days> to extend, or /ttl --die to kill the zombie.",
-            { error: true });
-          return true;
+        const reset = arg.toLowerCase() === "reset" ||
+          arg.toLowerCase().startsWith("reset ");
+        const duration = reset ? arg.slice("reset".length).trim() : arg;
+        let data;
+        if (reset) {
+          data = await uzPostJson("/api/ttl", { reset: true, duration });
+        } else {
+          data = await uzPostJson("/api/ttl", { duration });
         }
-        const data = await uzPostJson("/api/ttl", { days: n });
         addMessage("system", `Time to Live now ${data.remaining_human}.`);
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
