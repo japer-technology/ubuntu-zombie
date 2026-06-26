@@ -179,7 +179,7 @@ run_or_warn() {
     return 0
   fi
   set +e
-  # shellcheck disable=SC2294 # Re-evaluate shell_quote output in the composed command string.
+  # shellcheck disable=SC2294 # Execute the composed cleanup command after shell_quote expansions.
   eval "${command}"
   local rc=$?
   set -e
