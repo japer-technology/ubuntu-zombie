@@ -18,27 +18,13 @@
 #   uninstall   Delegate to uninstall.sh.
 #
 # Common env vars (run `install.sh --help` for the full list):
-#   ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
-#                               VNC_PASSWORD must be set unless already
-#                               configured on disk).
+#   ZOMBIE_NONINTERACTIVE=1     skip prompts for fully unattended installs.
 #   ZOMBIE_USER="zombie"        name of the local account created as the
 #                               operating identity of the AI Systems
 #                               Administrator. Defaults to `zombie`. The
 #                               legacy name `AGENT_USER` is still
 #                               accepted for backward compatibility.
-#   ZOMBIE_ENABLE_AUTOLOGIN=1   enable graphical autologin for the
-#                               agent account (off by default).
-#   ZOMBIE_SKIP_TAILSCALE=1     skip installing and enrolling Tailscale.
-#                               This is the default. Inbound SSH is then
-#                               allowed on every interface instead of being
-#                               restricted to tailscale0, and a Tailscale
-#                               account is not required.
-#   ZOMBIE_SKIP_TAILSCALE=0     opt in to installing and enrolling Tailscale
-#                               and restricting inbound SSH to tailscale0.
-#                               Requires a Tailscale account.
-#   SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host"
-#   VNC_PASSWORD="..."
-#   TAILSCALE_AUTHKEY="tskey-auth-..."  (used only when ZOMBIE_SKIP_TAILSCALE=0)
+#   ZOMBIE_CHAT_PORT=7878       loopback-only chat UI port.
 
 set -Eeuo pipefail
 
@@ -77,7 +63,6 @@ AGENT_HOME="/home/${AGENT_USER}"
 ZOMBIE_DIR="${ZOMBIE_DIR:-/opt/ai-zombie}"
 ZOMBIE_ETC="/etc/ubuntu-zombie"
 ZOMBIE_LOG_DIR="/var/log/ubuntu-zombie"
-VNC_PORT="${VNC_PORT:-5900}"
 CHAT_PORT="${ZOMBIE_CHAT_PORT:-7878}"
 LOG_FILE="${LOG_FILE:-/var/log/ubuntu-zombie-install.log}"
 
@@ -88,13 +73,6 @@ ZOMBIE_RECEIPT="${ZOMBIE_RECEIPT:-1}"
 RECEIPT_FILE="${ZOMBIE_RECEIPT_FILE:-${ZOMBIE_LOG_DIR}/install-receipt.txt}"
 
 ZOMBIE_NONINTERACTIVE="${ZOMBIE_NONINTERACTIVE:-0}"
-ZOMBIE_ENABLE_AUTOLOGIN="${ZOMBIE_ENABLE_AUTOLOGIN:-0}"
-# Tailscale is OFF by default. Opt in by setting ZOMBIE_SKIP_TAILSCALE=0
-# (install and enrol Tailscale, restricting inbound SSH to tailscale0).
-ZOMBIE_SKIP_TAILSCALE="${ZOMBIE_SKIP_TAILSCALE:-1}"
-SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
-VNC_PASSWORD="${VNC_PASSWORD:-}"
-TAILSCALE_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
 
 # Ubuntu Zombie chat-UI password gate and Time-to-Live (TTL) kill switch.
 # The chat service is reachable by every local user on http://127.0.0.1:PORT,
@@ -204,7 +182,7 @@ diagnose_failure() {
   avail_kb="$(df -P / 2>/dev/null | awk 'NR==2 {print $4}')"
   if [[ -n "${avail_kb:-}" && "${avail_kb}" -lt 1000000 ]]; then
     printf '    Likely cause: the root filesystem is nearly full (%s MB free).\n' "$((avail_kb/1024))" >&2
-    printf '    Fix: free up space (e.g. `sudo apt-get clean`, `docker system prune`) and re-run.\n' >&2
+    printf '    Fix: free up space (e.g. `sudo apt-get clean`) and re-run.\n' >&2
     return
   fi
   if ! getent hosts archive.ubuntu.com >/dev/null 2>&1 \
@@ -245,8 +223,8 @@ Subcommands:
               editable parameter review before any change is made.
   verify      Read-only state check. Does not change state.
   doctor      Explain failures and likely fixes.
-  repair      Apply known-safe fixes (re-assert permissions, retry
-              Tailscale login, restart the chat service).
+  repair      Apply known-safe fixes (re-assert permissions, restart
+              the chat service).
   uninstall   Reverse the install (delegates to uninstall.sh).
 
 Flags:
@@ -268,20 +246,11 @@ Flags:
     -v, --version     Print the version and exit.
 
 Environment variables (selected; see docs/CONFIGURATION.md for all):
-  ZOMBIE_NONINTERACTIVE=1     skip prompts (then SSH_PUBLIC_KEY and
-                              VNC_PASSWORD must be set unless already
-                              configured on disk).
+  ZOMBIE_NONINTERACTIVE=1     skip prompts for fully unattended installs.
   ZOMBIE_USER=<name>          name of the local agent account (default
                               'zombie'). Must be set on every later
                               install/verify/doctor/repair/uninstall
                               run that targets a non-default account.
-  ZOMBIE_ENABLE_AUTOLOGIN=1   enable graphical autologin (off by default).
-  ZOMBIE_SKIP_TAILSCALE=1     skip installing/enrolling Tailscale. This is
-                              the default. Inbound SSH is then allowed on
-                              every interface rather than only on tailscale0.
-  ZOMBIE_SKIP_TAILSCALE=0     opt in to Tailscale: install/enrol it and
-                              restrict inbound SSH to tailscale0 (needs a
-                              Tailscale account).
   ZOMBIE_COLOR=auto|always|never   colour policy (default auto). The setup
                               UI uses the Zombie Orchid highlight (#AC43D9)
                               and compatible accents when colour is enabled.
@@ -296,41 +265,23 @@ Environment variables (selected; see docs/CONFIGURATION.md for all):
                               1234, LM Studio's default).
   ZOMBIE_LOCAL_LLM_API_KEY=<k>  API key recorded for the discovered local LLM
                               (default 'local'; most local servers ignore it).
-  SSH_PUBLIC_KEY              SSH public key string.
-  VNC_PASSWORD                Loopback-only VNC password.
   ZOMBIE_ADMIN_PASSWORD       Chat-UI password gate (default
                               'livelongandprosper'; only a hash is stored).
   ZOMBIE_TTL_DAYS=<n>         Time to Live in days before the zombie is
                               permanently disabled (default 3).
-  TAILSCALE_AUTHKEY           Pre-auth key for unattended Tailscale
-                              (used only when ZOMBIE_SKIP_TAILSCALE=0).
 
 Examples:
   # Preview the plan before granting anything:
   sudo ./${SCRIPT_NAME} install --dry-run
 
-  # Minimal interactive install (prompts for SSH key + VNC password):
+  # Minimal interactive install:
   sudo ./${SCRIPT_NAME} install
 
   # Attended, but skip the YES gate:
   sudo ./${SCRIPT_NAME} install --yes
 
-  # Opt in to Tailscale (install/enrol it; SSH restricted to tailscale0):
-  sudo ZOMBIE_SKIP_TAILSCALE=0 ./${SCRIPT_NAME} install
-
   # Fully unattended (CI / cloud-init):
-  sudo ZOMBIE_NONINTERACTIVE=1 \\
-       SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host" \\
-       VNC_PASSWORD="s3cret" \\
-       ./${SCRIPT_NAME} install
-
-  # Fully unattended, with Tailscale enrolment via a pre-auth key:
-  sudo ZOMBIE_NONINTERACTIVE=1 \\
-       ZOMBIE_SKIP_TAILSCALE=0 \\
-       SSH_PUBLIC_KEY="ssh-ed25519 AAAA... you@host" \\
-       VNC_PASSWORD="s3cret" \\
-       TAILSCALE_AUTHKEY="tskey-auth-..." \\
-       ./${SCRIPT_NAME} install
+  sudo ZOMBIE_NONINTERACTIVE=1 ./${SCRIPT_NAME} install
 
   # Machine-readable health for monitoring:
   ./${SCRIPT_NAME} verify --json
@@ -439,19 +390,6 @@ append_line_once() {
   note_changed
 }
 
-is_ssh_pubkey() {
-  # Accept any line that "looks like" an OpenSSH public key
-  # ("<type> <base64> [comment]") and then defer real validation to
-  # ssh-keygen, which knows about every key/certificate type OpenSSH
-  # itself accepts (including sk-* FIDO keys, ssh-ed448, and the
-  # *-cert-v01@openssh.com certificate blobs). See FIX-2-10.
-  [[ "$1" =~ ^[A-Za-z0-9@._+/-]+[[:space:]]+[A-Za-z0-9+/=]+([[:space:]]+.*)?$ ]] || return 1
-  if command -v ssh-keygen >/dev/null 2>&1; then
-    printf '%s\n' "$1" | ssh-keygen -l -f - >/dev/null 2>&1 || return 1
-  fi
-  return 0
-}
-
 is_supported_agent_username() {
   # Either 2-32 chars starting with a letter and ending alphanumeric, with
   # underscore/hyphen allowed in the middle, or 1-32 alphanumeric chars.
@@ -491,9 +429,6 @@ validate_config() {
   if [[ "${ZOMBIE_RECEIPT}" == "1" ]] && ! is_safe_absolute_path "${RECEIPT_FILE}"; then
     die "ZOMBIE_RECEIPT_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
-  if ! is_valid_tcp_port "${VNC_PORT}"; then
-    die "VNC_PORT must be an integer from 1 to 65535." 2
-  fi
   if ! is_valid_tcp_port "${CHAT_PORT}"; then
     die "ZOMBIE_CHAT_PORT must be an integer from 1 to 65535." 2
   fi
@@ -515,23 +450,6 @@ load_os_release() {
     # shellcheck disable=SC1091
     . /etc/os-release || true
   fi
-}
-
-# Map the running Ubuntu's VERSION_ID / *_CODENAME to a supported Ubuntu
-# apt-repo codename. Tailscale and Docker both publish per-codename repos,
-# so a wrong guess installs an incompatible package set. Returns 0 and
-# echoes the codename on success; returns non-zero with no output if the
-# host is not a supported Ubuntu LTS. See FIX-1-09.
-resolve_ubuntu_codename() {
-  local codename="${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}"
-  if [[ -z "${codename}" ]]; then
-    case "${VERSION_ID:-}" in
-      22.04) codename="jammy" ;;
-      24.04) codename="noble" ;;
-      *)     return 1 ;;
-    esac
-  fi
-  printf '%s\n' "${codename}"
 }
 
 # ---------------------------------------------------------------------------
@@ -565,16 +483,16 @@ preflight() {
   arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
   case "${arch}" in
     amd64|arm64) pf ok "Architecture ${arch}" ;;
-    *) warn "Unusual architecture ${arch}; Docker/Tailscale apt repos may not match."
+    *) warn "Unusual architecture ${arch}; some upstream apt repos may not match."
        warnings=$((warnings + 1)); pf warn "Architecture ${arch}" ;;
   esac
 
-  # Disk: need ~5 GB free under / for runtime + Chromium + Docker layers.
+  # Disk: need ~3 GB free under / for runtime packages and the agent venv.
   local avail_kb
   avail_kb="$(df -P / | awk 'NR==2 {print $4}')"
-  if [[ "${avail_kb:-0}" -lt 5000000 ]]; then
-    warn "Less than 5 GB free under / ($((avail_kb/1024)) MB). Install may fail."
-    warnings=$((warnings + 1)); pf warn "Disk >= 5 GB free ($((avail_kb/1024)) MB)"
+  if [[ "${avail_kb:-0}" -lt 3000000 ]]; then
+    warn "Less than 3 GB free under / ($((avail_kb/1024)) MB). Install may fail."
+    warnings=$((warnings + 1)); pf warn "Disk >= 3 GB free ($((avail_kb/1024)) MB)"
   else
     pf ok "Disk free $((avail_kb/1024)) MB"
   fi
@@ -583,7 +501,7 @@ preflight() {
   local mem_kb
   mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
   if [[ "${mem_kb:-0}" -lt 2000000 ]]; then
-    warn "Less than 2 GB RAM ($((mem_kb/1024)) MB). Desktop + Chromium will be tight."
+    warn "Less than 2 GB RAM ($((mem_kb/1024)) MB). The agent runtime may be tight."
     warnings=$((warnings + 1)); pf warn "RAM >= 2 GB ($((mem_kb/1024)) MB)"
   else
     pf ok "RAM $((mem_kb/1024)) MB"
@@ -619,57 +537,6 @@ preflight() {
     pf info "apt/dpkg lock (will wait)"
   fi
 
-  # Public-SSH risk: is the SSH session terminating on a non-Tailscale
-  # local address? SSH_CONNECTION is "<client_ip> <client_port> <local_ip>
-  # <local_port>", so field 3 is the address sshd accepted the connection
-  # on. The previous version greped tailscale0 for the client IP, which by
-  # construction never matched and fired the warning unconditionally
-  # (FIX-2-06).
-  if [[ -n "${SSH_CONNECTION:-}" && "${ZOMBIE_SKIP_TAILSCALE}" != "1" ]]; then
-    local local_ip
-    local_ip="$(awk '{print $3}' <<<"${SSH_CONNECTION}")"
-    local ts_addrs
-    ts_addrs="$(ip -o addr show dev tailscale0 2>/dev/null \
-                  | awk '{print $4}' | cut -d/ -f1)"
-    if [[ -n "${local_ip}" ]] \
-       && ! printf '%s\n' "${ts_addrs}" | grep -qxF "${local_ip}"; then
-      warn "Detected SSH session terminating on ${local_ip}, which is NOT a tailscale0 address."
-      warn "Installer restarts sshd and tightens UFW; you risk locking yourself out."
-      if [[ "${ZOMBIE_NONINTERACTIVE}" != "1" && "${SUBCOMMAND}" == "install" ]]; then
-        warnings=$((warnings + 1)); pf warn "SSH session on tailscale0"
-      fi
-    fi
-  fi
-
-  # Tailscale already present?
-  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-    warn "Tailscale is disabled (default; opt in with ZOMBIE_SKIP_TAILSCALE=0)."
-    warn "  Inbound SSH will be allowed on every interface instead of only on"
-    warn "  tailscale0. Only use this on a network you control (e.g. behind a"
-    warn "  NAT/router or VPN)."
-    warnings=$((warnings + 1)); pf warn "Tailscale skipped (SSH on every interface)"
-  elif command -v tailscale >/dev/null 2>&1; then
-    if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
-      info "Tailscale is already installed and logged in."
-      pf ok "Tailscale logged in"
-    else
-      info "Tailscale is installed but not logged in."
-      pf info "Tailscale installed (not logged in)"
-    fi
-  fi
-
-  # Display manager: warn if a non-GDM DM is active.
-  if [[ -r /etc/X11/default-display-manager ]]; then
-    local dm
-    dm="$(tr -d '[:space:]' < /etc/X11/default-display-manager)"
-    if [[ "${dm}" != *gdm* ]]; then
-      warn "Active display manager is ${dm}, not GDM. The installer enables GDM autologin/Xorg via /etc/gdm3/."
-      warnings=$((warnings + 1)); pf warn "Display manager is GDM (found ${dm})"
-    else
-      pf ok "Display manager is GDM"
-    fi
-  fi
-
   # Render the compact summary table.
   if ! (( ZOMBIE_QUIET )); then
     printf '\n%sPreflight summary:%s\n' "${C_BOLD}" "${C_RESET}"
@@ -702,43 +569,10 @@ preflight() {
 
 validate_noninteractive() {
   [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] || return 0
-
-  # FIX-2-08: treat an authorized_keys file that only contains blank lines
-  # and comments as if no key was authorized, so non-interactive installs
-  # cannot silently lock the operator out.
-  local existing_keys=0
-  if [[ -r "${AGENT_HOME}/.ssh/authorized_keys" ]]; then
-    existing_keys="$(grep -cvE '^[[:space:]]*(#|$)' \
-                       "${AGENT_HOME}/.ssh/authorized_keys" 2>/dev/null || true)"
-    existing_keys="${existing_keys:-0}"
-  fi
-
-  local missing=()
-  if [[ -z "${SSH_PUBLIC_KEY}" && "${existing_keys}" -eq 0 ]]; then
-    missing+=("SSH_PUBLIC_KEY")
-  fi
-  if [[ -z "${VNC_PASSWORD}" && ! -f "${AGENT_HOME}/.vnc/passwd" ]]; then
-    missing+=("VNC_PASSWORD")
-  fi
-  if [[ -n "${SSH_PUBLIC_KEY}" ]] && ! is_ssh_pubkey "${SSH_PUBLIC_KEY}"; then
-    die "SSH_PUBLIC_KEY does not look like an OpenSSH public key." 64
-  fi
-  if (( ${#missing[@]} > 0 )); then
-    warn "Non-interactive mode requires the following to be set:"
-    local var
-    for var in "${missing[@]}"; do
-      case "${var}" in
-        SSH_PUBLIC_KEY)
-          warn "  export SSH_PUBLIC_KEY=\"ssh-ed25519 AAAA... you@host\"" ;;
-        VNC_PASSWORD)
-          warn "  export VNC_PASSWORD=\"<a-loopback-only-password>\"" ;;
-        *)
-          warn "  export ${var}=..." ;;
-      esac
-    done
-    die "Non-interactive mode requires: ${missing[*]}" 64
-  fi
 }
+
+# ---------------------------------------------------------------------------
+# Subcommand: verify}
 
 # ---------------------------------------------------------------------------
 # Subcommand: verify
@@ -753,8 +587,8 @@ cmd_verify() {
     export ZOMBIE_JSON=1
   fi
   # The embedded verify script's checks ("running as ${AGENT_USER}",
-  # passwordless sudo, DISPLAY, xdotool against the live X session) only
-  # make sense when run by the agent account. If invoked as root, re-exec
+  # passwordless sudo, runtime files) only make sense when run by the
+  # agent account. If invoked as root, re-exec
   # under the agent identity. See FIX-2-09.
   if [[ ${EUID} -eq 0 ]] && [[ "$(id -un)" != "${AGENT_USER}" ]]; then
     if id "${AGENT_USER}" >/dev/null 2>&1; then
@@ -824,32 +658,6 @@ cmd_doctor() {
     dr warn chat_service "Chat service unit missing. Fix: sudo ./${SCRIPT_NAME} install"
   fi
 
-  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-    dr info tailscale "Tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)."
-  elif command -v tailscale >/dev/null 2>&1; then
-    if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
-      dr ok tailscale "Tailscale logged in."
-    else
-      dr warn tailscale "Tailscale logged out. Fix: sudo tailscale up"
-    fi
-  else
-    dr warn tailscale "Tailscale missing. Fix: sudo ./${SCRIPT_NAME} install (or set ZOMBIE_SKIP_TAILSCALE=1)"
-  fi
-
-  if ufw status 2>/dev/null | grep -q "Status: active"; then
-    dr ok ufw "UFW active."
-  else
-    dr warn ufw "UFW not active. Fix: sudo ./${SCRIPT_NAME} repair"
-  fi
-
-  if [[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]]; then
-    if grep -q "AutomaticLoginEnable=true" /etc/gdm3/custom.conf 2>/dev/null; then
-      dr ok autologin "Autologin enabled (ZOMBIE_ENABLE_AUTOLOGIN=1)."
-    else
-      dr warn autologin "Autologin requested but not configured. Fix: sudo ZOMBIE_ENABLE_AUTOLOGIN=1 ./${SCRIPT_NAME} install"
-    fi
-  fi
-
   local n="${#d_status[@]}" i warns=0
   for (( i = 0; i < n; i++ )); do
     [[ "${d_status[i]}" == "warn" ]] && warns=$((warns + 1))
@@ -903,26 +711,6 @@ cmd_repair() {
     if [[ -d "${ZOMBIE_DIR}" ]]; then
       chown -R "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}"
     fi
-  fi
-
-  if command -v ufw >/dev/null 2>&1; then
-    ufw --force default deny incoming || true
-    ufw --force default allow outgoing || true
-    if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-      if ! ufw status | grep -qE '(^|[[:space:]])22/tcp([[:space:]]|$)'; then
-        ufw allow 22/tcp comment "SSH (Tailscale skipped)" || true
-      fi
-    else
-      if ! ufw status | grep -q "tailscale0.*22/tcp"; then
-        ufw allow in on tailscale0 to any port 22 proto tcp comment "SSH over Tailscale only" || true
-      fi
-    fi
-    ufw --force enable >/dev/null || true
-    ok "Firewall re-asserted."
-  fi
-
-  if [[ "${ZOMBIE_SKIP_TAILSCALE}" != "1" && -n "${TAILSCALE_AUTHKEY}" ]]; then
-    tailscale up --ssh=false --authkey "${TAILSCALE_AUTHKEY}" || warn "Tailscale auth-key login failed."
   fi
 
   if systemctl list-unit-files ubuntu-zombie-chat.service >/dev/null 2>&1; then
@@ -999,24 +787,15 @@ A real 'install' run with the current environment would:
   Transcript:     ${LOG_FILE}
   Receipt:        $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "(disabled)")
   Chat port:      ${CHAT_PORT}/tcp (loopback only)
-  VNC port:       ${VNC_PORT}/tcp (loopback only)
-  Tailscale:      $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "SKIPPED (ZOMBIE_SKIP_TAILSCALE=1)" || echo "installed and enrolled")
-  Autologin:      $([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo enabled || echo disabled)
   Mode:           $([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)
 
 Apt package groups installed:
-  base            openssh-server, sudo, curl, ufw, fail2ban, unattended-upgrades, git,
-                  python3*, build-essential, ripgrep, jq, …
-  desktop         ubuntu-desktop-minimal, gdm3, xorg, x11vnc, xdotool, scrot, …
+  base            sudo, curl, git, editors, Python 3/venv, build-essential,
+                  ripgrep, jq, logrotate, unattended-upgrades, …
   nodejs          Node 22.x from deb.nodesource.com (signed-by keyring)
-  docker          docker-ce, docker-ce-cli, containerd.io (official Docker apt)
-  $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "(tailscale skipped)" || echo "tailscale       tailscale (official Tailscale apt)")
 
 Files & directories created / re-asserted:
   /etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie   (NOPASSWD: ALL for ${AGENT_USER})
-  ${AGENT_HOME}/.ssh/authorized_keys              (700 dir, 600 file, ${AGENT_USER}:${AGENT_USER})
-  /etc/ssh/sshd_config.d/                         (key-only auth drop-in)
-  /etc/gdm3/custom.conf                           (Xorg, optional autologin)
   ${ZOMBIE_DIR}/                                  (755, ${AGENT_USER}:${AGENT_USER})
   ${ZOMBIE_DIR}/secrets/                          (700, env file 600)
   ${ZOMBIE_DIR}/bin/                              (verify, health-check, secrets-edit, audit-recent, …)
@@ -1029,10 +808,6 @@ Files & directories created / re-asserted:
   /etc/systemd/system/ubuntu-zombie-health.service
   /etc/systemd/system/ubuntu-zombie-health.timer
   /etc/logrotate.d/ubuntu-zombie
-
-Firewall (ufw):
-  default          deny incoming / allow outgoing
-  $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "ssh             ALLOW IN 22/tcp from any (Tailscale skipped)" || echo "ssh             ALLOW IN 22/tcp on tailscale0 only")
 
 Nothing has been changed. To proceed for real:
 
@@ -1053,17 +828,7 @@ EOF
 # Render the current parameters as a glance-able, brand-coloured table.
 print_parameter_table() {
   load_os_release
-  local ssh_state vnc_state receipt_state
-  if [[ -n "${SSH_PUBLIC_KEY}" ]]; then
-    ssh_state="provided"
-  else
-    ssh_state="will prompt during install"
-  fi
-  if [[ -n "${VNC_PASSWORD}" ]]; then
-    vnc_state="set (hidden)"
-  else
-    vnc_state="will prompt during install"
-  fi
+  local receipt_state
   if [[ "${ZOMBIE_RECEIPT}" == "1" ]]; then
     receipt_state="${RECEIPT_FILE}"
   else
@@ -1077,29 +842,20 @@ print_parameter_table() {
   field "   Agent home"      "${AGENT_HOME}" "${C_DIM}"
   field "2) Install root"    "${ZOMBIE_DIR}"
   field "3) Chat port"       "${CHAT_PORT}/tcp (loopback only)"
-  field "4) VNC port"        "${VNC_PORT}/tcp (loopback only)"
-  field "5) Autologin"       "$([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo enabled || echo disabled)"
-  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-    field "6) Tailscale"     "skipped — SSH on every interface" "${C_YELLOW}"
-  else
-    field "6) Tailscale"     "installed — SSH on tailscale0 only"
-  fi
-  field "7) Transcript log"  "${LOG_FILE}"
-  field "8) Receipt file"    "${receipt_state}"
-  field "9) SSH public key"  "${ssh_state}"
-  field "10) VNC password"   "${vnc_state}"
-  field "11) Chat password"  "$([[ "${ADMIN_PASSWORD_SET}" == "1" ]] && echo 'set (hidden)' || printf 'default (%s)' "${ZOMBIE_ADMIN_PASSWORD_DEFAULT}")"
-  field "12) Time to Live"   "${TTL_DAYS} day(s) then permanently disabled"
+  field "4) Transcript log"  "${LOG_FILE}"
+  field "5) Receipt file"    "${receipt_state}"
+  field "6) Chat password"   "$([[ "${ADMIN_PASSWORD_SET}" == "1" ]] && echo 'set (hidden)' || printf 'default (%s)' "${ZOMBIE_ADMIN_PASSWORD_DEFAULT}")"
+  field "7) Time to Live"    "${TTL_DAYS} day(s) then permanently disabled"
   if [[ -n "${LOCAL_LLM_MODEL}" ]]; then
-    field "13) Local LLM"    "${LOCAL_LLM_MODEL} @ ${LOCAL_LLM_BASE_URL}"
+    field "8) Local LLM"     "${LOCAL_LLM_MODEL} @ ${LOCAL_LLM_BASE_URL}"
   else
-    field "13) Local LLM"    "none (scan LAN for an OpenAI-compatible server)" "${C_DIM}"
+    field "8) Local LLM"     "none (scan LAN for an OpenAI-compatible server)" "${C_DIM}"
   fi
-  field "    Host"           "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
+  field "   Host"            "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
   printf '\n'
 }
 
-# Individual field editors. Each keeps the current value when the operator
+# Individual field editors.# Individual field editors. Each keeps the current value when the operator
 # presses Enter (allow_empty=1), and re-prompts on invalid input rather than
 # aborting the whole run.
 _edit_agent_user() {
@@ -1123,32 +879,11 @@ _edit_chat_port() {
     CHAT_PORT="${v}"
   fi
 }
-_edit_vnc_port() {
-  local v
-  if prompt_until_valid "$(printf 'New VNC port [%s]: ' "${VNC_PORT}")" \
-       is_valid_tcp_port v 1 && [[ -n "${v}" ]]; then
-    VNC_PORT="${v}"
-  fi
-}
 _edit_log_file() {
   local v
   if prompt_until_valid "$(printf 'New transcript log path [%s]: ' "${LOG_FILE}")" \
        is_safe_absolute_path v 1 && [[ -n "${v}" ]]; then
     LOG_FILE="${v}"
-  fi
-}
-_toggle_autologin() {
-  if [[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]]; then
-    ZOMBIE_ENABLE_AUTOLOGIN=0; info "Autologin disabled."
-  else
-    ZOMBIE_ENABLE_AUTOLOGIN=1; info "Autologin enabled."
-  fi
-}
-_toggle_tailscale() {
-  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-    ZOMBIE_SKIP_TAILSCALE=0; info "Tailscale will be installed; SSH restricted to tailscale0."
-  else
-    ZOMBIE_SKIP_TAILSCALE=1; warn "Tailscale skipped; SSH allowed on every interface."
   fi
 }
 _toggle_receipt() {
@@ -1167,30 +902,6 @@ _toggle_receipt() {
   else
     ZOMBIE_RECEIPT=1; info "Receipt enabled: ${RECEIPT_FILE}."
   fi
-}
-_edit_ssh_key() {
-  log "Paste the SSH public key to authorise (blank to leave unset)."
-  log "Example: ssh-ed25519 AAAAC3... you@workstation"
-  local v
-  if prompt_until_valid "SSH public key: " is_ssh_pubkey v 1; then
-    SSH_PUBLIC_KEY="${v}"
-    [[ -n "${v}" ]] && ok "SSH public key recorded." || info "SSH public key left unset."
-  fi
-}
-_edit_vnc_password() {
-  local p1 p2
-  read -r -s -p "New VNC password (blank to leave unset): " p1; echo
-  if [[ -z "${p1}" ]]; then
-    info "VNC password left unset."
-    return 0
-  fi
-  read -r -s -p "Confirm VNC password: " p2; echo
-  if [[ "${p1}" != "${p2}" ]]; then
-    warn "Passwords did not match; VNC password unchanged."
-    return 0
-  fi
-  VNC_PASSWORD="${p1}"
-  ok "VNC password recorded."
 }
 _edit_admin_password() {
   local p1 p2
@@ -1465,7 +1176,7 @@ review_parameters() {
   local choice
   while true; do
     print_parameter_table
-    printf '  %s[a]%s accept and install    %s[1-13]%s edit a field    %s[q]%s cancel\n' \
+    printf '  %s[a]%s accept and install    %s[1-8]%s edit a field    %s[q]%s cancel\n' \
       "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
     if ! read -r -p "$(printf '%s➜%s your choice [a]: ' "${C_BRAND}" "${C_RESET}")" choice; then
       info "No input (EOF); cancelling."; exit 0
@@ -1483,17 +1194,12 @@ review_parameters() {
       1)  _edit_agent_user ;;
       2)  _edit_zombie_dir ;;
       3)  _edit_chat_port ;;
-      4)  _edit_vnc_port ;;
-      5)  _toggle_autologin ;;
-      6)  _toggle_tailscale ;;
-      7)  _edit_log_file ;;
-      8)  _toggle_receipt ;;
-      9)  _edit_ssh_key ;;
-      10) _edit_vnc_password ;;
-      11) _edit_admin_password ;;
-      12) _edit_ttl_days ;;
-      13) _edit_local_llm ;;
-      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-13, 'a', or 'q'." ;;
+      4)  _edit_log_file ;;
+      5)  _toggle_receipt ;;
+      6)  _edit_admin_password ;;
+      7)  _edit_ttl_days ;;
+      8)  _edit_local_llm ;;
+      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-8, 'a', or 'q'." ;;
     esac
   done
 }
@@ -1503,8 +1209,7 @@ review_parameters() {
 # ---------------------------------------------------------------------------
 # A human-readable record of the install. Written once when the run starts
 # (every parameter) and finalised with the outcome when it ends. Secrets are
-# never written: only an SSH key fingerprint and a "set/unset" flag for the
-# VNC password are recorded.
+# never written; password values and provider keys are excluded.
 
 write_receipt_start() {
   [[ "${ZOMBIE_RECEIPT}" == "1" ]] || return 0
@@ -1521,17 +1226,6 @@ write_receipt_start() {
     ZOMBIE_RECEIPT=0
     return 0
   fi
-
-  local ssh_state="(none — will prompt during install)"
-  if [[ -n "${SSH_PUBLIC_KEY}" ]]; then
-    if command -v ssh-keygen >/dev/null 2>&1; then
-      ssh_state="$(printf '%s\n' "${SSH_PUBLIC_KEY}" | ssh-keygen -l -f - 2>/dev/null || echo 'provided')"
-    else
-      ssh_state="provided"
-    fi
-  fi
-  local vnc_state="(none — will prompt during install)"
-  [[ -n "${VNC_PASSWORD}" ]] && vnc_state="set via parameter/env (value not recorded)"
 
   if ! {
     printf '============================================================\n'
@@ -1553,13 +1247,6 @@ write_receipt_start() {
     printf 'Log dir          : %s\n' "${ZOMBIE_LOG_DIR}"
     printf 'Transcript log   : %s\n' "${LOG_FILE}"
     printf 'Chat port        : %s/tcp (loopback only)\n' "${CHAT_PORT}"
-    printf 'VNC port         : %s/tcp (loopback only)\n' "${VNC_PORT}"
-    printf 'Autologin        : %s\n' \
-      "$([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo enabled || echo disabled)"
-    printf 'Tailscale        : %s\n' \
-      "$([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo 'skipped (SSH on every interface)' || echo 'installed (SSH on tailscale0 only)')"
-    printf 'SSH public key   : %s\n' "${ssh_state}"
-    printf 'VNC password     : %s\n' "${vnc_state}"
     printf 'Local LLM        : %s\n' \
       "$([[ -n "${LOCAL_LLM_MODEL}" ]] && printf '%s @ %s' "${LOCAL_LLM_MODEL}" "${LOCAL_LLM_BASE_URL}" || echo 'none')"
     printf 'Receipt file     : %s\n' "${RECEIPT_FILE}"
@@ -1584,8 +1271,6 @@ write_receipt_finish() {
     if [[ -n "${INSTALL_T0:-}" ]]; then
       printf 'Duration         : %s\n' "$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
     fi
-    printf 'Tailscale        : %s\n' \
-      "$([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo 'skipped' || { [[ "${TS_STATUS_OK:-0}" == "1" ]] && echo 'logged in' || echo 'installed (not logged in)'; })"
     printf 'Provider token   : %s\n' "$([[ "${PROVIDER_OK:-0}" == "1" ]] && echo present || echo missing)"
     printf 'Chat service     : %s\n' "$([[ "${CHAT_OK:-0}" == "1" ]] && echo running || echo 'not running')"
     printf 'Steps satisfied  : %s\n' "${STEPS_SATISFIED}"
@@ -1754,7 +1439,6 @@ info "Log file: ${LOG_FILE}"
 info "Agent user: ${AGENT_USER}"
 info "Install root: ${ZOMBIE_DIR}"
 info "Chat port: ${CHAT_PORT} (loopback only)"
-info "Autologin: $([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo enabled || echo disabled)"
 info "Mode: $([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)"
 if (( ZOMBIE_PHASE_TOTAL > 0 )); then
   info "Phases: ${ZOMBIE_PHASE_TOTAL}. Typical run takes ~10–20 min depending on network speed."
@@ -1766,15 +1450,6 @@ cat <<EOF
 
 This installer will:
   - Create the ${AGENT_USER} user (operating identity of the AI Systems Administrator) with passwordless sudo
-  - Enable SSH key-only access
-  - $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "Skip Tailscale install/enrolment (ZOMBIE_SKIP_TAILSCALE=1); allow SSH on every interface" || echo "Install Tailscale from its official apt repository")
-  - $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "Allow inbound SSH on every interface (no Tailscale)" || echo "Allow inbound SSH only on the Tailscale interface")
-  - Force Xorg instead of Wayland
-  - $([[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]] && echo "Enable graphical autologin (ZOMBIE_ENABLE_AUTOLOGIN=1)" || echo "Leave graphical autologin disabled (default)")
-  - Enable loopback-only x11vnc for emergency desktop access
-  - Install GUI automation tools (xdotool, scrot, gnome-screenshot)
-  - Install Playwright with Chromium for browser automation
-  - Install Docker CE from its official apt repository
   - Install Python and Node agent runtimes
   - Install the loopback chat service (ubuntu-zombie-chat.service)
   - Install policy, audit log, and helper scripts
@@ -1811,7 +1486,6 @@ apt_get -y upgrade
 section "Base packages"
 
 apt_install \
-  openssh-server \
   sudo \
   curl \
   wget \
@@ -1828,17 +1502,12 @@ apt_install \
   unzip \
   zip \
   jq \
-  net-tools \
-  dnsutils \
   iputils-ping \
-  ufw \
-  fail2ban \
   unattended-upgrades \
   logrotate \
   python3 \
   python3-pip \
   python3-venv \
-  python3-tk \
   pipx \
   build-essential \
   ripgrep \
@@ -1846,28 +1515,8 @@ apt_install \
   tree \
   rsync \
   cron \
-  dbus-x11 \
-  dconf-cli \
   pwgen \
   psmisc
-
-section "Desktop, Xorg, and GUI control packages"
-
-apt_install \
-  ubuntu-desktop-minimal \
-  gdm3 \
-  xorg \
-  x11vnc \
-  xdotool \
-  wmctrl \
-  scrot \
-  imagemagick \
-  gnome-screenshot \
-  xclip \
-  xsel \
-  xterm \
-  at-spi2-core \
-  x11-utils
 
 # ---------------------------------------------------------------------------
 # Agent user and sudo
@@ -1899,170 +1548,11 @@ rm -f "${SUDOERS_TMP}"
 ok "Configured passwordless sudo for ${AGENT_USER}."
 
 # ---------------------------------------------------------------------------
-# SSH key
-# ---------------------------------------------------------------------------
-
-section "SSH key setup"
-
-install -d -m 700 -o "${AGENT_USER}" -g "${AGENT_USER}" "${AGENT_HOME}/.ssh"
-# Only create authorized_keys if it does not already exist. The previous
-# "cat existing > tmp && mv tmp existing" dance was a functional no-op that
-# left a window where a full disk could truncate the operator's keys and
-# lock them out. See FIX-1-05. The chown/chmod below re-asserts ownership
-# and mode whether or not the file pre-existed.
-if [[ ! -e "${AGENT_HOME}/.ssh/authorized_keys" ]]; then
-  install -m 600 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${AGENT_HOME}/.ssh/authorized_keys"
-fi
-chown "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.ssh/authorized_keys"
-chmod 600 "${AGENT_HOME}/.ssh/authorized_keys"
-
-if [[ -r "${AGENT_HOME}/.ssh/authorized_keys" ]]; then
-  EXISTING_KEYS="$(grep -cvE '^[[:space:]]*(#|$)' \
-                     "${AGENT_HOME}/.ssh/authorized_keys" 2>/dev/null || true)"
-  EXISTING_KEYS="${EXISTING_KEYS:-0}"
-else
-  EXISTING_KEYS=0
-fi
-
-if [[ -z "${SSH_PUBLIC_KEY}" && "${ZOMBIE_NONINTERACTIVE}" != "1" ]]; then
-  if [[ "${EXISTING_KEYS}" -gt 0 ]]; then
-    info "${EXISTING_KEYS} SSH key(s) already authorized for ${AGENT_USER}."
-    # Re-prompts on a malformed key instead of aborting the whole install;
-    # blank is accepted to skip adding another key.
-    prompt_until_valid "Add another public key? Leave blank to skip: " \
-      is_ssh_pubkey SSH_PUBLIC_KEY 1 || true
-  else
-    log
-    log "Paste the SSH public key that will be allowed to control this machine."
-    log "Example: ssh-ed25519 AAAAC3... you@workstation"
-    log "Leave blank only if you will add it manually after install."
-    prompt_until_valid "SSH public key (blank to add manually later): " \
-      is_ssh_pubkey SSH_PUBLIC_KEY 1 || true
-  fi
-fi
-
-if [[ -n "${SSH_PUBLIC_KEY}" ]]; then
-  if ! is_ssh_pubkey "${SSH_PUBLIC_KEY}"; then
-    die "That does not look like an SSH public key. Expected a line starting with 'ssh-ed25519 ', 'ssh-rsa ', etc." 1
-  fi
-  append_line_once "${SSH_PUBLIC_KEY}" "${AGENT_HOME}/.ssh/authorized_keys"
-  ok "Authorized the supplied SSH key."
-elif [[ "${EXISTING_KEYS}" -eq 0 && "${ZOMBIE_NONINTERACTIVE}" == "1" ]]; then
-  die "Non-interactive mode requires SSH_PUBLIC_KEY when no key is already authorized." 64
-fi
-
-chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}/.ssh"
-chmod 700 "${AGENT_HOME}/.ssh"
-chmod 600 "${AGENT_HOME}/.ssh/authorized_keys"
-
-# ---------------------------------------------------------------------------
-# SSH hardening
-# ---------------------------------------------------------------------------
-
-section "Harden SSH"
-
-install -d -m 755 /etc/ssh/sshd_config.d
-cat > /etc/ssh/sshd_config.d/99-ubuntu-zombie.conf <<EOF
-# Managed by ${SCRIPT_NAME}.
-PermitRootLogin no
-PasswordAuthentication no
-KbdInteractiveAuthentication no
-PubkeyAuthentication yes
-X11Forwarding yes
-AllowUsers ${AGENT_USER}
-EOF
-
-# sshd -t requires the privilege separation directory to exist; on fresh
-# installs (or containers where /run is a tmpfs) it may be missing.
-install -d -m 0755 /run/sshd
-sshd -t
-systemctl enable --now ssh >/dev/null
-systemctl restart ssh
-ok "SSH hardened (key-only, ${AGENT_USER} only)."
-
-# ---------------------------------------------------------------------------
-# Tailscale (official apt repo)
-# ---------------------------------------------------------------------------
-
-section "Install Tailscale"
-
-if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-  info "Skipping Tailscale install (ZOMBIE_SKIP_TAILSCALE=1)."
-else
-  if ! command -v tailscale >/dev/null 2>&1; then
-    install -d -m 755 /usr/share/keyrings
-    if ! TS_CODENAME="$(resolve_ubuntu_codename)"; then
-      die "Cannot determine Ubuntu codename for Tailscale repo (VERSION_ID='${VERSION_ID:-}'); supported: 22.04 jammy, 24.04 noble." 65
-    fi
-    curl_get "https://pkgs.tailscale.com/stable/ubuntu/${TS_CODENAME}.noarmor.gpg" \
-      -o /usr/share/keyrings/tailscale-archive-keyring.gpg
-    chmod 0644 /usr/share/keyrings/tailscale-archive-keyring.gpg
-    cat > /etc/apt/sources.list.d/tailscale.list <<EOF
-deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/ubuntu ${TS_CODENAME} main
-EOF
-    apt_get update
-    apt_install tailscale
-    ok "Tailscale installed from official apt repository."
-  else
-    info "Tailscale already installed."
-  fi
-
-  systemctl enable --now tailscaled >/dev/null
-fi
-
-# ---------------------------------------------------------------------------
-# Firewall (idempotent)
-# ---------------------------------------------------------------------------
-
-if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-  section "Firewall (SSH allowed on every interface)"
-
-  ufw --force default deny incoming
-  ufw --force default allow outgoing
-
-  # Remove any prior Tailscale-only SSH rule from a previous (non-skipped) run.
-  while ufw status | grep -q "tailscale0.*22/tcp"; do
-    ufw --force delete allow in on tailscale0 to any port 22 proto tcp >/dev/null 2>&1 || break
-  done
-
-  if ! ufw status | grep -qE '(^|[[:space:]])22/tcp([[:space:]]|$)'; then
-    ufw allow 22/tcp comment "SSH (Tailscale skipped)"
-  fi
-
-  ufw --force enable >/dev/null
-  warn "Tailscale is disabled. SSH is reachable from any network this host can be addressed on."
-  ok "UFW: deny inbound, allow outbound, SSH allowed on every interface."
-else
-  section "Firewall (Tailscale-only inbound)"
-
-  ufw --force default deny incoming
-  ufw --force default allow outgoing
-
-  # Remove any prior all-interface SSH rule we previously added (matched by
-  # the comment we set in the skip-Tailscale branch). Tightened in FIX-1-16
-  # so we never delete an unrelated 22/tcp rule the operator may have added.
-  while ufw status numbered | grep -F '# SSH (Tailscale skipped)' | grep -q '22/tcp'; do
-    rule_num="$(ufw status numbered \
-      | awk -F'[][]' '/# SSH \(Tailscale skipped\)/ && /22\/tcp/ {print $2; exit}')"
-    [[ -z "${rule_num}" ]] && break
-    yes | ufw delete "${rule_num}" >/dev/null 2>&1 || break
-  done
-
-  if ! ufw status | grep -q "tailscale0.*22/tcp"; then
-    ufw allow in on tailscale0 to any port 22 proto tcp comment "SSH over Tailscale only"
-  fi
-
-  ufw --force enable >/dev/null
-  ok "UFW: deny inbound, allow outbound, SSH allowed only on tailscale0."
-fi
-
-# ---------------------------------------------------------------------------
 # Security services and unattended upgrades
 # ---------------------------------------------------------------------------
 
-section "Security services"
+section "Unattended upgrades"
 
-systemctl enable --now fail2ban >/dev/null
 systemctl enable --now unattended-upgrades >/dev/null || true
 
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
@@ -2080,133 +1570,11 @@ EOF
 
 ok "Automatic security updates enabled (reboots at 04:00 if required)."
 
-# ---------------------------------------------------------------------------
-# Xorg, optional autologin, no sleep, no lock
-# ---------------------------------------------------------------------------
-
-section "Force Xorg session"
-
-install -d -m 755 /etc/gdm3
-# FIX-2-13: only manage the four [daemon] keys we own; preserve any
-# operator-authored content (e.g. [xdmcp] tweaks, greeter logo settings,
-# WaylandEnable overrides on neighbouring keys). The first time the
-# installer runs the file may not exist yet, so we create a minimal
-# scaffold owned by us; on subsequent runs we update in place.
-GDM_CONF="/etc/gdm3/custom.conf"
-if [[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]]; then
-  GDM_WAYLAND="false"
-  GDM_AUTOLOGIN_ENABLE="true"
-  GDM_AUTOLOGIN_USER="${AGENT_USER}"
-else
-  GDM_WAYLAND="false"
-  GDM_AUTOLOGIN_ENABLE="false"
-  GDM_AUTOLOGIN_USER=""
-fi
-
-if [[ ! -e "${GDM_CONF}" ]]; then
-  cat > "${GDM_CONF}" <<EOF
-# Managed by ${SCRIPT_NAME}.
-[daemon]
-
-[security]
-
-[xdmcp]
-
-[chooser]
-
-[debug]
-EOF
-fi
-
-# In-place INI updater: ensure [daemon] exists and set/replace the three
-# keys we own (WaylandEnable, AutomaticLoginEnable, AutomaticLogin).
-# Lines outside [daemon] are passed through verbatim. If AutomaticLogin
-# should be unset (autologin disabled), the key is commented out rather
-# than removed so a curious operator can still find it.
-python3 - "${GDM_CONF}" "${GDM_WAYLAND}" "${GDM_AUTOLOGIN_ENABLE}" "${GDM_AUTOLOGIN_USER}" <<'PYEOF'
-import os, sys
-path, wayland, autologin_enable, autologin_user = sys.argv[1:5]
-with open(path, 'r', encoding='utf-8') as f:
-    lines = f.readlines()
-
-owned = {
-    "WaylandEnable": wayland,
-    "AutomaticLoginEnable": autologin_enable,
-}
-if autologin_user:
-    owned["AutomaticLogin"] = autologin_user
-
-section = None
-seen = {k: False for k in owned}
-out = []
-daemon_idx_end = None
-for ln in lines:
-    stripped = ln.strip()
-    if stripped.startswith('[') and stripped.endswith(']'):
-        if section == 'daemon':
-            for k, v in owned.items():
-                if not seen[k]:
-                    out.append(f"{k}={v}\n")
-                    seen[k] = True
-        section = stripped[1:-1].lower()
-        out.append(ln)
-        continue
-    if section == 'daemon':
-        m = stripped.split('=', 1)
-        key = m[0].lstrip('#').strip() if m else ''
-        if key in owned and '=' in stripped:
-            if not seen[key]:
-                out.append(f"{key}={owned[key]}\n")
-                seen[key] = True
-            continue
-        # If autologin is disabled, comment out any pre-existing
-        # AutomaticLogin=<user> we don't own.
-        if not autologin_user and key == 'AutomaticLogin' and '=' in stripped:
-            out.append('# ' + ln if not ln.lstrip().startswith('#') else ln)
-            continue
-    out.append(ln)
-
-if section == 'daemon':
-    for k, v in owned.items():
-        if not seen[k]:
-            out.append(f"{k}={v}\n")
-            seen[k] = True
-
-# If [daemon] never appeared, append it.
-if not any(s for s in seen.values()):
-    out.append('\n[daemon]\n')
-    for k, v in owned.items():
-        out.append(f"{k}={v}\n")
-
-with open(path, 'w', encoding='utf-8') as f:
-    f.writelines(out)
-PYEOF
-
-if [[ "${ZOMBIE_ENABLE_AUTOLOGIN}" == "1" ]]; then
-  warn "Autologin is enabled. Any physical-access user gets an unlocked desktop as ${AGENT_USER}."
-else
-  info "Autologin is disabled. Desktop automation requires a live login as ${AGENT_USER}."
-fi
-
-install -d -m 755 /var/lib/AccountsService/users
-cat > "/var/lib/AccountsService/users/${AGENT_USER}" <<EOF
-[User]
-Session=ubuntu-xorg
-XSession=ubuntu-xorg
-SystemAccount=false
-EOF
-
-systemctl set-default graphical.target >/dev/null
-
 section "Prevent sleep, suspend, and screen lock"
 
 systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
 
-runuser -l "${AGENT_USER}" -c "dbus-run-session -- gsettings set org.gnome.desktop.session idle-delay 0"             >/dev/null 2>&1 || true
-runuser -l "${AGENT_USER}" -c "dbus-run-session -- gsettings set org.gnome.desktop.screensaver lock-enabled false"  >/dev/null 2>&1 || true
-runuser -l "${AGENT_USER}" -c "dbus-run-session -- gsettings set org.gnome.desktop.screensaver ubuntu-lock-on-suspend false" >/dev/null 2>&1 || true
-
-ok "Sleep masked, lock disabled."
+ok "Sleep and suspend targets masked."
 
 # ---------------------------------------------------------------------------
 # Workspace at /opt/ai-zombie
@@ -2311,39 +1679,6 @@ fi
 ensure_admin_password_hash "${ZOMBIE_DIR}/secrets/env"
 chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/secrets/env"
 chmod 600 "${ZOMBIE_DIR}/secrets/env"
-# Docker CE (official repo)
-# ---------------------------------------------------------------------------
-
-section "Install Docker Engine"
-
-if ! command -v docker >/dev/null 2>&1; then
-  for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
-    apt-get remove -y "$pkg" >/dev/null 2>&1 || true
-  done
-
-  install -m 0755 -d /etc/apt/keyrings
-  curl_get https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-  chmod a+r /etc/apt/keyrings/docker.asc
-
-  load_os_release
-  if ! DOCKER_CODENAME="$(resolve_ubuntu_codename)"; then
-    die "Cannot determine Ubuntu codename for Docker repo (VERSION_ID='${VERSION_ID:-}'); supported: 22.04 jammy, 24.04 noble." 65
-  fi
-  ARCH="$(dpkg --print-architecture)"
-
-  cat > /etc/apt/sources.list.d/docker.list <<EOF
-deb [arch=${ARCH} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu ${DOCKER_CODENAME} stable
-EOF
-  apt_get update
-  apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-else
-  info "Docker already installed."
-fi
-
-usermod -aG docker "${AGENT_USER}"
-systemctl enable --now docker >/dev/null
-ok "Docker ready, ${AGENT_USER} is in the docker group."
-
 # ---------------------------------------------------------------------------
 # Python cloud-agent runtime
 # ---------------------------------------------------------------------------
@@ -2357,44 +1692,18 @@ section "Python cloud-agent runtime"
 install -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/bin/setup-agent-venv" "${ZOMBIE_DIR}/bin/setup-agent-venv"
 
-# Build the venv and install python packages as the agent user. This step
-# downloads Chromium and can run for minutes; on an interactive TTY show a
-# heartbeat spinner and route the (noisy) detail to the transcript, while
-# non-interactive/CI runs keep the full output streaming as before.
-#
-# run_step needs a single command, so we wrap the redirection in `bash -c`.
-# The arguments after the script are positional parameters for that inner
-# shell: `_` is the throwaway $0, then $1=agent user, $2=helper path,
-# $3=log file. We redirect the helper's stdout+stderr to the transcript so
-# only the spinner shows on the console.
+# Build the venv and install Python packages as the agent user. On an
+# interactive TTY show a heartbeat spinner and route the detail to the
+# transcript, while non-interactive/CI runs keep the full output streaming.
 if [[ -t 2 ]] && ! (( ZOMBIE_QUIET )); then
-  run_step "Building Python venv + browser (this can take a few minutes)" -- \
+  run_step "Building Python venv" -- \
     bash -c 'runuser -l "$1" -- "$2" >>"$3" 2>&1' \
     _ "${AGENT_USER}" "${ZOMBIE_DIR}/bin/setup-agent-venv" "${LOG_FILE}"
 else
   runuser -l "${AGENT_USER}" -- "${ZOMBIE_DIR}/bin/setup-agent-venv"
 fi
 
-# Install Chromium system dependencies as root (apt-get requires it). The
-# unprivileged playwright browser download in setup-agent-venv above will
-# then only fetch the browser binaries, which it can do as ${AGENT_USER}.
-AGENT_VENV_PY="${AGENT_HOME}/agent-env/bin/python"
-if [[ -x "${AGENT_VENV_PY}" ]]; then
-  n=1; delay=5
-  while true; do
-    if "${AGENT_VENV_PY}" -m playwright install-deps chromium; then break; fi
-    if (( n >= 4 )); then
-      warn "playwright install-deps failed after ${n} attempts; Chromium may not launch."
-      break
-    fi
-    log "playwright install-deps retry ${n} in ${delay}s..."
-    sleep "${delay}"; n=$((n + 1)); delay=$((delay * 2))
-  done
-else
-  warn "Agent venv python not found at ${AGENT_VENV_PY}; skipping playwright system deps."
-fi
-
-ok "Python venv ready at ${AGENT_HOME}/agent-env."
+ok "Python venv ready at ${AGENT_HOME}/agent-env."ok "Python venv ready at ${AGENT_HOME}/agent-env."
 
 # ---------------------------------------------------------------------------
 # Node runtime
@@ -2407,8 +1716,8 @@ section "Node runtime"
 # requires Node ^20.17.0 || >=22.9.0. Install Node 22.x from the
 # official NodeSource apt repository so the global npm install below —
 # and the pi-ai / pi-coding-agent globals that follow — see a Node
-# runtime they actually support. Pattern mirrors the Tailscale and
-# Docker repo setup above (signed-by keyring + sources.list.d drop-in).
+# runtime they actually support. Pattern uses the standard signed-by
+# keyring + sources.list.d drop-in apt repository setup.
 NODESOURCE_KEYRING="/usr/share/keyrings/nodesource.gpg"
 NODESOURCE_SOURCES="/etc/apt/sources.list.d/nodesource.sources"
 NODESOURCE_PREF="/etc/apt/preferences.d/nodejs"
@@ -2748,151 +2057,6 @@ systemctl enable --now ubuntu-zombie-health.timer || true
 ok "Chat service installed and enabled."
 
 # ---------------------------------------------------------------------------
-# GUI control helper scripts (generated inline; they reference ZOMBIE_DIR).
-# ---------------------------------------------------------------------------
-
-section "GUI control helper scripts"
-
-cat > "${ZOMBIE_DIR}/bin/gui-env" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ -f ${ZOMBIE_DIR}/secrets/env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source ${ZOMBIE_DIR}/secrets/env
-  set +a
-fi
-
-export DISPLAY="\${DISPLAY:-:0}"
-export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
-export DBUS_SESSION_BUS_ADDRESS="\${DBUS_SESSION_BUS_ADDRESS:-unix:path=\${XDG_RUNTIME_DIR}/bus}"
-
-exec "\$@"
-EOF
-
-cat > "${ZOMBIE_DIR}/bin/screenshot" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-OUT="\${1:-${ZOMBIE_DIR}/state/screen.png}"
-${ZOMBIE_DIR}/bin/gui-env gnome-screenshot -f "\$OUT"
-echo "\$OUT"
-EOF
-
-cat > "${ZOMBIE_DIR}/bin/click" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-[[ \$# -eq 2 ]] || { echo "Usage: click X Y" >&2; exit 2; }
-${ZOMBIE_DIR}/bin/gui-env xdotool mousemove "\$1" "\$2" click 1
-EOF
-
-cat > "${ZOMBIE_DIR}/bin/type-text" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-[[ \$# -ge 1 ]] || { echo "Usage: type-text 'text'" >&2; exit 2; }
-${ZOMBIE_DIR}/bin/gui-env xdotool type --delay 10 "\$*"
-EOF
-
-cat > "${ZOMBIE_DIR}/bin/key" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-[[ \$# -ge 1 ]] || { echo "Usage: key ctrl+l" >&2; exit 2; }
-${ZOMBIE_DIR}/bin/gui-env xdotool key "\$@"
-EOF
-
-cat > "${ZOMBIE_DIR}/bin/agent-shell" <<EOF
-#!/usr/bin/env bash
-set -euo pipefail
-
-if [[ -f ${ZOMBIE_DIR}/secrets/env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source ${ZOMBIE_DIR}/secrets/env
-  set +a
-fi
-
-cd ${ZOMBIE_DIR}
-exec tmux new -A -s ubuntu-zombie
-EOF
-
-chmod +x "${ZOMBIE_DIR}/bin/"gui-env "${ZOMBIE_DIR}/bin/"screenshot \
-  "${ZOMBIE_DIR}/bin/"click "${ZOMBIE_DIR}/bin/"type-text \
-  "${ZOMBIE_DIR}/bin/"key "${ZOMBIE_DIR}/bin/"agent-shell
-
-chown -R "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}"
-
-# ---------------------------------------------------------------------------
-# Browser automation smoke test
-# ---------------------------------------------------------------------------
-
-section "Browser automation smoke test"
-
-cat > "${ZOMBIE_DIR}/tools/browser-test.py" <<'EOF'
-"""Smoke test: drive Chromium through Playwright on the real Xorg desktop."""
-from playwright.sync_api import sync_playwright
-
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=False)
-    page = browser.new_page()
-    page.goto("https://example.com")
-    print(page.title())
-    browser.close()
-EOF
-
-chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/tools/browser-test.py"
-
-# ---------------------------------------------------------------------------
-# x11vnc loopback only
-# ---------------------------------------------------------------------------
-
-section "x11vnc loopback-only desktop access"
-
-runuser -l "${AGENT_USER}" -c "mkdir -p ~/.config/autostart ~/.local/share"
-install -d -m 700 -o "${AGENT_USER}" -g "${AGENT_USER}" "${AGENT_HOME}/.vnc"
-
-VNC_PASSWD_FILE="${AGENT_HOME}/.vnc/passwd"
-
-if [[ -f "${VNC_PASSWD_FILE}" ]]; then
-  info "VNC password already set; keeping it."
-elif [[ -n "${VNC_PASSWORD}" ]]; then
-  if ! printf '%s\n%s\n' "${VNC_PASSWORD}" "${VNC_PASSWORD}" \
-    | runuser -u "${AGENT_USER}" -- env HOME="${AGENT_HOME}" x11vnc -storepasswd >/dev/null 2>&1; then
-    die "Failed to store VNC password; check that x11vnc is installed and ${AGENT_HOME}/.vnc is writable." 1
-  fi
-  chown "${AGENT_USER}:${AGENT_USER}" "${VNC_PASSWD_FILE}"
-  chmod 600 "${VNC_PASSWD_FILE}"
-  ok "VNC password set from VNC_PASSWORD env var."
-elif [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]]; then
-  die "Non-interactive mode requires VNC_PASSWORD when no VNC password is already stored." 64
-else
-  log
-  log "Set a VNC password. This is only used for emergency desktop access"
-  log "over an SSH tunnel. VNC binds to 127.0.0.1, never to the network."
-  # x11vnc -storepasswd prompts twice and masks input; on a mismatch it
-  # exits non-zero. Retry a few times instead of aborting the whole install
-  # on a single typo.
-  vnc_attempt=0
-  until runuser -l "${AGENT_USER}" -c "x11vnc -storepasswd"; do
-    vnc_attempt=$((vnc_attempt + 1))
-    if (( vnc_attempt >= 3 )); then
-      die "Failed to set a VNC password after ${vnc_attempt} attempts." 1
-    fi
-    warn "That didn't work (passwords may not have matched). Try again."
-  done
-fi
-
-cat > "${AGENT_HOME}/.config/autostart/x11vnc.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=x11vnc Loopback Only
-Exec=/usr/bin/x11vnc -display :0 -forever -shared -localhost -rfbauth ${AGENT_HOME}/.vnc/passwd -rfbport ${VNC_PORT} -o ${AGENT_HOME}/.local/share/x11vnc.log
-X-GNOME-Autostart-enabled=true
-EOF
-
-chown -R "${AGENT_USER}:${AGENT_USER}" \
-  "${AGENT_HOME}/.config" "${AGENT_HOME}/.local" "${AGENT_HOME}/.vnc"
-
-# ---------------------------------------------------------------------------
 # Verification script
 # ---------------------------------------------------------------------------
 
@@ -2905,7 +2069,6 @@ set -uo pipefail
 ZOMBIE_DIR="${ZOMBIE_DIR}"
 AGENT_USER="${AGENT_USER}"
 AGENT_HOME="${AGENT_HOME}"
-ZOMBIE_SKIP_TAILSCALE="${ZOMBIE_SKIP_TAILSCALE}"
 PI_AI_VERSION="${PI_AI_VERSION}"
 PI_MONO_VERSION="${PI_MONO_VERSION}"
 
@@ -2969,28 +2132,11 @@ check "passwordless sudo"                  sudo -n true
 [[ "\${JSON}" == "1" ]] || echo
 
 hd "Network and services:"
-check "ssh service active"                 systemctl is-active ssh
-check "ufw active"                         bash -c "sudo ufw status | grep -q 'Status: active'"
-if [[ "\${ZOMBIE_SKIP_TAILSCALE}" != "1" ]]; then
-  check "tailscale binary present"           command -v tailscale
-  check "tailscale is logged in"             bash -c "tailscale status >/dev/null 2>&1 && ! tailscale status | grep -q 'Logged out'"
-else
-  record skip "tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)"
-  [[ "\${JSON}" == "1" ]] || printf '  %s[~]%s  tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)\\n' "\${C_YEL}" "\${C_RESET}"
-fi
-check "docker engine reachable"            docker version
-[[ "\${JSON}" == "1" ]] || echo
-
-hd "Desktop and GUI control:"
-check "Xorg session forced for \${AGENT_USER}"  bash -c "grep -q 'XSession=ubuntu-xorg' /var/lib/AccountsService/users/\${AGENT_USER}"
-check "x11vnc autostart present"           test -f \${AGENT_HOME}/.config/autostart/x11vnc.desktop
-check "DISPLAY is set"                     test -n "\${DISPLAY:-}"
-check "xdotool reachable on \${DISPLAY:-:0}" \${ZOMBIE_DIR}/bin/gui-env xdotool getdisplaygeometry
-[[ "\${JSON}" == "1" ]] || echo
+check "loopback chat port configured"         test -n "${ZOMBIE_CHAT_PORT:-${CHAT_PORT}}"
+[[ "${JSON}" == "1" ]] || echo
 
 hd "Runtime:"
 check "Python venv exists"                 test -x \${AGENT_HOME}/agent-env/bin/python
-check "playwright importable"              \${AGENT_HOME}/agent-env/bin/python -c "from playwright.sync_api import sync_playwright"
 check "node and tsc present"               bash -c "command -v node && command -v tsc"
 check "pi-ai bridge deployed"              test -r \${ZOMBIE_DIR}/agent/pi-ai-bridge.mjs
 check "pi-ai installed (any version)"      bash -c "npm ls -g --depth=0 @earendil-works/pi-ai >/dev/null"
@@ -3004,10 +2150,6 @@ check "pi-mono log dir present"            test -d \${ZOMBIE_DIR}/state/logs
 check "built-in skills directory present"  test -d \${ZOMBIE_DIR}/skills
 check "skill apt.md deployed"              test -r \${ZOMBIE_DIR}/skills/apt.md
 check "skill systemd.md deployed"          test -r \${ZOMBIE_DIR}/skills/systemd.md
-check "skill tailscale.md deployed"        test -r \${ZOMBIE_DIR}/skills/tailscale.md
-check "skill ufw.md deployed"              test -r \${ZOMBIE_DIR}/skills/ufw.md
-check "skill docker.md deployed"           test -r \${ZOMBIE_DIR}/skills/docker.md
-check "skill gui.md deployed"              test -r \${ZOMBIE_DIR}/skills/gui.md
 check "operator skills.d/ present"         test -d /etc/ubuntu-zombie/skills.d
 check "agent tools.py compiles"            \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/tools.py
 check "agent pi_mono.py compiles"          \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/pi_mono.py
@@ -3022,16 +2164,6 @@ check "chat listening on 127.0.0.1:${CHAT_PORT}" bash -c "ss -ltn 'sport = :${CH
 check "agent server.py compiles"           \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/server.py
 [[ "\${JSON}" == "1" ]] || echo
 
-hd "Screenshot:"
-SHOT="\${ZOMBIE_DIR}/state/screen.png"
-if \${ZOMBIE_DIR}/bin/screenshot "\$SHOT" >/dev/null 2>&1 && [[ -s "\$SHOT" ]]; then
-  record ok "screenshot saved to \$SHOT"
-  [[ "\${JSON}" == "1" ]] || printf '  %s[ok]%s screenshot saved to %s\\n' "\${C_GREEN}" "\${C_RESET}" "\$SHOT"
-else
-  record fail "screenshot failed (desktop session may not be active yet)"
-  [[ "\${JSON}" == "1" ]] || printf '  %s[x]%s  screenshot failed (desktop session may not be active yet)\\n' "\${C_RED}" "\${C_RESET}"
-fi
-
 if [[ "\${JSON}" == "1" ]]; then
   printf '{"tool": "verify", "passed": %d, "failed": %d, "checks": [%s]}\\n' "\$PASS" "\$FAIL" "\${JSON_ITEMS}"
   [[ \$FAIL -gt 0 ]] && exit 1
@@ -3044,9 +2176,6 @@ printf '%sResult:%s %d passed, %d failed.\\n' "\${C_BOLD}" "\${C_RESET}" "\$PASS
 if [[ \$FAIL -gt 0 ]]; then
   echo
   echo "Tips:"
-  echo "  - If the desktop checks failed, run from a graphical login as \${AGENT_USER}."
-  echo "  - If tailscale is logged out, run: sudo tailscale up"
-  echo "  - If docker is not reachable, log out and log in again so the docker group applies."
   echo "  - If the chat service is not active: sudo systemctl status ubuntu-zombie-chat"
   exit 1
 fi
@@ -3055,38 +2184,6 @@ EOF
 chmod +x "${ZOMBIE_DIR}/bin/verify"
 chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/bin/verify"
 ln -sf "${ZOMBIE_DIR}/bin/verify" /usr/local/bin/zombie-verify
-
-# ---------------------------------------------------------------------------
-# Tailscale enrolment
-# ---------------------------------------------------------------------------
-
-section "Tailscale authentication"
-
-TS_STATUS_OK=0
-if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-  info "Skipping Tailscale enrolment (ZOMBIE_SKIP_TAILSCALE=1)."
-elif tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
-  info "Tailscale is already logged in."
-  TS_STATUS_OK=1
-elif [[ -n "${TAILSCALE_AUTHKEY}" ]]; then
-  if tailscale up --ssh=false --authkey "${TAILSCALE_AUTHKEY}"; then
-    ok "Tailscale logged in with pre-auth key."
-    TS_STATUS_OK=1
-  else
-    warn "Tailscale auth-key login failed. Run 'sudo tailscale up' from the console."
-  fi
-else
-  log
-  log "Authenticate this machine into your private Tailscale network."
-  log "This is the only intended remote ingress path."
-  log
-  if tailscale up --ssh=false; then
-    ok "Tailscale logged in."
-    TS_STATUS_OK=1
-  else
-    warn "Tailscale login did not complete. Run 'sudo tailscale up' from the console after install."
-  fi
-fi
 
 # ---------------------------------------------------------------------------
 # First-run status summary
@@ -3113,31 +2210,18 @@ bullet() {
   fi
 }
 
-if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-  bullet "1" "Tailscale skipped (ZOMBIE_SKIP_TAILSCALE=1)"
-else
-  bullet "${TS_STATUS_OK}" "Tailscale logged in"
-fi
 bullet "${PROVIDER_OK}"  "Provider token present in secrets/env"
 bullet "${CHAT_OK}"      "Chat service running on 127.0.0.1:${CHAT_PORT}"
 echo
 
 NEXT_STEP=""
-if [[ "${ZOMBIE_SKIP_TAILSCALE}" != "1" && "${TS_STATUS_OK}" != "1" ]]; then
-  NEXT_STEP="sudo tailscale up"
-elif [[ "${PROVIDER_OK}" != "1" ]]; then
+if [[ "${PROVIDER_OK}" != "1" ]]; then
   NEXT_STEP="sudo ${ZOMBIE_DIR}/bin/secrets-edit   # paste any of OPENAI/ANTHROPIC/GEMINI/XAI/OPENROUTER/MISTRAL/GROQ _API_KEY"
 elif [[ "${CHAT_OK}" != "1" ]]; then
   NEXT_STEP="sudo systemctl start ubuntu-zombie-chat.service"
 else
-  if [[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]]; then
-    NEXT_STEP="open http://127.0.0.1:${CHAT_PORT}/  (or tunnel: ssh -L ${CHAT_PORT}:127.0.0.1:${CHAT_PORT} ${AGENT_USER}@<host>)"
-  else
-    NEXT_STEP="open http://127.0.0.1:${CHAT_PORT}/  (or tunnel: ssh -L ${CHAT_PORT}:127.0.0.1:${CHAT_PORT} ${AGENT_USER}@<tailscale-name>)"
-  fi
+  NEXT_STEP="open http://127.0.0.1:${CHAT_PORT}/ locally"
 fi
-
-ufw status verbose || true
 
 cat <<EOF
 
@@ -3151,40 +2235,21 @@ Then:
   1. Reboot:
        sudo reboot
 
-  2. After reboot, from any device on your Tailscale network:
-       ssh ${AGENT_USER}@<tailscale-name-or-ip>
-       ${ZOMBIE_DIR}/bin/verify
-       ${ZOMBIE_DIR}/bin/health-check
+  2. After reboot, open the chat UI locally:
+       http://127.0.0.1:${CHAT_PORT}/
 
   3. Add cloud LLM keys (if not done already):
        sudo ${ZOMBIE_DIR}/bin/secrets-edit
 
-  4. Open the chat UI:
-       ssh -L ${CHAT_PORT}:127.0.0.1:${CHAT_PORT} ${AGENT_USER}@<tailscale-name-or-ip>
-       # open http://127.0.0.1:${CHAT_PORT}/ locally
-
-  5. Emergency desktop (still private):
-       ssh -L ${VNC_PORT}:localhost:${VNC_PORT} ${AGENT_USER}@<tailscale-name-or-ip>
-       # then point a VNC viewer at localhost:${VNC_PORT}
-
-  6. Inspect what the AI has done:
+  4. Inspect what the AI has done:
        ${ZOMBIE_DIR}/bin/audit-recent
 
 Surfaces installed:
-  - Terminal: SSH + sudo + tmux
-  - OS:       apt + systemctl + logs + files + Docker
-  - GUI:      Xorg + xdotool + screenshot + x11vnc (loopback)
-  - Browser:  Playwright + Chromium
+  - OS:       apt + systemctl + logs + files
   - Chat:     loopback HTTP on ${CHAT_PORT}, policy + audit
-  - Network:  $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "SSH on every interface (Tailscale skipped)" || echo "Tailscale-only inbound")
 
 Public exposure:
-  - SSH:           $([[ "${ZOMBIE_SKIP_TAILSCALE}" == "1" ]] && echo "every interface (Tailscale skipped)" || echo "Tailscale interface only")
-  - VNC:           localhost only
   - Chat:          localhost only
-  - Password SSH:  disabled
-  - Root SSH:      disabled
-  - UFW default:   deny inbound
 
 Install transcript: ${LOG_FILE}
 Install receipt:    $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "(disabled)")
@@ -3192,10 +2257,6 @@ Audit log:          ${ZOMBIE_LOG_DIR}/audit.log
 Policy:             ${ZOMBIE_ETC}/policy.yaml
 Uninstall:          sudo ${SCRIPT_DIR}/uninstall.sh --dry-run
 EOF
-
-if [[ "${ZOMBIE_SKIP_TAILSCALE}" != "1" && "${TS_STATUS_OK}" != "1" ]]; then
-  warn "Tailscale is not logged in yet. Run 'sudo tailscale up' before rebooting."
-fi
 
 echo
 echo "A reboot is required: sudo reboot"

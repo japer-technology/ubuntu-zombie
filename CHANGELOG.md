@@ -24,6 +24,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   lives in `payload/agent/lifecycle.py`; the password helpers live in
   `payload/agent/auth.py`.
 
+### Changed
+- **Zombie Zero default footprint.** Removed the installer/runtime
+  surfaces identified in `docs/analysis/ubuntu-zombie-zero.md`: SSH
+  server setup, Tailscale, fail2ban/UFW wiring, VNC/x11vnc, graphical
+  autologin, Docker, GUI/browser automation, and their built-in skills.
+  The product now installs a loopback-only chat surface plus the local
+  policy/audit runtime.
+
 ### Fixed
 - **`/whoami` no longer errors when provider configuration is broken or
   incomplete.** The chat UI now calls a dedicated `/api/whoami`
@@ -38,9 +46,6 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   from their source of truth (`payload/agent/pi-ai.version` and
   `payload/agent/pi-mono.version`) and degrade to `unknown` if a pin file
   is missing rather than aborting.
-- Clarified that Tailscale is optional and off by default: key-only,
-  root-disabled SSH is the default remote-access posture, while
-  `ZOMBIE_SKIP_TAILSCALE=0` opts in to tailnet-only SSH ingress.
 - Clarified provider/model setup in `README.md`, `docs/QUICKSTART.md`,
   and `docs/CONFIGURATION.md`: Ubuntu Zombie reads
   `/opt/ai-zombie/secrets/env`, maps `ZOMBIE_PROVIDER=gemini` to pi-ai's

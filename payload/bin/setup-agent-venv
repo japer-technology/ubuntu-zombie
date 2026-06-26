@@ -3,17 +3,13 @@
 # setup-agent-venv
 # ----------------
 # Provision the unprivileged Python virtualenv for the Ubuntu Zombie
-# agent account (default `~/agent-env`) and download the Chromium browser
-# binaries for Playwright.
+# agent account (default `~/agent-env`).
 #
 # Run as the AGENT_USER (not root):
 #   runuser -l "${AGENT_USER}" -- "${ZOMBIE_DIR}/bin/setup-agent-venv"
 #
-# This script is intentionally idempotent and retries transient pip /
-# Playwright failures with exponential backoff. The matching apt-level
-# Chromium system dependencies are installed separately by install.sh
-# (as root), because `playwright install --with-deps` shells out to
-# apt-get and would fail unprivileged. See FIX-1-01 and FIX-1-12.
+# This script is intentionally idempotent and retries transient pip
+# failures with exponential backoff.
 
 set -Eeuo pipefail
 
@@ -38,44 +34,12 @@ pip_with_retry() {
 }
 
 pip_with_retry install --upgrade pip wheel setuptools
-# Phase 1 (UPGRADE-TO-PI-PLAN §4.1): the bespoke openai/anthropic
-# Python clients are gone. Provider calls go through the Node
-# @earendil-works/pi-ai library via payload/agent/pi-ai-bridge.mjs.
-# The Python venv still ships the broader operator toolkit (requests,
-# pyautogui, playwright, …) used by helpers outside the chat loop.
+# Provider calls go through the Node @earendil-works/pi-ai library via
+# payload/agent/pi-ai-bridge.mjs; the Python venv only needs the small
+# standard operator toolkit used by the chat service and helpers.
 pip_with_retry install --upgrade \
   requests \
   pydantic \
   rich \
   typer \
-  python-dotenv \
-  playwright \
-  pyautogui \
-  pillow \
-  mss \
-  opencv-python \
-  python-xlib
-
-# Playwright browser downloads tend to flake on transient network. The
-# matching apt-level Chromium deps are installed as root before this
-# script runs, so we only need the unprivileged browser fetch here.
-n=1; delay=5
-while true; do
-  if python -m playwright install chromium; then break; fi
-  if (( n >= 4 )); then
-    echo "playwright install failed after ${n} attempts; rerun later." >&2
-    # FIX-3-04: signal failure so callers (install.sh) can detect the
-    # broken browser install instead of falling off the end with the
-    # echo's exit status (0).
-    mkdir -p "${HOME}/.cache/ubuntu-zombie"
-    : > "${HOME}/.cache/ubuntu-zombie/playwright-failed"
-    exit 1
-  fi
-  echo "playwright retry ${n} in ${delay}s..."
-  sleep "${delay}"
-  n=$((n + 1)); delay=$((delay * 2))
-done
-
-# FIX-3-04: clear the failure sentinel on success so the next health
-# check stops complaining once the operator has fixed the network.
-rm -f "${HOME}/.cache/ubuntu-zombie/playwright-failed" 2>/dev/null || true
+  python-dotenv

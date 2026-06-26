@@ -22,13 +22,10 @@
 > repair, and operate itself.**
 
 It is a normal Ubuntu PC with an administrator inside it. Any local
-user can open a private chat, ask the machine to do something, see
-exactly what is proposed, approve it, and watch it happen. Everything
-the AI does is audit-logged. SSH is key-only and root-disabled; that is
-a safe default for a machine behind a trusted perimeter. Tailscale is
-optional: opt in at install time if you also want inbound SSH confined
-to a private tailnet. The operator owns the machine, the SSH key, the
-API key, and the kill switch.
+user can open a private loopback chat, ask the machine to do something,
+see exactly what is proposed, approve it, and watch it happen.
+Everything the AI does is audit-logged. The operator owns the machine,
+the API key, and the TTL control.
 
 ## Quickstart
 
@@ -43,26 +40,13 @@ sudo reboot
 /opt/ai-zombie/bin/verify
 sudo /opt/ai-zombie/bin/secrets-edit   # add an LLM API key
 sudo systemctl restart ubuntu-zombie-chat.service
-# open http://127.0.0.1:7878/ locally, or tunnel over SSH:
-ssh -L 7878:127.0.0.1:7878 zombie@<host-name-or-ip>
+# open http://127.0.0.1:7878/ locally
 ```
 
-The installer needs only two inputs from you to proceed: an
-`SSH_PUBLIC_KEY` and a `VNC_PASSWORD`. In short: **the SSH key is how you
-log in to the machine remotely** (the installer makes SSH key-only and
-disables `root`, so only a computer holding the matching private key can
-connect), and **the VNC password protects an emergency, loopback-only
-"watch and drive the desktop" service** you reach over an SSH tunnel — it
-is not your login password. Both are explained step by step, for people
-new to Ubuntu, in
-[`docs/QUICKSTART.md`](docs/QUICKSTART.md#what-the-ssh-key-is-for-and-what-the-vnc-password-is-for).
-The installer prompts for both
-interactively, or reads them from the environment in non-interactive
-mode (`ZOMBIE_NONINTERACTIVE=1`). An LLM API key is added *after*
-install. Tailscale is **off by default**; key-only, root-disabled SSH
-is the default remote-access posture. Opt in with
-`ZOMBIE_SKIP_TAILSCALE=0` only if you want to restrict inbound SSH to
-your tailnet. The full list of inputs and their defaults is in
+The installer no longer provisions remote access or a secondary desktop
+viewing path. It installs one access surface: the password-protected
+chat UI bound to `127.0.0.1`. An LLM API key is added *after* install.
+The full list of inputs and their defaults is in
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md#parameters-required-to-allow-the-install-to-proceed).
 
 The chat administrator is **password-protected** and has a **Time to
@@ -79,13 +63,6 @@ set exactly one matching `*_API_KEY`, optionally set
 `ZOMBIE_PROVIDER`, and set `ZOMBIE_MODEL` when you need a non-default
 model (or when using `openrouter` / `lmstudio`). The chat service passes
 those values to `pi`/`@earendil-works/pi-ai` on every turn.
-
-If you do not already have an SSH key on the workstation you will use
-to control this PC, create one there (not on the Ubuntu Zombie box)
-with `ssh-keygen -t ed25519`, then pass the public half
-(`~/.ssh/id_ed25519.pub`, the line starting `ssh-ed25519 …`) as
-`SSH_PUBLIC_KEY`. Full steps — including copying the key from GitHub —
-are in [`docs/QUICKSTART.md`](docs/QUICKSTART.md#how-to-get-an-ssh-key).
 
 During an **interactive** install the script can also auto-detect a
 local LLM: it scans your LAN for an OpenAI-compatible server (LM
@@ -151,8 +128,7 @@ Non-interactive variants and every environment variable: see
 | [`docs/VISION.md`](docs/VISION.md)                             | What this project promises (and does not)         |
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md)                     | First successful install in ten steps             |
 | [`docs/PLATFORMS.md`](docs/PLATFORMS.md)                       | Supported Ubuntu versions and architectures       |
-| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)               | Provider keys, Tailscale, VNC, chat, policy       |
-| [`docs/VNC.md`](docs/VNC.md)                                   | Why/how the VNC password is used, and if required |
+| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)               | Provider keys, chat, policy, helper settings      |
 | [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)           | Common failures and their fixes                   |
 | [`docs/FAQ.md`](docs/FAQ.md)                                   | Quick answers distilled from the above            |
 | [`docs/UPGRADING.md`](docs/UPGRADING.md)                       | Version-by-version upgrade notes                  |
@@ -171,16 +147,12 @@ Non-interactive variants and every environment variable: see
 The local `zombie` Linux user (renameable at install time with
 `ZOMBIE_USER=<name>`) is the operating identity of the AI
 Systems Administrator and holds passwordless `sudo`. The configured
-cloud LLM provider authenticates the administrator. The operator owns
-the machine, the SSH private key, the API key, and (if Tailscale is
-enabled) the Tailscale account, and can rotate, revoke, or uninstall
+LLM provider powers the administrator. The operator owns the machine,
+the API key, and the TTL control, and can rotate, revoke, or uninstall
 any of them at any time. Privileged actions go through a local policy
-gate before `sudo`. Every action is audit-logged. The chat and VNC
-services bind to `127.0.0.1` only. Tailscale is off by default; the
-default key-only, root-disabled SSH setup is suitable behind a trusted
-network perimeter. Opt in with `ZOMBIE_SKIP_TAILSCALE=0` if you want to
-confine inbound SSH to your tailnet. Read [`SECURITY.md`](SECURITY.md)
-before running the installer.
+gate before `sudo`. Every action is audit-logged. The chat service
+binds to `127.0.0.1` only. Read [`SECURITY.md`](SECURITY.md) before
+running the installer.
 
 ## License
 

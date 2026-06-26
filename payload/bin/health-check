@@ -27,55 +27,11 @@ else
   check_fail "chat service not active (sudo systemctl start ubuntu-zombie-chat)"
 fi
 
-# Tailscale
-if command -v tailscale >/dev/null 2>&1; then
-  if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
-    check_ok "tailscale logged in"
-  else
-    check_fail "tailscale logged out (sudo tailscale up)"
-  fi
+# Local network visibility
+if ss -ltn 2>/dev/null | grep -q ":${ZOMBIE_CHAT_PORT:-7878} "; then
+  check_ok "chat port listening"
 else
-  check_ok "tailscale not installed (skipped)"
-fi
-
-# SSH
-if systemctl is-active --quiet ssh 2>/dev/null; then
-  check_ok "ssh service active"
-else
-  check_fail "ssh service not active"
-fi
-
-# Firewall
-if command -v ufw >/dev/null 2>&1 && sudo -n ufw status 2>/dev/null | grep -q "Status: active"; then
-  check_ok "ufw active"
-elif ufw status 2>/dev/null | grep -q "Status: active"; then
-  check_ok "ufw active"
-else
-  check_warn "ufw status unknown (need root to query)"
-fi
-
-# Docker
-if docker version >/dev/null 2>&1; then
-  check_ok "docker reachable"
-else
-  check_warn "docker not reachable (log out/in so the docker group applies)"
-fi
-
-# Desktop / display
-if [[ -n "${DISPLAY:-}" ]]; then
-  # FIX-3-22: distinguish "gui-env helper missing" (installer never
-  # ran / payload only) from "helper present but xdotool failed" so
-  # the operator gets a useful pointer instead of a misleading
-  # xdotool message.
-  if [[ ! -x "${ZOMBIE_DIR}/bin/gui-env" ]]; then
-    check_warn "gui-env helper missing at ${ZOMBIE_DIR}/bin/gui-env (re-run scripts/install.sh)"
-  elif "${ZOMBIE_DIR}/bin/gui-env" xdotool getdisplaygeometry >/dev/null 2>&1; then
-    check_ok "desktop reachable on ${DISPLAY}"
-  else
-    check_warn "DISPLAY=${DISPLAY} but xdotool failed (desktop session may not be live)"
-  fi
-else
-  check_warn "DISPLAY not set (desktop helpers unavailable in this shell)"
+  check_warn "chat port not observed in ss output"
 fi
 
 # Provider token presence (without reading the value)

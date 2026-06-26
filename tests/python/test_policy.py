@@ -22,7 +22,7 @@ CLASSIFICATION_CASES = {
     "FOO=bar apt-get install pkg": "system_change",
     "sudo apt install foo": "system_change",
     "sudo -u zombie ls /tmp": "read_only",
-    "sudo -E systemctl restart sshd": "network_change",
+    "sudo -E systemctl restart cron": "system_change",
     'rm -rf "/tmp/some file"': "destructive",
     # Unknown commands hit the fail-closed default.
     "foozle --bar": "destructive",
@@ -63,7 +63,6 @@ def test_tool_registry_is_closed(tools_module) -> None:
         "pkg.query", "pkg.install",
         "svc.status", "svc.control",
         "net.status",
-        "gui.screenshot", "gui.click", "gui.type",
         "skill.list", "skill.load",
     }
     assert set(tools_module.tool_names()) == expected
@@ -75,7 +74,7 @@ def test_tool_registry_is_closed(tools_module) -> None:
         ("fs.read", {"path": "/etc/os-release"}, "read_only"),
         ("fs.list", {"path": "/etc"}, "read_only"),
         ("pkg.install", {"names": ["curl"]}, "system_change"),
-        ("svc.control", {"unit": "ssh", "action": "restart"}, "system_change"),
+        ("svc.control", {"unit": "cron", "action": "restart"}, "system_change"),
         ("shell.run", {"argv": ["ls", "-la"]}, "read_only"),
         ("shell.run", {"command": "sudo apt-get install -y curl"}, "system_change"),
     ],

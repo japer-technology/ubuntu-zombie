@@ -12,8 +12,7 @@ A small loopback-only HTTP server that:
 - records every step in the JSON-lines audit log;
 - persists conversations + structured tool events to SQLite.
 
-The server binds to ``127.0.0.1`` only. Remote access is by SSH tunnel
-over Tailscale.
+The server binds to ``127.0.0.1`` only.
 
 The legacy ``extract_commands`` fenced-bash workflow and its
 ``SYSTEM_PROMPT_TEMPLATE`` have been removed; the model now drives

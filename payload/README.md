@@ -132,9 +132,8 @@ sequenceDiagram
 The four invariants that make this safe — and that any change to this
 directory must preserve — are:
 
-1. **Loopback only.** The server binds `127.0.0.1`; remote access is an
-   SSH tunnel over key-only SSH (optionally restricted to Tailscale).
-   There is no remote API surface.
+1. **Loopback only.** The server binds `127.0.0.1`. There is no remote
+   API surface.
 2. **Closed tool surface.** `TOOL_REGISTRY` in `agent/tools.py` is the
    only set of tools that can ever run. Adding one requires a code
    release; skills, prompts, and `policy.yaml` cannot expand it.
@@ -186,14 +185,14 @@ flowchart TB
 | [`pi-mono-bridge.mjs`](agent/pi-mono-bridge.mjs) | Node bridge that runs the `pi` agent loop one-shot (`pi --mode json -p`) with pi's real built-in tools, parsing `message_update` / `message_end` / `agent_end` events. |
 | [`pi-ai-bridge.mjs`](agent/pi-ai-bridge.mjs) | Node bridge over `@earendil-works/pi-ai` for one-shot `complete()` calls and live model listing (e.g. for the `/model` command). |
 | [`providers.py`](agent/providers.py) | Single source of truth for provider + model selection, resolved from `ZOMBIE_PROVIDER`, `ZOMBIE_MODEL`, and the matching `*_API_KEY`. |
-| [`tools.py`](agent/tools.py) | The **closed** tool registry, a tiny dependency-free schema validator, and the dispatcher that wraps existing helpers (`runner.run`, `Path.read_text`, GUI helpers, …). |
+| [`tools.py`](agent/tools.py) | The **closed** tool registry, a tiny dependency-free schema validator, and the dispatcher that wraps existing helpers (`runner.run`, `Path.read_text`, …). |
 | [`policy.py`](agent/policy.py) | Argv-aware classifier that reads `policy.yaml` live; fail-closed for unknown commands, with a `sudo` allow-list to keep common privileged targets at `system_change`. |
 | [`runner.py`](agent/runner.py) | Command execution with timeout and stdout/stderr/exit capture, plus suggested read-only follow-up checks. |
 | [`audit.py`](agent/audit.py) | Append-only JSON-lines audit log with secret redaction and SHA-256 digests of tool output. |
 | [`history.py`](agent/history.py) | SQLite-backed conversations and structured `tool_call` / `tool_observation` events; forward-only schema via `PRAGMA user_version`. |
 | [`skill_loader.py`](agent/skill_loader.py) | Selects trigger-matched Markdown skills and records their on-disk provenance; never expands the tool surface. |
 | [`templates/`](agent/templates) | The chat UI (`index.html`) plus `settings.json.tmpl` and `APPEND_SYSTEM.md.tmpl`, rendered by the installer into `/opt/ai-zombie/pi/`. |
-| [`skills/`](agent/skills) | Built-in skill catalogue (`apt`, `docker`, `gui`, `systemd`, `tailscale`, `ufw`) — Markdown nudges toward the correct typed tool. |
+| [`skills/`](agent/skills) | Built-in skill catalogue (`apt`, `systemd`) — Markdown nudges toward the correct typed tool. |
 | `pi-ai.version`, `pi-mono.version`, `bridge-dependencies.lock` | Pinned versions and checksums for the Node bridge dependencies. |
 | [`examples.md`](agent/examples.md) | Example operator prompts surfaced in the UI. |
 

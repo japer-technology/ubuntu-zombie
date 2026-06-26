@@ -224,14 +224,14 @@ fail-closed default. The standard approval prompt still fires for
 these — they do not auto-run — but they are not escalated to
 `destructive`. Entries are matched against the basename of the
 program that `sudo` invokes (after `sudo` consumes its own flags), so
-`sudo apt install foo`, `sudo -u root systemctl restart sshd`, and
+`sudo apt install foo`, `sudo -u root systemctl restart cron`, and
 `sudo -E /usr/bin/apt update` are all classified by the entries for
 `apt` and `systemctl`. Add entries only after confirming the
 underlying program is safe to elevate.
 
 ### Tool classes and per-turn budgets
 
-The agent emits structured tool calls from a closed 13-tool registry
+The agent emits structured tool calls from a closed 10-tool registry
 defined in `payload/agent/tools.py`:
 
 | Tool              | Registry default class | Purpose                                                    |
@@ -244,10 +244,7 @@ defined in `payload/agent/tools.py`:
 | `pkg.install`     | `system_change`        | Install Debian packages via apt-get.                       |
 | `svc.status`      | `read_only`            | Inspect a systemd unit (status / is-active).               |
 | `svc.control`     | `system_change`        | Start/stop/restart/reload/enable/disable a systemd unit.   |
-| `net.status`      | `read_only`            | Read-only firewall/Tailscale/interface inspection.         |
-| `gui.screenshot`  | `read_only`            | Capture the desktop session into the state directory.      |
-| `gui.click`       | `user_change`          | Move to (x, y) and click a mouse button via xdotool.       |
-| `gui.type`        | `user_change`          | Type text into the focused window via xdotool.             |
+| `net.status`      | `read_only`            | Read-only interface and listening-port inspection.          |
 | `skill.list`      | `read_only`            | Enumerate available skills.                                |
 | `skill.load`      | `read_only`            | Read the markdown body of a skill by name.                 |
 
@@ -296,108 +293,10 @@ Environment overrides for the `pi-mono` runtime are documented in
 [Advanced environment overrides](#advanced-environment-overrides)
 below (look for the `ZOMBIE_PI_MONO_*` variables).
 
-## Tailscale
-
-By default the installer does **not** install or enrol Tailscale, and
-inbound SSH is allowed on **every** interface (key-only, root-disabled).
-That SSH posture is secure enough for hosts behind a perimeter you
-control, such as a home/office LAN, private cloud network, security
-group, bastion, or existing VPN. See
-[Opting in to Tailscale](#opting-in-to-tailscale) below if you also
-want a Tailscale-only ingress posture.
-
-### Opting in to Tailscale
-
-Set `ZOMBIE_SKIP_TAILSCALE=0` to install Tailscale, enrol the machine
-into your tailnet, and restrict inbound SSH to the `tailscale0`
-interface via UFW:
-
-```bash
-sudo ZOMBIE_SKIP_TAILSCALE=0 ./scripts/install.sh install
-```
-
-When opting in interactively the installer runs `tailscale up`, which
-prints a login URL you must open in a browser to authenticate. To
-re-enrol or change accounts later:
-
-```bash
-sudo tailscale logout
-sudo tailscale up
-```
-
-For unattended installs, also set `TAILSCALE_AUTHKEY` to a Tailscale
-pre-auth key before running `install`; the installer will run
-`tailscale up --ssh=false --authkey "$TAILSCALE_AUTHKEY"` for you.
-`TAILSCALE_AUTHKEY` is used only when `ZOMBIE_SKIP_TAILSCALE=0`.
-
-The chat service never binds outside `127.0.0.1`; remote access is by
-SSH tunnel only.
-
-### Default: no Tailscale
-
-With the default (`ZOMBIE_SKIP_TAILSCALE=1`, no Tailscale), the
-installer will:
-
-- skip installing the Tailscale apt repo, `tailscale` package, and
-  `tailscaled` enablement;
-- skip the interactive `tailscale up` prompt and ignore
-  `TAILSCALE_AUTHKEY`;
-- configure UFW to allow inbound SSH on **every** interface instead of
-  only `tailscale0`.
-
-This means anyone who can route to port 22 on the host can attempt to
-authenticate, but SSH is still key-only and root-disabled, and the
-chat/VNC services still bind to `127.0.0.1` only. This is a suitable
-default behind a network perimeter you control. Opt in to Tailscale as
-above when you want the additional guarantee that SSH is reachable only
-from devices in your tailnet.
-
-Re-run the installer with `ZOMBIE_SKIP_TAILSCALE=0` at any time to
-enrol the machine into Tailscale and re-tighten UFW.
-
-## Autologin
-
-By default Ubuntu Zombie does **not** enable graphical autologin. To
-enable it (required for unattended desktop automation), re-run the
-installer with:
-
-```bash
-sudo ZOMBIE_ENABLE_AUTOLOGIN=1 ./scripts/install.sh install
-```
-
-Autologin trades a meaningful slice of physical-access security for
-the ability for the agent to drive the desktop without a human first
-typing the password. Read `SECURITY.md` before enabling it.
-
-## VNC
-
-`x11vnc` binds to `127.0.0.1:${VNC_PORT:-5900}` only and starts via
-the agent account's GNOME autostart entry. Tunnel to it over
-Tailscale:
-
-```bash
-ssh -L 5900:127.0.0.1:5900 zombie@<tailscale-name-or-ip>
-# open a VNC viewer at localhost:5900
-```
-
-Reset the password:
-
-```bash
-sudo -u zombie x11vnc -storepasswd
-```
-
-The port is fixed at install time. To change it, re-run the
-installer with `VNC_PORT=<n>` (and re-tunnel accordingly):
-
-```bash
-sudo VNC_PORT=5901 ./scripts/install.sh install
-```
-
 ## Chat access
 
 The chat UI is served at `http://127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}/`.
-Tunnel over Tailscale exactly the same way as VNC. On a shared desktop
-every local user can reach the loopback socket, so the UI is protected
+On a shared desktop every local user can reach the loopback socket, so the UI is protected
 by a **password gate**: the installer asks for a chat password (default
 `livelongandprosper`) and stores only a PBKDF2 hash as
 `ZOMBIE_ADMIN_PASSWORD_HASH` in `secrets/env`. Set a custom one with
@@ -438,7 +337,6 @@ inspected from the agent account with
 | `/var/log/ubuntu-zombie/audit.log`         | JSON-lines AI audit trail                       |
 | `/opt/ai-zombie/state/conversations.db`    | Chat history (SQLite)                           |
 | `/opt/ai-zombie/state/lifecycle.json`      | Time-to-Live state + tombstone                  |
-| `/opt/ai-zombie/state/screen.png`          | Latest screenshot helper output                 |
 | `/opt/ai-zombie/state/logs/pi-mono.*.log`  | Per-turn pi-mono bridge logs (rotated daily)    |
 | `/opt/ai-zombie/state/pi-mono-sessions/`   | pi session/checkpoint state                     |
 
@@ -450,26 +348,24 @@ inspected from the agent account with
 | Command                | Purpose                                                                 |
 | ---------------------- | ----------------------------------------------------------------------- |
 | `secrets-edit`         | Safely edit `secrets/env`; re-asserts `0600` mode after `$EDITOR` exits |
-| `health-check`         | One-shot health summary (chat service, Tailscale, SSH, desktop, …)      |
+| `health-check`         | One-shot health summary (chat service, provider token, disk, …)         |
 | `audit-recent`         | Tail the most recent decisions from `audit.log`                         |
 | `collect-diagnostics`  | Bundle logs and state into a tarball with secrets redacted              |
-| `zombie-chat`          | Print the local chat URL and a copy-pasteable SSH tunnel example        |
+| `zombie-chat`          | Print the local chat URL                                               |
 
-The installer also drops `verify` and a few GUI shims (`gui-env`,
-`screenshot`, `click`, `type`, `key`) under the same directory; the
-agent invokes them directly.
+The installer also drops `verify` under the same directory.
 
 ## Interactive setup review
 
 When `scripts/install.sh install` runs on an interactive terminal (i.e.
 not `--yes` and not `ZOMBIE_NONINTERACTIVE=1`), it opens an editable
 **parameter review** before touching the host. Every install parameter —
-agent user, install root, chat/VNC ports, autologin, Tailscale, transcript
-and receipt paths, the SSH public key, and the VNC password — is listed in
-a branded summary. Enter a number to edit a field (with validation and
-re-prompting on bad input), toggle the boolean options, and repeat until
-you are satisfied; then accept to begin the install. Cancelling at the
-review (`q`) exits without changing anything.
+agent user, install root, chat port, transcript and receipt paths, chat
+password, TTL, and local LLM selection — is listed in a branded summary.
+Enter a number to edit a field (with validation and re-prompting on bad
+input), toggle the boolean options, and repeat until you are satisfied;
+then accept to begin the install. Cancelling at the review (`q`) exits
+without changing anything.
 
 The review uses the **Zombie Orchid** highlight (`#AC43D9`) with
 compatible accent colours when colour is enabled. Colour follows the same
@@ -485,8 +381,7 @@ Every install writes a human-readable **receipt** recording all parameters
 when the run starts and the outcome (result, duration, service status,
 applied/satisfied step counts, next step) when it finishes. A failed run
 appends a `FAILED` record with the line and exit code. Secrets are never
-written: only the SSH key fingerprint and a set/unset flag for the VNC
-password are recorded.
+written; password values and provider keys are excluded.
 
 | Variable             | Default                                        | Effect                                             |
 | -------------------- | ---------------------------------------------- | -------------------------------------------------- |
@@ -551,7 +446,7 @@ Skill files are short markdown briefs the agent loads via `skill.list`
 
 | Path                         | Purpose                                                         |
 | ---------------------------- | --------------------------------------------------------------- |
-| `/opt/ai-zombie/skills/`     | Root-owned, ships with the package (`apt`, `docker`, `gui`, `systemd`, `tailscale`, `ufw`). |
+| `/opt/ai-zombie/skills/`     | Root-owned, ships with the package (`apt`, `systemd`). |
 | `/etc/ubuntu-zombie/skills.d/` | Operator-extensible. Same mode/owner contract as `policy.yaml`. |
 
 Drop additional `*.md` files into `/etc/ubuntu-zombie/skills.d/` to
