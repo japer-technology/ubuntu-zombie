@@ -1505,7 +1505,7 @@ run_bad_usage() {
   grep -Fq 'npm uninstall -g "${_pkg}"' scripts/uninstall.sh
   grep -Fq 'rm -f -- $(shell_quote "${f}")' scripts/uninstall.sh
   grep -Fq 'rm -f -- $(shell_quote "${_path}")' scripts/uninstall.sh
-  bash -c '
+  out="$(bash -c '
     set -Eeuo pipefail
     DRY_RUN=0
     UNINSTALL_EXIT=0
@@ -1563,7 +1563,15 @@ run_bad_usage() {
     [[ "${UNINSTALL_EXIT}" -eq 1 ]]
     chmod 700 "${tmp}/parent"
     rm -rf "${tmp}"
-  '
+  ' 2>&1)"
+  if [[ "${out}" != *"WARN:expected failure failed (exit 1); continuing cleanup."* ]]; then
+    echo "FAIL: run_or_warn warning was not emitted" >&2
+    exit 1
+  fi
+  if [[ "${out}" != *"WARN:Failed to remove stubborn"* ]]; then
+    echo "FAIL: remove_tree_checked warning was not emitted" >&2
+    exit 1
+  fi
 }
 
 run_noninteractive() {
