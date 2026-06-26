@@ -1723,6 +1723,10 @@ run_standards() {
     || { echo "health timer must not leave a failed unit after reporting unhealthy state" >&2; exit 1; }
   grep -q "s|__ZOMBIE_DIR__|\\\${ZOMBIE_DIR}|g" scripts/install.sh \
     || { echo "install.sh must render __ZOMBIE_DIR__ in systemd units" >&2; exit 1; }
+  if grep -n '\[\[ "${JSON}"' scripts/install.sh; then
+    echo "generated verify script must escape JSON references in install.sh heredoc" >&2
+    exit 1
+  fi
   grep -q "actions/attest@" .github/workflows/release.yml \
     || { echo "release workflow must generate provenance attestations" >&2; exit 1; }
   grep -q "verify-bridge-pins" .github/workflows/release.yml \
