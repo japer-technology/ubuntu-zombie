@@ -25,6 +25,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `payload/agent/auth.py`.
 
 ### Changed
+- The chat interface now includes a top-centre **Logoff** control, a
+  `/logout` slash command that reopens the password gate, and a grouped,
+  alphabetised `/help` command list.
 - The installer now shows the Ubuntu Zombie logo as soon as install mode
   starts, the uninstaller shows the same logo, the default TTL is 7 days,
   and the default chat password is `braaaains`.
