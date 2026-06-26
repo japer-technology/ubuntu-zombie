@@ -634,12 +634,13 @@ async function uzPostJson(path, body = {}) {
 
 function uzCommandEntries(filter = "") {
   const needle = filter.trim().toLowerCase();
-  return SLASH_COMMANDS
+  const entries = SLASH_COMMANDS
     .filter(([cmd, desc, group]) => !needle || cmd.toLowerCase().includes(needle) ||
       desc.toLowerCase().includes(needle) || group.toLowerCase().includes(needle))
     .slice()
     .sort(([cmdA, , groupA], [cmdB, , groupB]) =>
       groupA.localeCompare(groupB) || cmdA.localeCompare(cmdB));
+  return entries;
 }
 
 function uzCommandHelp(filter = "") {
@@ -1322,7 +1323,10 @@ async function logoutChat(announce) {
     if (announce) addMessage("system", "Authentication is not required for this session.");
     return;
   }
-  if (turnController) abortTurn("Logged out.");
+  if (turnController) {
+    // Synchronous local abort; the server-side turn may still finish later.
+    abortTurn("Logged out.");
+  }
   try {
     await uzPostJson("/api/logout");
     setAuthState(true, false);
