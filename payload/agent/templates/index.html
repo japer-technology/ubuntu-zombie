@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Ubuntu Zombie {{HOSTNAME}}</title>
+<title>Ubuntu Zombie</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
   :root { color-scheme: light dark; }
@@ -122,7 +122,7 @@
 <header>
   <h1>{{HOSTNAME}}({{USERNAME}})</h1>
   <div class="header-actions">
-    <button type="button" id="logout" title="Log out and lock the chat" hidden>Logoff</button>
+    <button type="button" id="logout" title="Log out and secure the chat" hidden>Logoff</button>
   </div>
   <div class="status">{{PROVIDER_STATUS}}</div>
 </header>
@@ -138,7 +138,7 @@
 <pre id="examples" hidden>{{EXAMPLES}}</pre>
 <footer>
   <form id="form">
-    <textarea id="prompt" placeholder="Ask the administrator…  (Enter to send, Shift+Enter for newline, /help for commands)" required></textarea>
+    <textarea id="prompt" placeholder="Ask the System Administrator…  (Enter to send, Shift+Enter for newline, /help for commands)" required></textarea>
     <button type="submit" id="send" class="primary">Send</button>
     <button type="button" id="stop" class="danger" hidden>Stop</button>
   </form>
@@ -148,7 +148,7 @@
 <div id="login-overlay" class="overlay" hidden>
   <div class="panel">
     <h2>Ubuntu Zombie Password Required</h2>
-    <p>This administrator is protected by a password. Enter it to continue.</p>
+    <p>This System Administrator requires a password.</p>
     <form id="login-form">
       <input type="password" id="login-password" autocomplete="current-password"
              placeholder="Password" aria-label="Password" required>
