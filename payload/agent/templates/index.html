@@ -1312,8 +1312,10 @@ loginForm.addEventListener("submit", async (event) => {
       return;
     }
     const data = await r.json().catch(() => ({}));
+    loginPassword.value = "";
     loginError.textContent = data.error || "Sign in failed.";
   } catch (err) {
+    loginPassword.value = "";
     loginError.textContent = String(err);
   }
 });
