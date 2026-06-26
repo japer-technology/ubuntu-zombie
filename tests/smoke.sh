@@ -73,7 +73,7 @@ cases = {
     "FOO=bar apt-get install pkg": "system_change",
     "sudo apt install foo": "system_change",
     "sudo -u zombie ls /tmp": "read_only",
-    "sudo -E systemctl restart sshd": "network_change",
+    "sudo -E systemctl restart cron": "system_change",
     # Quoted destructive path is now caught because rules see the
     # de-quoted argv (the historical regex-only matcher missed it).
     'rm -rf "/tmp/some file"': "destructive",
@@ -108,8 +108,7 @@ if hasattr(server, "extract_commands"):
 import tools as _t
 assert set(_t.tool_names()) == {
     "shell.run", "fs.read", "fs.list", "fs.write", "pkg.query", "pkg.install",
-    "svc.status", "svc.control", "net.status", "gui.screenshot",
-    "gui.click", "gui.type", "skill.list", "skill.load",
+    "svc.status", "svc.control", "net.status", "skill.list", "skill.load",
 }, _t.tool_names()
 # Per-tool default classifications come from the registry; shell.run
 # is computed per-argv via the existing classify() path.
@@ -117,7 +116,7 @@ if p.classify_tool("fs.read", {"path": "/etc/os-release"}) != "read_only":
     raise SystemExit("fs.read should be read_only")
 if p.classify_tool("pkg.install", {"names": ["curl"]}) != "system_change":
     raise SystemExit("pkg.install should be system_change")
-if p.classify_tool("svc.control", {"unit": "ssh", "action": "restart"}) != "system_change":
+if p.classify_tool("svc.control", {"unit": "cron", "action": "restart"}) != "system_change":
     raise SystemExit("svc.control should be system_change")
 if p.classify_tool("shell.run", {"argv": ["ls", "-la"]}) != "read_only":
     raise SystemExit("shell.run ls should be read_only via classify()")
@@ -133,7 +132,7 @@ try:
 except _t.SchemaError:
     pass
 try:
-    _t.validate_args("svc.control", {"unit": "ssh", "action": "nuke"})
+    _t.validate_args("svc.control", {"unit": "cron", "action": "nuke"})
     raise SystemExit("svc.control with bad action must be rejected")
 except _t.SchemaError:
     pass
@@ -175,17 +174,11 @@ from pathlib import Path
 
 skills = skill_loader.load_skills([Path("payload/agent/skills")])
 names = {s.name for s in skills}
-assert names == {"apt", "systemd", "tailscale", "ufw", "docker", "gui"}, names
+assert names == {"apt", "systemd"}, names
 for s in skills:
     assert s.triggers, f"skill {s.name} has no triggers"
 
 # Trigger match on the last user turn only.
-sel = skill_loader.select_skills(
-    ["I want to talk about cats", "Can you check if docker is installed?"],
-    dirs=[Path("payload/agent/skills")],
-)
-assert [s.name for s in sel] == ["docker"], [s.name for s in sel]
-
 # No trigger words -> no skills selected.
 sel = skill_loader.select_skills(
     ["What is the weather like?"],
@@ -1471,7 +1464,6 @@ run_bad_usage() {
   expect_exit_code 2 env 'LOG_FILE=relative.log' ./scripts/install.sh doctor
   expect_exit_code 2 env 'LOG_FILE=/tmp/zombie log' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_RECEIPT=1' 'ZOMBIE_RECEIPT_FILE=relative-receipt.txt' ./scripts/install.sh doctor
-  expect_exit_code 2 env 'VNC_PORT=bad' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_CHAT_PORT=70000' ./scripts/install.sh doctor
   # FIX-2-01: uninstall.sh must validate ZOMBIE_USER / paths *before*
   # any side-effecting command runs (so a smoke run as non-root still
@@ -1482,7 +1474,6 @@ run_bad_usage() {
   expect_exit_code 2 env 'ZOMBIE_DIR=/tmp/zombie;touch /tmp/uninstall-path-pwn' ./scripts/uninstall.sh --dry-run
   expect_exit_code 2 env 'BACKUP_DIR=relative/path' ./scripts/uninstall.sh --dry-run
   expect_exit_code 2 env 'BACKUP_DIR=/tmp/zombie backup' ./scripts/uninstall.sh --dry-run
-  expect_exit_code 2 env 'VNC_PORT=0' ./scripts/uninstall.sh --dry-run
   [[ ! -e /tmp/zombie-pwn ]] || { echo "FAIL: uninstall.sh ZOMBIE_USER injection created /tmp/zombie-pwn" >&2; exit 1; }
   [[ ! -e /tmp/install-path-pwn ]] || { echo "FAIL: install.sh ZOMBIE_DIR injection created /tmp/install-path-pwn" >&2; exit 1; }
   [[ ! -e /tmp/uninstall-path-pwn ]] || { echo "FAIL: uninstall.sh ZOMBIE_DIR injection created /tmp/uninstall-path-pwn" >&2; exit 1; }
@@ -1523,8 +1514,7 @@ run_diagnostics() {
   echo "[smoke] collect-diagnostics best-effort"
   # FIX-3-24: collect-diagnostics must finish and write its tarball
   # even when individual captured commands return non-zero (e.g.
-  # `systemctl status` of an inactive unit, `docker version` with no
-  # daemon, a `tailscale` binary that is not installed). Before the
+  # `systemctl status` of an inactive unit). Before the
   # fix, `set -euo pipefail` aborted the run on the first such failure
   # and the EXIT trap then deleted the partial bundle, so no tarball
   # was produced. Run the real script in an isolated TMPDIR and assert
@@ -1626,7 +1616,7 @@ run_standards() {
   # ``make package`` carries them into the release bundle and the
   # installer can deploy them to /opt/ai-zombie/skills/.
   local s
-  for s in apt systemd tailscale ufw docker gui; do
+  for s in apt systemd; do
     [[ -s "payload/agent/skills/${s}.md" ]] || \
       { echo "missing built-in skill: payload/agent/skills/${s}.md" >&2; exit 1; }
   done

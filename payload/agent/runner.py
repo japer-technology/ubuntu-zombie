@@ -46,13 +46,6 @@ def _propose_follow_ups(command: str, exit_code: int) -> list[str]:
         unit = tokens[2]
         follow_ups.append(f"systemctl is-active {shlex.quote(unit)}")
         follow_ups.append(f"systemctl status --no-pager {shlex.quote(unit)} | head -n 20")
-    elif head == "ufw":
-        follow_ups.append("ufw status verbose")
-    elif head == "tailscale":
-        follow_ups.append("tailscale status")
-    elif head == "docker" and len(tokens) > 1 and tokens[1] in {"run", "start", "restart"}:
-        follow_ups.append("docker ps")
-
     if exit_code != 0 and "journalctl" not in command:
         follow_ups.append("journalctl -n 50 --no-pager")
     return follow_ups

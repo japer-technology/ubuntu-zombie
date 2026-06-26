@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# zombie-chat — print the chat URL, a remote-tunnel example, and the
+# zombie-chat — print the local chat URL and the
 # operator's debugging entry points. This is the single command a
 # tester should run to discover every diagnostic surface the payload
 # ships with.
 set -euo pipefail
 
 PORT="${ZOMBIE_CHAT_PORT:-7878}"
-HOST="$(hostname)"
-
 cat <<EOF
 ██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗
 ██║   ██║██╔══██╗██║   ██║████╗  ██║╚══██╔══╝██║   ██║    ╚══███╔╝██╔═══██╗████╗ ████║██╔══██╗██║██╔════╝
@@ -21,10 +19,6 @@ Ubuntu Zombie chat
 
 Local URL:
   http://127.0.0.1:${PORT}/
-
-Remote (from a device on your Tailscale network):
-  ssh -L ${PORT}:127.0.0.1:${PORT} agent@${HOST}
-  # then open http://127.0.0.1:${PORT}/ in your local browser
 
 Service control:
   sudo systemctl status ubuntu-zombie-chat.service

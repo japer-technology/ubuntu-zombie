@@ -46,9 +46,8 @@ the machine the whole time.
    What was asked, what was proposed, what was approved, and what the
    system did — all recorded and inspectable after the fact.
 4. **Operator revocation as a first-class feature.** Rotating the
-   provider API key, removing the SSH key, disabling the Tailscale
-   account, or running `uninstall` stops the agent. The kill switch
-   is the operator's, not the vendor's.
+   provider API key, expiring the Time to Live, or running `uninstall`
+   stops the agent. Control is the operator's, not the vendor's.
 
 ## What the MVP does not promise
 
@@ -67,12 +66,10 @@ the machine the whole time.
 
 The local `zombie` account (renameable with `ZOMBIE_USER=<name>`)
 holds passwordless `sudo` and is the operating identity of the AI
-Systems Administrator. The configured token provider authenticates
-the administrator. The operator owns the machine and can rotate the
-API key, revoke the SSH key, disable any optional Tailscale enrolment,
-or uninstall the system at any time. Inbound administration uses
-key-only, root-disabled SSH; operators can optionally confine SSH to a
-private Tailscale tailnet with `ZOMBIE_SKIP_TAILSCALE=0`.
+Systems Administrator. The configured provider powers the
+administrator. The operator owns the machine and can rotate the API key,
+expire the Time to Live, or uninstall the system at any time. Ubuntu
+Zombie exposes only a loopback chat service by default.
 
 ## How to read the rest of the docs
 

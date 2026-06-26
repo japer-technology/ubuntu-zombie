@@ -223,8 +223,8 @@ Subcommands:
               editable parameter review before any change is made.
   verify      Read-only state check. Does not change state.
   doctor      Explain failures and likely fixes.
-  repair      Apply known-safe fixes (re-assert permissions, retry
-              Tailscale login, restart the chat service).
+  repair      Apply known-safe fixes (re-assert permissions, restart
+              the chat service).
   uninstall   Reverse the install (delegates to uninstall.sh).
 
 Flags:
@@ -388,19 +388,6 @@ append_line_once() {
   fi
   printf '%s\n' "$line" >> "$file"
   note_changed
-}
-
-is_ssh_pubkey() {
-  # Accept any line that "looks like" an OpenSSH public key
-  # ("<type> <base64> [comment]") and then defer real validation to
-  # ssh-keygen, which knows about every key/certificate type OpenSSH
-  # itself accepts (including sk-* FIDO keys, ssh-ed448, and the
-  # *-cert-v01@openssh.com certificate blobs). See FIX-2-10.
-  [[ "$1" =~ ^[A-Za-z0-9@._+/-]+[[:space:]]+[A-Za-z0-9+/=]+([[:space:]]+.*)?$ ]] || return 1
-  if command -v ssh-keygen >/dev/null 2>&1; then
-    printf '%s\n' "$1" | ssh-keygen -l -f - >/dev/null 2>&1 || return 1
-  fi
-  return 0
 }
 
 is_supported_agent_username() {
@@ -1222,8 +1209,7 @@ review_parameters() {
 # ---------------------------------------------------------------------------
 # A human-readable record of the install. Written once when the run starts
 # (every parameter) and finalised with the outcome when it ends. Secrets are
-# never written: only an SSH key fingerprint and a "set/unset" flag for the
-# VNC password are recorded.
+# never written; password values and provider keys are excluded.
 
 write_receipt_start() {
   [[ "${ZOMBIE_RECEIPT}" == "1" ]] || return 0
@@ -1588,11 +1574,7 @@ section "Prevent sleep, suspend, and screen lock"
 
 systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
 
-runuser -l "${AGENT_USER}" -c "dbus-run-session -- gsettings set org.gnome.desktop.session idle-delay 0"             >/dev/null 2>&1 || true
-runuser -l "${AGENT_USER}" -c "dbus-run-session -- gsettings set org.gnome.desktop.screensaver lock-enabled false"  >/dev/null 2>&1 || true
-runuser -l "${AGENT_USER}" -c "dbus-run-session -- gsettings set org.gnome.desktop.screensaver ubuntu-lock-on-suspend false" >/dev/null 2>&1 || true
-
-ok "Sleep masked, lock disabled."
+ok "Sleep and suspend targets masked."
 
 # ---------------------------------------------------------------------------
 # Workspace at /opt/ai-zombie
@@ -1734,8 +1716,8 @@ section "Node runtime"
 # requires Node ^20.17.0 || >=22.9.0. Install Node 22.x from the
 # official NodeSource apt repository so the global npm install below —
 # and the pi-ai / pi-coding-agent globals that follow — see a Node
-# runtime they actually support. Pattern mirrors the Tailscale and
-# apt repo setup above (signed-by keyring + sources.list.d drop-in).
+# runtime they actually support. Pattern uses the standard signed-by
+# keyring + sources.list.d drop-in apt repository setup.
 NODESOURCE_KEYRING="/usr/share/keyrings/nodesource.gpg"
 NODESOURCE_SOURCES="/etc/apt/sources.list.d/nodesource.sources"
 NODESOURCE_PREF="/etc/apt/preferences.d/nodejs"

@@ -3,8 +3,8 @@
 # Action classes:
 #   read_only       informational, never mutating; runs automatically.
 #   user_change     changes within the agent user's own home.
-#   system_change   package, service, file, or Docker mutation.
-#   network_change  firewall, Tailscale, sshd, interface mutation.
+#   system_change   package, service, or file mutation.
+#   network_change  firewall or interface mutation.
 #   destructive     irreversible mutation; requires confirmation phrase.
 #
 # Defaults are conservative. Operators may tighten or loosen per class.
@@ -33,8 +33,6 @@ sudo_allow_list:
   - systemctl
   - service
   - journalctl
-  - ufw
-  - tailscale
   - mkdir
   - mv
   - cp
@@ -46,7 +44,6 @@ sudo_allow_list:
   - install
   - update-grub
   - update-initramfs
-  - docker
   - git
   - nginx
   - certbot
@@ -60,11 +57,11 @@ classes:
     description: Changes within the agent account's home directory or user-owned files.
   system_change:
     approval: auto
-    description: Package, service, file, or Docker mutation.
+    description: Package, service, or file mutation.
   network_change:
     approval: auto
     confirm_phrase: true
-    description: Firewall, Tailscale, sshd, interface mutation.
+    description: Firewall or interface mutation.
   destructive:
     approval: required
     confirm_phrase: true
@@ -85,8 +82,6 @@ rules:
     class: destructive
   - pattern: '\bshred\b'
     class: destructive
-  - pattern: '\bdocker\s+(system\s+prune|volume\s+rm|image\s+prune\s+-a)'
-    class: destructive
   - pattern: '>\s*/dev/sd[a-z]'
     class: destructive
   # FIX-3-03: ``find`` with -delete or -exec*/-ok* runs arbitrary
@@ -96,17 +91,13 @@ rules:
     class: destructive
 
   # ----- network_change -----
-  - pattern: '\bufw\b'
-    class: network_change
   - pattern: '\biptables\b'
     class: network_change
   - pattern: '\bnft\b'
     class: network_change
-  - pattern: '\btailscale\s+(up|down|logout|set)'
-    class: network_change
   - pattern: '\bip\s+(link|addr|route)\s+(set|add|del|change)'
     class: network_change
-  - pattern: '\bsystemctl\s+(start|stop|restart|reload|enable|disable|mask|unmask)\s+(ssh|sshd|tailscaled|networking|systemd-networkd|NetworkManager)'
+  - pattern: '\bsystemctl\s+(start|stop|restart|reload|enable|disable|mask|unmask)\s+(networking|systemd-networkd|NetworkManager)'
     class: network_change
 
   # ----- system_change -----
@@ -119,8 +110,6 @@ rules:
   - pattern: '\bsystemctl\s+(start|stop|restart|reload|enable|disable|mask|unmask)\b'
     class: system_change
   - pattern: '\bservice\s+\S+\s+(start|stop|restart|reload)'
-    class: system_change
-  - pattern: '\bdocker\s+(run|start|stop|restart|rm|build|pull|push|exec)'
     class: system_change
   - pattern: '\busermod\b'
     class: system_change
@@ -202,8 +191,6 @@ rules:
   - pattern: '^(ip\s+(a|addr|link)\s*(show)?|ss\b|netstat\b|ping\b|dig\b|host\b|nslookup\b)'
     class: read_only
   - pattern: '^(apt\s+list|apt-cache\s+(search|show|policy)|dpkg\s+-l|dpkg\s+-s)'
-    class: read_only
-  - pattern: '^(docker\s+(ps|images|info|version|logs|inspect|stats)|tailscale\s+status|ufw\s+status)'
     class: read_only
   - pattern: '^(git\s+(status|log|diff|show|branch|remote))'
     class: read_only

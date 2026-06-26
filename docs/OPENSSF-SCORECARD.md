@@ -107,7 +107,7 @@ Suggestions:
   `ts-node`) to explicit versions, mirroring how `pi-ai` /
   `pi-coding-agent` are already pinned via `*.version` files. Continue
   using `--ignore-scripts`.
-- Pin apt/NodeSource and Tailscale bootstrap steps where feasible (pin
+- Pin apt/NodeSource bootstrap steps where feasible (pin
   the NodeSource setup to a known distribution, verify GPG keys by
   fingerprint rather than trusting whatever the endpoint serves).
 - A committed `requirements.txt` / `package.json` has a useful

@@ -4,8 +4,8 @@
 # ------------
 # Reverse the Ubuntu Zombie installer.
 #
-# Removes the chat service, sudoers drop-in, SSH drop-in, x11vnc
-# autostart, generated helpers, policy, logrotate rule, and (with
+# Removes the chat service, sudoers drop-in, generated helpers, policy,
+# logrotate rule, and (with
 # confirmation) the agent user account (default name `zombie`,
 # overridable with ZOMBIE_USER). Optionally archives the account's
 # home directory and /opt/ai-zombie/state/ to /var/backups/ before
@@ -23,8 +23,8 @@
 #                        `AGENT_USER` is still accepted as a legacy
 #                        alias so older installs can still be reversed.
 #
-# This script intentionally does NOT remove Docker, Tailscale, Node,
-# Python, or other base packages — those are normal Ubuntu software
+# This script intentionally does NOT remove Node, Python, or other base
+# packages — those are normal Ubuntu software
 # that other things may depend on.
 
 set -Eeuo pipefail
@@ -41,7 +41,6 @@ fi
 AGENT_USER="${ZOMBIE_USER:-${AGENT_USER:-zombie}}"
 AGENT_HOME="/home/${AGENT_USER}"
 ZOMBIE_DIR="${ZOMBIE_DIR:-/opt/ai-zombie}"
-VNC_PORT="${VNC_PORT:-5900}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups}"
 
 DRY_RUN=0
@@ -63,8 +62,8 @@ uninstall.sh
 ------------
 Reverse the Ubuntu Zombie installer.
 
-Removes the chat service, sudoers drop-in, SSH drop-in, x11vnc
-autostart, generated helpers, policy, logrotate rule, and (with
+Removes the chat service, sudoers drop-in, generated helpers, policy,
+logrotate rule, and (with
 confirmation) the agent user account (default name `zombie`,
 overridable with ZOMBIE_USER). Optionally archives the account's
 home directory and /opt/ai-zombie/state/ to /var/backups/ before
@@ -82,8 +81,8 @@ Environment:
                        `AGENT_USER` is still accepted as a legacy
                        alias so older installs can still be reversed.
 
-This script intentionally does NOT remove Docker, Tailscale, Node,
-Python, or other base packages — those are normal Ubuntu software
+This script intentionally does NOT remove Node, Python, or other base
+packages — those are normal Ubuntu software
 that other things may depend on.
 EOF
 }
@@ -114,11 +113,6 @@ is_safe_absolute_path() {
   [[ "$1" =~ ^/[A-Za-z0-9._/+:-]+$ ]] || return 1
 }
 
-is_valid_tcp_port() {
-  [[ "$1" =~ ^[0-9]+$ ]] || return 1
-  (( "$1" >= 1 && "$1" <= 65535 ))
-}
-
 validate_config() {
   if ! is_supported_agent_username "${AGENT_USER}"; then
     printf '%s[x]%s Invalid agent username %q. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation).\n' \
@@ -133,11 +127,6 @@ validate_config() {
   if ! is_safe_absolute_path "${BACKUP_DIR}"; then
     printf '%s[x]%s BACKUP_DIR must be an absolute path using only safe path characters; got %q\n' \
       "${C_RED}" "${C_RESET}" "${BACKUP_DIR}" >&2
-    exit 2
-  fi
-  if ! is_valid_tcp_port "${VNC_PORT}"; then
-    printf '%s[x]%s VNC_PORT must be an integer from 1 to 65535; got %q\n' \
-      "${C_RED}" "${C_RESET}" "${VNC_PORT}" >&2
     exit 2
   fi
 }
@@ -184,9 +173,9 @@ run "systemctl disable --now ubuntu-zombie-health.service 2>/dev/null || true"
 run "systemctl disable --now ubuntu-zombie-chat.service   2>/dev/null || true"
 
 # -------------------------------------------------------------------
-# 2. Remove systemd units, sudoers drop-in, SSH drop-in.
+# 2. Remove systemd units and sudoers drop-ins.
 # -------------------------------------------------------------------
-info "Removing systemd units, sudoers drop-in, SSH drop-in"
+info "Removing systemd units and sudoers drop-ins"
 for unit in ubuntu-zombie-chat.service ubuntu-zombie-health.service ubuntu-zombie-health.timer; do
   run "rm -f /etc/systemd/system/${unit}"
 done
@@ -213,41 +202,12 @@ for f in /etc/sudoers.d/90-*-ubuntu-zombie; do
   run "rm -f $f"
 done
 shopt -u nullglob
-run "rm -f /etc/ssh/sshd_config.d/99-ubuntu-zombie.conf"
-if [[ "${DRY_RUN}" != "1" ]]; then
-  warn "Reloading sshd. PermitRootLogin, PasswordAuthentication, and AllowUsers"
-  warn "now revert to the Ubuntu defaults; this host may be more open than before."
-  systemctl reload ssh 2>/dev/null || systemctl restart ssh 2>/dev/null || true
-fi
 
 # -------------------------------------------------------------------
-# 3. Remove x11vnc autostart and policy/logrotate.
+# 3. Remove policy/logrotate and legacy desktop artefacts.
 # -------------------------------------------------------------------
-info "Removing x11vnc autostart, policy, and logrotate rule"
-run "rm -f ${AGENT_HOME}/.config/autostart/x11vnc.desktop"
+info "Removing policy, logrotate rule, and legacy desktop artefacts"
 run "rm -f /etc/logrotate.d/ubuntu-zombie"
-
-# Optionally drop the firewall rule we added.
-if command -v ufw >/dev/null 2>&1; then
-  if ufw status 2>/dev/null | grep -q "tailscale0.*22/tcp"; then
-    run "ufw --force delete allow in on tailscale0 to any port 22 proto tcp 2>/dev/null || true"
-  fi
-  # Also remove the all-interface SSH rule that install.sh adds when
-  # ZOMBIE_SKIP_TAILSCALE=1. Match by the stable comment so we never
-  # delete an operator-managed 22/tcp rule. See FIX-2-03.
-  while ufw status numbered 2>/dev/null | grep -F '# SSH (Tailscale skipped)' | grep -q '22/tcp'; do
-    rule_num="$(ufw status numbered 2>/dev/null \
-      | awk -F'[][]' '/# SSH \(Tailscale skipped\)/ && /22\/tcp/ {print $2; exit}')"
-    [[ -z "${rule_num}" ]] && break
-    run "yes | ufw delete ${rule_num} >/dev/null 2>&1 || true"
-    # Guard against an infinite loop if the delete silently fails.
-    if ufw status numbered 2>/dev/null \
-        | awk -F'[][]' '/# SSH \(Tailscale skipped\)/ && /22\/tcp/ {print $2; exit}' \
-        | grep -qx "${rule_num}"; then
-      break
-    fi
-  done
-fi
 
 # -------------------------------------------------------------------
 # 4. Archive user data if requested.
@@ -261,8 +221,8 @@ if [[ "${ARCHIVE}" == "1" ]]; then
   if [[ ! -d "${BACKUP_DIR}" ]]; then
     run "install -d -m 700 ${BACKUP_DIR}"
   fi
-  # Create the tarballs with mode 0600 so SSH keys, the VNC password,
-  # and any provider tokens are not world-readable when BACKUP_DIR itself
+  # Create the tarballs with mode 0600 so provider tokens and other
+  # secrets are not world-readable when BACKUP_DIR itself
   # is 0755 (the Ubuntu default for /var/backups). See FIX-2-02.
   if [[ -d "${AGENT_HOME}" ]]; then
     run "(umask 077 && tar -czf ${BACKUP_DIR}/ubuntu-zombie-home-${STAMP}.tar.gz -C / home/${AGENT_USER})"
@@ -389,21 +349,6 @@ elif id "${AGENT_USER}" >/dev/null 2>&1; then
   fi
 fi
 
-# -------------------------------------------------------------------
-# 8. Force GDM out of auto-login so a removed user does not break boot.
-# -------------------------------------------------------------------
-if [[ -f /etc/gdm3/custom.conf ]]; then
-  info "Disabling auto-login in /etc/gdm3/custom.conf"
-  if [[ "${DRY_RUN}" != "1" ]]; then
-    sed -i \
-      -e 's/^AutomaticLoginEnable=.*/AutomaticLoginEnable=false/' \
-      -e "s/^AutomaticLogin=.*/# AutomaticLogin=/" \
-      /etc/gdm3/custom.conf || true
-  else
-    printf '%s[dry]%s sed -i ...AutomaticLoginEnable=false... /etc/gdm3/custom.conf\n' "${C_YEL}" "${C_RESET}"
-  fi
-fi
-
 echo
 if (( UNINSTALL_EXIT != 0 )); then
   warn "Uninstall finished with errors (exit ${UNINSTALL_EXIT})."
@@ -413,16 +358,11 @@ fi
 cat <<EOF
 
 Left intact on purpose:
-  - Docker, Tailscale, Node, Python, Playwright, GNOME, x11vnc
-    (these are normal Ubuntu packages; remove them with apt if you
-    really want to).
+  - Node, Python, and other shared runtime packages
+    (remove them with apt only if you know nothing else needs them).
   - /var/log/ubuntu-zombie/ and /var/log/ubuntu-zombie-install.log
     are retained for audit. Remove them with:
         sudo rm -rf /var/log/ubuntu-zombie /var/log/ubuntu-zombie-install.log
-
-If you want to fully purge package state too:
-  sudo apt-get purge -y docker-ce docker-ce-cli containerd.io \\
-       docker-buildx-plugin docker-compose-plugin tailscale x11vnc
 EOF
 
 exit "${UNINSTALL_EXIT}"
