@@ -156,10 +156,14 @@ run() {
 }
 
 shell_quote() {
+  # Quote a single token before embedding it in a command string passed to
+  # run()/eval. This keeps dry-run output readable while preserving safety.
   printf '%q' "$1"
 }
 
 run_or_warn() {
+  # Run a non-critical cleanup command. Failures are reported in the final
+  # exit code, but they must not stop later uninstall steps from running.
   local description="$1"
   local command="$2"
   if [[ "${DRY_RUN}" == "1" ]]; then
@@ -179,6 +183,8 @@ run_or_warn() {
 }
 
 remove_tree_checked() {
+  # Remove a directory tree and verify it is actually gone before reporting
+  # success; stubborn paths are errors, but cleanup should still continue.
   local path="$1"
   local label="$2"
   local quoted
