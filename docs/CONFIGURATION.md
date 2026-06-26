@@ -34,8 +34,8 @@ Supported variables:
 | `ZOMBIE_GROQ_MODEL`       | Override the default model used when the active provider is `groq` |
 | `ZOMBIE_OPENROUTER_MODEL` | Fully-qualified OpenRouter model id (e.g. `anthropic/claude-3.5-sonnet`); used only when `ZOMBIE_MODEL` is unset |
 | `ZOMBIE_CHAT_PORT`   | Loopback port for the chat UI (default `7878`) |
-| `ZOMBIE_ADMIN_PASSWORD` | Chat-UI password gate. The installer asks for it (default `livelongandprosper`) and stores only a PBKDF2 hash as `ZOMBIE_ADMIN_PASSWORD_HASH` in `secrets/env`. |
-| `ZOMBIE_TTL_DAYS`    | Time to Live in whole days before the zombie is permanently disabled (default `3`). Each install starts a fresh countdown. |
+| `ZOMBIE_ADMIN_PASSWORD` | Chat-UI password gate. The installer asks for it (default `braaaains`) and stores only a PBKDF2 hash as `ZOMBIE_ADMIN_PASSWORD_HASH` in `secrets/env`. |
+| `ZOMBIE_TTL_DAYS`    | Time to Live in whole days before the zombie is permanently disabled (default `7`). Each install starts a fresh countdown. |
 | `LMSTUDIO_API_KEY`   | API key for a local OpenAI-compatible server (LM Studio / Ollama / llama.cpp). Pair with `ZOMBIE_PROVIDER=lmstudio` and `ZOMBIE_MODEL`; the server URL lives in `~/.pi/agent/models.json` (most local servers ignore the key). |
 | `DISPLAY`            | X display for desktop helpers (default `:0`; pre-seeded in the generated `secrets/env`) |
 
@@ -298,7 +298,7 @@ below (look for the `ZOMBIE_PI_MONO_*` variables).
 The chat UI is served at `http://127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}/`.
 On a shared desktop every local user can reach the loopback socket, so the UI is protected
 by a **password gate**: the installer asks for a chat password (default
-`livelongandprosper`) and stores only a PBKDF2 hash as
+`braaaains`) and stores only a PBKDF2 hash as
 `ZOMBIE_ADMIN_PASSWORD_HASH` in `secrets/env`. Set a custom one with
 `ZOMBIE_ADMIN_PASSWORD` or through the interactive parameter review.
 (Having a root/agent shell on the box is still root-equivalent — that
@@ -308,7 +308,7 @@ out of the administrator.)
 ### Time to Live (the kill switch)
 
 Every install gives the root-capable agent a bounded lifetime. The
-**Time to Live** defaults to 3 days (`ZOMBIE_TTL_DAYS`, or set it in the
+**Time to Live** defaults to 7 days (`ZOMBIE_TTL_DAYS`, or set it in the
 interactive review). When the TTL elapses — or an operator runs the
 `/ttl --die` chat command — the zombie writes a durable tombstone and is
 **permanently disabled until the next reinstall**: it refuses to answer

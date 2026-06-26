@@ -22,8 +22,8 @@ installs may set these environment variables:
 | `ZOMBIE_USER` | Agent account name; default `zombie`. |
 | `ZOMBIE_DIR` | Install root; default `/opt/ai-zombie`. |
 | `ZOMBIE_CHAT_PORT` | Loopback chat port; default `7878`. |
-| `ZOMBIE_ADMIN_PASSWORD` | Chat password; default `livelongandprosper`. |
-| `ZOMBIE_TTL_DAYS` | Initial Time to Live; default `14`. |
+| `ZOMBIE_ADMIN_PASSWORD` | Chat password; default `braaaains`. |
+| `ZOMBIE_TTL_DAYS` | Initial Time to Live; default `7`. |
 | `ZOMBIE_LOCAL_LLM_MODE` | Local LLM detection mode; default `auto`. |
 
 Provider API keys are added after installation with

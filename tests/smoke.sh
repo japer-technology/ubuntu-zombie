@@ -1251,9 +1251,9 @@ os.environ.pop(auth.HASH_ENV, None)
 assert auth.auth_required() is False
 assert auth.check_password("anything") is True
 
-h = auth.hash_password("livelongandprosper")
+h = auth.hash_password("braaaains")
 assert h.startswith("pbkdf2_sha256$"), h
-assert auth.verify_password("livelongandprosper", h) is True
+assert auth.verify_password("braaaains", h) is True
 assert auth.verify_password("wrong", h) is False
 # Malformed stored hashes never validate.
 for bad in ("", "garbage", "pbkdf2_sha256$nope"):
@@ -1262,7 +1262,7 @@ for bad in ("", "garbage", "pbkdf2_sha256$nope"):
 os.environ[auth.HASH_ENV] = h
 try:
     assert auth.auth_required() is True
-    assert auth.check_password("livelongandprosper") is True
+    assert auth.check_password("braaaains") is True
     assert auth.check_password("nope") is False
 finally:
     os.environ.pop(auth.HASH_ENV, None)
@@ -1348,7 +1348,7 @@ def post(app, path, body=None, cookie=None):
 
 
 # --- Gate enabled: protected endpoints require a login. ---
-os.environ[auth.HASH_ENV] = auth.hash_password("livelongandprosper")
+os.environ[auth.HASH_ENV] = auth.hash_password("braaaains")
 lifecycle.initialize(3)
 app = server.App()
 
@@ -1361,7 +1361,7 @@ assert status == 401, (status, body)
 status, body, _ = post(app, "/api/login", {"password": "wrong"})
 assert status == 401, (status, body)
 
-status, body, headers = post(app, "/api/login", {"password": "livelongandprosper"})
+status, body, headers = post(app, "/api/login", {"password": "braaaains"})
 assert status == 200 and body.get("ok"), (status, body)
 cookie = next(v.split(";", 1)[0] for k, v in headers if k == "Set-Cookie")
 
@@ -1409,6 +1409,11 @@ run_branding() {
   grep -Fq "$first_line" scripts/lib.sh
   grep -Fq "$first_line" payload/bin/zombie-chat
   grep -Fq "$first_line" payload/agent/templates/index.html
+  local out
+  out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run)"
+  grep -Fq "$first_line" <<<"${out}"
+  out="$(ZOMBIE_COLOR=never ./scripts/uninstall.sh --help)"
+  grep -Fq "$first_line" <<<"${out}"
 }
 
 run_subcommands() {

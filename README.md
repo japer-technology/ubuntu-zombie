@@ -50,8 +50,8 @@ The full list of inputs and their defaults is in
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md#parameters-required-to-allow-the-install-to-proceed).
 
 The chat administrator is **password-protected** and has a **Time to
-Live**. The installer asks for a chat password (default
-`livelongandprosper`) and a TTL (default 3 days); only a hash of the
+Live**. The installer asks for a chat password (default `braaaains`)
+and a TTL (default 7 days); only a hash of the
 password is stored. When the TTL expires — or you run `/ttl --die` in
 the chat — the zombie permanently disables itself until the next
 reinstall. Extend it from the chat with `/ttl <days>`. See

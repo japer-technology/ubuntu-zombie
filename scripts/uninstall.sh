@@ -30,6 +30,7 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # shellcheck source=scripts/lib.sh
 if [[ -r "${SCRIPT_DIR}/lib.sh" ]]; then
   . "${SCRIPT_DIR}/lib.sh"
@@ -55,6 +56,12 @@ UNINSTALL_EXIT=0
 # inline printf calls below (e.g. the [dry] glyph) need no churn.
 lib_setup_colors
 C_YEL="${C_YELLOW}"
+if [[ -f "${REPO_ROOT}/VERSION" ]]; then
+  SCRIPT_VERSION="$(tr -d '[:space:]' < "${REPO_ROOT}/VERSION")"
+else
+  SCRIPT_VERSION="0000.00.00.00.00.00"
+fi
+brand_splash "uninstall" "${SCRIPT_VERSION}"
 
 usage() {
   # Heredoc instead of `sed -n '2,30p' "$0"` so the help output cannot
