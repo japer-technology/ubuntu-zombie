@@ -2144,7 +2144,7 @@ check "passwordless sudo"                  sudo -n true
 
 hd "Network and services:"
 check "loopback chat port configured"         test -n "${ZOMBIE_CHAT_PORT:-${CHAT_PORT}}"
-[[ "${JSON}" == "1" ]] || echo
+[[ "\${JSON}" == "1" ]] || echo
 
 hd "Runtime:"
 check "Python venv exists"                 test -x \${AGENT_HOME}/agent-env/bin/python

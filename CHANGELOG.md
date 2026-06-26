@@ -33,6 +33,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   policy/audit runtime.
 
 ### Fixed
+- **The installer no longer aborts at "Install verification script" with
+  `JSON: unbound variable`.** A generated `verify` line now preserves
+  `${JSON}` for runtime evaluation instead of expanding it while
+  `install.sh` writes the script under `set -u`.
 - **Uninstall now continues cleanup after non-critical host failures.** A
   failed `systemctl daemon-reload`, global npm package removal, or stubborn
   install directory now records an error but no longer prevents later cleanup
