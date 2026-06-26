@@ -47,6 +47,8 @@ DRY_RUN=0
 ARCHIVE=0
 ASSUME_YES=0
 KEEP_AGENT=0
+# Track recoverable failures from the start so early cleanup can continue
+# through later steps while still returning a non-zero final status.
 UNINSTALL_EXIT=0
 
 # Shared colours/logging come from lib.sh. Keep the legacy C_YEL alias so the
@@ -313,18 +315,8 @@ if command -v npm >/dev/null 2>&1; then
   for _pkg in @earendil-works/pi-coding-agent @earendil-works/pi-ai; do
     if npm ls -g --depth=0 "${_pkg}" >/dev/null 2>&1; then
       if confirm "Remove global npm package ${_pkg}?"; then
-        if [[ "${DRY_RUN}" == "1" ]]; then
-          run "npm uninstall -g $(shell_quote "${_pkg}")"
-        else
-          set +e
-          npm uninstall -g "${_pkg}"
-          _npm_rc=$?
-          set -e
-          if (( _npm_rc != 0 )); then
-            warn "Failed to remove global npm package ${_pkg} (exit ${_npm_rc}); continuing cleanup."
-            UNINSTALL_EXIT=1
-          fi
-        fi
+        run_or_warn "Remove global npm package ${_pkg}" \
+          "npm uninstall -g $(shell_quote "${_pkg}")"
       fi
     fi
   done

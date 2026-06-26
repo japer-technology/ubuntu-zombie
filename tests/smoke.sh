@@ -1502,9 +1502,11 @@ run_bad_usage() {
   # removals fail, and it must quote paths passed through its eval helper.
   grep -Fq 'run_or_warn "systemctl daemon-reload"' scripts/uninstall.sh
   grep -Fq 'remove_tree_checked "${ZOMBIE_DIR}" "${ZOMBIE_DIR}"' scripts/uninstall.sh
-  grep -Fq 'npm uninstall -g "${_pkg}"' scripts/uninstall.sh
+  grep -Fq 'run_or_warn "Remove global npm package ${_pkg}"' scripts/uninstall.sh
   grep -Fq 'rm -f -- $(shell_quote "${f}")' scripts/uninstall.sh
   grep -Fq 'rm -f -- $(shell_quote "${_path}")' scripts/uninstall.sh
+  # uninstall.sh exits during top-level validation when sourced as non-root,
+  # so exercise a minimal copy of the helper bodies here.
   out="$(bash -c '
     set -Eeuo pipefail
     DRY_RUN=0
