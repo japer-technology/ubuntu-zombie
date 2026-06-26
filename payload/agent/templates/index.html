@@ -635,10 +635,11 @@ async function uzPostJson(path, body = {}) {
 function uzCommandEntries(filter = "") {
   const needle = filter.trim().toLowerCase();
   return SLASH_COMMANDS
-    .filter(([c, d, g]) => !needle || c.toLowerCase().includes(needle) ||
-      d.toLowerCase().includes(needle) || g.toLowerCase().includes(needle))
+    .filter(([cmd, desc, group]) => !needle || cmd.toLowerCase().includes(needle) ||
+      desc.toLowerCase().includes(needle) || group.toLowerCase().includes(needle))
     .slice()
-    .sort((a, b) => a[2].localeCompare(b[2]) || a[0].localeCompare(b[0]));
+    .sort(([cmdA, , groupA], [cmdB, , groupB]) =>
+      groupA.localeCompare(groupB) || cmdA.localeCompare(cmdB));
 }
 
 function uzCommandHelp(filter = "") {
@@ -1318,7 +1319,7 @@ loginForm.addEventListener("submit", async (event) => {
 
 async function logoutChat(announce) {
   if (!authRequired) {
-    if (announce) addMessage("system", "The password gate is not enabled.");
+    if (announce) addMessage("system", "Authentication is not required for this session.");
     return;
   }
   if (turnController) abortTurn("Logged out.");
