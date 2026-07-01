@@ -57,8 +57,8 @@ Both must pass before you hand work back. They require `bash`,
 
 Do **not** run `make install-local` or `scripts/install.sh install`
 from an agent environment, your workstation, or any machine you are
-not prepared to wipe. The installer mutates users, sudoers, systemd
-units, firewall rules, and Tailscale state; it is intended only for
+not prepared to wipe. The installer mutates users, sudoers, and systemd
+units; it is intended only for
 a disposable Ubuntu Desktop LTS VM. The same applies to `uninstall.sh`,
 `secrets-edit`, and anything under `/opt/ai-zombie/`.
 
@@ -69,9 +69,8 @@ of them will get a change rejected.
 
 1. **Idempotence.** `scripts/install.sh install` must converge on
    re-run without errors. Any new step that creates files, users,
-   services, or firewall rules must check current state first.
-2. **Non-interactive mode.** `ZOMBIE_NONINTERACTIVE=1` (with
-   `SSH_PUBLIC_KEY` and `VNC_PASSWORD` when needed) must work
+   or services must check current state first.
+2. **Non-interactive mode.** `ZOMBIE_NONINTERACTIVE=1` must work
    end-to-end; CI depends on it. Missing required env in
    non-interactive mode exits `64`.
 3. **Policy gate + audit log.** Any new privileged behaviour must go

@@ -29,9 +29,9 @@ else (firewall, systemd sandboxing) already permits egress.
 
 ## What already works — do not change
 
-- **OS firewall.** UFW defaults to *deny inbound, allow outbound*
-  (`scripts/install.sh`; `SECURITY.md` → "Network exposure"). Outbound
-  HTTP/HTTPS is not blocked.
+- **OS networking.** The default install configures no host firewall,
+  and outbound HTTP/HTTPS is not blocked (`scripts/install.sh`). The
+  chat service listens on loopback only; egress is unrestricted.
 - **systemd sandbox.** `payload/systemd/ubuntu-zombie-chat.service`
   deliberately ships with no network confinement — there is no
   `PrivateNetwork`, `IPAddressDeny`, or `RestrictAddressFamilies`. The
@@ -40,9 +40,6 @@ else (firewall, systemd sandboxing) already permits egress.
   real built-in tools (`read, bash, edit, write, grep, find, ls`), and
   `curl` is installed as a base package. So a shell fetch already
   functions when the agent chooses to run one.
-- **Browser automation.** Playwright + Chromium are installed
-  (`payload/bin/setup-agent-venv`), so a full browser path exists for the
-  "open a browser to example.com" style of request.
 - **Loopback-only serving.** The chat *server* binds to `127.0.0.1`
   (`payload/agent/server.py`). That is an inbound invariant and is
   unrelated to outbound internet access — keep it as-is.

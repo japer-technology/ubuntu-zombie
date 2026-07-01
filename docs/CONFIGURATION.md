@@ -37,7 +37,7 @@ Supported variables:
 | `ZOMBIE_ADMIN_PASSWORD` | Chat-UI password gate. The installer asks for it (default `braaaains`) and stores only a PBKDF2 hash as `ZOMBIE_ADMIN_PASSWORD_HASH` in `secrets/env`. |
 | `ZOMBIE_TTL_DAYS`    | Time to Live in whole days before the zombie is permanently disabled (default `7`). Each install starts a fresh countdown. |
 | `LMSTUDIO_API_KEY`   | API key for a local OpenAI-compatible server (LM Studio / Ollama / llama.cpp). Pair with `ZOMBIE_PROVIDER=lmstudio` and `ZOMBIE_MODEL`; the server URL lives in `~/.pi/agent/models.json` (most local servers ignore the key). |
-| `DISPLAY`            | X display for desktop helpers (default `:0`; pre-seeded in the generated `secrets/env`) |
+| `DISPLAY`            | Pre-seeded in the generated `secrets/env` (default `:0`); vestigial, retained for compatibility and not used by the loopback-only chat service |
 
 Per-provider defaults if no `ZOMBIE_MODEL` / `ZOMBIE_<PROVIDER>_MODEL`
 override is set (from `payload/agent/providers.py`):
