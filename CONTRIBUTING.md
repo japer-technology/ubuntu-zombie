@@ -76,9 +76,9 @@ CI runs the same script on every push and pull request, plus
   clean. Wrap long lines with `\` rather than disabling rules.
 - Python: 4-space indent, type hints on public functions, no
   third-party dependencies outside what the installer already
-  installs (`openai`, `anthropic`, `requests`, `pydantic`, `rich`,
-  `typer`, `python-dotenv`, `playwright`, `pyautogui`, `pillow`,
-  `mss`, `opencv-python`, `python-xlib`, plus the standard library).
+  installs (`requests`, `pydantic`, `rich`, `typer`,
+  `python-dotenv`, plus the standard library). Provider calls go
+  through the Node `@earendil-works/pi-ai` bridge, not a Python SDK.
 - Docs: Markdown, line-wrapped at ~78 characters where reasonable.
 - Commits: imperative subject lines under 72 characters.
 

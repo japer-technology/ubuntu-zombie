@@ -43,6 +43,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   autologin, Docker, GUI/browser automation, and their built-in skills.
   The product now installs a loopback-only chat surface plus the local
   policy/audit runtime.
+- **Documentation aligned with Zombie Zero.** Updated `SECURITY.md`,
+  `AGENTS.md`, `CONTRIBUTING.md`, `docs/CONFIGURATION.md`, and
+  `docs/INTERNET-ACCESS.md` to drop stale references to SSH, Tailscale,
+  UFW, VNC, autologin, Docker, and GUI/browser automation, and to
+  correct the Python dependency list to match `setup-agent-venv`.
 
 ### Fixed
 - **The installer no longer aborts at "Install verification script" with
