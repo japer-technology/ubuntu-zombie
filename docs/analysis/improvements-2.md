@@ -1,6 +1,6 @@
 # Ubuntu Zombie improvements 2 — all-powerful pi plan
 
-Last reanalysed: 2026-07-04.
+Last reanalyzed: 2026-07-04.
 
 This document supersedes `docs/analysis/improvements-1.md` as the next
 implementation backlog. It intentionally changes the product direction:
@@ -224,8 +224,10 @@ for uploading local secrets or command output to arbitrary services.
   fetch instead of a refusal.
 - `web.fetch` appears as a distinct, bounded, redacted audit event.
 - Public web lookups do not require an approval prompt by default.
-- `curl ... | bash`, file uploads, request bodies, or local-network probes
-  remain separately classified as higher-risk actions.
+- `curl ... | bash` is a critical security anti-pattern and must stay
+  blocked or require explicit confirmation; file uploads, request bodies,
+  and local-network probes remain separately classified as higher-risk
+  actions.
 - Documentation states that outbound web access is enabled for the agent
   capability, while inbound chat exposure remains loopback-only.
 
@@ -361,7 +363,7 @@ Add explicit posture language and configuration. Recommended names:
   owner who wants the zombie to operate the machine fully;
 - `strict`: narrower Python-typed tools and approvals, optimized for
   cautious environments;
-- `explain`: no host mutation, useful when provider trust is low.
+- `observe`: no host mutation, useful when provider trust is low.
 
 The user request for this plan is clearly in the `power` direction. If this
 mode becomes the default, docs must say so loudly. If maintainers choose a
@@ -449,7 +451,7 @@ Policy should be posture-aware:
   pretend it mediates every pi action.
 - `strict`: all host actions should flow through Python typed tools and
   approvals before execution.
-- `explain`: no host mutation tools.
+- `observe`: no host mutation tools.
 
 Regardless of posture, keep destructive actions clearly visible and logged.
 If `payload/etc/policy.yaml` remains single-mode, make it match the shipped
@@ -569,7 +571,7 @@ Implement in small pull requests:
    guidance, and docs.
 4. Add enhanced audit fields for sudo/effective user, working directory,
    byte counts, durations, and redacted previews.
-5. Add explicit posture naming (`power`, `strict`, `explain`) or otherwise
+5. Add explicit posture naming (`power`, `strict`, `observe`) or otherwise
    document the chosen all-powerful default in installer output and verify.
 6. Align shipped policy text, parser behavior, tests, and docs with the
    chosen posture model.
