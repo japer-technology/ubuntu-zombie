@@ -1,8 +1,11 @@
-# Ubuntu Zombie improvements 1
+# Ubuntu Zombie improvements 1 — reanalysis
 
-This document turns a review of the current idea and implementation into
-implementation-ready work. It is written for an AI coding agent starting
-from a fresh checkout of this repository.
+Last reanalysed: 2026-07-04.
+
+This document rechecks the issues previously raised in this file against
+this checkout of the repository. It is written for an AI coding agent
+starting from a fresh checkout and should be treated as an implementation
+backlog, not as a record of completed work.
 
 Before changing code, read:
 
@@ -13,11 +16,11 @@ Before changing code, read:
 - `SECURITY.md`
 - `CONTRIBUTING.md`
 
-Do not run `make install-local`, `scripts/install.sh install`, or
-`scripts/uninstall.sh` on the current workstation. Those commands mutate
-users, sudoers, services, firewall rules, Docker, VNC, and Tailscale
-state. Use only non-root tests unless the user explicitly provides a
-disposable Ubuntu Desktop LTS VM.
+Do not run `make install-local`, `scripts/install.sh install`,
+`scripts/install.sh repair`, or `scripts/uninstall.sh` on the current
+workstation. Those commands mutate users, sudoers, services, package
+state, and systemd state. Use only non-root tests unless the user
+explicitly provides a disposable Ubuntu Desktop LTS VM.
 
 After shell or Python changes, run:
 
@@ -27,160 +30,185 @@ make test
 ```
 
 If the local environment cannot run those commands, say exactly why.
+Documentation-only changes do not need to run the installer or the
+host-mutating commands above.
 
-## Summary
+## Executive summary
 
-Ubuntu Zombie has a strong product direction: a private, root-capable AI
-systems administrator with local audit logs, an explicit policy gate, a
-loopback-only UI, and operator revocation. The main problem is that the
-implementation does not fully match that safety model.
+The original analysis was directionally right but several items are now
+stale. The current install is much smaller than the older analysis
+assumed: `scripts/install.sh` no longer provisions SSH, Tailscale, VNC,
+Docker, GUI automation, autologin, UFW, or fail2ban by default. The
+remaining serious gap is narrower and more important:
 
-Highest priority:
+1. The pi-mono production bridge still lets pi execute its own built-in
+   host tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) in
+   `--mode json`; Python logs those events diagnostically but does not
+   mediate them through `tools.py`, `policy.py`, approvals, or audit
+   before execution.
+2. The effective policy loaded by `policy.py` is conservative because the
+   minimal YAML loader falls back to code defaults when it encounters the
+   shipped list blocks, but the text in `payload/etc/policy.yaml` still
+   says `default_class: system_change` and marks `user_change`,
+   `system_change`, and `network_change` as `approval: auto`. That is a
+   dangerous mismatch between file contents and runtime behavior.
+3. The system prompt and some docs now honestly describe the current
+   pi-built-in tool path, while other docs still describe the intended
+   closed Python registry as if it were the only execution path. This
+   contradiction must be resolved before adding more capabilities.
+4. The standing privilege model remains passwordless sudo for the
+   `zombie` account. Docker root-equivalence and broad inbound SSH are no
+   longer default issues, but passwordless sudo is still root-equivalent.
 
-1. Ensure every model-initiated host action is mediated by Python's
-   closed tool registry, policy gate, approval flow, and audit log.
-2. Make the shipped policy defaults match the documented trust model.
-3. Reduce the privilege blast radius of the agent account.
-4. Improve previews, auditability, and tests so operators can trust each
-   proposed action before it runs.
+## Status of the original issues
 
-## P0: restore the closed tool and policy boundary
+- **Closed tool and policy boundary — P0, still open.** The production
+  bridge intentionally enables pi built-ins and does not turn
+  `tool_execution_*` events into Python-mediated `tool_call` frames.
+- **Safe shipped policy defaults — P0, partially effective but still
+  defective.** Runtime defaults are conservative; the YAML file text
+  remains permissive and is being masked by parser fallback.
+- **Reduce root-equivalent privilege exposure — P1, still open.**
+  Passwordless sudo remains; Docker group membership is obsolete in the
+  default installer.
+- **Action previews before approval — P1, still open.** Audit
+  stdout/stderr previews are not approval previews.
+- **Filesystem read/write boundaries — P1, still open.** The Python
+  registry path needs sensitive-path denial, and pi built-ins currently
+  bypass those boundaries.
+- **Real Ubuntu VM integration tests — P1, still open.** The installer
+  still lacks guarded disposable-VM coverage.
+- **Operator approval UI — P2, partially present.** Pending actions and
+  approve/deny exist, but evidence and client-side phrase handling are
+  weak.
+- **Network exposure safer by default — closed/watch.** Default install is
+  loopback-only and does not configure SSH, Tailscale, VNC, Docker, GUI
+  automation, or a firewall. Keep this invariant.
+- **Align names/docs/state — P2, partially resolved.** Default `zombie` is
+  documented in several files, but `SECURITY.md` and some analysis docs
+  still say `agent` for the account identity.
+- **First-class read-only web fetch — P2, still open.** Wait until the
+  bridge boundary is fixed.
+- **Audit and evidence — P3, partially improved.** Structured audit and
+  optional redacted stdout/stderr previews exist; classification evidence
+  fields are still missing.
+
+## P0: make the execution boundary true or document the bypass
 
 ### Current state
 
-The architecture promises that the model never executes free-form host
-actions directly:
+The intended architecture is still a closed Python tool registry:
 
-- `docs/ARCHITECTURE.md` says every action goes through
-  `payload/agent/tools.py`.
-- `payload/agent/tools.py` defines `TOOL_REGISTRY`, schema validation,
-  and dispatch shims.
-- `payload/agent/server.py` validates tool calls, classifies them with
-  `policy.classify_tool`, queues approvals, and dispatches approved
-  calls.
+- `payload/agent/tools.py` defines `TOOL_REGISTRY`, validates schemas,
+  and dispatches typed shims.
+- `payload/agent/server.py` calls `tools.validate_args`,
+  `policy.classify_tool`, queues approvals when required, dispatches
+  auto-approved calls, and audit-logs decisions.
+- `payload/agent/pi_mono.py` still documents a bridge protocol with
+  `tool_call` frames from the bridge and `tool_result` frames from
+  Python.
 
-However, `payload/agent/pi-mono-bridge.mjs` currently starts `pi` in
-JSON mode and enables pi's own built-in tools:
+The production bridge does not currently use that path for real pi tools.
+`payload/agent/pi-mono-bridge.mjs` starts `pi --mode json -p` with:
 
 ```js
 const PI_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 ```
 
-The comments in that file say pi executes those tools itself and the
-bridge only logs `tool_execution_*` events. That means Python does not
-validate arguments, classify the command, queue approval, or audit the
-actual host mutation before it happens.
+When pi emits `tool_execution_start` or `tool_execution_end`, the bridge
+logs those events as diagnostics only. It does not convert them into
+logical tool calls such as `shell.run` or `fs.read`, and Python does not
+approve them before execution. The smoke test currently locks in that
+behavior: the `on_tool_call` callback must not fire for the fake
+production bridge, and `tool_execution_*` events must not be surfaced as
+mediated `tool_call` frames.
 
-This is the most important implementation gap. A root-capable product
-must make the trust boundary true in code, not only in docs.
+The prompt templates also reflect the current bypass. They tell the model
+that it can act with pi built-ins (`read`, `ls`, `write`, `edit`,
+`grep`, `find`, `bash`) rather than the logical Python registry names.
 
 ### Desired behavior
 
-For every model-initiated host action:
+Choose one product position and make code, tests, and docs agree:
 
-1. The bridge emits a tool call to Python.
-2. Python calls `tools.validate_args`.
-3. Python calls `policy.classify_tool`.
-4. Read-only actions may execute automatically.
-5. Elevated actions are queued for operator approval.
-6. Destructive or high-risk actions require the configured phrase.
-7. Python calls `tools.dispatch` only after the gate has allowed it.
+1. **Preferred:** every host action initiated by the model is mediated by
+   Python before execution.
+2. **Fallback:** pi built-ins stay enabled, but docs and security copy say
+   plainly that those actions bypass Python policy/approval/audit until
+   the bridge is replaced.
+
+The preferred position should restore this invariant:
+
+1. The model emits a logical tool call.
+2. Python validates it with `tools.validate_args`.
+3. Python classifies it with `policy.classify_tool`.
+4. Read-only calls may auto-run.
+5. Elevated calls are queued for approval.
+6. Phrase-gated calls require the configured phrase.
+7. Python dispatches the call only after the gate allows it.
 8. Python records proposed, queued, approved, executed, denied, and
-   errored actions in `audit.log`.
+   errored decisions in `audit.log`.
 9. Tool observations are returned to the model.
 
-No model-visible tool may bypass that path.
+No model-visible host tool should bypass that path.
 
-### Implementation approach
+### Implementation notes
 
-Prefer returning the bridge to an RPC-style flow where pi emits tool
-calls and waits for Python-provided results. The exact upstream pi
-protocol may require exploration, but the local contract should remain
-the one already documented in `payload/agent/pi_mono.py`:
+Investigate whether the pinned `@earendil-works/pi-coding-agent` version
+can be driven in an RPC mode that accepts external tool results. If it
+can, replace the current `--mode json`/built-in flow with a bridge that
+maps pi tool calls to Python logical tools and writes Python results back
+to pi.
 
-```text
-bridge -> Python: {"type":"tool_call","id":...,"name":...,"args":{...}}
-Python -> bridge: {"type":"tool_result","id":...,"ok":true|false,...}
-bridge -> Python: {"type":"final","text":...}
-```
+If the pinned pi protocol cannot support externally-dispatched tools
+cleanly, do not keep a silent bypass. Disable host tools in production or
+keep the assistant in explanation-only mode until a mediated tool path
+exists.
 
-Concrete steps:
-
-1. Inspect the pinned `@earendil-works/pi-coding-agent` version and its
-   supported tool protocol.
-2. Update `payload/agent/pi-mono-bridge.mjs` so pi does not execute
-   built-in host tools directly.
-3. Remove or disable `PI_BUILTIN_TOOLS` for production use.
-4. Pass only the logical registry tool names from Python to the model:
-   `shell.run`, `fs.read`, `fs.list`, `fs.write`, `pkg.query`,
-   `pkg.install`, `svc.status`, `svc.control`, `net.status`,
-   `gui.screenshot`, `gui.click`, `gui.type`, `skill.list`,
-   `skill.load`.
-5. Translate upstream tool-call events into those logical tool names if
-   pi requires a different schema.
-6. Return Python's `tool_result` to the model before the model continues.
-7. Keep the existing idle timeout and provider/model selection behavior.
-8. Make bridge logs diagnostic only. The audit log must come from
-   Python, not from pi's internal execution events.
-
-If upstream pi cannot support externally-dispatched tools cleanly, do
-not silently keep the bypass. Instead:
-
-- Disable host tools in pi.
-- Keep the assistant in explanation-only mode until a Python-mediated
-  tool path exists.
-- Update docs to describe the limitation.
-
-### Files to change
+### Files likely to change
 
 - `payload/agent/pi-mono-bridge.mjs`
 - `payload/agent/pi_mono.py`
+- `payload/agent/server.py`
+- `payload/agent/templates/APPEND_SYSTEM.md.tmpl`
 - `payload/agent/templates/settings.json.tmpl`
+- `tests/fixtures/fake-pi-json.mjs`
 - `tests/fixtures/stub-pi-mono.mjs`
 - `tests/smoke.sh`
-- `tests/python/test_policy.py` or a new `tests/python/test_bridge.py`
+- `tests/python/`
 - `docs/ARCHITECTURE.md`
 - `docs/INTERNET-ACCESS.md`
+- `SECURITY.md`
 - `CHANGELOG.md`
-- `VERSION` if `CHANGELOG.md` is updated
+- `VERSION` if `CHANGELOG.md` changes
 
-### Tests to add
+### Tests to add or change
 
-Add a regression test that fails if the production bridge enables pi
-built-in host tools without Python mediation. Suggested checks:
-
-- Static check: `payload/agent/pi-mono-bridge.mjs` must not pass
-  `read,bash,edit,write,grep,find,ls` to pi in production mode.
-- Protocol check: a stub bridge emits a `shell.run` call and Python
-  records the call as queued or executed according to policy.
-- Audit check: every executed tool call has a matching `tool_call`
-  audit entry with `decision`.
-- Approval check: elevated tool calls remain pending until
-  `/api/approve` is called.
-
-Add one integration-style unit test around `App.post_message` using
-`ZOMBIE_PI_MONO_BRIDGE` and a stub plan:
-
-1. Stub emits `{"type":"tool_call","id":"1","name":"shell.run",
-   "args":{"argv":["sudo","apt-get","install","-y","curl"]}}`.
-2. Policy classifies it as `system_change`.
-3. The response has a pending tool event.
-4. `tools.dispatch` is not called before approval.
-5. Audit contains `decision:"queued"`.
+- A regression test that fails if the production bridge enables pi
+  built-in host tools without Python mediation.
+- A server-level test where a stub emits `shell.run` for an elevated
+  command and `tools.dispatch` is not called before approval.
+- An audit test that queued/executed tool calls include matching
+  `tool_call` audit entries with decisions.
+- A bridge protocol test that verifies Python returns observations to the
+  model before the model continues.
 
 ### Acceptance criteria
 
-- No model-initiated shell, file edit, package, service, GUI, Docker, or
-  network action can execute unless Python dispatches it.
-- The architecture document accurately describes the implemented bridge.
-- The test suite fails if a future bridge reintroduces direct pi
-  built-in execution.
+- No shell, file edit, package, service, network, or skill action can run
+  unless Python dispatches it, or the product explicitly documents that
+  pi built-ins are an insecure compatibility limitation.
+- Tests fail if direct pi built-in host execution is reintroduced under a
+  supposedly Python-mediated mode.
+- Prompt text, architecture docs, and security docs describe the same
+  execution path that the code actually uses.
 
-## P0: make the shipped policy safe by default
+## P0: align the shipped policy file, parser, tests, and docs
 
 ### Current state
 
-`payload/etc/policy.yaml` currently ships these risky defaults:
+The text of `payload/etc/policy.yaml` still contains permissive-looking
+values:
 
 ```yaml
 settings:
@@ -199,23 +227,40 @@ classes:
   destructive:
     approval: required
     confirm_phrase: true
+
+agent:
+  max_tool_calls_per_turn: 128
+  max_elevated_calls_per_turn: 32
+  max_turn_seconds: 600
 ```
 
-The tests and architecture text expect a stricter model:
+However, loading that file with `ZOMBIE_POLICY=payload/etc/policy.yaml`
+currently yields conservative effective values:
 
-- Unknown commands should fail closed to `destructive`.
-- `system_change` should require approval.
-- `network_change` should require approval and a phrase.
-- Only read-only diagnostics should auto-run.
+- `default_class == "destructive"`
+- `user_change`, `system_change`, `network_change`, and `destructive`
+  require approval
+- budgets are `12`, `3`, and `600`
 
-Because `server.py` executes calls immediately when
-`policy.requires_approval(classification)` is false, the current
-default policy can auto-run package installs, service restarts,
-firewall changes, Tailscale changes, and many `sudo` commands.
+This happens because the minimal YAML loader raises on list blocks such
+as `sudo_allow_list:` and falls back to code defaults for `settings`,
+`classes`, and `agent`; rules and the sudo allow-list are then recovered
+with text-specific extractors. The tests assert the conservative effective
+values, but the shipped file text still communicates the opposite.
 
-### Desired default policy
+That is unsafe because a future parser fix could suddenly make the
+permissive text effective.
 
-Change `payload/etc/policy.yaml` to:
+### Desired behavior
+
+Make all four layers agree:
+
+1. `payload/etc/policy.yaml` text is conservative.
+2. `policy.py` parses the shipped policy deterministically.
+3. Tests assert both effective values and key file contents.
+4. Docs describe the shipped behavior, not accidental fallback behavior.
+
+Recommended shipped defaults:
 
 ```yaml
 settings:
@@ -230,285 +275,155 @@ classes:
     description: Changes within the agent account's home directory or user-owned files.
   system_change:
     approval: required
-    description: Package, service, file, or Docker mutation.
+    description: Package, service, file, or privileged mutation.
   network_change:
     approval: required
     confirm_phrase: true
-    description: Firewall, Tailscale, sshd, interface mutation.
+    description: Firewall, interface, sshd, or remote-access mutation.
   destructive:
     approval: required
     confirm_phrase: true
     description: Irreversible mutation. Requires confirmation phrase.
-```
 
-Also reduce the default budgets in the shipped file to match the docs
-unless there is a documented reason not to:
-
-```yaml
 agent:
   max_tool_calls_per_turn: 12
   max_elevated_calls_per_turn: 3
   max_turn_seconds: 600
 ```
 
-If the product intentionally wants a permissive mode, make it an
-explicit opt-in profile, not the default. For example:
-
-- keep `payload/etc/policy.yaml` conservative;
-- add `docs/CONFIGURATION.md` guidance for editing policy;
-- optionally add a commented `trusted-lab` example in docs, not active.
-
-### Files to change
+### Files likely to change
 
 - `payload/etc/policy.yaml`
+- `payload/agent/policy.py`
+- `tests/smoke.sh`
+- `tests/python/test_policy.py`
 - `docs/ARCHITECTURE.md`
 - `docs/CONFIGURATION.md`
 - `docs/INTERNET-ACCESS.md`
-- `README.md` if the quick trust summary mentions approval semantics
-- `tests/smoke.sh`
-- `tests/python/test_policy.py`
+- `SECURITY.md`
 - `CHANGELOG.md`
-- `VERSION` if `CHANGELOG.md` is updated
+- `VERSION` if `CHANGELOG.md` changes
 
-### Tests to add or fix
+### Tests to add or adjust
 
-Ensure tests load the shipped policy file and assert:
-
-```python
-p = policy.load_policy()
-assert p.default_class == "destructive"
-assert p.requires_approval(p.classify("foozle --bar"))
-assert p.requires_approval(p.classify("sudo apt install curl"))
-assert p.requires_approval(p.classify_tool("pkg.install", {"names": ["curl"]}))
-assert p.requires_approval(p.classify_tool("svc.control", {
-    "unit": "ssh",
-    "action": "restart",
-}))
-assert p.requires_phrase(p.classify("ufw allow 80/tcp"))
-assert not p.requires_approval(p.classify("ls /etc"))
-```
-
-Add a server-level test that confirms a `system_change` tool call is
-queued, not dispatched, under the shipped policy.
+- Parse the shipped YAML and assert the effective values above.
+- Assert the shipped file text does not contain permissive defaults for
+  `default_class`, `system_change`, `network_change`, or budgets.
+- Add a parser regression for list-containing YAML so `settings`,
+  `classes`, `agent`, `rules`, `sudo_allow_list`, and `tool_classes` can
+  coexist without silent fallback.
+- Keep existing fail-closed tests for unknown commands and tools.
 
 ### Acceptance criteria
 
-- A first install cannot auto-run elevated model actions.
-- Tests and docs agree with the shipped policy.
-- Unknown commands classify as `destructive`.
+- A parser improvement cannot accidentally activate permissive defaults.
+- Unknown commands and unknown tools require approval by default.
 - Only read-only actions auto-run by default.
+- Docs and tests match the effective policy.
 
-## P1: reduce root-equivalent privilege exposure
+## P1: reduce standing sudo exposure
 
 ### Current state
 
-The agent account has passwordless sudo and is added to the Docker
-group. Both are root-equivalent. The policy gate is therefore the main
-runtime barrier.
+The installer creates the configurable account `ZOMBIE_USER` (default
+`zombie`), adds it to `sudo`, and writes a sudoers drop-in granting:
 
-This is workable for an MVP only if the policy boundary is airtight. It
-is still a large blast radius if the agent account, model output, API
-key, SSH key, browser automation path, or local session is compromised.
+```text
+<user> ALL=(ALL) NOPASSWD:ALL
+```
+
+This is intentional for the MVP but root-equivalent. The older concern
+that the user is also added to the Docker group is stale: the current
+installer does not install Docker or add Docker group membership by
+default.
 
 ### Desired direction
 
 Keep the product promise that the AI can administer the machine, but
-reduce always-on root-equivalent access.
+make broad passwordless sudo a compatibility mode rather than the only
+mode.
 
 Recommended staged approach:
 
-1. Keep `NOPASSWD: ALL` only as a compatibility mode.
-2. Add an optional strict mode with a narrow privileged helper.
+1. Keep `NOPASSWD: ALL` as explicit `compat` mode.
+2. Add a `strict` mode with a narrow privileged helper or allow-list.
 3. Move common privileged actions into typed tools where possible.
-4. Remove Docker group membership by default or make it opt-in.
+4. Keep Docker absent from the default install; if Docker support returns,
+   make it opt-in and document root equivalence.
 
-### Implementation option A: sudoers allow-list
-
-Add a stricter sudoers mode controlled by an install-time env var:
-
-```bash
-ZOMBIE_PRIVILEGE_MODE=compat   # current behavior
-ZOMBIE_PRIVILEGE_MODE=strict   # allow-listed commands only
-```
-
-In strict mode, generate a sudoers drop-in that allows only the command
-families Ubuntu Zombie actually wraps:
-
-- `/usr/bin/apt-get`
-- `/usr/bin/dpkg`
-- `/usr/bin/systemctl`
-- `/usr/sbin/ufw`
-- `/usr/bin/tailscale`
-- `/usr/bin/install`
-- `/usr/bin/chmod`
-- `/usr/bin/chown`
-- `/usr/bin/chgrp`
-- other commands only after reviewing the typed tools and skills
-
-This is imperfect because shell tools can still be broad, but it is an
-improvement over `ALL`.
-
-### Implementation option B: root helper
-
-Create a small root-owned helper such as:
-
-```text
-/opt/ai-zombie/bin/privileged-action
-```
-
-The helper accepts structured JSON requests for specific privileged
-operations, validates them again, logs them, and executes without a
-general shell. Then sudoers grants:
-
-```text
-zombie ALL=(root) NOPASSWD: /opt/ai-zombie/bin/privileged-action
-```
-
-This is more work but aligns best with the closed-tool design.
-
-### Docker group
-
-Docker group access is root-equivalent. Improve this default:
-
-1. Add `ZOMBIE_ENABLE_DOCKER=0|1`.
-2. Default to `0` unless Docker is essential for the MVP.
-3. If `0`, do not install Docker CE and do not add the agent to the
-   Docker group.
-4. Keep Docker tools and skills available only when Docker is enabled.
-5. Update docs and `verify` output accordingly.
-
-If Docker remains default-on, make the README and `SECURITY.md` say
-plainly that the agent has root-equivalent Docker access by default.
-
-### Files to change
+### Files likely to change
 
 - `scripts/install.sh`
 - `scripts/uninstall.sh`
-- `payload/bin/health-check`
-- generated verify helper inside `scripts/install.sh`
-- `payload/agent/tools.py`
-- `payload/agent/skills/docker.md`
+- generated verify helper in `scripts/install.sh`
+- `payload/bin/health-check` if privilege checks move there
+- `payload/agent/tools.py` if typed privileged tools change
 - `docs/CONFIGURATION.md`
 - `docs/ARCHITECTURE.md`
-- `docs/REQUIRES.md`
 - `SECURITY.md`
 - `README.md`
 - `tests/smoke.sh`
 - `CHANGELOG.md`
-- `VERSION` if `CHANGELOG.md` is updated
-
-### Tests to add
-
-- Non-root smoke test for `ZOMBIE_PRIVILEGE_MODE` validation.
-- Non-root smoke test that generated sudoers text is syntactically
-  valid where possible.
-- Installer dry-run output test that shows whether Docker will be
-  installed.
-- Bad-usage tests for invalid privilege mode and Docker flag values.
+- `VERSION` if `CHANGELOG.md` changes
 
 ### Acceptance criteria
 
-- Operators can choose a stricter privilege posture at install time.
-- The default posture is either stricter, or the docs clearly state why
-  compatibility mode is default.
-- Docker root-equivalence is opt-in or very clearly disclosed.
+- Operators can select a stricter privilege posture at install time.
+- The default is either stricter, or `compat` is explicitly justified in
+  the installer and security docs.
+- Docker remains off by default unless deliberately reintroduced as an
+  opt-in root-equivalent feature.
 
-## P1: add action previews before approval
+## P1: add approval previews for elevated actions
 
 ### Current state
 
-The approval flow identifies the tool, args, classification, and
-confirmation requirement. It does not consistently show an operator the
-actual impact of the action.
+The approval flow queues elevated actions and exposes pending calls, but
+it does not compute a safe impact preview before approval. Audit has an
+optional verbose stdout/stderr preview mode, but that is post-execution
+output evidence, not a pre-approval preview of what will change.
 
 ### Desired behavior
 
-Before approving elevated actions, the UI and API should expose a
-preview object where feasible:
+Before approval, expose a bounded, redacted preview where safe:
 
 - file writes: target path, old hash, new hash, and unified diff;
-- package installs: `apt-get --simulate install ...` output;
-- package removals: `apt-get --simulate remove ...` output;
-- service control: current state and intended action;
-- firewall changes: current `ufw status numbered` and proposed rule;
-- Tailscale changes: current `tailscale status` and proposed command;
-- destructive actions: touched path/device summary and no auto-preview
-  if preview itself would be risky.
+- package installs/removals: `apt-get --simulate` output;
+- service control: current state and requested action;
+- network changes: current state and proposed mutation;
+- destructive actions: touched path/device summary, or no preview if
+  previewing would itself be risky.
 
-### Implementation approach
-
-Add a preview layer that runs before queuing or as part of pending-call
-construction.
-
-Possible API:
-
-```python
-def preview_tool(name: str, args: dict[str, Any], classification: str) -> dict[str, Any]:
-    ...
-```
-
-Where to put it:
-
-- small implementation: `payload/agent/tools.py`;
-- cleaner implementation: new `payload/agent/previews.py`.
-
-In `server.py`, after classification and before writing the pending
-event, compute:
-
-```python
-preview = preview_tool(name, cleaned, classification)
-```
-
-Add `preview` to:
-
-- the `tool_call` history event;
-- the `pending_tool_call` history event;
-- the `/api/pending` response;
-- the queued `log_tool_call` audit entry.
-
-Do not execute risky preview commands automatically. If a preview
-cannot be produced safely, return:
+If no safe preview exists, return:
 
 ```json
 {"available": false, "reason": "..."}
 ```
 
-### Files to change
+### Files likely to change
 
 - `payload/agent/server.py`
-- `payload/agent/tools.py` or new `payload/agent/previews.py`
+- `payload/agent/tools.py` or a new `payload/agent/previews.py`
 - `payload/agent/templates/index.html`
-- `payload/agent/audit.py` if redaction needs extra coverage
+- `payload/agent/audit.py` if preview redaction needs extra coverage
 - `tests/python/`
 - `tests/smoke.sh`
 - `docs/ARCHITECTURE.md`
 - `docs/CONFIGURATION.md`
 - `CHANGELOG.md`
-- `VERSION` if `CHANGELOG.md` is updated
-
-### Tests to add
-
-- `fs.write` preview produces a unified diff for an allowed existing
-  file under a temp state directory.
-- `pkg.install` preview uses `apt-get --simulate` and does not install.
-- `svc.control` preview reports current service status.
-- Preview errors do not block queuing unless the preview command itself
-  violates policy or schema.
-- Pending API includes a bounded preview.
-- Audit redacts secrets in preview fields.
+- `VERSION` if `CHANGELOG.md` changes
 
 ### Acceptance criteria
 
-- Approval prompts show enough impact for an operator to make a real
-  decision.
+- Pending approval prompts show enough evidence for a real decision.
 - Preview generation does not mutate host state.
 - Preview output is bounded and redacted.
 
-## P1: tighten filesystem read and write boundaries
+## P1: tighten filesystem boundaries
 
 ### Current state
 
-`payload/agent/tools.py` allows `fs.read` and `fs.list` under:
+The Python registry path allows `fs.read` and `fs.list` under:
 
 - `${ZOMBIE_DIR}/state`
 - `/etc`
@@ -522,16 +437,19 @@ It allows `fs.write` under:
 - `${ZOMBIE_DIR}/state`
 - `/tmp`
 
-This is better than arbitrary filesystem access, but `/etc` and
-`/var/log` can contain secrets or sensitive local data. Also, shell
-commands can still read broader paths if the bridge and policy allow
-them.
+The path check resolves paths before testing allow-list membership, which
+is good. There is still no deny-list for obvious sensitive files such as
+`/etc/shadow`, `/etc/sudoers.d`, host SSH private keys,
+`/proc/*/environ`, or `/opt/ai-zombie/secrets`.
+
+This only protects the Python `fs.*` tools. While pi built-ins remain
+enabled, pi's `read`, `grep`, `find`, `bash`, `write`, and `edit` can
+still bypass these boundaries.
 
 ### Desired behavior
 
-Keep useful diagnostics but protect obvious sensitive paths.
-
-Add deny-lists checked after resolving the path:
+After resolving the path, reject sensitive exact paths and prefixes.
+Start with:
 
 - `/etc/shadow`
 - `/etc/gshadow`
@@ -539,79 +457,47 @@ Add deny-lists checked after resolving the path:
 - `/etc/sudoers.d`
 - `/etc/ssh/ssh_host_*_key`
 - `/etc/NetworkManager/system-connections`
-- `/var/log/auth.log` may be readable only with truncation/redaction, or
-  require approval
 - `/proc/*/environ`
-- `/proc/*/cmdline` may need redaction
 - `/opt/ai-zombie/secrets`
 - any path configured by `ZOMBIE_SECRETS`
 
-For denied read paths, return a schema/policy rejection that explains
-the path is sensitive.
+Consider redaction or approval-gated access for sensitive diagnostics
+such as `/var/log/auth.log` and `/proc/*/cmdline`.
 
-### Implementation approach
-
-In `payload/agent/tools.py`:
-
-1. Add `_read_denied_prefixes()` and `_read_denied_exact_paths()`.
-2. Add `_is_denied_read_path(path: Path) -> bool`.
-3. In `_shim_fs_read` and `_shim_fs_list`, check deny-list after
-   `resolve()`.
-4. Add tests for symlink escape attempts and sensitive paths.
-
-Consider adding a separate class for sensitive reads:
-
-```yaml
-sensitive_read:
-  approval: required
-```
-
-Only do this if the policy class model is updated everywhere. A simpler
-first implementation can reject sensitive reads outright.
-
-### Files to change
+### Files likely to change
 
 - `payload/agent/tools.py`
-- `payload/agent/audit.py`
+- `payload/agent/audit.py` if new redaction is needed
 - `payload/bin/collect-diagnostics`
-- `tests/python/test_policy.py` or new `tests/python/test_tools.py`
+- `tests/python/test_tools.py`
+- `tests/smoke.sh`
 - `docs/ARCHITECTURE.md`
 - `SECURITY.md`
 - `CHANGELOG.md`
-- `VERSION` if `CHANGELOG.md` is updated
-
-### Tests to add
-
-- `fs.read` rejects `/etc/shadow`.
-- `fs.list` rejects `/opt/ai-zombie/secrets`.
-- `fs.read` rejects a symlink under an allowed directory that resolves
-  to a denied path.
-- `fs.read` still allows `/etc/os-release`.
-- Redaction covers any new sensitive preview or diagnostic fields.
+- `VERSION` if `CHANGELOG.md` changes
 
 ### Acceptance criteria
 
-- The model cannot read obvious local secrets through `fs.read` or
-  `fs.list`.
-- The implementation uses resolved paths, not string-prefix checks on
-  unresolved input.
-- Docs describe what local state the provider may see.
+- Python `fs.read` and `fs.list` cannot read obvious local secrets.
+- Denials use resolved paths so symlinks cannot bypass the deny-list.
+- Docs explain what local state the model/provider may see.
+- The bridge bypass is fixed or explicitly documented as bypassing this
+  protection.
 
-## P1: add real Ubuntu VM integration tests
+## P1: add real disposable-VM integration tests
 
 ### Current state
 
-The repository has useful non-root smoke tests and Python unit tests,
-but the installer's real behavior is host-mutating and cannot be fully
-verified without a disposable Ubuntu VM.
+The repository has useful non-root smoke tests and Python unit tests, but
+real installer behavior is host-mutating and still lacks disposable VM
+coverage.
 
 ### Desired coverage
 
-Add an integration workflow that runs on disposable Ubuntu Desktop LTS
-or a close VM image and verifies:
+A guarded integration harness should verify at least:
 
 1. `install --dry-run`
-2. non-interactive install with `SSH_PUBLIC_KEY` and `VNC_PASSWORD`
+2. non-interactive install with generated placeholder inputs
 3. re-run install for idempotence
 4. `verify`
 5. `doctor`
@@ -621,54 +507,42 @@ or a close VM image and verifies:
 9. policy blocks elevated action before approval
 10. uninstall with archive on a disposable host
 
-This can be a GitHub Actions workflow if nested virtualization is
-available, or a documented local `multipass`/`qemu` test harness if not.
-
-### Implementation approach
-
-Create one of:
-
-- `scripts/integration-vm.sh`
-- `tests/integration/`
-- `.github/workflows/integration.yml` updates
-
-The integration runner must clearly refuse to run unless it detects a
-disposable VM marker, for example:
+The runner must refuse to mutate a normal workstation unless an explicit
+marker is present, for example:
 
 ```bash
 ZOMBIE_INTEGRATION_ALLOW_HOST_MUTATION=I_AM_IN_A_DISPOSABLE_VM
 ```
 
-Use placeholder credentials generated during the run:
-
-- create an ephemeral SSH keypair;
-- generate a random VNC password;
-- use a stub provider bridge where possible;
-- do not require real LLM API keys.
-
-### Files to change
+### Files likely to change
 
 - `.github/workflows/integration.yml`
 - `scripts/integration-vm.sh` or `tests/integration/*`
 - `docs/PLATFORMS.md`
 - `CONTRIBUTING.md`
 - `CHANGELOG.md`
-- `VERSION` if `CHANGELOG.md` is updated
+- `VERSION` if `CHANGELOG.md` changes
 
 ### Acceptance criteria
 
 - Maintainers have a repeatable way to test real installer behavior.
-- The integration harness cannot accidentally run destructive install
-  steps on a normal workstation without an explicit VM guard.
-- Idempotence is tested by running install twice.
+- The harness cannot accidentally run destructive install steps on a
+  normal workstation.
+- Idempotence is verified by running install twice.
 
 ## P2: improve the operator approval UI
 
 ### Current state
 
-The UI exposes pending calls and has approve/deny actions, but the
-operator experience should be stronger for a product that can mutate
-root-owned state.
+`payload/agent/templates/index.html` renders pending calls and provides
+Approve and Deny buttons. The server enforces the confirmation phrase on
+approval, and slash commands can approve or deny pending calls.
+
+The UI still does not show enough decision evidence. It does not render a
+pre-approval preview, touched paths, audit id, matched policy rule, sudo
+involvement, or a compact structured summary of risk. The approve button
+is not disabled until the phrase is correct; phrase mistakes are caught
+only after submission.
 
 ### Desired behavior
 
@@ -678,171 +552,112 @@ For each pending action, show:
 - classification;
 - matched policy rule or tool default;
 - whether sudo/root is involved;
-- command argv or structured args;
+- structured args or normalized argv;
 - preview output;
 - touched paths;
-- audit id;
-- exact confirmation phrase if required;
+- audit id and tool-call id;
+- exact phrase when required;
 - deny button;
-- approve button disabled until phrase is correct when required.
+- approve button disabled until a required phrase matches.
 
-Add copy that is operational rather than marketing-oriented. Avoid
-large explanatory blocks. Put the evidence next to the decision.
-
-### Implementation approach
-
-Update `payload/agent/templates/index.html`:
-
-1. Render pending calls as compact action panels.
-2. Show preview fields if present.
-3. Show the audit id and tool-call id.
-4. For destructive or network changes, require typing the phrase into a
-   local input before enabling approve.
-5. Keep slash commands working.
-6. Ensure mobile layout does not overlap.
-
-Add API fields from `server.py` as needed.
-
-### Files to change
+### Files likely to change
 
 - `payload/agent/templates/index.html`
 - `payload/agent/server.py`
 - `docs/ARCHITECTURE.md`
 - `tests/smoke.sh`
-- optional browser/UI tests if a browser test harness exists
+- optional browser/UI tests if a harness is added
 - `CHANGELOG.md`
-- `VERSION` if `CHANGELOG.md` is updated
+- `VERSION` if `CHANGELOG.md` changes
 
 ### Acceptance criteria
 
 - Operators can understand what they are approving without reading raw
   logs.
-- The approve button cannot accidentally submit a destructive action
-  without the exact phrase.
+- The approve button cannot accidentally submit phrase-gated actions.
 - Existing `/approve` and `/deny` commands still work.
 
-## P2: make network exposure safer by default
+## Closed/watch: preserve the safer default network footprint
 
 ### Current state
 
-Tailscale is off by default. With the default, UFW allows SSH on every
-interface, with key-only auth and root login disabled. This is a
-reasonable technical baseline, but it may be too exposed for the target
-audience.
+The older analysis assumed SSH ingress, Tailscale, VNC, UFW, and related
+remote-access services were part of the default install. They are not in
+this checkout.
 
-### Desired direction
+`docs/ARCHITECTURE.md` and `SECURITY.md` say the default install does not
+provision SSH, Tailscale, VNC, Docker, a configured firewall, or GUI
+automation, and `scripts/install.sh` does not include those package or
+configuration steps. The only intended access surface is the chat service
+on `127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}`.
 
-Choose one of these product positions and make it consistent:
+### Recommendation
 
-1. Tailscale-first default: install/enrol Tailscale unless explicitly
-   skipped, and allow SSH only on `tailscale0`.
-2. Local-only default: do not open inbound SSH unless the operator opts
-   in.
-3. Current default retained: keep SSH on every interface, but make the
-   risk more prominent in quickstart and installer confirmation.
-
-For novice users, option 1 or 2 is safer. Option 3 is simpler but needs
-clear warnings.
-
-### Implementation option: local-only default
-
-Add:
-
-```bash
-ZOMBIE_ENABLE_SSH_INGRESS=0|1
-```
-
-Default to `0` for new installs. If `0`:
-
-- install and harden sshd if required;
-- write authorized keys;
-- do not add a UFW allow rule for port 22;
-- print local-only instructions.
-
-If `1` and Tailscale is skipped:
-
-- allow SSH on every interface;
-- require an interactive confirmation or `--yes`.
-
-### Files to change
-
-- `scripts/install.sh`
-- `scripts/uninstall.sh`
-- `docs/QUICKSTART.md`
-- `docs/CONFIGURATION.md`
-- `docs/TAILSCALE.md`
-- `docs/REQUIRES.md`
-- `SECURITY.md`
-- `README.md`
-- `tests/smoke.sh`
-- `CHANGELOG.md`
-- `VERSION` if `CHANGELOG.md` is updated
+Do not implement the older `ZOMBIE_ENABLE_SSH_INGRESS` work as a P2
+safety fix unless SSH provisioning is deliberately reintroduced. Instead,
+add tests or documentation guards that preserve the loopback-only default.
 
 ### Acceptance criteria
 
-- A new operator cannot accidentally expose SSH broadly without seeing
-  a clear choice.
-- Existing users have an upgrade path that preserves their configured
-  posture.
-- `verify`, `doctor`, and `repair` understand the chosen ingress mode.
+- Default install remains loopback-only.
+- Any future remote-access feature is explicit opt-in and documented as a
+  new exposure.
+- `verify`, `doctor`, and `repair` do not imply that broad SSH ingress is
+  expected by default.
 
-## P2: align names, docs, and generated state
+## P2: align account naming in remaining docs
 
 ### Current state
 
-The docs alternate between `agent` and `zombie` for the local Linux
-account. The code supports `ZOMBIE_USER`, while some docs still discuss
-`agent`. Some architecture and configuration sections also disagree
-with shipped policy defaults and budgets.
+The installer and primary user docs have largely moved to the default
+Linux account name `zombie` with `ZOMBIE_USER` as the configuration
+variable and `AGENT_USER` as a legacy alias. Remaining stale text exists,
+notably in `SECURITY.md`, which still says the operating identity is
+`agent` and refers to removing the `agent` user.
+
+Some analysis documents, such as `docs/analysis/ubuntu-zombie-zero.md`,
+also still use `agent` for account-identity text. Historical research
+under `docs/research/` can remain as-is unless it is actively presented
+as current product documentation.
 
 ### Desired behavior
 
-Use one canonical term:
+Use one canonical account model:
 
-- product role: "AI Systems Administrator";
+- product role: AI Systems Administrator;
 - default Linux account: `zombie`;
 - configurable env var: `ZOMBIE_USER`;
-- legacy alias: `AGENT_USER`, documented only as backward-compatible.
+- legacy alias: `AGENT_USER`, documented only for backward compatibility.
 
-### Implementation approach
+Keep the word "agent" when it refers to the AI concept, Python package,
+or general runtime role. Change only account-identity text.
 
-Search and update docs carefully:
+### Files likely to change
 
-```bash
-rg -n "\bagent\b|AGENT_USER|zombie" README.md docs SECURITY.md CONTRIBUTING.md payload scripts tests
-```
-
-Do not blindly replace all occurrences. Keep "agent" when it refers to
-the general AI agent concept or Python package names. Replace only
-account-identity text that should say `zombie`.
-
-Also align these docs with the final policy:
-
-- `docs/ARCHITECTURE.md`
-- `docs/CONFIGURATION.md`
 - `SECURITY.md`
-- `README.md`
-- `docs/INTERNET-ACCESS.md`
+- `docs/analysis/ubuntu-zombie-zero.md` if still considered current
+- targeted references in `README.md`, `docs/`, `CONTRIBUTING.md`,
+  `payload/`, `scripts/`, and `tests/`
 
 ### Acceptance criteria
 
-- A new reader understands the account model without reconciling
-  `agent` vs `zombie`.
-- Docs match the installed defaults.
-- Tests cover the policy defaults that docs describe.
+- A new reader does not need to reconcile `agent` vs `zombie` as the
+  default account name.
+- Backward-compatible `AGENT_USER` behavior remains documented.
 
-## P2: add first-class read-only web fetch safely
+## P2: add first-class read-only web fetch after P0
 
 ### Current state
 
-`docs/INTERNET-ACCESS.md` notes that outbound networking is available,
-but there is no first-class `web.fetch` tool. It also describes the
-current bridge bypass issue. Do not add internet features until P0 is
-fixed, because fetches must also go through Python policy and audit.
+There is no `web.fetch` tool in `payload/agent/tools.py`. Outbound
+networking is available and `curl`/`wget` are installed, but web access is
+only available through shell/pi built-ins. `docs/INTERNET-ACCESS.md`
+still contains stale statements about `default_class: system_change` and
+about the pi-built-in path; revise it when web fetch work begins.
 
 ### Desired behavior
 
-After P0 is complete, add a typed read-only fetch tool:
+After the bridge boundary is fixed, add a typed read-only tool:
 
 ```text
 web.fetch
@@ -851,54 +666,53 @@ web.fetch
 Arguments:
 
 - `url`: string, required;
-- `max_bytes`: integer, optional, default 65536;
-- `timeout`: integer, optional, default 20;
-- `headers`: object, optional, only allow safe request headers.
+- `max_bytes`: integer, optional, default bounded value;
+- `timeout`: integer, optional, default bounded value;
+- `headers`: object, optional, allow only safe request headers.
 
 Restrictions:
 
 - only `http` and `https`;
 - no request body;
 - no POST/PUT/PATCH/DELETE;
-- deny loopback, link-local, private RFC1918, and cloud metadata IPs by
-  default;
+- deny loopback, link-local, private RFC1918, and cloud metadata targets
+  by default;
 - follow redirects only within safe schemes;
-- cap response body;
-- redact response before audit/history.
+- cap and redact response bodies before audit/history.
 
-### Files to change
+### Files likely to change
 
 - `payload/agent/tools.py`
-- `payload/agent/templates/settings.json.tmpl`
+- `payload/agent/templates/APPEND_SYSTEM.md.tmpl`
 - `payload/agent/skills/web.md`
-- `payload/agent/server.py` system prompt text
 - `payload/etc/policy.yaml`
 - `tests/smoke.sh`
-- `tests/python/test_policy.py` or new `tests/python/test_web_fetch.py`
+- `tests/python/test_web_fetch.py`
 - `docs/INTERNET-ACCESS.md`
 - `docs/ARCHITECTURE.md`
 - `docs/CONFIGURATION.md`
 - `CHANGELOG.md`
-- `VERSION` if `CHANGELOG.md` is updated
+- `VERSION` if `CHANGELOG.md` changes
 
 ### Acceptance criteria
 
-- The agent can fetch public web pages for read-only lookups.
-- Fetches are audit-visible as `web.fetch`, not hidden in shell text.
-- Fetch cannot read from or post local files.
-- Fetch cannot reach loopback/private/link-local targets by default.
-- `curl ... | bash` remains gated as an elevated action.
+- The assistant can fetch public web pages for read-only lookups.
+- Fetches are audit-visible as `web.fetch`.
+- Fetch cannot read local files, send request bodies, or reach local and
+  private network targets by default.
+- `curl ... | bash` remains gated as an elevated or destructive action.
 
 ## P3: strengthen audit and evidence
 
 ### Current state
 
-Audit logging is a good foundation. It records structured tool calls,
-classifications, decisions, exit codes, durations, and stream hashes.
+Audit logging records structured events and redacts obvious secrets.
+Verbose mode can attach redacted stdout/stderr previews. The audit log
+still does not explain why a classification was chosen.
 
 ### Improvements
 
-Add:
+Add bounded fields such as:
 
 - policy rule id or pattern that determined classification;
 - tool schema version;
@@ -907,19 +721,19 @@ Add:
 - effective user;
 - whether sudo was present;
 - parent conversation id and message id;
-- bridge version and provider/model per turn.
+- bridge version and provider/model per turn;
+- normalized argv separately from rendered shell.
 
-For commands, record normalized argv separately from rendered shell
-where possible. Avoid storing full stdout/stderr by default.
+Avoid storing full stdout/stderr by default.
 
-### Files to change
+### Files likely to change
 
 - `payload/agent/audit.py`
 - `payload/agent/policy.py`
 - `payload/agent/server.py`
 - `payload/agent/runner.py`
 - `payload/bin/audit-recent`
-- tests under `tests/python`
+- `tests/python/`
 - `docs/ARCHITECTURE.md`
 - `SECURITY.md`
 
@@ -933,37 +747,41 @@ where possible. Avoid storing full stdout/stderr by default.
 
 Implement in this order:
 
-1. P0 bridge mediation.
-2. P0 conservative shipped policy.
-3. Tests that lock P0 behavior.
-4. Docs alignment for P0.
-5. Filesystem deny-list.
-6. Action previews.
-7. Privilege mode and Docker opt-in.
-8. Integration VM tests.
-9. UI improvements.
-10. Network default changes.
-11. Web fetch.
-12. Audit evidence fields.
+1. Fix or explicitly disable/document the pi built-in bridge bypass.
+2. Align `payload/etc/policy.yaml`, the YAML parser, tests, and docs.
+3. Update prompt templates and architecture/security docs to match the
+   real execution path.
+4. Add filesystem sensitive-path denials on the Python registry path.
+5. Add approval previews.
+6. Improve approval UI evidence.
+7. Add stricter privilege mode or a privileged helper.
+8. Add disposable-VM integration tests.
+9. Finish account-name doc alignment.
+10. Add `web.fetch` safely.
+11. Add audit classification evidence fields.
 
 Do not combine all items in one large pull request. The first PR should
-focus only on making the execution boundary true and tested.
+focus only on making the execution boundary and policy defaults true,
+tested, and documented.
 
-## Definition of done for the first PR
+## Definition of done for the first implementation PR
 
-The first PR should be considered complete when:
+The first implementation PR should be considered complete when:
 
-- pi cannot execute host tools outside Python mediation;
-- `payload/etc/policy.yaml` is conservative by default;
+- pi cannot execute host tools outside Python mediation, or host tools are
+  disabled and the limitation is documented;
+- `payload/etc/policy.yaml` text is conservative and matches effective
+  runtime behavior;
 - `make lint` passes;
 - `make test` passes;
 - tests fail if elevated actions auto-dispatch under the shipped policy;
-- `docs/ARCHITECTURE.md`, `SECURITY.md`, and `docs/CONFIGURATION.md`
-  match the implemented behavior;
+- tests fail if the production bridge reintroduces unmediated host tool
+  execution under the claimed closed-registry mode;
+- `docs/ARCHITECTURE.md`, `SECURITY.md`, `docs/CONFIGURATION.md`, and
+  `docs/INTERNET-ACCESS.md` match the implemented behavior;
 - `CHANGELOG.md` records the user-visible safety change;
-- `VERSION` is bumped if the changelog is updated, using:
+- `VERSION` is bumped if `CHANGELOG.md` is updated, using:
 
 ```bash
 date -u +%Y.%m.%d.%H.%M.%S > VERSION
 ```
-
