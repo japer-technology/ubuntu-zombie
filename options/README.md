@@ -1,0 +1,168 @@
+# Optional component plans (`options/`)
+
+This directory is the **design surface** for Ubuntu Zombie's opt-in
+software components. It holds no runnable code. Each file is a written
+specification for a capability that a future change could add to
+[`scripts/install.sh`](../scripts/install.sh) as an
+`ZOMBIE_INSTALL_<COMPONENT>` flag — off by default, idempotent,
+non-interactive-capable, audited, and reversible by
+[`scripts/uninstall.sh`](../scripts/uninstall.sh).
+
+The premise, argued in [`brainstorm.md`](brainstorm.md) and
+[`docs/VISION.md`](../docs/VISION.md), is simple: once a machine carries
+a private, root-capable AI Systems Administrator that can `verify`,
+`doctor`, `repair`, and *explain* its own software under human approval
+and audit, whole classes of software that were previously "too complex
+to run unattended on a personal machine" become realistic **opt-in**
+components. These plans triage and specify those candidates.
+
+## How the files fit together
+
+- [`brainstorm.md`](brainstorm.md) — the map of record. It catalogues
+  candidate components, groups them into tiers, and carries the
+  **candidate index** table that tracks each one from idea to spec. Start
+  here.
+- `plan-optional-<slug>.md` — one worked specification per component.
+  A candidate graduates from a bullet in the brainstorm to its own plan
+  file once it clears the triage bar (see below).
+- [`PLAN.md`](PLAN.md) — the cross-cutting implementation roadmap: how to
+  sequence and build these components so shared foundations land before
+  the things that depend on them.
+
+## Plans in this directory
+
+Grouped by the operator need they serve. Every flag defaults to `0`.
+
+### Data safety and recovery
+
+- [`plan-optional-backup.md`](plan-optional-backup.md) —
+  `ZOMBIE_INSTALL_BACKUP`. Scheduled `restic` snapshots of
+  operator-nominated paths to an operator-supplied repository, with
+  agent-assisted health checks and operator-driven restore.
+- [`plan-optional-snapshots.md`](plan-optional-snapshots.md) —
+  `ZOMBIE_INSTALL_SNAPSHOTS`. Filesystem snapshots and a pre-`apt` hook
+  so a bad upgrade is one boot rollback away. Configures the distro's own
+  tooling; never converts a root filesystem in place.
+
+### Observability and self-knowledge
+
+- [`plan-optional-observability.md`](plan-optional-observability.md) —
+  `ZOMBIE_INSTALL_OBSERVABILITY`. A curated Prometheus + Grafana + Loki
+  stack, loopback/tailnet-bound, so the agent can read its own metrics
+  and logs to answer "why is the machine slow?" with evidence.
+- [`plan-optional-inventory.md`](plan-optional-inventory.md) —
+  `ZOMBIE_INSTALL_INVENTORY`. A periodic, queryable snapshot of packages,
+  services, and config drift — a read-only change journal that
+  complements the audit log.
+
+### Networking and remote access
+
+- [`plan-optional-proxy.md`](plan-optional-proxy.md) —
+  `ZOMBIE_INSTALL_PROXY`. A host-wide `Caddy` front door that terminates
+  TLS and routes to every opt-in web component from one domain.
+- [`plan-optional-dns.md`](plan-optional-dns.md) —
+  `ZOMBIE_INSTALL_DNS`. A curated single-host `Unbound` resolver with
+  ad/tracker blocklists and DNS-over-TLS upstream, with health checks
+  that never let DNS go dark.
+- [`plan-optional-remote.md`](plan-optional-remote.md) —
+  `ZOMBIE_INSTALL_REMOTE`. Re-introduces the full remote-access surface
+  (SSH, Tailscale, `fail2ban`, `x11vnc`) as one feature-gated,
+  closed-by-default component.
+
+### Personal application stacks
+
+- [`plan-optional-nextcloud.md`](plan-optional-nextcloud.md) —
+  `ZOMBIE_INSTALL_NEXTCLOUD`. A single-operator Nextcloud (files, sync,
+  docs) as a curated container stack with PostgreSQL, where the agent
+  owns the day-2 upkeep Nextcloud is infamous for.
+
+### Local AI / compute
+
+- [`plan-optional-localllm.md`](plan-optional-localllm.md) —
+  `ZOMBIE_INSTALL_LOCALLLM`. Installs and manages a local LLM runtime
+  (`Ollama` by default, `llama.cpp` alternative) with optional GPU
+  enablement, wired into the existing provider plumbing so the agent can
+  run on a model it also maintains.
+
+### Developer and build infrastructure
+
+- [`plan-optional-forgejo-server.md`](plan-optional-forgejo-server.md) —
+  `ZOMBIE_INSTALL_FORGEJO` (server). A self-hosted Forgejo server backed
+  by PostgreSQL, with an optional local Actions runner on the same host.
+- [`plan-optional-forgejo-society.md`](plan-optional-forgejo-society.md) —
+  seeds the Forgejo-Society content (organisations, role repositories,
+  conformance suite, workflows) **on top of** an installed Forgejo
+  server. Hard-depends on the server plan.
+
+Candidates still at the brainstorm stage — secrets manager
+(`ZOMBIE_INSTALL_VAULT`), local SSO (`ZOMBIE_INSTALL_SSO`), wiki
+(`ZOMBIE_INSTALL_WIKI`), curated app platform (`ZOMBIE_INSTALL_APPS`),
+and registry/cache (`ZOMBIE_INSTALL_REGISTRY`) — are described in
+[`brainstorm.md`](brainstorm.md) and have no plan file yet.
+
+## The shape every plan shares
+
+Each `plan-optional-*.md` is written against the same section order so
+they can be read and reviewed uniformly:
+
+> Goal · why AI assistance is the unlock · what "maximum" means ·
+> behaviour and options · non-negotiables (from
+> [`AGENTS.md`](../AGENTS.md)) · implementation steps ·
+> validation before hand-off · out of scope / risks.
+
+Every component, when built, reuses the same touch-points:
+
+- option parsing + validators + `usage()` env block;
+- an interactive parameter-review row and toggle;
+- a dry-run plan and pre-flight banner lines;
+- guarded install `section` blocks that check current state first
+  (idempotent) and early-return when the flag is off;
+- generated secrets written to root-owned files, surfaced only as
+  set/unset fingerprints in the receipt;
+- `verify`/`doctor`/`repair` checks that emit JSON records;
+- `uninstall.sh` reversal, with destructive steps behind the
+  confirmation phrase;
+- a policy class in [`payload/etc/policy.yaml`](../payload/etc/policy.yaml)
+  and handling in [`payload/agent/policy.py`](../payload/agent/policy.py)
+  for anything the agent may later drive;
+- `docs/CONFIGURATION.md`, `docs/ARCHITECTURE.md`, and `README.md`
+  updates; a `CHANGELOG.md` entry and a `VERSION` bump.
+
+## Naming and promotion workflow
+
+- **One spec per file**, named `plan-optional-<slug>.md`, where `<slug>`
+  is the master flag's component name in lower kebab-case
+  (`ZOMBIE_INSTALL_BACKUP` → `plan-optional-backup.md`).
+- A candidate graduates from a brainstorm bullet to a real spec when it
+  clears the triage bar in
+  [`brainstorm.md`](brainstorm.md#how-to-triage-these-into-real-plans):
+  it fits the single-host, single-operator, beside-not-over model; its
+  difficulty is genuinely operational; it can be expressed as the shared
+  checklist above; and its blast radius is bounded and reversible.
+- When a candidate is promoted, update its row in the candidate index in
+  [`brainstorm.md`](brainstorm.md) to point at the new file, so the
+  brainstorm stays the map of record.
+
+## Boundaries these plans respect
+
+Drawn from [`docs/VISION.md`](../docs/VISION.md) and
+[`AGENTS.md`](../AGENTS.md):
+
+- **One machine, one operator, one trust boundary** — no fleet
+  orchestration, no multi-tenant control planes.
+- **Beside the user, not over them** — components install alongside the
+  operator's session; they never replace logins, files, or the desktop.
+- **Every privileged action through the policy gate and audit log** — no
+  new `sudo` path bypasses the gate.
+- **Idempotent, non-interactive-capable, reversible** — each component is
+  one or more guarded sections, drivable end-to-end under
+  `ZOMBIE_NONINTERACTIVE=1`, and undone by `uninstall.sh`.
+- **No secrets in the repo; British/Commonwealth spelling; the
+  `[i]/[+]/[!]/[x]` and `[ok]/[!]/[x]/[~]` glyph vocabulary.**
+
+## Status
+
+Everything here is design, not implementation. None of these flags exist
+in `scripts/install.sh` yet; these files describe how they *should* be
+built when the work is picked up. See [`PLAN.md`](PLAN.md) for the
+recommended order of implementation.
