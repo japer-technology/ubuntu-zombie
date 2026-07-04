@@ -103,7 +103,7 @@ make that true.
 ### Current state
 
 `payload/agent/pi-mono-bridge.mjs` runs pi in JSON mode with built-in host
-tools:
+tools. The current source declares the tool list exactly as:
 
 ```js
 const PI_BUILTIN_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -224,10 +224,11 @@ for uploading local secrets or command output to arbitrary services.
   fetch instead of a refusal.
 - `web.fetch` appears as a distinct, bounded, redacted audit event.
 - Public web lookups do not require an approval prompt by default.
-- `curl ... | bash` is a critical security anti-pattern and must stay
-  blocked or require explicit confirmation; file uploads, request bodies,
-  and local-network probes remain separately classified as higher-risk
-  actions.
+- `curl ... | bash` is a critical security anti-pattern because it
+  fetches arbitrary remote code and executes it directly, bypassing the
+  bounded `web.fetch` audit trail; it must stay blocked or require explicit
+  confirmation. File uploads, request bodies, and local-network probes
+  remain separately classified as higher-risk actions.
 - Documentation states that outbound web access is enabled for the agent
   capability, while inbound chat exposure remains loopback-only.
 
