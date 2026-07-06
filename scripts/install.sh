@@ -104,6 +104,40 @@ LOCAL_LLM_ENDPOINT=""
 LOCAL_LLM_BASE_URL=""
 LOCAL_LLM_MODEL=""
 
+# ---------------------------------------------------------------------------
+# Optional components ("Ubuntu Zombie + Options")
+# ---------------------------------------------------------------------------
+# Every opt-in component is governed by a ZOMBIE_INSTALL_<COMPONENT> flag
+# that defaults to 0, so the baseline install is unchanged unless the
+# operator explicitly opts in. Each component follows the same contract:
+# validated settings, an entry in the interactive Options menu (item 9 of
+# the parameter review), a dry-run stanza, guarded idempotent install
+# sections, receipt records, verify/doctor/repair checks, and a reversal
+# path in uninstall.sh. Forgejo is the first component; more will follow.
+#
+# Forgejo: a self-hosted git forge backed by PostgreSQL, listening on the
+# normal network interfaces (this is a service for people on the LAN, not
+# a loopback-only agent surface). Optionally a Forgejo Actions runner is
+# co-located on the same host using the standard Docker-based executor.
+ZOMBIE_INSTALL_FORGEJO="${ZOMBIE_INSTALL_FORGEJO:-0}"
+ZOMBIE_INSTALL_FORGEJO_RUNNER="${ZOMBIE_INSTALL_FORGEJO_RUNNER:-0}"
+FORGEJO_HTTP_PORT="${FORGEJO_HTTP_PORT:-3000}"
+FORGEJO_ADMIN_USER="${FORGEJO_ADMIN_USER:-forgejo-admin}"
+FORGEJO_ADMIN_EMAIL="${FORGEJO_ADMIN_EMAIL:-forgejo-admin@localhost.localdomain}"
+FORGEJO_DB_NAME="${FORGEJO_DB_NAME:-forgejo}"
+FORGEJO_DB_USER="${FORGEJO_DB_USER:-forgejo}"
+FORGEJO_VERSION="${FORGEJO_VERSION:-}"
+FORGEJO_RUNNER_VERSION="${FORGEJO_RUNNER_VERSION:-}"
+FORGEJO_RUNNER_LABELS="${FORGEJO_RUNNER_LABELS:-ubuntu-latest:docker://node:20-bookworm}"
+# Populated at install time once the release tag is resolved.
+FORGEJO_RESOLVED_VERSION=""
+
+# True when at least one optional component is enabled — used to keep the
+# default dry-run/receipt/banner output byte-for-byte unchanged otherwise.
+any_option_enabled() {
+  [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]
+}
+
 # UX flags (set by argument parsing below; env provides the defaults).
 #   ASSUME_YES   skip the interactive "Type YES" confirmation but keep
 #                interactive prompts for any still-missing inputs.
@@ -270,6 +304,24 @@ Environment variables (selected; see docs/CONFIGURATION.md for all):
   ZOMBIE_TTL_DAYS=<n>         Time to Live in days before the zombie is
                               permanently disabled (default 7).
 
+Optional components (all default 0 / off; see options/ for the roadmap):
+  ZOMBIE_INSTALL_FORGEJO=1    also install a self-hosted Forgejo git forge
+                              backed by PostgreSQL, reachable on the normal
+                              network interfaces (port 3000 by default).
+  ZOMBIE_INSTALL_FORGEJO_RUNNER=1  also install a Forgejo Actions runner on
+                              the same host (standard Docker executor).
+                              Requires ZOMBIE_INSTALL_FORGEJO=1.
+  FORGEJO_HTTP_PORT=<n>       Forgejo web/API port (default 3000).
+  FORGEJO_ADMIN_USER=<name>   initial admin account (default forgejo-admin;
+                              password auto-generated, printed once).
+  FORGEJO_ADMIN_EMAIL=<addr>  admin email (default forgejo-admin@localhost.localdomain).
+  FORGEJO_DB_NAME=<name>      PostgreSQL database (default forgejo).
+  FORGEJO_DB_USER=<name>      PostgreSQL role (default forgejo).
+  FORGEJO_VERSION=<x.y.z>     pin the Forgejo release (default: latest).
+  FORGEJO_RUNNER_VERSION=<x.y.z>  pin the runner release (default: latest).
+  FORGEJO_RUNNER_LABELS=<labels>  runner labels (default
+                              ubuntu-latest:docker://node:20-bookworm).
+
 Examples:
   # Preview the plan before granting anything:
   sudo ./${SCRIPT_NAME} install --dry-run
@@ -282,6 +334,10 @@ Examples:
 
   # Fully unattended (CI / cloud-init):
   sudo ZOMBIE_NONINTERACTIVE=1 ./${SCRIPT_NAME} install
+
+  # Baseline plus a Forgejo forge with a co-located Actions runner:
+  sudo ZOMBIE_INSTALL_FORGEJO=1 ZOMBIE_INSTALL_FORGEJO_RUNNER=1 \\
+    ./${SCRIPT_NAME} install
 
   # Machine-readable health for monitoring:
   ./${SCRIPT_NAME} verify --json
@@ -418,6 +474,28 @@ is_valid_ttl_days() {
   (( "$1" >= 1 && "$1" <= 36500 ))
 }
 
+# A boolean opt-in flag: exactly "0" or "1".
+is_valid_option_flag() {
+  [[ "$1" == "0" || "$1" == "1" ]]
+}
+
+# A Forgejo account / database identifier: conservative because the value
+# is interpolated into psql statements and CLI invocations. 1-40 chars,
+# starts with a letter, ends alphanumeric, underscore/hyphen in the middle.
+is_valid_forgejo_name() {
+  [[ "$1" =~ ^[a-z]([a-z0-9_-]{0,38}[a-z0-9])?$ ]]
+}
+
+# A plausible email for the Forgejo admin account (conservative subset).
+is_valid_forgejo_email() {
+  [[ "$1" =~ ^[A-Za-z0-9._+-]+@[A-Za-z0-9.-]+$ ]]
+}
+
+# An optional Forgejo release pin like "11.0.3" (empty means "latest").
+is_valid_forgejo_version() {
+  [[ -z "$1" || "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]
+}
+
 # Validate user-controlled install settings before they are interpolated into
 # paths, sudoers entries, generated unit files, or shell commands.
 validate_config() {
@@ -438,6 +516,35 @@ validate_config() {
   fi
   if ! is_valid_ttl_days "${TTL_DAYS}"; then
     die "ZOMBIE_TTL_DAYS must be an integer number of days from 1 to 36500." 2
+  fi
+  if ! is_valid_option_flag "${ZOMBIE_INSTALL_FORGEJO}"; then
+    die "ZOMBIE_INSTALL_FORGEJO must be 0 or 1." 2
+  fi
+  if ! is_valid_option_flag "${ZOMBIE_INSTALL_FORGEJO_RUNNER}"; then
+    die "ZOMBIE_INSTALL_FORGEJO_RUNNER must be 0 or 1." 2
+  fi
+  if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+    if ! is_valid_tcp_port "${FORGEJO_HTTP_PORT}"; then
+      die "FORGEJO_HTTP_PORT must be an integer from 1 to 65535." 2
+    fi
+    if ! is_valid_forgejo_name "${FORGEJO_ADMIN_USER}"; then
+      die "FORGEJO_ADMIN_USER must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
+    fi
+    if ! is_valid_forgejo_email "${FORGEJO_ADMIN_EMAIL}"; then
+      die "FORGEJO_ADMIN_EMAIL must look like an email address." 2
+    fi
+    if ! is_valid_forgejo_name "${FORGEJO_DB_NAME}"; then
+      die "FORGEJO_DB_NAME must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
+    fi
+    if ! is_valid_forgejo_name "${FORGEJO_DB_USER}"; then
+      die "FORGEJO_DB_USER must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
+    fi
+    if ! is_valid_forgejo_version "${FORGEJO_VERSION}"; then
+      die "FORGEJO_VERSION must be a release like 11.0.3 (or empty for latest)." 2
+    fi
+    if ! is_valid_forgejo_version "${FORGEJO_RUNNER_VERSION}"; then
+      die "FORGEJO_RUNNER_VERSION must be a release like 6.3.1 (or empty for latest)." 2
+    fi
   fi
 }
 
@@ -662,6 +769,27 @@ cmd_doctor() {
     dr warn chat_service "Chat service unit missing. Fix: sudo ./${SCRIPT_NAME} install"
   fi
 
+  # Optional component: Forgejo (detected from the installed unit/config).
+  if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo ]]; then
+    if systemctl is-active --quiet forgejo.service 2>/dev/null; then
+      dr ok forgejo "Forgejo service active."
+    else
+      dr warn forgejo "Forgejo installed but not running. Likely causes: port in use (ss -ltnp), DB auth (journalctl -u forgejo | grep -i password), or migrations not run. Fix: sudo systemctl restart forgejo"
+    fi
+    if systemctl is-active --quiet postgresql 2>/dev/null; then
+      dr ok forgejo_db "PostgreSQL active."
+    else
+      dr warn forgejo_db "PostgreSQL not running (Forgejo needs it). Fix: sudo systemctl start postgresql"
+    fi
+    if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+      if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
+        dr ok forgejo_runner "Forgejo Actions runner active."
+      else
+        dr warn forgejo_runner "Forgejo runner not running. Check registration (/var/lib/forgejo-runner/.runner) and Docker (systemctl status docker). Fix: sudo systemctl restart forgejo-runner"
+      fi
+    fi
+  fi
+
   local n="${#d_status[@]}" i warns=0
   for (( i = 0; i < n; i++ )); do
     [[ "${d_status[i]}" == "warn" ]] && warns=$((warns + 1))
@@ -759,6 +887,23 @@ cmd_repair() {
     install -d -m 755 -o root -g root "${ZOMBIE_ETC}/skills.d"
     ok "Skill catalogue re-deployed."
   fi
+
+  # Optional component: Forgejo — re-assert ownership/permissions and
+  # restart the units when the component is installed.
+  if [[ -d /etc/forgejo || -d /var/lib/forgejo ]]; then
+    [[ -d /etc/forgejo ]] && { chown root:git /etc/forgejo; chmod 770 /etc/forgejo; }
+    [[ -f /etc/forgejo/app.ini ]] && { chown root:git /etc/forgejo/app.ini; chmod 640 /etc/forgejo/app.ini; }
+    [[ -d /var/lib/forgejo ]] && { chown -R git:git /var/lib/forgejo; chmod 750 /var/lib/forgejo; }
+    if [[ -f /etc/systemd/system/forgejo.service ]]; then
+      systemctl daemon-reload
+      systemctl restart forgejo.service || warn "Forgejo failed to restart; see journalctl -u forgejo"
+    fi
+    if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+      chown -R forgejo-runner:forgejo-runner /var/lib/forgejo-runner 2>/dev/null || true
+      systemctl restart forgejo-runner.service || warn "Forgejo runner failed to restart; see journalctl -u forgejo-runner"
+    fi
+    ok "Forgejo ownership and services re-asserted."
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -812,6 +957,33 @@ Files & directories created / re-asserted:
   /etc/systemd/system/ubuntu-zombie-health.service
   /etc/systemd/system/ubuntu-zombie-health.timer
   /etc/logrotate.d/ubuntu-zombie
+EOF
+  if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+    cat <<EOF
+
+Optional components enabled (ZOMBIE_INSTALL_* flags):
+  Forgejo server  git forge + PostgreSQL (${FORGEJO_VERSION:-latest release})
+                  apt: git-lfs postgresql postgresql-contrib openssl xz-utils
+                  binary: /usr/local/bin/forgejo (checksum-verified download)
+                  data: /var/lib/forgejo (git:git)  config: /etc/forgejo/app.ini
+                  database: ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password generated)
+                  admin: ${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password generated, printed once)
+                  unit: /etc/systemd/system/forgejo.service
+                  exposure: http://<host>:${FORGEJO_HTTP_PORT}/ on all interfaces (normal access)
+EOF
+    if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+      cat <<EOF
+  Actions runner  co-located Forgejo Actions runner (Docker executor)
+                  apt: docker.io   binary: /usr/local/bin/forgejo-runner
+                  registers against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels:
+                    ${FORGEJO_RUNNER_LABELS}
+                  unit: /etc/systemd/system/forgejo-runner.service
+                  note: co-locating runner and forge is contrary to upstream
+                        guidance and is enabled deliberately.
+EOF
+    fi
+  fi
+  cat <<EOF
 
 Nothing has been changed. To proceed for real:
 
@@ -855,8 +1027,25 @@ print_parameter_table() {
   else
     field "8) Local LLM"     "none (scan LAN for an OpenAI-compatible server)" "${C_DIM}"
   fi
+  if any_option_enabled; then
+    field "9) Options"       "$(options_summary)"
+  else
+    field "9) Options"       "none selected (backup, forge, and more to come)" "${C_DIM}"
+  fi
   field "   Host"            "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
   printf '\n'
+}
+
+# One-line summary of every enabled optional component, for row 9.
+options_summary() {
+  local parts=()
+  if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+    local runner_state="off"
+    [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && runner_state="on"
+    parts+=("Forgejo server (port ${FORGEJO_HTTP_PORT}, admin ${FORGEJO_ADMIN_USER}, runner: ${runner_state})")
+  fi
+  local IFS='; '
+  printf '%s' "${parts[*]}"
 }
 
 # Individual field editors.# Individual field editors. Each keeps the current value when the operator
@@ -940,6 +1129,98 @@ _edit_ttl_days() {
        is_valid_ttl_days v 1 && [[ -n "${v}" ]]; then
     TTL_DAYS="${v}"; ok "Time to Live set to ${TTL_DAYS} day(s)."
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Optional components menu (item 9 of the parameter review)
+# ---------------------------------------------------------------------------
+# A nested, branded sub-menu that lists every opt-in component with its
+# on/off state and settings. New components add one row here instead of
+# renumbering the top-level review menu.
+
+_edit_forgejo_port() {
+  local v
+  if prompt_until_valid "$(printf 'Forgejo web port [%s]: ' "${FORGEJO_HTTP_PORT}")" \
+       is_valid_tcp_port v 1 && [[ -n "${v}" ]]; then
+    FORGEJO_HTTP_PORT="${v}"; ok "Forgejo port set to ${FORGEJO_HTTP_PORT}."
+  fi
+}
+
+_edit_forgejo_admin() {
+  local v
+  if prompt_until_valid "$(printf 'Forgejo admin username [%s]: ' "${FORGEJO_ADMIN_USER}")" \
+       is_valid_forgejo_name v 1 && [[ -n "${v}" ]]; then
+    FORGEJO_ADMIN_USER="${v}"; ok "Forgejo admin set to ${FORGEJO_ADMIN_USER}."
+  fi
+  if prompt_until_valid "$(printf 'Forgejo admin email [%s]: ' "${FORGEJO_ADMIN_EMAIL}")" \
+       is_valid_forgejo_email v 1 && [[ -n "${v}" ]]; then
+    FORGEJO_ADMIN_EMAIL="${v}"; ok "Forgejo admin email set to ${FORGEJO_ADMIN_EMAIL}."
+  fi
+}
+
+_toggle_forgejo_runner() {
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+    ZOMBIE_INSTALL_FORGEJO_RUNNER=0
+    info "Forgejo Actions runner disabled."
+  else
+    ZOMBIE_INSTALL_FORGEJO_RUNNER=1
+    warn "Co-locating the runner with the forge is contrary to upstream guidance; enabling deliberately."
+    info "Forgejo Actions runner enabled (standard Docker executor)."
+  fi
+}
+
+_toggle_forgejo() {
+  if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+    ZOMBIE_INSTALL_FORGEJO=0
+    ZOMBIE_INSTALL_FORGEJO_RUNNER=0
+    info "Forgejo server disabled."
+  else
+    ZOMBIE_INSTALL_FORGEJO=1
+    info "Forgejo server enabled (PostgreSQL-backed, port ${FORGEJO_HTTP_PORT})."
+  fi
+}
+
+# Render the current optional components as a glance-able sub-table.
+print_options_table() {
+  brand_banner "Ubuntu Zombie — optional components"
+  printf '  %sEvery option is off by default and reversible by uninstall.sh.%s\n\n' \
+    "${C_DIM}" "${C_RESET}"
+  if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+    field "1) Forgejo server"  "enabled"
+    field "2) Forgejo port"    "${FORGEJO_HTTP_PORT}/tcp (all interfaces)"
+    field "3) Forgejo admin"   "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password auto-generated)"
+    field "4) Actions runner"  "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo 'disabled')"
+    field "   Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password auto-generated)" "${C_DIM}"
+    field "   Version"         "${FORGEJO_VERSION:-latest release}" "${C_DIM}"
+  else
+    field "1) Forgejo server"  "disabled (git forge + PostgreSQL, optional CI runner)" "${C_DIM}"
+  fi
+  field "   Coming soon"       "backup, snapshots, observability, and more" "${C_DIM}"
+  printf '\n'
+}
+
+# The nested options review loop, entered from item 9 of review_parameters.
+review_options() {
+  local choice
+  while true; do
+    print_options_table
+    printf '  %s[b]%s back to setup    %s[1-4]%s toggle or edit an option\n' \
+      "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}"
+    if ! read -r -p "$(printf '%s➜%s your choice [b]: ' "${C_BRAND}" "${C_RESET}")" choice; then
+      return 0
+    fi
+    case "${choice,,}" in
+      ""|b|back|q) return 0 ;;
+      1) _toggle_forgejo ;;
+      2) [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && _edit_forgejo_port \
+           || warn "Enable the Forgejo server first (option 1)." ;;
+      3) [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && _edit_forgejo_admin \
+           || warn "Enable the Forgejo server first (option 1)." ;;
+      4) [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && _toggle_forgejo_runner \
+           || warn "Enable the Forgejo server first (option 1)." ;;
+      *) warn "Unrecognised choice: '${choice}'. Enter a number 1-4 or 'b'." ;;
+    esac
+  done
 }
 
 # ---------------------------------------------------------------------------
@@ -1191,7 +1472,7 @@ review_parameters() {
   local choice
   while true; do
     print_parameter_table
-    printf '  %s[a]%s accept and install    %s[1-8]%s edit a field    %s[q]%s cancel\n' \
+    printf '  %s[a]%s accept and install    %s[1-9]%s edit a field    %s[q]%s cancel\n' \
       "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
     if ! read -r -p "$(printf '%s➜%s your choice [a]: ' "${C_BRAND}" "${C_RESET}")" choice; then
       info "No input (EOF); cancelling."; exit 0
@@ -1214,7 +1495,8 @@ review_parameters() {
       6)  _edit_admin_password ;;
       7)  _edit_ttl_days ;;
       8)  _edit_local_llm ;;
-      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-8, 'a', or 'q'." ;;
+      9)  review_options ;;
+      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-9, 'a', or 'q'." ;;
     esac
   done
 }
@@ -1265,6 +1547,19 @@ write_receipt_start() {
     printf 'Local LLM        : %s\n' \
       "$([[ -n "${LOCAL_LLM_MODEL}" ]] && printf '%s @ %s' "${LOCAL_LLM_MODEL}" "${LOCAL_LLM_BASE_URL}" || echo 'none')"
     printf 'Receipt file     : %s\n' "${RECEIPT_FILE}"
+    if any_option_enabled; then
+      printf '\n-- Optional components --\n'
+      if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+        printf 'Forgejo server   : enabled\n'
+        printf 'Forgejo port     : %s/tcp (all interfaces)\n' "${FORGEJO_HTTP_PORT}"
+        printf 'Forgejo admin    : %s <%s>\n' "${FORGEJO_ADMIN_USER}" "${FORGEJO_ADMIN_EMAIL}"
+        printf 'Forgejo database : %s (role %s; password generated, not recorded)\n' \
+          "${FORGEJO_DB_NAME}" "${FORGEJO_DB_USER}"
+        printf 'Forgejo version  : %s\n' "${FORGEJO_VERSION:-latest (resolved at install)}"
+        printf 'Actions runner   : %s\n' \
+          "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, Docker executor)' || echo disabled)"
+      fi
+    fi
     printf '============================================================\n'
   } >> "${RECEIPT_FILE}" 2>/dev/null; then
     warn "Could not write the install receipt to ${RECEIPT_FILE}."
@@ -1288,6 +1583,16 @@ write_receipt_finish() {
     fi
     printf 'Provider token   : %s\n' "$([[ "${PROVIDER_OK:-0}" == "1" ]] && echo present || echo missing)"
     printf 'Chat service     : %s\n' "$([[ "${CHAT_OK:-0}" == "1" ]] && echo running || echo 'not running')"
+    if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+      printf 'Forgejo version  : %s\n' "${FORGEJO_RESOLVED_VERSION:-unknown}"
+      printf 'Forgejo service  : %s\n' \
+        "$(systemctl is-active --quiet forgejo.service 2>/dev/null && echo running || echo 'not running')"
+      printf 'Forgejo secrets  : generated (stored only in /etc/forgejo/app.ini, mode 640)\n'
+      if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+        printf 'Actions runner   : %s\n' \
+          "$(systemctl is-active --quiet forgejo-runner.service 2>/dev/null && echo running || echo 'not running')"
+      fi
+    fi
     printf 'Steps satisfied  : %s\n' "${STEPS_SATISFIED}"
     printf 'Steps applied    : %s\n' "${STEPS_CHANGED}"
     [[ -n "${NEXT_STEP:-}" ]] && printf 'Next step        : %s\n' "${NEXT_STEP}"
@@ -1393,6 +1698,28 @@ ZOMBIE_PHASE_TOTAL="$(awk '/^# install — the rest of the file/{f=1} f && /^sec
 # result (e.g. if the marker comment is ever moved) — fall back to an
 # un-totalled "[n]" counter rather than printing a confusing "[n/0]".
 [[ "${ZOMBIE_PHASE_TOTAL}" =~ ^[0-9]+$ ]] || ZOMBIE_PHASE_TOTAL=0
+
+# Optional components add indented `  section "..."` calls inside guarded
+# if-blocks (deliberately not matched by the top-level count above, so a
+# default install's "[n/total]" is unaffected). When a component is
+# enabled, add its section count to the denominator so progress stays
+# honest. Blocks are delimited by "# option-sections: <name> begin/end".
+_count_option_sections() {
+  awk -v m="$1" '
+    $0 ~ "^ *# option-sections: " m " begin$" {f=1}
+    f && /^ +section "/ {c++}
+    $0 ~ "^ *# option-sections: " m " end$" {f=0}
+    END {print c+0}
+  ' "${BASH_SOURCE[0]}" 2>/dev/null || echo 0
+}
+if (( ZOMBIE_PHASE_TOTAL > 0 )); then
+  if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+    ZOMBIE_PHASE_TOTAL=$(( ZOMBIE_PHASE_TOTAL + $(_count_option_sections forgejo) ))
+    if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+      ZOMBIE_PHASE_TOTAL=$(( ZOMBIE_PHASE_TOTAL + $(_count_option_sections forgejo-runner) ))
+    fi
+  fi
+fi
 _SECTION_T0=""
 
 # Re-define section() to: record a step breadcrumb, number the phase, and
@@ -1466,6 +1793,14 @@ This installer will:
   - Install the loopback chat service (ubuntu-zombie-chat.service)
   - Install policy, audit log, and helper scripts
   - Enable automatic security updates
+EOF
+if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+  printf '  - Install a Forgejo git forge + PostgreSQL on port %s (all interfaces)\n' "${FORGEJO_HTTP_PORT}"
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+    printf '  - Install a co-located Forgejo Actions runner (Docker executor)\n'
+  fi
+fi
+cat <<EOF
 
 Run this from the physical Ubuntu machine, not over public SSH.
 
@@ -1917,6 +2252,340 @@ retry 4 5 -- install_pinned_node_bridge pi-ai "${PAYLOAD_DIR}/agent/pi-ai.versio
 retry 4 5 -- install_pinned_node_bridge pi-mono "${PAYLOAD_DIR}/agent/pi-mono.version"
 
 # ---------------------------------------------------------------------------
+# Optional component: Forgejo server (ZOMBIE_INSTALL_FORGEJO=1)
+# ---------------------------------------------------------------------------
+# A self-hosted git forge backed by PostgreSQL. This is a *normal* network
+# service for people: it listens on all interfaces (unlike the loopback-only
+# chat UI), and its admin/database credentials are generated at install time
+# and stored only in root-owned files on this host. Every step checks the
+# current state first so re-runs converge without errors.
+
+# Map dpkg architecture to the Forgejo release asset suffix. The uname -m
+# names (x86_64/aarch64) only apply when dpkg is unavailable and the
+# fallback runs.
+forgejo_release_arch() {
+  case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
+    amd64|x86_64)  printf 'amd64' ;;
+    arm64|aarch64) printf 'arm64' ;;
+    *) return 1 ;;
+  esac
+}
+
+# Resolve the latest release tag (e.g. "11.0.3") of a Codeberg repository.
+codeberg_latest_release() {
+  local repo="$1" tag
+  tag="$(curl_get "https://codeberg.org/api/v1/repos/${repo}/releases/latest" \
+           | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name",""))' 2>/dev/null)" || return 1
+  tag="${tag#v}"
+  [[ "${tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || return 1
+  printf '%s' "${tag}"
+}
+
+# Read one key from one section of an ini file (first match wins), so
+# same-named keys in other sections (e.g. NAME/USER/PASSWD) never leak.
+ini_get() {
+  local file="$1" section="$2" key="$3"
+  awk -F' = ' -v s="[${section}]" -v k="${key}" '
+    $0 == s {in_s=1; next}
+    /^\[/   {in_s=0}
+    in_s && $1 == k {print $2; exit}
+  ' "${file}" 2>/dev/null
+}
+
+# Download a Codeberg release asset and verify its published .sha256 sum.
+# Usage: codeberg_fetch_verified <url> <dest_tmp_file>
+codeberg_fetch_verified() {
+  local url="$1" dest="$2" sum
+  curl_get "${url}" -o "${dest}" || return 1
+  sum="$(curl_get "${url}.sha256" | awk '{print $1}')" || return 1
+  [[ "${sum}" =~ ^[0-9a-f]{64}$ ]] \
+    || die "Could not fetch a valid checksum for ${url}." 1
+  printf '%s  %s\n' "${sum}" "${dest}" | sha256sum -c - >/dev/null \
+    || die "Checksum mismatch for ${url}." 1
+}
+
+if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+  # option-sections: forgejo begin
+  section "Install Forgejo prerequisites"
+
+  apt_install git git-lfs postgresql postgresql-contrib openssl xz-utils
+
+  section "Create git system user"
+
+  if id git >/dev/null 2>&1; then
+    info "User git already exists."
+    note_satisfied
+  else
+    adduser --system --group --home /var/lib/forgejo \
+      --shell /bin/bash --gecos "Forgejo git service" git
+    ok "Created system user git."
+    note_changed
+  fi
+
+  section "Install Forgejo binary"
+
+  FORGEJO_ARCH="$(forgejo_release_arch)" \
+    || die "Forgejo releases support only amd64/arm64 hosts." 65
+  if [[ -n "${FORGEJO_VERSION}" ]]; then
+    FORGEJO_RESOLVED_VERSION="${FORGEJO_VERSION}"
+    info "Forgejo release pinned to ${FORGEJO_RESOLVED_VERSION}."
+  else
+    FORGEJO_RESOLVED_VERSION="$(codeberg_latest_release forgejo/forgejo)" \
+      || die "Could not resolve the latest Forgejo release from codeberg.org (pin FORGEJO_VERSION to proceed)." 66
+    info "Latest Forgejo release: ${FORGEJO_RESOLVED_VERSION}."
+  fi
+  _installed_forgejo=""
+  if [[ -x /usr/local/bin/forgejo ]]; then
+    _installed_forgejo="$(/usr/local/bin/forgejo --version 2>/dev/null \
+      | awk '{print $3}' | cut -d+ -f1 || true)"
+  fi
+  if [[ "${_installed_forgejo}" == "${FORGEJO_RESOLVED_VERSION}" ]]; then
+    info "Forgejo ${FORGEJO_RESOLVED_VERSION} already installed."
+    note_satisfied
+  else
+    _forgejo_url="https://codeberg.org/forgejo/forgejo/releases/download/v${FORGEJO_RESOLVED_VERSION}/forgejo-${FORGEJO_RESOLVED_VERSION}-linux-${FORGEJO_ARCH}"
+    _forgejo_tmp="$(mktemp)"
+    codeberg_fetch_verified "${_forgejo_url}" "${_forgejo_tmp}" \
+      || { rm -f "${_forgejo_tmp}"; die "Failed to download Forgejo ${FORGEJO_RESOLVED_VERSION}." 66; }
+    install -m 0755 -o root -g root "${_forgejo_tmp}" /usr/local/bin/forgejo
+    rm -f "${_forgejo_tmp}"
+    ok "Installed Forgejo ${FORGEJO_RESOLVED_VERSION} to /usr/local/bin/forgejo (checksum verified)."
+    note_changed
+  fi
+
+  section "Create Forgejo directories"
+
+  install -d -m 750 -o git -g git /var/lib/forgejo
+  install -d -m 770 -o root -g git /etc/forgejo
+  note_satisfied
+
+  section "Configure PostgreSQL for Forgejo"
+
+  systemctl enable --now postgresql >/dev/null 2>&1 \
+    || die "PostgreSQL failed to start; see journalctl -u postgresql." 1
+  # Reuse the DB password from an existing app.ini so re-runs never desync
+  # the credential; generate it exactly once otherwise.
+  FORGEJO_DB_PASSWORD=""
+  if [[ -f /etc/forgejo/app.ini ]]; then
+    FORGEJO_DB_PASSWORD="$(ini_get /etc/forgejo/app.ini database PASSWD || true)"
+  fi
+  if [[ -z "${FORGEJO_DB_PASSWORD}" ]]; then
+    FORGEJO_DB_PASSWORD="$(openssl rand -hex 24)"
+  fi
+  if runuser -u postgres -- psql -tAc \
+       "SELECT 1 FROM pg_roles WHERE rolname = '${FORGEJO_DB_USER}'" | grep -q 1; then
+    info "PostgreSQL role ${FORGEJO_DB_USER} already exists; re-asserting password."
+    note_satisfied
+  else
+    ok "Creating PostgreSQL role ${FORGEJO_DB_USER}."
+    note_changed
+  fi
+  # FORGEJO_DB_USER is constrained by is_valid_forgejo_name but may contain
+  # hyphens, so it is double-quoted as a SQL identifier; the password is
+  # single-quote doubled for SQL-literal safety.
+  _fj_pass_sql="${FORGEJO_DB_PASSWORD//\'/\'\'}"
+  runuser -u postgres -- psql -v ON_ERROR_STOP=1 <<PSQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${FORGEJO_DB_USER}') THEN
+    CREATE ROLE "${FORGEJO_DB_USER}" LOGIN PASSWORD '${_fj_pass_sql}';
+  ELSE
+    ALTER ROLE "${FORGEJO_DB_USER}" WITH LOGIN PASSWORD '${_fj_pass_sql}';
+  END IF;
+END
+\$\$;
+PSQL
+  unset _fj_pass_sql
+  if runuser -u postgres -- psql -tAc \
+       "SELECT 1 FROM pg_database WHERE datname = '${FORGEJO_DB_NAME}'" | grep -q 1; then
+    info "PostgreSQL database ${FORGEJO_DB_NAME} already exists."
+    note_satisfied
+  else
+    runuser -u postgres -- createdb -O "${FORGEJO_DB_USER}" "${FORGEJO_DB_NAME}"
+    ok "Created PostgreSQL database ${FORGEJO_DB_NAME} (owner ${FORGEJO_DB_USER})."
+    note_changed
+  fi
+
+  section "Write Forgejo configuration"
+
+  # Reuse existing secrets from app.ini so a re-run never rotates them
+  # behind the running service; generate them exactly once otherwise.
+  _fj_secret_key=""; _fj_internal_token=""; _fj_jwt_secret=""
+  if [[ -f /etc/forgejo/app.ini ]]; then
+    _fj_secret_key="$(ini_get /etc/forgejo/app.ini security SECRET_KEY || true)"
+    _fj_internal_token="$(ini_get /etc/forgejo/app.ini security INTERNAL_TOKEN || true)"
+    _fj_jwt_secret="$(ini_get /etc/forgejo/app.ini oauth2 JWT_SECRET || true)"
+  fi
+  [[ -n "${_fj_secret_key}" ]]     || _fj_secret_key="$(/usr/local/bin/forgejo generate secret SECRET_KEY)"
+  [[ -n "${_fj_internal_token}" ]] || _fj_internal_token="$(/usr/local/bin/forgejo generate secret INTERNAL_TOKEN)"
+  [[ -n "${_fj_jwt_secret}" ]]     || _fj_jwt_secret="$(/usr/local/bin/forgejo generate secret JWT_SECRET)"
+  _fj_domain="$(hostname -f 2>/dev/null || hostname)"
+  _fj_tmp="$(mktemp)"
+  cat > "${_fj_tmp}" <<EOF
+; Managed by ${SCRIPT_NAME} (Ubuntu Zombie optional component).
+; Re-runs preserve the generated secrets below; edit with care.
+APP_NAME = Forgejo
+RUN_USER = git
+WORK_PATH = /var/lib/forgejo
+
+[database]
+DB_TYPE = postgres
+HOST = 127.0.0.1:5432
+NAME = ${FORGEJO_DB_NAME}
+USER = ${FORGEJO_DB_USER}
+PASSWD = ${FORGEJO_DB_PASSWORD}
+
+[server]
+; Normal network access: the forge serves people on the LAN, unlike the
+; loopback-only chat UI.
+HTTP_ADDR = 0.0.0.0
+HTTP_PORT = ${FORGEJO_HTTP_PORT}
+DOMAIN = ${_fj_domain}
+ROOT_URL = http://${_fj_domain}:${FORGEJO_HTTP_PORT}/
+LFS_START_SERVER = true
+
+[repository]
+ROOT = /var/lib/forgejo/data/forgejo-repositories
+
+[lfs]
+PATH = /var/lib/forgejo/data/lfs
+
+[security]
+INSTALL_LOCK = true
+SECRET_KEY = ${_fj_secret_key}
+INTERNAL_TOKEN = ${_fj_internal_token}
+
+[oauth2]
+JWT_SECRET = ${_fj_jwt_secret}
+
+[service]
+DISABLE_REGISTRATION = true
+
+[actions]
+ENABLED = true
+EOF
+  if [[ -f /etc/forgejo/app.ini ]] && cmp -s "${_fj_tmp}" /etc/forgejo/app.ini; then
+    info "Forgejo configuration already up to date."
+    rm -f "${_fj_tmp}"
+    note_satisfied
+  else
+    install -m 640 -o root -g git "${_fj_tmp}" /etc/forgejo/app.ini
+    rm -f "${_fj_tmp}"
+    ok "Wrote /etc/forgejo/app.ini (secrets generated once, never logged)."
+    note_changed
+  fi
+  unset _fj_secret_key _fj_internal_token _fj_jwt_secret FORGEJO_DB_PASSWORD
+
+  section "Enable Forgejo service"
+
+  install -m 644 "${PAYLOAD_DIR}/systemd/forgejo.service" \
+    /etc/systemd/system/forgejo.service
+  systemctl daemon-reload
+  runuser -u git -- /usr/local/bin/forgejo migrate \
+    --config /etc/forgejo/app.ini --work-path /var/lib/forgejo
+  systemctl enable --now forgejo.service \
+    || die "Forgejo service failed to start; see journalctl -u forgejo." 1
+  if runuser -u git -- /usr/local/bin/forgejo admin user list --admin \
+       --config /etc/forgejo/app.ini --work-path /var/lib/forgejo 2>/dev/null \
+       | awk '{print $2}' | grep -qx "${FORGEJO_ADMIN_USER}"; then
+    info "Forgejo admin ${FORGEJO_ADMIN_USER} already exists."
+    note_satisfied
+  else
+    _fj_admin_pass="$(openssl rand -base64 18)"
+    runuser -u git -- /usr/local/bin/forgejo admin user create \
+      --config /etc/forgejo/app.ini --work-path /var/lib/forgejo \
+      --admin --username "${FORGEJO_ADMIN_USER}" \
+      --email "${FORGEJO_ADMIN_EMAIL}" \
+      --password "${_fj_admin_pass}" --must-change-password
+    ok "Created Forgejo admin ${FORGEJO_ADMIN_USER}."
+    printf '\n%s  Forgejo admin credentials (shown once, not stored anywhere):%s\n' "${C_BOLD}" "${C_RESET}"
+    printf '    username: %s\n' "${FORGEJO_ADMIN_USER}"
+    printf '    password: %s\n' "${_fj_admin_pass}"
+    printf '  You must change it on first sign-in at http://%s:%s/\n\n' "${_fj_domain}" "${FORGEJO_HTTP_PORT}"
+    unset _fj_admin_pass
+    note_changed
+  fi
+  # option-sections: forgejo end
+
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+    # option-sections: forgejo-runner begin
+    section "Install Forgejo runner"
+
+    warn "Co-locating the Actions runner with the forge is contrary to upstream guidance; enabled deliberately."
+    apt_install docker.io
+    systemctl enable --now docker >/dev/null 2>&1 \
+      || die "Docker Engine failed to start; see journalctl -u docker." 1
+    if id forgejo-runner >/dev/null 2>&1; then
+      info "User forgejo-runner already exists."
+      note_satisfied
+    else
+      adduser --system --group --home /var/lib/forgejo-runner \
+        --shell /bin/bash --gecos "Forgejo Actions runner" forgejo-runner
+      ok "Created system user forgejo-runner."
+      note_changed
+    fi
+    usermod -aG docker forgejo-runner
+    install -d -m 750 -o forgejo-runner -g forgejo-runner /var/lib/forgejo-runner
+    if [[ -n "${FORGEJO_RUNNER_VERSION}" ]]; then
+      _runner_version="${FORGEJO_RUNNER_VERSION}"
+      info "Forgejo runner release pinned to ${_runner_version}."
+    else
+      _runner_version="$(codeberg_latest_release forgejo/runner)" \
+        || die "Could not resolve the latest forgejo-runner release from codeberg.org (pin FORGEJO_RUNNER_VERSION to proceed)." 66
+      info "Latest forgejo-runner release: ${_runner_version}."
+    fi
+    _installed_runner=""
+    if [[ -x /usr/local/bin/forgejo-runner ]]; then
+      _installed_runner="$(/usr/local/bin/forgejo-runner --version 2>/dev/null \
+        | awk '{print $3}' | sed 's/^v//' || true)"
+    fi
+    if [[ "${_installed_runner}" == "${_runner_version}" ]]; then
+      info "forgejo-runner ${_runner_version} already installed."
+      note_satisfied
+    else
+      _runner_url="https://codeberg.org/forgejo/runner/releases/download/v${_runner_version}/forgejo-runner-${_runner_version}-linux-${FORGEJO_ARCH}"
+      _runner_tmp="$(mktemp)"
+      codeberg_fetch_verified "${_runner_url}" "${_runner_tmp}" \
+        || { rm -f "${_runner_tmp}"; die "Failed to download forgejo-runner ${_runner_version}." 66; }
+      install -m 0755 -o root -g root "${_runner_tmp}" /usr/local/bin/forgejo-runner
+      rm -f "${_runner_tmp}"
+      ok "Installed forgejo-runner ${_runner_version} (checksum verified)."
+      note_changed
+    fi
+
+    section "Register Forgejo runner"
+
+    if [[ -f /var/lib/forgejo-runner/.runner ]]; then
+      info "Runner already registered; skipping registration."
+      note_satisfied
+    else
+      _runner_token="$(runuser -u git -- /usr/local/bin/forgejo \
+        --config /etc/forgejo/app.ini --work-path /var/lib/forgejo \
+        actions generate-runner-token)"
+      runuser -u forgejo-runner -- bash -c \
+        "cd /var/lib/forgejo-runner && /usr/local/bin/forgejo-runner register \
+           --no-interactive \
+           --instance 'http://127.0.0.1:${FORGEJO_HTTP_PORT}/' \
+           --token '${_runner_token}' \
+           --name '$(hostname)' \
+           --labels '${FORGEJO_RUNNER_LABELS}'"
+      unset _runner_token
+      ok "Runner registered against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels: ${FORGEJO_RUNNER_LABELS}"
+      note_changed
+    fi
+    install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
+      /etc/systemd/system/forgejo-runner.service
+    systemctl daemon-reload
+    systemctl enable --now forgejo-runner.service \
+      || warn "forgejo-runner service did not start; see journalctl -u forgejo-runner."
+    ok "Forgejo Actions runner installed and enabled."
+    # option-sections: forgejo-runner end
+  fi
+elif [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+  warn "ZOMBIE_INSTALL_FORGEJO_RUNNER=1 has no effect without ZOMBIE_INSTALL_FORGEJO=1; skipping the runner."
+fi
+
+# ---------------------------------------------------------------------------
 # Deploy payload: chat service, helpers, policy, systemd, logrotate.
 # ---------------------------------------------------------------------------
 
@@ -2176,6 +2845,27 @@ check "chat listening on 127.0.0.1:${CHAT_PORT}" bash -c "ss -ltn 'sport = :${CH
 check "agent server.py compiles"           \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/server.py
 [[ "\${JSON}" == "1" ]] || echo
 
+# Optional component: Forgejo. Detected from the installed config so the
+# checks run (or stay silent) regardless of the caller's environment.
+if sudo -n test -f /etc/forgejo/app.ini 2>/dev/null; then
+  FORGEJO_PORT="\$(sudo -n awk -F' = ' '\$0=="[server]"{s=1;next} /^\\[/{s=0} s && \$1=="HTTP_PORT"{print \$2; exit}' /etc/forgejo/app.ini 2>/dev/null)"
+  FORGEJO_PORT="\${FORGEJO_PORT:-3000}"
+  FORGEJO_DB="\$(sudo -n awk -F' = ' '\$0=="[database]"{s=1;next} /^\\[/{s=0} s && \$1=="NAME"{print \$2; exit}' /etc/forgejo/app.ini 2>/dev/null)"
+  FORGEJO_DB="\${FORGEJO_DB:-forgejo}"
+  hd "Forgejo (optional component):"
+  check "forgejo binary present"             test -x /usr/local/bin/forgejo
+  check "forgejo reports a version"          /usr/local/bin/forgejo --version
+  check "postgresql active"                  systemctl is-active postgresql
+  check "forgejo database \${FORGEJO_DB} present" bash -c "sudo -n runuser -u postgres -- psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '\${FORGEJO_DB}'\" | grep -q 1"
+  check "forgejo.service active"             systemctl is-active forgejo.service
+  check "forgejo answering on 127.0.0.1:\${FORGEJO_PORT}" curl -fsS -m 5 -o /dev/null "http://127.0.0.1:\${FORGEJO_PORT}/"
+  if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+    check "forgejo-runner.service active"    systemctl is-active forgejo-runner.service
+    check "runner registration present"      sudo -n test -f /var/lib/forgejo-runner/.runner
+  fi
+  [[ "\${JSON}" == "1" ]] || echo
+fi
+
 if [[ "\${JSON}" == "1" ]]; then
   printf '{"tool": "verify", "passed": %d, "failed": %d, "checks": [%s]}\\n' "\$PASS" "\$FAIL" "\${JSON_ITEMS}"
   [[ \$FAIL -gt 0 ]] && exit 1
@@ -2224,6 +2914,16 @@ bullet() {
 
 bullet "${PROVIDER_OK}"  "Provider token present in secrets/env"
 bullet "${CHAT_OK}"      "Chat service running on 127.0.0.1:${CHAT_PORT}"
+if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+  FORGEJO_OK=0
+  systemctl is-active --quiet forgejo.service && FORGEJO_OK=1
+  bullet "${FORGEJO_OK}" "Forgejo ${FORGEJO_RESOLVED_VERSION:-} running on port ${FORGEJO_HTTP_PORT} (all interfaces)"
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+    RUNNER_OK=0
+    systemctl is-active --quiet forgejo-runner.service && RUNNER_OK=1
+    bullet "${RUNNER_OK}" "Forgejo Actions runner registered and running"
+  fi
+fi
 echo
 
 NEXT_STEP=""
@@ -2259,9 +2959,10 @@ Then:
 Surfaces installed:
   - OS:       apt + systemctl + logs + files
   - Chat:     loopback HTTP on ${CHAT_PORT}, policy + audit
-
+$([[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && printf '  - Forge:    Forgejo on port %s (PostgreSQL-backed%s)\n' "${FORGEJO_HTTP_PORT}" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', Actions runner co-located')")
 Public exposure:
   - Chat:          localhost only
+$([[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && printf '  - Forgejo:       all interfaces on %s/tcp (normal network access)\n' "${FORGEJO_HTTP_PORT}")
 
 Install transcript: ${LOG_FILE}
 Install receipt:    $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "(disabled)")

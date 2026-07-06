@@ -67,6 +67,30 @@ Built-in skills ship under `/opt/ai-zombie/skills/` and currently cover
 `apt` and `systemd`. Operators may add local skill briefs under
 `/etc/ubuntu-zombie/skills.d/`.
 
+## Optional components
+
+The installer supports opt-in components behind `ZOMBIE_INSTALL_*`
+flags (all default `0`; specifications live under `options/`). Each
+component follows one contract: validated settings, an entry in the
+interactive Options menu, a dry-run stanza, guarded idempotent install
+sections, receipt records, `verify`/`doctor`/`repair` checks, and a
+reversal path in `uninstall.sh`.
+
+The first component is the **Forgejo server**
+(`ZOMBIE_INSTALL_FORGEJO`): a git forge backed by PostgreSQL, running
+as the dedicated `git` system user under a hardened `forgejo.service`
+unit, plus an optional co-located Actions runner
+(`ZOMBIE_INSTALL_FORGEJO_RUNNER`, Docker executor, `forgejo-runner`
+system user). Its trust boundary differs from the chat service: the
+forge is a **network-listening service on all interfaces** (normal
+access for people on the LAN), so its units are sandboxed
+(`NoNewPrivileges`, `ProtectSystem=full`, scoped `ReadWritePaths`) —
+the opposite of the deliberately unsandboxed chat unit. Its secrets
+live only in `/etc/forgejo/app.ini` (`root:git`, `640`). The policy
+gate classifies forge administration (`forgejo`, `forgejo-runner`,
+`psql`, `createdb`) as `system_change` and database drops
+(`dropdb`/`dropuser`/`DROP DATABASE`) as `destructive`.
+
 ## Installer subcommands
 
 | Subcommand | Behaviour |

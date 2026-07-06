@@ -9,6 +9,24 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Added
+- **Optional components mechanism ("Ubuntu Zombie + Options") and the
+  first component: a self-hosted Forgejo git forge.** Opt-in
+  `ZOMBIE_INSTALL_<COMPONENT>` flags (all default `0`) now plug into a
+  shared contract: validated settings, a nested `9) Options` sub-menu in
+  the interactive parameter review, dry-run and pre-flight stanzas that
+  leave the default output unchanged, receipt records, an honest
+  `[n/total]` phase counter, `verify`/`doctor`/`repair` checks, policy
+  classes, and `uninstall.sh` reversal. `ZOMBIE_INSTALL_FORGEJO=1`
+  installs Forgejo backed by PostgreSQL — checksum-verified binary from
+  codeberg.org (pin with `FORGEJO_VERSION`), generated secrets stored
+  only in `/etc/forgejo/app.ini` (`root:git`, `640`), an auto-generated
+  admin account printed once, a hardened `forgejo.service`, and normal
+  network access on all interfaces (`FORGEJO_HTTP_PORT`, default
+  `3000`). `ZOMBIE_INSTALL_FORGEJO_RUNNER=1` adds a co-located Forgejo
+  Actions runner using the standard Docker executor (labels default to
+  `ubuntu-latest:docker://node:20-bookworm`), with a visible warning
+  that co-location is contrary to upstream guidance. Documented in
+  `docs/CONFIGURATION.md`, `docs/ARCHITECTURE.md`, and `README.md`.
 - **Chat-UI password gate and Time-to-Live (TTL) kill switch.** The chat
   service is reachable by every local user on `http://127.0.0.1:7878`, so
   it is now protected by a shared password (the installer asks for it;

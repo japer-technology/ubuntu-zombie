@@ -246,6 +246,63 @@ run "systemctl disable --now ubuntu-zombie-health.service 2>/dev/null || true"
 run "systemctl disable --now ubuntu-zombie-chat.service   2>/dev/null || true"
 
 # -------------------------------------------------------------------
+# 1b. Optional component: Forgejo server + Actions runner.
+# -------------------------------------------------------------------
+# Only runs when Forgejo artefacts are present, so a baseline-only
+# install is untouched. Dropping the database and removing the data
+# directory are destructive and sit behind their own confirmations.
+if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
+      || -x /usr/local/bin/forgejo ]]; then
+  info "Removing optional Forgejo component"
+  # Capture the database/role names from app.ini before the config is
+  # removed (the operator may have customised FORGEJO_DB_NAME/USER).
+  FORGEJO_DB_NAME="forgejo"; FORGEJO_DB_USER="forgejo"
+  if [[ -r /etc/forgejo/app.ini ]]; then
+    _fj_db="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="NAME"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_role="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="USER"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    [[ "${_fj_db}"   =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_NAME="${_fj_db}"
+    [[ "${_fj_role}" =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_USER="${_fj_role}"
+  fi
+  run "systemctl disable --now forgejo-runner.service 2>/dev/null || true"
+  run "systemctl disable --now forgejo.service        2>/dev/null || true"
+  run "rm -f /etc/systemd/system/forgejo.service /etc/systemd/system/forgejo-runner.service"
+  run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
+  run "rm -f /usr/local/bin/forgejo /usr/local/bin/forgejo-runner"
+  if [[ -d /etc/forgejo ]]; then
+    remove_tree_checked "/etc/forgejo" "/etc/forgejo (Forgejo config + secrets)"
+  fi
+  if [[ -d /var/lib/forgejo ]]; then
+    if confirm "Remove /var/lib/forgejo (ALL repositories and LFS data)?"; then
+      remove_tree_checked "/var/lib/forgejo" "/var/lib/forgejo (Forgejo data)"
+    else
+      warn "Keeping /var/lib/forgejo. Repository data remains on disk."
+    fi
+  fi
+  if [[ -d /var/lib/forgejo-runner ]]; then
+    remove_tree_checked "/var/lib/forgejo-runner" "/var/lib/forgejo-runner (runner state)"
+  fi
+  if command -v psql >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
+    if confirm "Drop the Forgejo PostgreSQL database and role (destructive)?"; then
+      run_or_warn "Drop Forgejo database" \
+        "runuser -u postgres -- dropdb --if-exists -- $(shell_quote "${FORGEJO_DB_NAME}")"
+      run_or_warn "Drop Forgejo role" \
+        "runuser -u postgres -- dropuser --if-exists -- $(shell_quote "${FORGEJO_DB_USER}")"
+    else
+      warn "Keeping the Forgejo PostgreSQL database and role."
+    fi
+  fi
+  for _fj_user in forgejo-runner git; do
+    if id "${_fj_user}" >/dev/null 2>&1; then
+      if confirm "Remove the ${_fj_user} system user (created for Forgejo)?"; then
+        run_or_warn "Remove user ${_fj_user}" \
+          "deluser ${_fj_user} >/dev/null 2>&1 || userdel ${_fj_user}"
+      fi
+    fi
+  done
+  ok "Forgejo component removal finished."
+fi
+
+# -------------------------------------------------------------------
 # 2. Remove systemd units and sudoers drop-ins.
 # -------------------------------------------------------------------
 info "Removing systemd units and sudoers drop-ins"

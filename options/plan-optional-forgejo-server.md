@@ -1,5 +1,35 @@
 # Plan: optional Forgejo Server with Local Runner (Forgejo + PostgreSQL) install
 
+> **Status: IMPLEMENTED** (first shipped optional component). The
+> as-built behaviour is documented in
+> [`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md#optional-components-ubuntu-zombie--options)
+> and [`docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md#optional-components).
+> Key deltas from the original draft below, which was written against an
+> older baseline:
+>
+> - There is no UFW/Docker/Tailscale baseline any more, so the
+>   implementation introduced the shared optional-component mechanism
+>   itself (flags, validators, the `9) Options` review sub-menu,
+>   dry-run/banner/receipt stanzas, and a skip-aware phase counter) with
+>   Forgejo as its first consumer.
+> - **Exposure is normal network access**: Forgejo listens on all
+>   interfaces (`HTTP_ADDR = 0.0.0.0`, default port `3000`) so people on
+>   the LAN can use the forge — unlike the loopback-only chat UI. There
+>   is no firewall step because the baseline manages no firewall.
+> - The runner is the **standard Docker executor**: the runner opt-in
+>   installs `docker.io` itself and registers with labels defaulting to
+>   `ubuntu-latest:docker://node:20-bookworm`. The runner runs as the
+>   `forgejo-runner` system user (not `runner`).
+> - Binaries are downloaded from `codeberg.org` and verified against the
+>   published SHA-256 sums; `FORGEJO_VERSION`/`FORGEJO_RUNNER_VERSION`
+>   pin releases, and the resolved version is recorded in the receipt.
+> - The Forgejo units ship in `payload/systemd/` and are hardened
+>   (`NoNewPrivileges`, `ProtectSystem=full`, scoped `ReadWritePaths`) —
+>   the opposite of the deliberately unsandboxed chat unit.
+> - The "maximum" profile (Caddy, fail2ban, Restic, metrics, SMTP)
+>   remains deferred to the dedicated proxy/remote/backup component
+>   plans, as argued below. Git LFS is included in the minimum build.
+
 ## Goal
 
 Add an **opt-in** capability to `scripts/install.sh` that, in addition to
