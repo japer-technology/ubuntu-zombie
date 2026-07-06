@@ -480,9 +480,10 @@ is_valid_option_flag() {
 }
 
 # A Forgejo account / database identifier: conservative because the value
-# is interpolated into psql statements and CLI invocations.
+# is interpolated into psql statements and CLI invocations. 1-40 chars,
+# starts with a letter, ends alphanumeric, underscore/hyphen in the middle.
 is_valid_forgejo_name() {
-  [[ "$1" =~ ^[a-z][a-z0-9_-]{0,38}[a-z0-9]$ || "$1" =~ ^[a-z][a-z0-9]{0,39}$ ]]
+  [[ "$1" =~ ^[a-z]([a-z0-9_-]{0,38}[a-z0-9])?$ ]]
 }
 
 # A plausible email for the Forgejo admin account (conservative subset).
@@ -2259,7 +2260,9 @@ retry 4 5 -- install_pinned_node_bridge pi-mono "${PAYLOAD_DIR}/agent/pi-mono.ve
 # and stored only in root-owned files on this host. Every step checks the
 # current state first so re-runs converge without errors.
 
-# Map dpkg architecture to the Forgejo release asset suffix.
+# Map dpkg architecture to the Forgejo release asset suffix. The uname -m
+# names (x86_64/aarch64) only apply when dpkg is unavailable and the
+# fallback runs.
 forgejo_release_arch() {
   case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
     amd64|x86_64)  printf 'amd64' ;;
@@ -2276,6 +2279,17 @@ codeberg_latest_release() {
   tag="${tag#v}"
   [[ "${tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || return 1
   printf '%s' "${tag}"
+}
+
+# Read one key from one section of an ini file (first match wins), so
+# same-named keys in other sections (e.g. NAME/USER/PASSWD) never leak.
+ini_get() {
+  local file="$1" section="$2" key="$3"
+  awk -F' = ' -v s="[${section}]" -v k="${key}" '
+    $0 == s {in_s=1; next}
+    /^\[/   {in_s=0}
+    in_s && $1 == k {print $2; exit}
+  ' "${file}" 2>/dev/null
 }
 
 # Download a Codeberg release asset and verify its published .sha256 sum.
@@ -2353,7 +2367,7 @@ if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
   # the credential; generate it exactly once otherwise.
   FORGEJO_DB_PASSWORD=""
   if [[ -f /etc/forgejo/app.ini ]]; then
-    FORGEJO_DB_PASSWORD="$(awk -F' = ' '/^PASSWD/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    FORGEJO_DB_PASSWORD="$(ini_get /etc/forgejo/app.ini database PASSWD || true)"
   fi
   if [[ -z "${FORGEJO_DB_PASSWORD}" ]]; then
     FORGEJO_DB_PASSWORD="$(openssl rand -hex 24)"
@@ -2366,16 +2380,17 @@ if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
     ok "Creating PostgreSQL role ${FORGEJO_DB_USER}."
     note_changed
   fi
-  # FORGEJO_DB_USER is constrained by is_valid_forgejo_name (no quoting
-  # needed); the password is single-quote doubled for SQL-literal safety.
+  # FORGEJO_DB_USER is constrained by is_valid_forgejo_name but may contain
+  # hyphens, so it is double-quoted as a SQL identifier; the password is
+  # single-quote doubled for SQL-literal safety.
   _fj_pass_sql="${FORGEJO_DB_PASSWORD//\'/\'\'}"
   runuser -u postgres -- psql -v ON_ERROR_STOP=1 <<PSQL
 DO \$\$
 BEGIN
   IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${FORGEJO_DB_USER}') THEN
-    CREATE ROLE ${FORGEJO_DB_USER} LOGIN PASSWORD '${_fj_pass_sql}';
+    CREATE ROLE "${FORGEJO_DB_USER}" LOGIN PASSWORD '${_fj_pass_sql}';
   ELSE
-    ALTER ROLE ${FORGEJO_DB_USER} WITH LOGIN PASSWORD '${_fj_pass_sql}';
+    ALTER ROLE "${FORGEJO_DB_USER}" WITH LOGIN PASSWORD '${_fj_pass_sql}';
   END IF;
 END
 \$\$;
@@ -2397,9 +2412,9 @@ PSQL
   # behind the running service; generate them exactly once otherwise.
   _fj_secret_key=""; _fj_internal_token=""; _fj_jwt_secret=""
   if [[ -f /etc/forgejo/app.ini ]]; then
-    _fj_secret_key="$(awk -F' = ' '/^SECRET_KEY/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-    _fj_internal_token="$(awk -F' = ' '/^INTERNAL_TOKEN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-    _fj_jwt_secret="$(awk -F' = ' '/^JWT_SECRET/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_secret_key="$(ini_get /etc/forgejo/app.ini security SECRET_KEY || true)"
+    _fj_internal_token="$(ini_get /etc/forgejo/app.ini security INTERNAL_TOKEN || true)"
+    _fj_jwt_secret="$(ini_get /etc/forgejo/app.ini oauth2 JWT_SECRET || true)"
   fi
   [[ -n "${_fj_secret_key}" ]]     || _fj_secret_key="$(/usr/local/bin/forgejo generate secret SECRET_KEY)"
   [[ -n "${_fj_internal_token}" ]] || _fj_internal_token="$(/usr/local/bin/forgejo generate secret INTERNAL_TOKEN)"
@@ -2833,9 +2848,9 @@ check "agent server.py compiles"           \${AGENT_HOME}/agent-env/bin/python -
 # Optional component: Forgejo. Detected from the installed config so the
 # checks run (or stay silent) regardless of the caller's environment.
 if sudo -n test -f /etc/forgejo/app.ini 2>/dev/null; then
-  FORGEJO_PORT="\$(sudo -n awk -F' = ' '/^HTTP_PORT/{print \$2; exit}' /etc/forgejo/app.ini 2>/dev/null)"
+  FORGEJO_PORT="\$(sudo -n awk -F' = ' '\$0=="[server]"{s=1;next} /^\\[/{s=0} s && \$1=="HTTP_PORT"{print \$2; exit}' /etc/forgejo/app.ini 2>/dev/null)"
   FORGEJO_PORT="\${FORGEJO_PORT:-3000}"
-  FORGEJO_DB="\$(sudo -n awk -F' = ' '/^NAME/{print \$2; exit}' /etc/forgejo/app.ini 2>/dev/null)"
+  FORGEJO_DB="\$(sudo -n awk -F' = ' '\$0=="[database]"{s=1;next} /^\\[/{s=0} s && \$1=="NAME"{print \$2; exit}' /etc/forgejo/app.ini 2>/dev/null)"
   FORGEJO_DB="\${FORGEJO_DB:-forgejo}"
   hd "Forgejo (optional component):"
   check "forgejo binary present"             test -x /usr/local/bin/forgejo

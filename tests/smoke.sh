@@ -1671,6 +1671,8 @@ run_noninteractive() {
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_HTTP_PORT=70000' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_DB_NAME=Bad;Name' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_ADMIN_USER=-bad' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_ADMIN_USER=a-' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_DB_USER=bad_' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_VERSION=not.a.version!' ./scripts/install.sh doctor
 }
 

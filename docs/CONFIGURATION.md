@@ -429,6 +429,13 @@ The receipt records only set/unset facts, never secret values.
 
 Caveats:
 
+- The forge listens on **all interfaces without HTTPS** by default. On a
+  trusted LAN that is the intended "normal access" posture; if the host
+  is reachable from untrusted networks, front Forgejo with a reverse
+  proxy that terminates TLS (see
+  [`options/plan-optional-proxy.md`](../options/plan-optional-proxy.md))
+  before exposing it. Registration is disabled by default
+  (`DISABLE_REGISTRATION = true`); the admin creates accounts.
 - Co-locating the runner with the forge is contrary to upstream
   guidance (a compromised job shares the host with the forge). The
   installer prints a warning and proceeds only because the flag is an

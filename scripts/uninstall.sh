@@ -258,8 +258,8 @@ if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
   # removed (the operator may have customised FORGEJO_DB_NAME/USER).
   FORGEJO_DB_NAME="forgejo"; FORGEJO_DB_USER="forgejo"
   if [[ -r /etc/forgejo/app.ini ]]; then
-    _fj_db="$(awk -F' = ' '/^NAME/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-    _fj_role="$(awk -F' = ' '/^USER/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_db="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="NAME"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_role="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="USER"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
     [[ "${_fj_db}"   =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_NAME="${_fj_db}"
     [[ "${_fj_role}" =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_USER="${_fj_role}"
   fi
@@ -284,9 +284,9 @@ if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
   if command -v psql >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
     if confirm "Drop the Forgejo PostgreSQL database and role (destructive)?"; then
       run_or_warn "Drop Forgejo database" \
-        "runuser -u postgres -- dropdb --if-exists $(shell_quote "${FORGEJO_DB_NAME}")"
+        "runuser -u postgres -- dropdb --if-exists -- $(shell_quote "${FORGEJO_DB_NAME}")"
       run_or_warn "Drop Forgejo role" \
-        "runuser -u postgres -- dropuser --if-exists $(shell_quote "${FORGEJO_DB_USER}")"
+        "runuser -u postgres -- dropuser --if-exists -- $(shell_quote "${FORGEJO_DB_USER}")"
     else
       warn "Keeping the Forgejo PostgreSQL database and role."
     fi
