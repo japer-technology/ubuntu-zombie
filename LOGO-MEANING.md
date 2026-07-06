@@ -26,7 +26,7 @@ a hosted service.
 
 The seam is deliberately clean and centered. The AI does not
 "take over" the machine and the human does not pretend the AI
-isn't there. They share one face, one jaw, one eye line.
+isn't there. The human knows the AI has a TTL and controls it.
 
 ## The robot half (left): the AI Systems Administrator
 
