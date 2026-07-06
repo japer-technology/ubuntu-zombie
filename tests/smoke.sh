@@ -1649,6 +1649,29 @@ run_noninteractive() {
   # probed `sudo -n true` but discarded both, so they have been removed
   # (FIX-1-13).
   ./scripts/install.sh --help | grep -q ZOMBIE_NONINTERACTIVE
+
+  echo "[smoke] optional components (Forgejo) dry-run"
+  # The Forgejo option must parse from env alone (no new required
+  # non-interactive input), never touch the host under --dry-run, and
+  # leave the default dry-run output byte-for-byte unchanged when off.
+  local base_out fj_out
+  base_out="$(ZOMBIE_COLOR=never ./scripts/install.sh install --dry-run)"
+  if grep -q "Optional components enabled" <<<"${base_out}"; then
+    echo "FAIL: default dry-run must not mention optional components" >&2
+    exit 1
+  fi
+  fj_out="$(ZOMBIE_COLOR=never ZOMBIE_NONINTERACTIVE=1 ZOMBIE_INSTALL_FORGEJO=1 \
+    ZOMBIE_INSTALL_FORGEJO_RUNNER=1 ./scripts/install.sh install --dry-run)"
+  grep -q "Optional components enabled" <<<"${fj_out}" \
+    || { echo "FAIL: Forgejo dry-run stanza missing" >&2; exit 1; }
+  grep -q "forgejo-runner.service" <<<"${fj_out}" \
+    || { echo "FAIL: runner dry-run stanza missing" >&2; exit 1; }
+  # Invalid option values must be rejected before any host change.
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=2' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_HTTP_PORT=70000' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_DB_NAME=Bad;Name' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_ADMIN_USER=-bad' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_VERSION=not.a.version!' ./scripts/install.sh doctor
 }
 
 run_diagnostics() {
@@ -1768,6 +1791,21 @@ run_standards() {
     || { echo "health systemd template must use __ZOMBIE_DIR__ placeholder" >&2; exit 1; }
   grep -q "ZOMBIE_HEALTH_WARN_ONLY=1" payload/systemd/ubuntu-zombie-health.service \
     || { echo "health timer must not leave a failed unit after reporting unhealthy state" >&2; exit 1; }
+  # Optional Forgejo component: hardened units must ship in the payload,
+  # and the policy must gate database drops as destructive.
+  [[ -s payload/systemd/forgejo.service ]] \
+    || { echo "missing payload/systemd/forgejo.service" >&2; exit 1; }
+  [[ -s payload/systemd/forgejo-runner.service ]] \
+    || { echo "missing payload/systemd/forgejo-runner.service" >&2; exit 1; }
+  grep -q "NoNewPrivileges=true" payload/systemd/forgejo.service \
+    || { echo "forgejo.service must stay hardened (NoNewPrivileges)" >&2; exit 1; }
+  grep -q 'dropdb' payload/etc/policy.yaml \
+    || { echo "policy.yaml must classify dropdb/dropuser as destructive" >&2; exit 1; }
+  grep -q "option-sections: forgejo begin" scripts/install.sh \
+    || { echo "install.sh must keep the forgejo option-sections markers" >&2; exit 1; }
+  grep -q "ZOMBIE_INSTALL_FORGEJO" scripts/uninstall.sh 2>/dev/null \
+    || grep -q "Removing optional Forgejo component" scripts/uninstall.sh \
+    || { echo "uninstall.sh must reverse the Forgejo component" >&2; exit 1; }
   grep -q 'id="logout"' payload/agent/templates/index.html \
     || { echo "chat UI must expose the logoff button" >&2; exit 1; }
   grep -q 'case "/logout"' payload/agent/templates/index.html \
@@ -1815,6 +1853,10 @@ run_flags() {
   # --help must advertise the new examples and completion section.
   ./scripts/install.sh --help | grep -q "Examples:"
   ./scripts/install.sh --help | grep -q "completion"
+
+  # --help must document the optional-component flags.
+  ./scripts/install.sh --help | grep -q "ZOMBIE_INSTALL_FORGEJO"
+  ./scripts/install.sh --help | grep -q "FORGEJO_HTTP_PORT"
 
   # --no-color must strip ANSI escapes from output.
   set +e

@@ -162,7 +162,13 @@ Drawn from [`docs/VISION.md`](../docs/VISION.md) and
 
 ## Status
 
-Everything here is design, not implementation. None of these flags exist
-in `scripts/install.sh` yet; these files describe how they *should* be
-built when the work is picked up. See [`PLAN.md`](PLAN.md) for the
-recommended order of implementation.
+The **Forgejo server** plan is implemented: `ZOMBIE_INSTALL_FORGEJO`
+(and `ZOMBIE_INSTALL_FORGEJO_RUNNER`) exist in `scripts/install.sh`,
+together with the shared optional-component mechanism (the `9) Options`
+review sub-menu, dry-run/banner/receipt stanzas, verify/doctor/repair
+checks, and `uninstall.sh` reversal). See
+[`plan-optional-forgejo-server.md`](plan-optional-forgejo-server.md)
+for the as-built deltas and
+[`docs/CONFIGURATION.md`](../docs/CONFIGURATION.md#optional-components-ubuntu-zombie--options)
+for operator documentation. Every other flag here remains design, not
+implementation; see [`PLAN.md`](PLAN.md) for the recommended order.

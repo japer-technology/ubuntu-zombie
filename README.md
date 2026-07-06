@@ -121,6 +121,24 @@ for the non-interactive variant and when a reboot is required.
 Non-interactive variants and every environment variable: see
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) and `--help`.
 
+## Optional components (Ubuntu Zombie + Options)
+
+The baseline can be extended with opt-in components behind
+`ZOMBIE_INSTALL_*` flags — all off by default, idempotent, audited,
+and reversible by `uninstall.sh`. The first is a self-hosted
+**Forgejo** git forge (PostgreSQL-backed, normal LAN access, optional
+co-located Actions runner):
+
+```bash
+sudo ZOMBIE_INSTALL_FORGEJO=1 ZOMBIE_INSTALL_FORGEJO_RUNNER=1 \
+  ./scripts/install.sh install
+```
+
+Interactive installs can also toggle components from item
+`9) Options` of the parameter review. Settings and caveats:
+[`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#optional-components-ubuntu-zombie--options).
+More components are specified under [`options/`](options/README.md).
+
 ## Documentation
 
 | Document                                                       | When to read it                                   |

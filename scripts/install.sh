@@ -1705,9 +1705,9 @@ ZOMBIE_PHASE_TOTAL="$(awk '/^# install — the rest of the file/{f=1} f && /^sec
 # honest. Blocks are delimited by "# option-sections: <name> begin/end".
 _count_option_sections() {
   awk -v m="$1" '
-    $0 == "# option-sections: " m " begin" {f=1}
-    f && /^  section "/ {c++}
-    $0 == "# option-sections: " m " end" {f=0}
+    $0 ~ "^ *# option-sections: " m " begin$" {f=1}
+    f && /^ +section "/ {c++}
+    $0 ~ "^ *# option-sections: " m " end$" {f=0}
     END {print c+0}
   ' "${BASH_SOURCE[0]}" 2>/dev/null || echo 0
 }

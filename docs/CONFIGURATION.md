@@ -386,6 +386,59 @@ output, so `--no-color` produces a plain, screen-reader-friendly table.
 Automated runs (`--yes`, `ZOMBIE_NONINTERACTIVE=1`, or non-TTY stdin) skip
 the review entirely and use the supplied environment unchanged.
 
+## Optional components ("Ubuntu Zombie + Options")
+
+Beyond the baseline, the installer supports **opt-in components**
+governed by `ZOMBIE_INSTALL_<COMPONENT>` flags. Every flag defaults to
+`0`, so a default install is unchanged. Enabled components appear in
+the interactive review (item `9) Options` opens a nested menu), the
+dry-run plan, the pre-flight banner, and the install receipt; they are
+checked by `verify`/`doctor`, repaired by `repair`, and reversed by
+`uninstall.sh`. The design surface for future components lives under
+[`options/`](../options/README.md).
+
+### Forgejo server (`ZOMBIE_INSTALL_FORGEJO=1`)
+
+A self-hosted [Forgejo](https://forgejo.org/) git forge backed by
+PostgreSQL, with an optional co-located Forgejo Actions runner using
+the standard Docker executor.
+
+Unlike the loopback-only chat UI, the forge is a **normal network
+service**: it listens on all interfaces so people on the LAN can reach
+it at `http://<host>:<port>/`.
+
+| Variable                        | Default                                  | Effect |
+| ------------------------------- | ---------------------------------------- | ------ |
+| `ZOMBIE_INSTALL_FORGEJO`        | `0`                                      | Set to `1` to install Forgejo + PostgreSQL. |
+| `ZOMBIE_INSTALL_FORGEJO_RUNNER` | `0`                                      | Set to `1` to also install a co-located Actions runner. Requires the server flag. |
+| `FORGEJO_HTTP_PORT`             | `3000`                                   | Forgejo web/API port (all interfaces). |
+| `FORGEJO_ADMIN_USER`            | `forgejo-admin`                          | Initial admin account name. |
+| `FORGEJO_ADMIN_EMAIL`           | `forgejo-admin@localhost.localdomain`    | Initial admin email. |
+| `FORGEJO_DB_NAME`               | `forgejo`                                | PostgreSQL database name. |
+| `FORGEJO_DB_USER`               | `forgejo`                                | PostgreSQL role name. |
+| `FORGEJO_VERSION`               | *(empty — latest release)*               | Pin a Forgejo release (e.g. `11.0.3`); the resolved value is recorded in the receipt. |
+| `FORGEJO_RUNNER_VERSION`        | *(empty — latest release)*               | Pin a forgejo-runner release. |
+| `FORGEJO_RUNNER_LABELS`         | `ubuntu-latest:docker://node:20-bookworm`| Runner labels; the default maps `ubuntu-latest` jobs to a Docker container. |
+
+Secrets (database password, `SECRET_KEY`, `INTERNAL_TOKEN`,
+`JWT_SECRET`) are generated at install time and stored only in
+`/etc/forgejo/app.ini` (mode `640`, owner `root:git`); re-runs reuse
+them rather than rotating them. The admin password is generated,
+printed **once** to the console, and must be changed on first sign-in.
+The receipt records only set/unset facts, never secret values.
+
+Caveats:
+
+- Co-locating the runner with the forge is contrary to upstream
+  guidance (a compromised job shares the host with the forge). The
+  installer prints a warning and proceeds only because the flag is an
+  explicit opt-in.
+- Binaries are downloaded from `codeberg.org` and verified against the
+  published SHA-256 checksums; pin `FORGEJO_VERSION` where
+  reproducibility matters.
+- `uninstall.sh` reverses the component; dropping the database/role
+  and removing `/var/lib/forgejo` sit behind their own confirmations.
+
 ## Install receipt
 
 Every install writes a human-readable **receipt** recording all parameters

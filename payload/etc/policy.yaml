@@ -47,6 +47,22 @@ sudo_allow_list:
   - git
   - nginx
   - certbot
+  # Optional Forgejo component (ZOMBIE_INSTALL_FORGEJO): the forge, its
+  # Actions runner, the PostgreSQL client, and the account-management
+  # commands the agent may drive when operating the component.
+  - psql
+  - createdb
+  - dropdb
+  - dropuser
+  - forgejo
+  - forgejo-runner
+  - docker
+  - runuser
+  - adduser
+  - deluser
+  - useradd
+  - userdel
+  - usermod
 
 classes:
   read_only:
@@ -79,6 +95,12 @@ rules:
   - pattern: '\bdd\b.*\bof=/dev/'
     class: destructive
   - pattern: '\buserdel\b'
+    class: destructive
+  # Optional Forgejo component: dropping the forge's database or role is
+  # irreversible; require the confirmation phrase.
+  - pattern: '\bdropdb\b|\bdropuser\b'
+    class: destructive
+  - pattern: '\bDROP\s+(DATABASE|ROLE|TABLE)\b'
     class: destructive
   - pattern: '\bshred\b'
     class: destructive
@@ -116,6 +138,12 @@ rules:
   - pattern: '\bgroupadd\b'
     class: system_change
   - pattern: '\badduser\b'
+    class: system_change
+  # Optional Forgejo component: forge administration, runner management,
+  # and PostgreSQL mutations are system changes (audited, auto-approved).
+  - pattern: '\bforgejo(-runner)?\b'
+    class: system_change
+  - pattern: '\bpsql\b|\bcreatedb\b'
     class: system_change
   - pattern: '\bchmod\b|\bchown\b|\bchgrp\b'
     class: system_change
