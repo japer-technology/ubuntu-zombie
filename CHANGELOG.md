@@ -9,6 +9,18 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Added
+- **Optional-component passwords are now options.**
+  `FORGEJO_ADMIN_PASSWORD` and `FORGEJO_DB_PASSWORD` environment
+  variables let the operator choose the Forgejo admin and PostgreSQL
+  role passwords (8–256 printable characters, validated before any
+  host change). When left unset the installer generates them randomly,
+  as before, and now records the generated values in the root-only
+  install receipt (mode `600`) so they can be retrieved later;
+  operator-supplied passwords are never recorded. The interactive
+  Options review can also set the admin password, and an
+  operator-chosen admin password is not forced to change on first
+  sign-in. Same contract intended for the parameters of every future
+  optional component.
 - **`uninstall.sh` now speaks the same UX flag vocabulary as
   `install.sh`.** New `-q`/`--quiet` (warnings and errors only),
   `--no-color`/`--no-colour` (disable ANSI; `NO_COLOR` and
@@ -18,6 +30,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   stay concise — and unknown arguments exit `2` (bad usage) instead of
   `1`, matching `install.sh`. The smoke tests (`flags` and `branding`
   groups) assert the new contract.
+
+### Changed
+- The optional-components review table no longer prints a
+  "Coming soon" teaser row.
 
 ### Fixed
 - **`die()` no longer leaks its exit-code argument into the error
