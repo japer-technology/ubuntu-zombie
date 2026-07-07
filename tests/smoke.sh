@@ -1889,28 +1889,24 @@ run_flags() {
 
   # Every operator-facing helper script must answer --help with exit 0
   # and reject unknown arguments with exit 2 (bad usage).
+  # Exceptions to the exit-2 check: audit-recent's -n takes a numeric
+  # value it validates itself, and verify-release accepts an arbitrary
+  # positional release directory, so a bogus flag is not "unknown" to it.
+  local helpers=(
+    payload/bin/collect-diagnostics
+    payload/bin/health-check
+    payload/bin/secrets-edit
+    payload/bin/setup-agent-venv
+    payload/bin/zombie-chat
+    scripts/build-deb.sh
+    scripts/verify-bridge-pins.sh
+  )
   local helper
-  for helper in \
-    payload/bin/audit-recent \
-    payload/bin/collect-diagnostics \
-    payload/bin/health-check \
-    payload/bin/secrets-edit \
-    payload/bin/setup-agent-venv \
-    payload/bin/verify-release \
-    payload/bin/zombie-chat \
-    scripts/build-deb.sh \
-    scripts/verify-bridge-pins.sh; do
+  for helper in "${helpers[@]}" payload/bin/audit-recent payload/bin/verify-release; do
     bash "${helper}" --help >/dev/null \
       || { echo "FAIL: ${helper} --help did not exit 0" >&2; exit 1; }
   done
-  for helper in \
-    payload/bin/collect-diagnostics \
-    payload/bin/health-check \
-    payload/bin/secrets-edit \
-    payload/bin/setup-agent-venv \
-    payload/bin/zombie-chat \
-    scripts/build-deb.sh \
-    scripts/verify-bridge-pins.sh; do
+  for helper in "${helpers[@]}" payload/bin/audit-recent; do
     expect_exit_code 2 bash "${helper}" --definitely-not-a-flag
   done
 
