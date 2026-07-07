@@ -2585,6 +2585,7 @@ EOF
     if [[ "${FORGEJO_ADMIN_PASSWORD_SOURCE}" == "operator" ]]; then
       info "FORGEJO_ADMIN_PASSWORD ignored: the admin account already exists."
     fi
+    FORGEJO_ADMIN_PASSWORD=""
     FORGEJO_ADMIN_PASSWORD_SOURCE=""
     note_satisfied
   else
