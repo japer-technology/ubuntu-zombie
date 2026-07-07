@@ -12,16 +12,21 @@
 # deletion.
 #
 # Usage:
-#   sudo ./uninstall.sh            # interactive
-#   sudo ./uninstall.sh --dry-run  # preview
-#   sudo ./uninstall.sh --archive  # archive then remove
-#   sudo ./uninstall.sh --yes      # skip confirmations
-#   sudo ./uninstall.sh --keep-agent  # do not remove user
+#   sudo ./uninstall.sh                # interactive
+#   sudo ./uninstall.sh -n|--dry-run   # preview
+#   sudo ./uninstall.sh --archive      # archive then remove
+#   sudo ./uninstall.sh -y|--yes       # skip confirmations
+#   sudo ./uninstall.sh --keep-agent   # do not remove user
+#   sudo ./uninstall.sh -q|--quiet     # warnings and errors only
+#   sudo ./uninstall.sh --no-color     # disable ANSI colour
+#   ./uninstall.sh -v|--version        # print the version and exit
 #
 # Environment:
 #   ZOMBIE_USER=<name>   override the account name (default `zombie`).
 #                        `AGENT_USER` is still accepted as a legacy
 #                        alias so older installs can still be reversed.
+#   ZOMBIE_COLOR=auto|always|never   colour policy (default auto;
+#                        NO_COLOR is also honoured).
 #
 # This script intentionally does NOT remove Node, Python, or other base
 # packages — those are normal Ubuntu software
@@ -61,7 +66,6 @@ if [[ -f "${REPO_ROOT}/VERSION" ]]; then
 else
   SCRIPT_VERSION="0000.00.00.00.00.00"
 fi
-brand_splash "uninstall" "${SCRIPT_VERSION}"
 
 usage() {
   # Heredoc instead of `sed -n '2,30p' "$0"` so the help output cannot
@@ -80,16 +84,21 @@ home directory and /opt/ai-zombie/state/ to /var/backups/ before
 deletion.
 
 Usage:
-  sudo ./uninstall.sh            # interactive
-  sudo ./uninstall.sh --dry-run  # preview
-  sudo ./uninstall.sh --archive  # archive then remove
-  sudo ./uninstall.sh --yes      # skip confirmations
-  sudo ./uninstall.sh --keep-agent  # do not remove user
+  sudo ./uninstall.sh                # interactive
+  sudo ./uninstall.sh -n|--dry-run   # preview
+  sudo ./uninstall.sh --archive      # archive then remove
+  sudo ./uninstall.sh -y|--yes       # skip confirmations
+  sudo ./uninstall.sh --keep-agent   # do not remove user
+  sudo ./uninstall.sh -q|--quiet     # warnings and errors only
+  sudo ./uninstall.sh --no-color     # disable ANSI colour
+  ./uninstall.sh -v|--version        # print the version and exit
 
 Environment:
   ZOMBIE_USER=<name>   override the account name (default `zombie`).
                        `AGENT_USER` is still accepted as a legacy
                        alias so older installs can still be reversed.
+  ZOMBIE_COLOR=auto|always|never   colour policy (default auto;
+                       NO_COLOR is also honoured).
 
 This script intentionally does NOT remove Node, Python, or other base
 packages — those are normal Ubuntu software
@@ -100,13 +109,21 @@ EOF
 for arg in "$@"; do
   case "${arg}" in
     -h|--help)    usage; exit 0 ;;
-    --dry-run)    DRY_RUN=1 ;;
+    -v|--version) printf 'uninstall.sh %s\n' "${SCRIPT_VERSION}"; exit 0 ;;
+    -n|--dry-run) DRY_RUN=1 ;;
     --archive)    ARCHIVE=1 ;;
     --yes|-y)     ASSUME_YES=1 ;;
     --keep-agent) KEEP_AGENT=1 ;;
-    *)            die "Unknown argument: ${arg} (try --help)" ;;
+    -q|--quiet)   ZOMBIE_QUIET=1 ;;
+    --no-color|--no-colour) export ZOMBIE_COLOR=never; lib_setup_colors; C_YEL="${C_YELLOW}" ;;
+    *)            die "Unknown argument: ${arg} (try --help)" 2 ;;
   esac
 done
+
+# The splash is printed only for a real uninstall run: after argument
+# parsing (so --help/--version/bad-usage stay concise) and honouring
+# --quiet, exactly like install.sh.
+(( ZOMBIE_QUIET )) || brand_splash "uninstall" "${SCRIPT_VERSION}"
 
 # Validate user-controlled inputs before they are interpolated into any
 # command string handed to `run` (which eval's it). Mirrors
@@ -234,7 +251,7 @@ confirm() {
   [[ "${ans}" == "YES" ]]
 }
 
-printf '%s== ubuntu-zombie uninstall ==%s\n\n' "${C_BOLD}" "${C_RESET}"
+(( ZOMBIE_QUIET )) || printf '%s== ubuntu-zombie uninstall ==%s\n\n' "${C_BOLD}" "${C_RESET}"
 [[ "${DRY_RUN}" == "1" ]] && warn "Dry-run mode: nothing will be changed."
 
 # -------------------------------------------------------------------
@@ -483,7 +500,7 @@ if (( UNINSTALL_EXIT != 0 )); then
 else
   ok "Uninstall complete."
 fi
-cat <<EOF
+(( ZOMBIE_QUIET )) || cat <<EOF
 
 Left intact on purpose:
   - Node, Python, and other shared runtime packages

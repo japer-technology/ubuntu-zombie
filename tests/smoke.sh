@@ -1454,8 +1454,14 @@ run_branding() {
   local out
   out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run)"
   grep -Fq "$first_line" <<<"${out}"
-  out="$(ZOMBIE_COLOR=never ./scripts/uninstall.sh --help)"
+  # A real uninstall run opens with the splash; --help stays concise.
+  out="$(ZOMBIE_COLOR=never ./scripts/uninstall.sh --dry-run 2>&1 || true)"
   grep -Fq "$first_line" <<<"${out}"
+  out="$(ZOMBIE_COLOR=never ./scripts/uninstall.sh --help)"
+  if grep -Fq "$first_line" <<<"${out}"; then
+    echo "FAIL: uninstall.sh --help must not print the splash" >&2
+    exit 1
+  fi
 }
 
 run_subcommands() {
@@ -1885,6 +1891,25 @@ run_flags() {
   if command -v python3 >/dev/null 2>&1; then
     printf '%s' "${out}" | python3 -c 'import sys,json; json.load(sys.stdin)' \
       || { echo "FAIL: doctor --json did not produce valid JSON" >&2; exit 1; }
+  fi
+
+  # uninstall.sh shares the same UX flag vocabulary as install.sh.
+  ./scripts/uninstall.sh --help    >/dev/null
+  ./scripts/uninstall.sh --version >/dev/null
+  expect_exit_code 2 ./scripts/uninstall.sh --definitely-not-a-flag
+  set +e
+  out="$(./scripts/uninstall.sh --no-color --dry-run 2>&1)"
+  set -e
+  if printf '%s' "${out}" | grep -q $'\033'; then
+    echo "FAIL: uninstall.sh --no-color still emitted ANSI escapes" >&2
+    exit 1
+  fi
+  set +e
+  out="$(./scripts/uninstall.sh --quiet --dry-run 2>/dev/null)"
+  set -e
+  if printf '%s\n' "${out}" | grep -q '██'; then
+    echo "FAIL: uninstall.sh --quiet still printed the splash" >&2
+    exit 1
   fi
 
   # Every operator-facing helper script must answer --help with exit 0

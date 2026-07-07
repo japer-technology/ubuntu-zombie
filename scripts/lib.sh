@@ -97,7 +97,7 @@ log()  { (( ZOMBIE_QUIET )) || printf '%s\n' "$*"; }
 info() { (( ZOMBIE_QUIET )) || printf '%s[i]%s %s\n' "${C_CYAN}" "${C_RESET}" "$*"; }
 ok()   { (( ZOMBIE_QUIET )) || printf '%s[+]%s %s\n' "${C_GREEN}" "${C_RESET}" "$*"; }
 warn() { printf '%s[!]%s %s\n' "${C_YELLOW}" "${C_RESET}" "$*" >&2; }
-die()  { printf '%s[x]%s %s\n' "${C_RED}" "${C_RESET}" "$*" >&2; exit "${2:-1}"; }
+die()  { printf '%s[x]%s %s\n' "${C_RED}" "${C_RESET}" "$1" >&2; exit "${2:-1}"; }
 
 # A single checklist bullet with a unified glyph vocabulary. Replaces the
 # historical mix of [ok]/[--] and [i]/[!]/[+]/[x] used across scripts.
