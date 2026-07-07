@@ -1887,6 +1887,33 @@ run_flags() {
       || { echo "FAIL: doctor --json did not produce valid JSON" >&2; exit 1; }
   fi
 
+  # Every operator-facing helper script must answer --help with exit 0
+  # and reject unknown arguments with exit 2 (bad usage).
+  local helper
+  for helper in \
+    payload/bin/audit-recent \
+    payload/bin/collect-diagnostics \
+    payload/bin/health-check \
+    payload/bin/secrets-edit \
+    payload/bin/setup-agent-venv \
+    payload/bin/verify-release \
+    payload/bin/zombie-chat \
+    scripts/build-deb.sh \
+    scripts/verify-bridge-pins.sh; do
+    bash "${helper}" --help >/dev/null \
+      || { echo "FAIL: ${helper} --help did not exit 0" >&2; exit 1; }
+  done
+  for helper in \
+    payload/bin/collect-diagnostics \
+    payload/bin/health-check \
+    payload/bin/secrets-edit \
+    payload/bin/setup-agent-venv \
+    payload/bin/zombie-chat \
+    scripts/build-deb.sh \
+    scripts/verify-bridge-pins.sh; do
+    expect_exit_code 2 bash "${helper}" --definitely-not-a-flag
+  done
+
   # Completion files referenced by --help must exist and parse.
   [[ -r scripts/completions/install.bash ]] \
     || { echo "FAIL: scripts/completions/install.bash missing" >&2; exit 1; }

@@ -10,6 +10,28 @@
 # Idempotent: re-running rebuilds the package from scratch.
 set -Eeuo pipefail
 
+usage() {
+  cat <<EOF
+build-deb.sh — build a stage-1 .deb of the Ubuntu Zombie source tree.
+
+Usage:
+  bash scripts/build-deb.sh [-h|--help]
+
+Output:
+  dist/ubuntu-zombie_<version>_all.deb
+
+Idempotent: re-running rebuilds the package from scratch. Requires
+dpkg-deb; no debhelper needed. See debian/README.md for what the
+package does (and deliberately does not do).
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  "") ;;
+  *) echo "build-deb.sh: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+esac
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 

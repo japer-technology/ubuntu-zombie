@@ -13,6 +13,31 @@
 
 set -Eeuo pipefail
 
+usage() {
+  cat <<EOF
+setup-agent-venv — provision the agent account's Python virtualenv.
+
+Usage:
+  setup-agent-venv [-h|--help]
+
+Creates (or reuses) the virtualenv at \${VENV_DIR:-~/agent-env} and
+installs the small standard operator toolkit into it, retrying
+transient pip failures with exponential backoff. Idempotent.
+
+Run as the agent user, not root:
+  runuser -l "\${AGENT_USER}" -- "\${ZOMBIE_DIR}/bin/setup-agent-venv"
+
+Environment:
+  VENV_DIR    Virtualenv location (default ~/agent-env).
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  "") ;;
+  *) echo "setup-agent-venv: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+esac
+
 VENV_DIR="${VENV_DIR:-${HOME}/agent-env}"
 
 if [[ ! -d "${VENV_DIR}" ]]; then

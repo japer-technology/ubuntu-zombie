@@ -3,6 +3,32 @@
 # Secrets are redacted before write.
 set -euo pipefail
 
+usage() {
+  cat <<EOF
+collect-diagnostics — bundle redacted logs and state for a bug report.
+
+Usage:
+  collect-diagnostics [-h|--help]
+
+Writes a tarball to \${TMPDIR:-/tmp}/ubuntu-zombie-diagnostics-<stamp>.tar.gz
+containing system info, service status, journal excerpts, the installer
+log, the audit log, and the policy file. Token-shaped values (API keys,
+SSH keys, KEY/TOKEN/PASSWORD/SECRET assignments) are redacted before
+write.
+
+Environment:
+  TMPDIR    Output directory for the bundle (default /tmp).
+
+Review the bundle before sharing it.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  "") ;;
+  *) echo "collect-diagnostics: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+esac
+
 OUT_DIR="${TMPDIR:-/tmp}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 BUNDLE_DIR="$(mktemp -d "${OUT_DIR}/ubuntu-zombie-diagnostics-${STAMP}.XXXX")"

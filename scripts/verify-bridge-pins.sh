@@ -2,6 +2,26 @@
 # Verify the checksum-pinned Node bridge inputs recorded in the release tree.
 set -Eeuo pipefail
 
+usage() {
+  cat <<EOF
+verify-bridge-pins.sh — verify the checksum-pinned Node bridge inputs.
+
+Usage:
+  bash scripts/verify-bridge-pins.sh [-h|--help]
+
+Downloads each npm tarball recorded in
+payload/agent/bridge-dependencies.lock and checks its version, resolved
+URL, sha256, integrity, and license against the lock file. Exits
+non-zero on any mismatch. Requires network access, npm, and sha256sum.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  "") ;;
+  *) echo "verify-bridge-pins.sh: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+esac
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 

@@ -9,6 +9,21 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Added
+- **Consistent `--help` across every operator-facing script.** The
+  payload helpers (`collect-diagnostics`, `health-check`,
+  `secrets-edit`, `setup-agent-venv`, `zombie-chat`) and the delivery
+  scripts (`scripts/build-deb.sh`, `scripts/verify-bridge-pins.sh`)
+  now answer `-h`/`--help` with a usage summary and reject unknown
+  arguments with exit `2`, matching `install.sh`, `uninstall.sh`,
+  `audit-recent`, and `verify-release`. The smoke tests (`flags`
+  group) now assert the `--help`/bad-argument contract for every
+  helper.
+- **README landing pages for every top-level folder.** New
+  `docs/README.md` (documentation index by reader intent),
+  `scripts/README.md` (delivery-script guide with VM warning),
+  `tests/README.md` (test groups and how to run them), and
+  `docs/analysis/README.md` (what the analysis notes are), so every
+  directory in the repository now explains itself.
 - **Optional components mechanism ("Ubuntu Zombie + Options") and the
   first component: a self-hosted Forgejo git forge.** Opt-in
   `ZOMBIE_INSTALL_<COMPONENT>` flags (all default `0`) now plug into a
