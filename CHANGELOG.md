@@ -9,6 +9,21 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Added
+- **`uninstall.sh` now speaks the same UX flag vocabulary as
+  `install.sh`.** New `-q`/`--quiet` (warnings and errors only),
+  `--no-color`/`--no-colour` (disable ANSI; `NO_COLOR` and
+  `ZOMBIE_COLOR` are also honoured), `-v`/`--version`, and `-n` as a
+  short alias for `--dry-run`. The startup splash now prints only for
+  a real uninstall run — `--help`, `--version`, and bad-usage errors
+  stay concise — and unknown arguments exit `2` (bad usage) instead of
+  `1`, matching `install.sh`. The smoke tests (`flags` and `branding`
+  groups) assert the new contract.
+
+### Fixed
+- **`die()` no longer leaks its exit-code argument into the error
+  message.** `scripts/lib.sh` printed `$*`, so calls like
+  `die "Unknown flag: --x (try --help)" 2` rendered a stray `2` at the
+  end of the line in `install.sh` and `uninstall.sh` error output.
 - **Consistent `--help` across every operator-facing script.** The
   payload helpers (`collect-diagnostics`, `health-check`,
   `secrets-edit`, `setup-agent-venv`, `zombie-chat`) and the delivery
