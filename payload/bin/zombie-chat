@@ -5,6 +5,24 @@
 # ships with.
 set -euo pipefail
 
+usage() {
+  cat <<EOF
+zombie-chat — print the local chat URL and every diagnostic entry point.
+
+Usage:
+  zombie-chat [-h|--help]
+
+Environment:
+  ZOMBIE_CHAT_PORT    Chat port to show in the URL (default 7878).
+EOF
+}
+
+case "${1:-}" in
+  -h|--help) usage; exit 0 ;;
+  "") ;;
+  *) echo "zombie-chat: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+esac
+
 PORT="${ZOMBIE_CHAT_PORT:-7878}"
 cat <<EOF
 ██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗

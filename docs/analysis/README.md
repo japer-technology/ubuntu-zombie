@@ -1,0 +1,19 @@
+# Analysis notes
+
+Working notes from repository-wide reviews. Unlike the user docs one
+level up, these are **internal engineering records**: each file lists
+concrete issues that were found, what was decided, and whether the fix
+has landed. They are kept so a future review can re-check the same
+ground without rediscovering it from scratch.
+
+- [`improvements-1.md`](improvements-1.md) — first full-repository
+  review and its periodic reanalysis: each originally raised issue,
+  re-checked against the current tree.
+- [`improvements-2.md`](improvements-2.md) — second review pass with
+  the same structure.
+- [`install-enhancement-1.md`](install-enhancement-1.md) — focused
+  analysis of installer UX and robustness enhancements.
+
+If you are looking for how to *use* or *understand* Ubuntu Zombie,
+start at [`../README.md`](../README.md) (the documentation index)
+instead.
