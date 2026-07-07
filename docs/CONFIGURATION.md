@@ -414,18 +414,24 @@ it at `http://<host>:<port>/`.
 | `FORGEJO_HTTP_PORT`             | `3000`                                   | Forgejo web/API port (all interfaces). |
 | `FORGEJO_ADMIN_USER`            | `forgejo-admin`                          | Initial admin account name. |
 | `FORGEJO_ADMIN_EMAIL`           | `forgejo-admin@localhost.localdomain`    | Initial admin email. |
+| `FORGEJO_ADMIN_PASSWORD`        | *(empty — generated)*                    | Initial admin password (8–256 printable chars). Leave empty to have one generated and recorded in the install receipt. |
 | `FORGEJO_DB_NAME`               | `forgejo`                                | PostgreSQL database name. |
 | `FORGEJO_DB_USER`               | `forgejo`                                | PostgreSQL role name. |
+| `FORGEJO_DB_PASSWORD`           | *(empty — generated)*                    | PostgreSQL role password (8–256 printable chars). Leave empty to have one generated and recorded in the install receipt. |
 | `FORGEJO_VERSION`               | *(empty — latest release)*               | Pin a Forgejo release (e.g. `11.0.3`); the resolved value is recorded in the receipt. |
 | `FORGEJO_RUNNER_VERSION`        | *(empty — latest release)*               | Pin a forgejo-runner release. |
 | `FORGEJO_RUNNER_LABELS`         | `ubuntu-latest:docker://node:20-bookworm`| Runner labels; the default maps `ubuntu-latest` jobs to a Docker container. |
 
-Secrets (database password, `SECRET_KEY`, `INTERNAL_TOKEN`,
-`JWT_SECRET`) are generated at install time and stored only in
-`/etc/forgejo/app.ini` (mode `640`, owner `root:git`); re-runs reuse
-them rather than rotating them. The admin password is generated,
-printed **once** to the console, and must be changed on first sign-in.
-The receipt records only set/unset facts, never secret values.
+Secrets (`SECRET_KEY`, `INTERNAL_TOKEN`, `JWT_SECRET`) are generated at
+install time and stored only in `/etc/forgejo/app.ini` (mode `640`,
+owner `root:git`); re-runs reuse them rather than rotating them. The
+admin and database passwords are options: set
+`FORGEJO_ADMIN_PASSWORD` / `FORGEJO_DB_PASSWORD` to choose them, or
+leave them empty to have the installer generate them randomly and
+record the generated values in the install receipt (root-only, mode
+`600`). Operator-supplied passwords are never recorded. A generated
+admin password is also printed once to the console and must be changed
+on first sign-in; an operator-chosen one is kept as-is.
 
 Caveats:
 
@@ -451,8 +457,11 @@ Caveats:
 Every install writes a human-readable **receipt** recording all parameters
 when the run starts and the outcome (result, duration, service status,
 applied/satisfied step counts, next step) when it finishes. A failed run
-appends a `FAILED` record with the line and exit code. Secrets are never
-written; password values and provider keys are excluded.
+appends a `FAILED` record with the line and exit code. The file is
+root-only (mode `600`). Operator-supplied password values and provider
+keys are never written; passwords the installer generates itself (for
+optional components) are recorded in the finish record so the operator
+can retrieve them.
 
 | Variable             | Default                                        | Effect                                             |
 | -------------------- | ---------------------------------------------- | -------------------------------------------------- |

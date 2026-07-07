@@ -1679,6 +1679,8 @@ run_noninteractive() {
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_ADMIN_USER=-bad' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_ADMIN_USER=a-' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_DB_USER=bad_' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_ADMIN_PASSWORD=short' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_DB_PASSWORD=short' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_VERSION=not.a.version!' ./scripts/install.sh doctor
 }
 
@@ -1865,6 +1867,8 @@ run_flags() {
   # --help must document the optional-component flags.
   ./scripts/install.sh --help | grep -q "ZOMBIE_INSTALL_FORGEJO"
   ./scripts/install.sh --help | grep -q "FORGEJO_HTTP_PORT"
+  ./scripts/install.sh --help | grep -q "FORGEJO_ADMIN_PASSWORD"
+  ./scripts/install.sh --help | grep -q "FORGEJO_DB_PASSWORD"
 
   # --no-color must strip ANSI escapes from output.
   set +e

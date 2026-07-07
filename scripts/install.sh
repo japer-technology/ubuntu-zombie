@@ -126,6 +126,19 @@ FORGEJO_ADMIN_USER="${FORGEJO_ADMIN_USER:-forgejo-admin}"
 FORGEJO_ADMIN_EMAIL="${FORGEJO_ADMIN_EMAIL:-forgejo-admin@localhost.localdomain}"
 FORGEJO_DB_NAME="${FORGEJO_DB_NAME:-forgejo}"
 FORGEJO_DB_USER="${FORGEJO_DB_USER:-forgejo}"
+# Passwords are options like everything else: leave them empty and the
+# installer generates them randomly and records the generated values in the
+# root-only install receipt; set them and the operator's values are used and
+# never recorded anywhere.
+FORGEJO_ADMIN_PASSWORD="${FORGEJO_ADMIN_PASSWORD:-}"
+FORGEJO_DB_PASSWORD="${FORGEJO_DB_PASSWORD:-}"
+# Where each password came from this run: "operator" (env/prompt),
+# "generated" (random, recorded in the receipt), "existing" (reused from
+# the host, e.g. app.ini), or "" (not touched, e.g. admin already exists).
+FORGEJO_ADMIN_PASSWORD_SOURCE=""
+FORGEJO_DB_PASSWORD_SOURCE=""
+[[ -n "${FORGEJO_ADMIN_PASSWORD}" ]] && FORGEJO_ADMIN_PASSWORD_SOURCE="operator"
+[[ -n "${FORGEJO_DB_PASSWORD}" ]] && FORGEJO_DB_PASSWORD_SOURCE="operator"
 FORGEJO_VERSION="${FORGEJO_VERSION:-}"
 FORGEJO_RUNNER_VERSION="${FORGEJO_RUNNER_VERSION:-}"
 FORGEJO_RUNNER_LABELS="${FORGEJO_RUNNER_LABELS:-ubuntu-latest:docker://node:20-bookworm}"
@@ -136,6 +149,12 @@ FORGEJO_RESOLVED_VERSION=""
 # default dry-run/receipt/banner output byte-for-byte unchanged otherwise.
 any_option_enabled() {
   [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]
+}
+
+# One-line label for where an optional-component password will come from,
+# shared by the dry-run stanza, options table, and receipt start record.
+password_source_label() {
+  [[ -n "$1" ]] && echo 'set via env' || echo 'generated, recorded in receipt'
 }
 
 # UX flags (set by argument parsing below; env provides the defaults).
@@ -312,11 +331,14 @@ Optional components (all default 0 / off; see options/ for the roadmap):
                               the same host (standard Docker executor).
                               Requires ZOMBIE_INSTALL_FORGEJO=1.
   FORGEJO_HTTP_PORT=<n>       Forgejo web/API port (default 3000).
-  FORGEJO_ADMIN_USER=<name>   initial admin account (default forgejo-admin;
-                              password auto-generated, printed once).
+  FORGEJO_ADMIN_USER=<name>   initial admin account (default forgejo-admin).
   FORGEJO_ADMIN_EMAIL=<addr>  admin email (default forgejo-admin@localhost.localdomain).
+  FORGEJO_ADMIN_PASSWORD=<p>  initial admin password (default: randomly
+                              generated and recorded in the install receipt).
   FORGEJO_DB_NAME=<name>      PostgreSQL database (default forgejo).
   FORGEJO_DB_USER=<name>      PostgreSQL role (default forgejo).
+  FORGEJO_DB_PASSWORD=<p>     PostgreSQL role password (default: randomly
+                              generated and recorded in the install receipt).
   FORGEJO_VERSION=<x.y.z>     pin the Forgejo release (default: latest).
   FORGEJO_RUNNER_VERSION=<x.y.z>  pin the runner release (default: latest).
   FORGEJO_RUNNER_LABELS=<labels>  runner labels (default
@@ -496,6 +518,16 @@ is_valid_forgejo_version() {
   [[ -z "$1" || "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]
 }
 
+# An optional operator-supplied password (empty means "generate randomly").
+# Conservative because the value is interpolated into psql literals, app.ini
+# lines, and CLI arguments: 8-256 printable characters, no control characters
+# or newlines.
+is_valid_forgejo_password() {
+  [[ -z "$1" ]] && return 0
+  (( ${#1} >= 8 && ${#1} <= 256 )) || return 1
+  [[ "$1" =~ ^[[:print:]]+$ ]]
+}
+
 # Validate user-controlled install settings before they are interpolated into
 # paths, sudoers entries, generated unit files, or shell commands.
 validate_config() {
@@ -538,6 +570,12 @@ validate_config() {
     fi
     if ! is_valid_forgejo_name "${FORGEJO_DB_USER}"; then
       die "FORGEJO_DB_USER must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
+    fi
+    if ! is_valid_forgejo_password "${FORGEJO_ADMIN_PASSWORD}"; then
+      die "FORGEJO_ADMIN_PASSWORD must be 8-256 printable characters (or empty to auto-generate)." 2
+    fi
+    if ! is_valid_forgejo_password "${FORGEJO_DB_PASSWORD}"; then
+      die "FORGEJO_DB_PASSWORD must be 8-256 printable characters (or empty to auto-generate)." 2
     fi
     if ! is_valid_forgejo_version "${FORGEJO_VERSION}"; then
       die "FORGEJO_VERSION must be a release like 11.0.3 (or empty for latest)." 2
@@ -966,8 +1004,8 @@ Optional components enabled (ZOMBIE_INSTALL_* flags):
                   apt: git-lfs postgresql postgresql-contrib openssl xz-utils
                   binary: /usr/local/bin/forgejo (checksum-verified download)
                   data: /var/lib/forgejo (git:git)  config: /etc/forgejo/app.ini
-                  database: ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password generated)
-                  admin: ${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password generated, printed once)
+                  database: ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))
+                  admin: ${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))
                   unit: /etc/systemd/system/forgejo.service
                   exposure: http://<host>:${FORGEJO_HTTP_PORT}/ on all interfaces (normal access)
 EOF
@@ -1156,6 +1194,36 @@ _edit_forgejo_admin() {
        is_valid_forgejo_email v 1 && [[ -n "${v}" ]]; then
     FORGEJO_ADMIN_EMAIL="${v}"; ok "Forgejo admin email set to ${FORGEJO_ADMIN_EMAIL}."
   fi
+  local p1 p2
+  if ! read -r -s -p "Forgejo admin password (blank to auto-generate and record in the receipt): " p1; then
+    printf '\n'
+    warn "No input (EOF); Forgejo admin password unchanged."
+    return 0
+  fi
+  printf '\n'
+  if [[ -z "${p1}" ]]; then
+    FORGEJO_ADMIN_PASSWORD=""
+    FORGEJO_ADMIN_PASSWORD_SOURCE=""
+    info "Forgejo admin password will be generated and recorded in the receipt."
+    return 0
+  fi
+  if ! is_valid_forgejo_password "${p1}"; then
+    warn "Password must be 8-256 printable characters; Forgejo admin password unchanged."
+    return 0
+  fi
+  if ! read -r -s -p "Confirm Forgejo admin password: " p2; then
+    printf '\n'
+    warn "No input (EOF); Forgejo admin password unchanged."
+    return 0
+  fi
+  printf '\n'
+  if [[ "${p1}" != "${p2}" ]]; then
+    warn "Passwords did not match; Forgejo admin password unchanged."
+    return 0
+  fi
+  FORGEJO_ADMIN_PASSWORD="${p1}"
+  FORGEJO_ADMIN_PASSWORD_SOURCE="operator"
+  ok "Forgejo admin password recorded."
 }
 
 _toggle_forgejo_runner() {
@@ -1188,14 +1256,13 @@ print_options_table() {
   if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
     field "1) Forgejo server"  "enabled"
     field "2) Forgejo port"    "${FORGEJO_HTTP_PORT}/tcp (all interfaces)"
-    field "3) Forgejo admin"   "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password auto-generated)"
+    field "3) Forgejo admin"   "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))"
     field "4) Actions runner"  "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo 'disabled')"
-    field "   Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password auto-generated)" "${C_DIM}"
+    field "   Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))" "${C_DIM}"
     field "   Version"         "${FORGEJO_VERSION:-latest release}" "${C_DIM}"
   else
     field "1) Forgejo server"  "disabled (git forge + PostgreSQL, optional CI runner)" "${C_DIM}"
   fi
-  field "   Coming soon"       "backup, snapshots, observability, and more" "${C_DIM}"
   printf '\n'
 }
 
@@ -1505,8 +1572,10 @@ review_parameters() {
 # Install receipt (start + finish records)
 # ---------------------------------------------------------------------------
 # A human-readable record of the install. Written once when the run starts
-# (every parameter) and finalised with the outcome when it ends. Secrets are
-# never written; password values and provider keys are excluded.
+# (every parameter) and finalised with the outcome when it ends. The file is
+# root-only (mode 600). Operator-supplied password values and provider keys
+# are never written; passwords the installer generates itself are recorded
+# in the finish record so the operator can retrieve them.
 
 write_receipt_start() {
   [[ "${ZOMBIE_RECEIPT}" == "1" ]] || return 0
@@ -1552,9 +1621,12 @@ write_receipt_start() {
       if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
         printf 'Forgejo server   : enabled\n'
         printf 'Forgejo port     : %s/tcp (all interfaces)\n' "${FORGEJO_HTTP_PORT}"
-        printf 'Forgejo admin    : %s <%s>\n' "${FORGEJO_ADMIN_USER}" "${FORGEJO_ADMIN_EMAIL}"
-        printf 'Forgejo database : %s (role %s; password generated, not recorded)\n' \
-          "${FORGEJO_DB_NAME}" "${FORGEJO_DB_USER}"
+        printf 'Forgejo admin    : %s <%s> (password %s)\n' \
+          "${FORGEJO_ADMIN_USER}" "${FORGEJO_ADMIN_EMAIL}" \
+          "$(password_source_label "${FORGEJO_ADMIN_PASSWORD}")"
+        printf 'Forgejo database : %s (role %s; password %s)\n' \
+          "${FORGEJO_DB_NAME}" "${FORGEJO_DB_USER}" \
+          "$(password_source_label "${FORGEJO_DB_PASSWORD}")"
         printf 'Forgejo version  : %s\n' "${FORGEJO_VERSION:-latest (resolved at install)}"
         printf 'Actions runner   : %s\n' \
           "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, Docker executor)' || echo disabled)"
@@ -1588,6 +1660,10 @@ write_receipt_finish() {
       printf 'Forgejo service  : %s\n' \
         "$(systemctl is-active --quiet forgejo.service 2>/dev/null && echo running || echo 'not running')"
       printf 'Forgejo secrets  : generated (stored only in /etc/forgejo/app.ini, mode 640)\n'
+      printf 'Forgejo admin pw : %s\n' \
+        "$(receipt_password_line "${FORGEJO_ADMIN_PASSWORD_SOURCE}" "${FORGEJO_ADMIN_PASSWORD}")"
+      printf 'Forgejo DB pw    : %s\n' \
+        "$(receipt_password_line "${FORGEJO_DB_PASSWORD_SOURCE}" "${FORGEJO_DB_PASSWORD}")"
       if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
         printf 'Actions runner   : %s\n' \
           "$(systemctl is-active --quiet forgejo-runner.service 2>/dev/null && echo running || echo 'not running')"
@@ -1602,6 +1678,18 @@ write_receipt_finish() {
     return 0
   }
   ok "Install receipt finalised: ${RECEIPT_FILE}"
+}
+
+# Render one password line for the finish receipt. Only values this run
+# generated itself are written out (the receipt is root-only, mode 600);
+# operator-supplied or reused credentials are never recorded.
+receipt_password_line() { # $1 = source, $2 = value
+  case "$1" in
+    generated) printf '%s (generated this run)' "$2" ;;
+    operator)  printf 'set by operator (not recorded)' ;;
+    existing)  printf 'unchanged (reused from host, not recorded)' ;;
+    *)         printf 'unchanged (not touched this run)' ;;
+  esac
 }
 
 # Append a short failure record to the receipt from the error trap.
@@ -2363,14 +2451,17 @@ if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
 
   systemctl enable --now postgresql >/dev/null 2>&1 \
     || die "PostgreSQL failed to start; see journalctl -u postgresql." 1
-  # Reuse the DB password from an existing app.ini so re-runs never desync
-  # the credential; generate it exactly once otherwise.
-  FORGEJO_DB_PASSWORD=""
-  if [[ -f /etc/forgejo/app.ini ]]; then
+  # Password precedence: an operator-supplied FORGEJO_DB_PASSWORD wins;
+  # otherwise reuse the password from an existing app.ini so re-runs never
+  # desync the credential; otherwise generate it exactly once and record it
+  # in the install receipt.
+  if [[ -z "${FORGEJO_DB_PASSWORD}" && -f /etc/forgejo/app.ini ]]; then
     FORGEJO_DB_PASSWORD="$(ini_get /etc/forgejo/app.ini database PASSWD || true)"
+    [[ -n "${FORGEJO_DB_PASSWORD}" ]] && FORGEJO_DB_PASSWORD_SOURCE="existing"
   fi
   if [[ -z "${FORGEJO_DB_PASSWORD}" ]]; then
     FORGEJO_DB_PASSWORD="$(openssl rand -hex 24)"
+    FORGEJO_DB_PASSWORD_SOURCE="generated"
   fi
   if runuser -u postgres -- psql -tAc \
        "SELECT 1 FROM pg_roles WHERE rolname = '${FORGEJO_DB_USER}'" | grep -q 1; then
@@ -2474,7 +2565,9 @@ EOF
     ok "Wrote /etc/forgejo/app.ini (secrets generated once, never logged)."
     note_changed
   fi
-  unset _fj_secret_key _fj_internal_token _fj_jwt_secret FORGEJO_DB_PASSWORD
+  # FORGEJO_DB_PASSWORD is kept until the finish receipt is written so a
+  # generated value can be recorded there; other secrets are one-shot.
+  unset _fj_secret_key _fj_internal_token _fj_jwt_secret
 
   section "Enable Forgejo service"
 
@@ -2489,20 +2582,34 @@ EOF
        --config /etc/forgejo/app.ini --work-path /var/lib/forgejo 2>/dev/null \
        | awk '{print $2}' | grep -qx "${FORGEJO_ADMIN_USER}"; then
     info "Forgejo admin ${FORGEJO_ADMIN_USER} already exists."
+    if [[ "${FORGEJO_ADMIN_PASSWORD_SOURCE}" == "operator" ]]; then
+      info "FORGEJO_ADMIN_PASSWORD ignored: the admin account already exists."
+    fi
+    FORGEJO_ADMIN_PASSWORD_SOURCE=""
     note_satisfied
   else
-    _fj_admin_pass="$(openssl rand -base64 18)"
+    if [[ "${FORGEJO_ADMIN_PASSWORD_SOURCE}" != "operator" ]]; then
+      FORGEJO_ADMIN_PASSWORD="$(openssl rand -base64 18)"
+      FORGEJO_ADMIN_PASSWORD_SOURCE="generated"
+    fi
+    # A generated password must be changed on first sign-in; an
+    # operator-chosen one is taken as deliberate and kept as-is.
+    _fj_must_change=()
+    [[ "${FORGEJO_ADMIN_PASSWORD_SOURCE}" == "generated" ]] \
+      && _fj_must_change=(--must-change-password)
     runuser -u git -- /usr/local/bin/forgejo admin user create \
       --config /etc/forgejo/app.ini --work-path /var/lib/forgejo \
       --admin --username "${FORGEJO_ADMIN_USER}" \
       --email "${FORGEJO_ADMIN_EMAIL}" \
-      --password "${_fj_admin_pass}" --must-change-password
+      --password "${FORGEJO_ADMIN_PASSWORD}" "${_fj_must_change[@]}"
     ok "Created Forgejo admin ${FORGEJO_ADMIN_USER}."
-    printf '\n%s  Forgejo admin credentials (shown once, not stored anywhere):%s\n' "${C_BOLD}" "${C_RESET}"
-    printf '    username: %s\n' "${FORGEJO_ADMIN_USER}"
-    printf '    password: %s\n' "${_fj_admin_pass}"
-    printf '  You must change it on first sign-in at http://%s:%s/\n\n' "${_fj_domain}" "${FORGEJO_HTTP_PORT}"
-    unset _fj_admin_pass
+    if [[ "${FORGEJO_ADMIN_PASSWORD_SOURCE}" == "generated" ]]; then
+      printf '\n%s  Forgejo admin credentials (also recorded in the install receipt):%s\n' "${C_BOLD}" "${C_RESET}"
+      printf '    username: %s\n' "${FORGEJO_ADMIN_USER}"
+      printf '    password: %s\n' "${FORGEJO_ADMIN_PASSWORD}"
+      printf '  You must change it on first sign-in at http://%s:%s/\n\n' "${_fj_domain}" "${FORGEJO_HTTP_PORT}"
+    fi
+    unset _fj_must_change
     note_changed
   fi
   # option-sections: forgejo end
