@@ -9,6 +9,22 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Added
+- **The installer now bootstraps its own prerequisites.** A fresh
+  Ubuntu image ships without `curl` (and a minimal image can lack
+  `python3`), which made the local LM Studio / LLM network scan and
+  the preflight connectivity check skip or fail. `install.sh` now
+  installs whichever of `curl`/`python3` is missing via `apt-get`
+  right after the root check, before any step that needs them.
+- **The Forgejo Options menu now covers every decision parameter.**
+  New menu items let the operator interactively edit the PostgreSQL
+  database name, role (username), and password (item 5) and the
+  Forgejo/runner release pins plus runner labels (item 6), matching
+  the existing prompts for the port and admin account. The database
+  password prompt follows the shared contract: blank auto-generates a
+  password and records it in the root-only receipt.
+  `FORGEJO_RUNNER_LABELS` is now validated (conservative character
+  set) before it is interpolated into the runner registration
+  command.
 - **Optional-component passwords are now options.**
   `FORGEJO_ADMIN_PASSWORD` and `FORGEJO_DB_PASSWORD` environment
   variables let the operator choose the Forgejo admin and PostgreSQL

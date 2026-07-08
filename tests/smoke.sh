@@ -1682,6 +1682,7 @@ run_noninteractive() {
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_ADMIN_PASSWORD=short' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_DB_PASSWORD=short' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_VERSION=not.a.version!' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_RUNNER_LABELS=bad label' ./scripts/install.sh doctor
 }
 
 run_diagnostics() {
