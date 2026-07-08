@@ -422,6 +422,12 @@ it at `http://<host>:<port>/`.
 | `FORGEJO_RUNNER_VERSION`        | *(empty — latest release)*               | Pin a forgejo-runner release. |
 | `FORGEJO_RUNNER_LABELS`         | `ubuntu-latest:docker://node:20-bookworm`| Runner labels; the default maps `ubuntu-latest` jobs to a Docker container. |
 
+Every one of these decision parameters can also be set interactively:
+the review's `9) Options` sub-menu lets you toggle the server and
+runner and edit the port, the admin account (username, email,
+password), the PostgreSQL database (name, role/username, password),
+and the version pins and runner labels before anything is installed.
+
 Secrets (`SECRET_KEY`, `INTERNAL_TOKEN`, `JWT_SECRET`) are generated at
 install time and stored only in `/etc/forgejo/app.ini` (mode `640`,
 owner `root:git`); re-runs reuse them rather than rotating them. The

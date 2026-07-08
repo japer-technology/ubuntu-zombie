@@ -518,6 +518,13 @@ is_valid_forgejo_version() {
   [[ -z "$1" || "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]
 }
 
+# Runner labels like "ubuntu-latest:docker://node:20-bookworm". Conservative
+# because the value is interpolated into the runner-registration command:
+# no whitespace, quotes, or shell metacharacters.
+is_valid_forgejo_runner_labels() {
+  [[ "$1" =~ ^[A-Za-z0-9._:/,+-]{1,512}$ ]]
+}
+
 # An optional operator-supplied password (empty means "generate randomly").
 # Conservative because the value is interpolated into psql literals, app.ini
 # lines, and CLI arguments: 8-256 printable characters, no control characters
@@ -582,6 +589,9 @@ validate_config() {
     fi
     if ! is_valid_forgejo_version "${FORGEJO_RUNNER_VERSION}"; then
       die "FORGEJO_RUNNER_VERSION must be a release like 6.3.1 (or empty for latest)." 2
+    fi
+    if ! is_valid_forgejo_runner_labels "${FORGEJO_RUNNER_LABELS}"; then
+      die "FORGEJO_RUNNER_LABELS must use only letters, digits, and . _ : / , + - (no spaces or quotes; max 512 chars)." 2
     fi
   fi
 }
@@ -1226,6 +1236,73 @@ _edit_forgejo_admin() {
   ok "Forgejo admin password recorded."
 }
 
+_edit_forgejo_database() {
+  local v
+  if prompt_until_valid "$(printf 'Forgejo PostgreSQL database name [%s]: ' "${FORGEJO_DB_NAME}")" \
+       is_valid_forgejo_name v 1 && [[ -n "${v}" ]]; then
+    FORGEJO_DB_NAME="${v}"; ok "Forgejo database set to ${FORGEJO_DB_NAME}."
+  fi
+  if prompt_until_valid "$(printf 'Forgejo PostgreSQL role (username) [%s]: ' "${FORGEJO_DB_USER}")" \
+       is_valid_forgejo_name v 1 && [[ -n "${v}" ]]; then
+    FORGEJO_DB_USER="${v}"; ok "Forgejo database role set to ${FORGEJO_DB_USER}."
+  fi
+  local p1 p2
+  if ! read -r -s -p "Forgejo PostgreSQL role password (blank to auto-generate and record in the receipt): " p1; then
+    printf '\n'
+    warn "No input (EOF); Forgejo database password unchanged."
+    return 0
+  fi
+  printf '\n'
+  if [[ -z "${p1}" ]]; then
+    FORGEJO_DB_PASSWORD=""
+    FORGEJO_DB_PASSWORD_SOURCE=""
+    info "Forgejo database password will be generated and recorded in the receipt."
+    return 0
+  fi
+  if ! is_valid_forgejo_password "${p1}"; then
+    warn "Password must be 8-256 printable characters; Forgejo database password unchanged."
+    return 0
+  fi
+  if ! read -r -s -p "Confirm Forgejo PostgreSQL role password: " p2; then
+    printf '\n'
+    warn "No input (EOF); Forgejo database password unchanged."
+    return 0
+  fi
+  printf '\n'
+  if [[ "${p1}" != "${p2}" ]]; then
+    warn "Passwords did not match; Forgejo database password unchanged."
+    return 0
+  fi
+  FORGEJO_DB_PASSWORD="${p1}"
+  FORGEJO_DB_PASSWORD_SOURCE="operator"
+  ok "Forgejo database password recorded."
+}
+
+# Accepts a release pin like 11.0.3 or the keyword "latest" (clears the pin).
+_forgejo_version_or_latest() {
+  [[ "${1,,}" == "latest" ]] || is_valid_forgejo_version "$1"
+}
+
+_edit_forgejo_versions() {
+  local v
+  if prompt_until_valid "$(printf 'Forgejo release pin (x.y.z, or "latest") [%s]: ' "${FORGEJO_VERSION:-latest}")" \
+       _forgejo_version_or_latest v 1 && [[ -n "${v}" ]]; then
+    [[ "${v,,}" == "latest" ]] && v=""
+    FORGEJO_VERSION="${v}"; ok "Forgejo version set to ${FORGEJO_VERSION:-latest release}."
+  fi
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+    if prompt_until_valid "$(printf 'Runner release pin (x.y.z, or "latest") [%s]: ' "${FORGEJO_RUNNER_VERSION:-latest}")" \
+         _forgejo_version_or_latest v 1 && [[ -n "${v}" ]]; then
+      [[ "${v,,}" == "latest" ]] && v=""
+      FORGEJO_RUNNER_VERSION="${v}"; ok "Runner version set to ${FORGEJO_RUNNER_VERSION:-latest release}."
+    fi
+    if prompt_until_valid "$(printf 'Runner labels [%s]: ' "${FORGEJO_RUNNER_LABELS}")" \
+         is_valid_forgejo_runner_labels v 1 && [[ -n "${v}" ]]; then
+      FORGEJO_RUNNER_LABELS="${v}"; ok "Runner labels set to ${FORGEJO_RUNNER_LABELS}."
+    fi
+  fi
+}
+
 _toggle_forgejo_runner() {
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
     ZOMBIE_INSTALL_FORGEJO_RUNNER=0
@@ -1258,8 +1335,12 @@ print_options_table() {
     field "2) Forgejo port"    "${FORGEJO_HTTP_PORT}/tcp (all interfaces)"
     field "3) Forgejo admin"   "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))"
     field "4) Actions runner"  "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo 'disabled')"
-    field "   Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))" "${C_DIM}"
-    field "   Version"         "${FORGEJO_VERSION:-latest release}" "${C_DIM}"
+    field "5) Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))"
+    if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+      field "6) Versions"      "Forgejo ${FORGEJO_VERSION:-latest release}, runner ${FORGEJO_RUNNER_VERSION:-latest release} (labels ${FORGEJO_RUNNER_LABELS})"
+    else
+      field "6) Versions"      "Forgejo ${FORGEJO_VERSION:-latest release}"
+    fi
   else
     field "1) Forgejo server"  "disabled (git forge + PostgreSQL, optional CI runner)" "${C_DIM}"
   fi
@@ -1271,7 +1352,7 @@ review_options() {
   local choice
   while true; do
     print_options_table
-    printf '  %s[b]%s back to setup    %s[1-4]%s toggle or edit an option\n' \
+    printf '  %s[b]%s back to setup    %s[1-6]%s toggle or edit an option\n' \
       "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}"
     if ! read -r -p "$(printf '%s➜%s your choice [b]: ' "${C_BRAND}" "${C_RESET}")" choice; then
       return 0
@@ -1285,7 +1366,11 @@ review_options() {
            || warn "Enable the Forgejo server first (option 1)." ;;
       4) [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && _toggle_forgejo_runner \
            || warn "Enable the Forgejo server first (option 1)." ;;
-      *) warn "Unrecognised choice: '${choice}'. Enter a number 1-4 or 'b'." ;;
+      5) [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && _edit_forgejo_database \
+           || warn "Enable the Forgejo server first (option 1)." ;;
+      6) [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && _edit_forgejo_versions \
+           || warn "Enable the Forgejo server first (option 1)." ;;
+      *) warn "Unrecognised choice: '${choice}'. Enter a number 1-6 or 'b'." ;;
     esac
   done
 }
@@ -1740,6 +1825,25 @@ fi
 
 require_root
 validate_noninteractive
+
+# Bootstrap prerequisites: a fresh Ubuntu Desktop image ships without curl,
+# and a minimal image can also lack python3. Both are needed before the main
+# package phase — the local LLM scan, the preflight connectivity check, and
+# every curl_get download rely on them — so install whichever is missing now.
+# Idempotent: does nothing when both commands are already present.
+bootstrap_prerequisites() {
+  local missing=()
+  command -v curl    >/dev/null 2>&1 || missing+=(curl)
+  command -v python3 >/dev/null 2>&1 || missing+=(python3)
+  (( ${#missing[@]} )) || return 0
+  info "Installing missing prerequisite package(s): ${missing[*]}…"
+  apt_get update -qq \
+    || warn "apt-get update failed; attempting the install anyway."
+  apt_install "${missing[@]}" \
+    || die "Could not install prerequisite package(s): ${missing[*]}. Install them manually (apt-get install ${missing[*]}) and re-run." 1
+  ok "Prerequisite package(s) installed: ${missing[*]}"
+}
+bootstrap_prerequisites
 
 # Local LLM discovery: scan the host's IPv4 /24 for an OpenAI-compatible LLM
 # server and offer the models it advertises as the starting model. Runs before
