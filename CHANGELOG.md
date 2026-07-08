@@ -9,6 +9,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Added
+- **New `multipliers/` analysis library.** A documentation-only
+  design surface (like `options/`) analysing how to multiply the
+  existing Ubuntu installation mechanism across Windows and macOS
+  with cleaner native delivery artifacts (`.deb` + apt repository,
+  signed/notarised `.pkg` + Homebrew, signed EXE/MSI + winget). It
+  inventories the portable agent core versus the platform shell,
+  defines the platform-shell contract, records prior art from the
+  `lmstudio-vampire` packaging tree and the `forgejo-society`
+  installation library, and lays out a phased roadmap with risks
+  and explicit non-goals. No runtime behaviour changes.
 - **The installer now bootstraps its own prerequisites.** A fresh
   Ubuntu image ships without `curl` (and a minimal image can lack
   `python3`), which made the local LM Studio / LLM network scan and
