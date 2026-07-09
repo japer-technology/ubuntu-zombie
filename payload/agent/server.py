@@ -675,6 +675,13 @@ class App:
                     "ok": True,
                     "exit_code": result.get("exit_code") if isinstance(result, dict) else None,
                     "duration_ms": result.get("duration_ms") if isinstance(result, dict) else None,
+                    # Byte counts let the UI's /verbose mode tally how
+                    # much data each tool moved without shipping the
+                    # full output over the progress stream.
+                    "stdout_bytes": (len((result.get("stdout") or "").encode("utf-8"))
+                                     if isinstance(result, dict) else None),
+                    "stderr_bytes": (len((result.get("stderr") or "").encode("utf-8"))
+                                     if isinstance(result, dict) else None),
                 })
                 return {"ok": True, "result": result}
             except Exception as exc:  # noqa: BLE001

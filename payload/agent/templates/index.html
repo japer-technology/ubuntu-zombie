@@ -243,6 +243,71 @@ let queuedBubble = null;
 const CLIENT_TURN_TIMEOUT_MS = 720000;
 const QUEUED_PROMPT_PREVIEW_CHARS = 4000;
 
+// ---- /verbose background-activity accounting -----------------------
+// Counts everything the page can see moving: HTTP API calls (with
+// request/response byte sizes), live-stream frames, tool executions
+// and the bytes their stdout/stderr moved, plus streamed reply
+// characters. Two buckets: the current turn and the whole browser
+// session. Pure bookkeeping — no behaviour depends on it beyond the
+// optional detail shown when verbose mode is on.
+const VERBOSE_STORAGE_KEY = "uz_verbose";
+let verboseMode = false;
+try { verboseMode = localStorage.getItem(VERBOSE_STORAGE_KEY) === "1"; }
+catch (_e) { /* storage unavailable; default off */ }
+
+function newStatBucket() {
+  return { apiCalls: 0, bytesOut: 0, bytesIn: 0, sseEvents: 0,
+           toolCalls: 0, toolFailures: 0, toolOutputBytes: 0,
+           streamChars: 0 };
+}
+const netStats = { session: newStatBucket(), turn: newStatBucket() };
+
+function byteLength(s) {
+  try { return new TextEncoder().encode(String(s)).length; }
+  catch (_e) { return String(s).length; }
+}
+
+function tallyStat(field, n = 1) {
+  if (!Number.isFinite(n) || n <= 0) return;
+  netStats.session[field] += n;
+  netStats.turn[field] += n;
+}
+
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n < 0) n = 0;
+  if (n < 1024) return `${n} B`;
+  const units = ["kB", "MB", "GB"];
+  let u = -1;
+  do { n /= 1024; u++; } while (n >= 1024 && u < units.length - 1);
+  return `${n.toFixed(1)} ${units[u]}`;
+}
+
+function statsSummary(bucket) {
+  const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
+  return `${plural(bucket.apiCalls, "API call")}` +
+    ` (${formatBytes(bucket.bytesOut)} out · ${formatBytes(bucket.bytesIn)} in)` +
+    ` · ${plural(bucket.toolCalls, "tool call")}` +
+    (bucket.toolFailures ? ` (${bucket.toolFailures} failed)` : "") +
+    ` · ${formatBytes(bucket.toolOutputBytes)} tool output` +
+    ` · ${plural(bucket.sseEvents, "stream event")}` +
+    ` · ${bucket.streamChars} streamed chars`;
+}
+
+// Route every API call through one wrapper so verbose accounting sees
+// each request exactly once. The response size comes from the
+// Content-Length header the local server always sets on JSON replies.
+const uzNativeFetch = window.fetch.bind(window);
+window.fetch = async (input, init) => {
+  tallyStat("apiCalls");
+  if (init && typeof init.body === "string") {
+    tallyStat("bytesOut", byteLength(init.body));
+  }
+  const r = await uzNativeFetch(input, init);
+  const len = Number(r.headers.get("content-length") || "");
+  tallyStat("bytesIn", len);
+  return r;
+};
+
 function el(tag, attrs = {}, ...children) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -459,14 +524,20 @@ function renderResult(result) {
             (typeof result.duration_ms === "number" ? ` · ${result.duration_ms} ms` : "")
     }));
   }
-  if (result && result.stdout) wrap.appendChild(el("pre", { text: result.stdout }));
-  if (result && result.stderr) {
-    const pre = el("pre", { text: result.stderr });
+  // Tool output almost always ends with "\n"; a raw trailing newline
+  // inside the dark <pre> paints an extra empty dark line under every
+  // observation, so trim it (and skip whitespace-only output entirely).
+  const clip = (s) => String(s).replace(/\s+$/, "");
+  if (result && result.stdout && clip(result.stdout)) {
+    wrap.appendChild(el("pre", { text: clip(result.stdout) }));
+  }
+  if (result && result.stderr && clip(result.stderr)) {
+    const pre = el("pre", { text: clip(result.stderr) });
     pre.style.color = "#e74c3c";
     wrap.appendChild(pre);
   }
-  if (result && result.content && !result.stdout) {
-    wrap.appendChild(el("pre", { text: result.content }));
+  if (result && result.content && !result.stdout && clip(result.content)) {
+    wrap.appendChild(el("pre", { text: clip(result.content) }));
   }
   if (result && result.follow_up && result.follow_up.length) {
     const f = el("div", {});
@@ -639,6 +710,7 @@ const SLASH_COMMANDS = [
   ["/tools", "List the closed tool registry.", "Tools"],
   ["/ttl [duration|reset [duration]|--die]", "Show, extend, reset, or trip the Time to Live.", "Session"],
   ["/undo [n]", "Rewind n user turns in a new branch.", "Conversation"],
+  ["/verbose [on|off]", "Toggle background-activity detail: API calls, tool calls, bytes moved.", "Diagnostics"],
   ["/version", "Show Ubuntu Zombie and bridge versions.", "Diagnostics"],
   ["/whoami", "Show the active agent identity.", "Configuration"]
 ];
@@ -926,11 +998,18 @@ function applyTurnPayload(data) {
   const events = data.events || [];
   if (events.length) log.appendChild(renderTurnCounter(events));
   if (data.error) addMessage("system", data.error, { error: true });
+  // In verbose mode every completed turn ends with its background
+  // activity tally so the operator can see what the turn cost.
+  if (verboseMode) {
+    log.appendChild(el("div", { class: "muted",
+      text: `Turn activity: ${statsSummary(netStats.turn)}` }));
+  }
   scrollLog();
   return data;
 }
 
 async function uzSendPromptSync(prompt, convId = conversationId) {
+  netStats.turn = newStatBucket();
   addMessage("user", prompt);
   setBusy(true);
   thinkingEl = showThinking();
@@ -977,6 +1056,7 @@ async function uzSendPromptSync(prompt, convId = conversationId) {
 
 async function uzSendPrompt(prompt, convId = conversationId) {
   if (!window.EventSource) return uzSendPromptSync(prompt, convId);
+  netStats.turn = newStatBucket();
   addMessage("user", prompt);
   setBusy(true);
   thinkingEl = showThinking();
@@ -1109,13 +1189,18 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     };
     activeEventSource.addEventListener("phase", (ev) => {
       armTimeout();
+      tallyStat("sseEvents");
+      tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       setStatus(PHASE_LABELS[p.phase] || "Working…");
     });
     activeEventSource.addEventListener("token", (ev) => {
       armTimeout();
+      tallyStat("sseEvents");
+      tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       if (!p.delta) return;
+      tallyStat("streamChars", p.delta.length);
       dots.remove();
       body.textContent += p.delta;
       setStatus("Streaming the reply…");
@@ -1123,29 +1208,43 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     });
     activeEventSource.addEventListener("tool_start", (ev) => {
       armTimeout();
+      tallyStat("sseEvents");
+      tallyStat("bytesIn", byteLength(ev.data || ""));
+      tallyStat("toolCalls");
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
       const detail = (p.classification && p.classification !== "bridge")
         ? ` · ${p.classification}` : "";
-      startToolLine(tool, `${tool}${detail} — running…`);
+      const verboseDetail = (verboseMode && p.decision)
+        ? ` · ${p.decision}` : "";
+      startToolLine(tool, `${tool}${detail}${verboseDetail} — running…`);
       setStatus(`Running ${tool}…`);
     });
     activeEventSource.addEventListener("tool_end", (ev) => {
       armTimeout();
+      tallyStat("sseEvents");
+      tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
+      const moved = (typeof p.stdout_bytes === "number" ? p.stdout_bytes : 0) +
+                    (typeof p.stderr_bytes === "number" ? p.stderr_bytes : 0);
+      tallyStat("toolOutputBytes", moved);
       if (p.ok === false) {
+        tallyStat("toolFailures");
         endToolLine(tool, false, `${tool} — ${p.error || "failed"}`);
       } else {
         const bits = [];
         if (p.exit_code !== undefined && p.exit_code !== null) bits.push(`exit ${p.exit_code}`);
         if (typeof p.duration_ms === "number") bits.push(`${p.duration_ms} ms`);
+        if (verboseMode && moved > 0) bits.push(`${formatBytes(moved)} output`);
         endToolLine(tool, true, `${tool} — done${bits.length ? ` (${bits.join(" · ")})` : ""}`);
       }
       setStatus(`Finished ${tool}.`);
     });
     activeEventSource.addEventListener("pending_approval", (ev) => {
       armTimeout();
+      tallyStat("sseEvents");
+      tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
       endToolLine(tool, true, `${tool} — queued for operator approval`);
@@ -1155,10 +1254,14 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     });
     activeEventSource.addEventListener("turn_done", (ev) => {
       armTimeout();
+      tallyStat("sseEvents");
+      tallyStat("bytesIn", byteLength(ev.data || ""));
       finish(JSON.parse(ev.data || "{}"));
     });
     activeEventSource.addEventListener("turn_error", (ev) => {
       armTimeout();
+      tallyStat("sseEvents");
+      tallyStat("bytesIn", byteLength(ev.data || ""));
       completed = true;
       const p = JSON.parse(ev.data || "{}");
       if (activeEventSource) activeEventSource.close();
@@ -1353,6 +1456,28 @@ async function handleSlashCommand(input) {
           `${f.hostname || "?"} - ${f.os || "Ubuntu"} - ${f.kernel || "?"} ` +
           `(${f.arch || "?"})` + (providerText ? ` - ${providerText}` : ""));
       } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/verbose": {
+      addMessage("user", input);
+      const want = arg.toLowerCase();
+      if (want === "on") verboseMode = true;
+      else if (want === "off") verboseMode = false;
+      else if (!want) verboseMode = !verboseMode;
+      else {
+        addMessage("system", "Usage: /verbose [on|off]", { error: true });
+        return true;
+      }
+      try {
+        localStorage.setItem(VERBOSE_STORAGE_KEY, verboseMode ? "1" : "0");
+      } catch (_e) { /* storage unavailable; toggle applies to this page only */ }
+      addMessage("system",
+        `Verbose mode ${verboseMode ? "on" : "off"}.` +
+        (verboseMode
+          ? " Each turn now ends with its background-activity tally" +
+            " and tool lines include extra detail."
+          : "") +
+        `\nSession activity so far: ${statsSummary(netStats.session)}`);
       return true;
     }
     case "/version": {
