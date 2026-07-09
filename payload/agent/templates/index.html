@@ -369,7 +369,7 @@ function scrollLog() {
   // token or tool line must not yank them back to the bottom.
   const slack = 48; // px of "close enough to the bottom" tolerance
   const nearBottom = viewport.scrollHeight - viewport.scrollTop -
-                     viewport.clientHeight <= slack;
+                       viewport.clientHeight <= slack;
   if (nearBottom) viewport.scrollTop = viewport.scrollHeight;
 }
 
@@ -1201,8 +1201,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       // A tool_end without a matching tool_start (out-of-order or
       // dropped frame) still gets a completed line so it is visible.
       const stack = toolLineStacks.get(name);
-      const line = (stack ? stack.shift() : undefined) ||
-                   startToolLine(name, note, false);
+      const line = stack?.shift() || startToolLine(name, note, false);
       line.className = `act ${ok === false ? "failed" : "done"}`;
       line.replaceChildren(
         el("span", { class: "icon", text: ok === false ? "✗" : "✓" }),
