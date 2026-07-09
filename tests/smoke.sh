@@ -1839,7 +1839,7 @@ run_standards() {
     || { echo "chat UI must keep the streaming fallback reload path" >&2; exit 1; }
   grep -q 'queued' payload/agent/templates/index.html \
     || { echo "chat UI must keep the queued-message affordance" >&2; exit 1; }
-  grep -q '/api/stream' payload/agent/server.py \
+  grep -Fq '["api", "stream"]' payload/agent/server.py \
     || { echo "server.py must expose the SSE stream endpoint" >&2; exit 1; }
   grep -q '"type":"progress"' payload/agent/pi_mono.py \
     || { echo "pi_mono.py protocol docs must mention progress events" >&2; exit 1; }
