@@ -19,6 +19,10 @@ Ubuntu Zombie:
 - `OPEN-WEBUI-LESSONS-PLAN.md` — a phased implementation plan that
   turns the distilled shortlist in `OPEN-WEBUI-LESSONS.md` into
   concrete work items against the current codebase.
+- `OPEN-WEBUI-LESSONS-PLAN-PHASE-A.md` — a detailed, step-by-step
+  implementation plan for Phase A of that plan (SSE streaming of
+  tool activity and tokens; never losing operator input during a
+  busy turn), grounded in the current turn transport.
 
 If you are trying to **use** Ubuntu Zombie, you almost certainly want
 [`docs/QUICKSTART.md`](../QUICKSTART.md),

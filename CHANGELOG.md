@@ -16,6 +16,19 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `SECURITY.md`. Documentation only; no behaviour changes.
 
 ### Added
+- **New research note
+  `docs/research/OPEN-WEBUI-LESSONS-PLAN-PHASE-A.md`.** A detailed,
+  step-by-step implementation plan for Phase A (liveness plumbing)
+  of `docs/research/OPEN-WEBUI-LESSONS-PLAN.md`: SSE streaming of
+  tool activity and best-effort token deltas (two-step turn
+  protocol, `GET /api/stream/{turn_id}`, bridge `progress`/`token`
+  events, client `EventSource` with a poll-once fallback) and a
+  client-side one-deep queue so operator input submitted during a
+  busy turn is never silently dropped. Includes ground-truth
+  analysis of the current turn transport, an event vocabulary,
+  sequencing with per-step gates, tests, docs obligations, and
+  risks. Linked from `docs/research/README.md`. Documentation only;
+  no behaviour changes.
 - **New research note `docs/research/OPEN-WEBUI-LESSONS-PLAN.md`.**
   A phased implementation plan that turns the distilled ten-item
   shortlist in `docs/research/OPEN-WEBUI-LESSONS.md` into concrete
