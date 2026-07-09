@@ -40,7 +40,23 @@
   .queued { background: #4a90e214; border: 1px dashed #4a90e299; }
   .queued .actions { margin-top: .4rem; }
   .queued pre { margin: .35rem 0 0; white-space: pre-wrap; }
-  .live-status { font-size: .8rem; opacity: .8; margin-top: .35rem; }
+  .live-status { font-size: .8rem; opacity: .8; margin-top: .35rem;
+                 display: flex; align-items: center; gap: .45rem; }
+  .spin { width: .65rem; height: .65rem; border-radius: 50%;
+          border: 2px solid currentColor; border-top-color: transparent;
+          display: inline-block; flex: none; opacity: .7;
+          animation: zspin .8s linear infinite; }
+  @keyframes zspin { to { transform: rotate(360deg); } }
+  .live-activity { display: flex; flex-direction: column; gap: .2rem;
+                   margin: .25rem 0 .35rem;
+                   font-family: ui-monospace, monospace; font-size: .8rem; }
+  .live-activity .act { display: flex; align-items: center; gap: .45rem; }
+  .live-activity .act .icon { width: 1rem; text-align: center; flex: none; }
+  .live-activity .act.done { opacity: .75; }
+  .live-activity .act.done .icon { color: #2ecc71; }
+  .live-activity .act.failed .icon { color: #e74c3c; }
+  .live-activity .act.failed { color: #e74c3c; }
+  .muted { opacity: .6; font-size: .8rem; }
   .role { font-size: .7rem; text-transform: uppercase; opacity: .6;
           margin-bottom: .2rem; }
   .proposal { border: 1px solid #f5a623; border-radius: .5rem;
@@ -132,6 +148,7 @@
                       40% { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) {
     .thinking .dots i { animation: none; opacity: .6; }
+    .spin { animation: none; border-top-color: currentColor; opacity: .4; }
   }
 </style>
 </head>
@@ -215,6 +232,9 @@ let authRequired = false;
 // completes (or fails cleanly) server-side before the browser gives up.
 let turnController = null;
 let activeEventSource = null;
+// Set while a live streamed turn is rendering; called to freeze the
+// live bubble (stop spinner/timer) when the turn ends or is aborted.
+let liveTurnCleanup = null;
 let turnBusy = false;
 let thinkingEl = null;
 let thinkingTimer = null;
@@ -419,6 +439,9 @@ function abortTurn(reason) {
   if (activeEventSource) {
     try { activeEventSource.close(); } catch (_e) { /* ignore */ }
     activeEventSource = null;
+    if (liveTurnCleanup) {
+      liveTurnCleanup("Stopped — the agent may still finish in the background.");
+    }
     setBusy(false);
     promptEl.focus();
     drainQueuedPrompt();
@@ -430,7 +453,7 @@ stopBtn.addEventListener("click", () => abortTurn("Stopped."));
 
 function renderResult(result) {
   const wrap = el("div", { class: "result" });
-  if (result && typeof result.exit_code !== "undefined") {
+  if (result && result.exit_code !== undefined && result.exit_code !== null) {
     wrap.appendChild(el("div", {
       text: `exit ${result.exit_code}` +
             (typeof result.duration_ms === "number" ? ` · ${result.duration_ms} ms` : "")
@@ -450,6 +473,12 @@ function renderResult(result) {
     f.appendChild(el("div", { text: "Suggested follow-ups:" }));
     for (const cmd of result.follow_up) f.appendChild(el("code", { text: cmd }));
     wrap.appendChild(f);
+  }
+  // Never leave a bare, contentless box in the transcript: an empty
+  // observation is real information ("the tool ran and printed
+  // nothing"), so say so instead of showing nothing.
+  if (!wrap.childElementCount) {
+    wrap.appendChild(el("div", { class: "muted", text: "(no output)" }));
   }
   return wrap;
 }
@@ -473,7 +502,8 @@ function renderToolCall(p) {
   const wrap = el("div", { class: `proposal ${p.classification || "tool"}` });
   wrap.appendChild(el("div", { class: "class",
     text: `${p.tool} · ${p.classification || "?"} · ${p.decision || "?"}` }));
-  wrap.appendChild(el("code", { text: summarizeArgs(p.args) }));
+  const args = summarizeArgs(p.args);
+  if (args) wrap.appendChild(el("code", { text: args }));
   if (p.error) wrap.appendChild(el("div", { class: "system error", text: p.error }));
   return wrap;
 }
@@ -983,13 +1013,82 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     }
     conversationId = data.conversation_id ?? conversationId;
     clearThinking();
-    const live = addMessage("assistant", "", { record: false });
-    const body = live.lastElementChild;
-    const status = el("div", { class: "live-status", text: "Connecting to live turn…" });
+    // Live turn bubble: a compact activity feed (tool lines updated in
+    // place), the streamed reply text (thinking dots until the first
+    // token arrives) and a status row with a spinner plus an elapsed
+    // timer — the operator always sees *something* moving.
+    const live = el("div", { class: "msg assistant" });
+    live.appendChild(el("div", { class: "role", text: "assistant" }));
+    const activity = el("div", { class: "live-activity" });
+    live.appendChild(activity);
+    const body = el("div");
+    live.appendChild(body);
+    const dots = el("div", { class: "thinking" },
+      el("div", { class: "dots" }, el("i", {}), el("i", {}), el("i", {})));
+    live.appendChild(dots);
+    const status = el("div", { class: "live-status" });
+    const spinner = el("span", { class: "spin" });
+    const statusLabel = el("span", { text: "Connecting to live turn…" });
+    status.appendChild(spinner);
+    status.appendChild(statusLabel);
     live.appendChild(status);
+    log.appendChild(live);
+    scrollLog();
+    const liveStarted = Date.now();
+    let statusText = "Connecting to live turn…";
+    const paintStatus = () => {
+      const secs = Math.round((Date.now() - liveStarted) / 1000);
+      statusLabel.textContent = `${statusText} ${secs}s`;
+    };
+    const setStatus = (text) => { statusText = text; paintStatus(); };
+    let liveTimer = setInterval(paintStatus, 1000);
+    paintStatus();
+    // One activity line per tool execution, keyed by tool name (the
+    // stream reports starts and ends by name only). Lines flip from
+    // "running…" to done/failed in place instead of stacking empty
+    // proposal/observation boxes mid-turn.
+    const toolLineStacks = new Map();
+    const startToolLine = (name, note) => {
+      const line = el("div", { class: "act running" });
+      line.appendChild(el("span", { class: "icon", text: "⏳" }));
+      line.appendChild(el("span", { text: note }));
+      activity.appendChild(line);
+      const stack = toolLineStacks.get(name) || [];
+      stack.push(line);
+      toolLineStacks.set(name, stack);
+      scrollLog();
+      return line;
+    };
+    const endToolLine = (name, ok, note) => {
+      const stack = toolLineStacks.get(name) || [];
+      // A tool_end without a matching tool_start (out-of-order or
+      // dropped frame) still gets a completed line so it is visible.
+      const line = stack.shift() || startToolLine(name, note);
+      line.className = `act ${ok === false ? "failed" : "done"}`;
+      line.replaceChildren(
+        el("span", { class: "icon", text: ok === false ? "✗" : "✓" }),
+        el("span", { text: note }));
+      scrollLog();
+      return line;
+    };
+    const settleLive = (finalStatus) => {
+      if (liveTimer !== null) { clearInterval(liveTimer); liveTimer = null; }
+      dots.remove();
+      spinner.remove();
+      liveTurnCleanup = null;
+      if (finalStatus === null) return;
+      if (!body.textContent && !activity.childElementCount) {
+        live.remove();
+        return;
+      }
+      if (finalStatus) statusLabel.textContent = finalStatus;
+      else status.remove();
+    };
+    liveTurnCleanup = settleLive;
     activeEventSource = new EventSource(`/api/stream/${encodeURIComponent(data.turn_id)}`);
 
     const completeUi = () => {
+      settleLive(null);
       if (timeoutId !== null) { clearTimeout(timeoutId); timeoutId = null; }
       turnController = null;
       setBusy(false);
@@ -1003,35 +1102,54 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       applyTurnPayload(payload);
       completeUi();
     };
+    const PHASE_LABELS = {
+      model: "Model is thinking…",
+      tools: "Running tools…",
+      finalising: "Finalising the reply…",
+    };
     activeEventSource.addEventListener("phase", (ev) => {
       armTimeout();
       const p = JSON.parse(ev.data || "{}");
-      status.textContent = `Phase: ${p.phase || "working"}`;
+      setStatus(PHASE_LABELS[p.phase] || "Working…");
     });
     activeEventSource.addEventListener("token", (ev) => {
       armTimeout();
       const p = JSON.parse(ev.data || "{}");
-      body.textContent += p.delta || "";
+      if (!p.delta) return;
+      dots.remove();
+      body.textContent += p.delta;
+      setStatus("Streaming the reply…");
       scrollLog();
     });
     activeEventSource.addEventListener("tool_start", (ev) => {
       armTimeout();
       const p = JSON.parse(ev.data || "{}");
-      status.textContent = `Running ${p.tool || "tool"}…`;
-      log.appendChild(renderToolCall(p));
-      scrollLog();
+      const tool = p.tool || "tool";
+      const detail = (p.classification && p.classification !== "bridge")
+        ? ` · ${p.classification}` : "";
+      startToolLine(tool, `${tool}${detail} — running…`);
+      setStatus(`Running ${tool}…`);
     });
     activeEventSource.addEventListener("tool_end", (ev) => {
       armTimeout();
       const p = JSON.parse(ev.data || "{}");
-      status.textContent = `Finished ${p.tool || "tool"}.`;
-      log.appendChild(renderToolObservation({ tool: p.tool, ok: p.ok, result: p, error: p.error }));
-      scrollLog();
+      const tool = p.tool || "tool";
+      if (p.ok === false) {
+        endToolLine(tool, false, `${tool} — ${p.error || "failed"}`);
+      } else {
+        const bits = [];
+        if (p.exit_code !== undefined && p.exit_code !== null) bits.push(`exit ${p.exit_code}`);
+        if (typeof p.duration_ms === "number") bits.push(`${p.duration_ms} ms`);
+        endToolLine(tool, true, `${tool} — done${bits.length ? ` (${bits.join(" · ")})` : ""}`);
+      }
+      setStatus(`Finished ${tool}.`);
     });
     activeEventSource.addEventListener("pending_approval", (ev) => {
       armTimeout();
       const p = JSON.parse(ev.data || "{}");
-      status.textContent = `Approval required for ${p.tool || "tool"}.`;
+      const tool = p.tool || "tool";
+      endToolLine(tool, true, `${tool} — queued for operator approval`);
+      setStatus(`Approval required for ${tool}.`);
       log.appendChild(renderPendingToolCall(p));
       scrollLog();
     });
@@ -1045,6 +1163,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const p = JSON.parse(ev.data || "{}");
       if (activeEventSource) activeEventSource.close();
       activeEventSource = null;
+      settleLive("Turn failed.");
       if (p.dead) showTombstone(p);
       if (p.error) addMessage("system", p.error, { error: true });
       completeUi();
