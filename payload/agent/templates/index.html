@@ -235,6 +235,10 @@ let authRequired = false;
 // completes (or fails cleanly) server-side before the browser gives up.
 let turnController = null;
 let activeEventSource = null;
+// Client-side timeout handle for the in-flight turn. Shared so that
+// abortTurn() can always disarm it: a timeout left armed after a manual
+// stop would otherwise fire minutes later and abort a *newer* turn.
+let turnTimeoutId = null;
 // Set while a live streamed turn is rendering; called to freeze the
 // live bubble (stop spinner/timer) when the turn ends or is aborted.
 let liveTurnCleanup = null;
@@ -360,6 +364,18 @@ function addMessage(role, content, opts = {}) {
 }
 
 function scrollLog() {
+  // Follow the transcript only when the operator is already reading the
+  // tail. If they have scrolled up to study earlier output, a streaming
+  // token or tool line must not yank them back to the bottom.
+  const slack = 48; // px of "close enough to the bottom" tolerance
+  const nearBottom = viewport.scrollHeight - viewport.scrollTop -
+                     viewport.clientHeight <= slack;
+  if (nearBottom) viewport.scrollTop = viewport.scrollHeight;
+}
+
+// A message the operator just sent always snaps the view to the bottom,
+// even if they had scrolled up beforehand.
+function scrollLogToBottom() {
   viewport.scrollTop = viewport.scrollHeight;
 }
 
@@ -515,12 +531,14 @@ function setBusy(busy) {
 }
 
 function abortTurn(reason) {
+  if (turnTimeoutId !== null) { clearTimeout(turnTimeoutId); turnTimeoutId = null; }
   if (turnController) {
     try { turnController.abort(); } catch (_e) { /* ignore */ }
   }
   if (activeEventSource) {
     try { activeEventSource.close(); } catch (_e) { /* ignore */ }
     activeEventSource = null;
+    turnController = null;
     if (liveTurnCleanup) {
       liveTurnCleanup("Stopped — the agent may still finish in the background.");
     }
@@ -627,12 +645,21 @@ function renderPendingToolCall(p) {
     approve.disabled = deny.disabled = true;
     const body = { tool_call_id: p.tool_call_id, decision: "approve" };
     if (phraseInput) body.phrase = phraseInput.value;
-    const r = await fetch("/api/approve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const data = await r.json();
+    let data;
+    try {
+      const r = await fetch("/api/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      data = await r.json();
+    } catch (err) {
+      // A network failure must not wedge the buttons disabled: the call
+      // is still pending server-side, so let the operator retry.
+      approve.disabled = deny.disabled = false;
+      wrap.appendChild(el("div", { class: "system error", text: String(err) }));
+      return;
+    }
     if (data.error) {
       approve.disabled = deny.disabled = false;
       wrap.appendChild(el("div", { class: "system error", text: data.error }));
@@ -644,11 +671,17 @@ function renderPendingToolCall(p) {
   });
   deny.addEventListener("click", async () => {
     approve.disabled = deny.disabled = true;
-    await fetch("/api/approve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tool_call_id: p.tool_call_id, decision: "deny" }),
-    });
+    try {
+      await fetch("/api/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tool_call_id: p.tool_call_id, decision: "deny" }),
+      });
+    } catch (err) {
+      approve.disabled = deny.disabled = false;
+      wrap.appendChild(el("div", { class: "system error", text: String(err) }));
+      return;
+    }
     actions.remove();
     wrap.appendChild(el("div", { text: "Denied." }));
   });
@@ -1012,12 +1045,13 @@ function applyTurnPayload(data) {
   if (data.messages || data.events) {
     uzClearLog();
     renderConversation(data.messages || [], data.events || []);
-  } else {
-    if (data.error) addMessage("system", data.error, { error: true });
-    if (data.reply) addMessage("assistant", data.reply);
+  } else if (data.reply) {
+    addMessage("assistant", data.reply);
   }
   const events = data.events || [];
   if (events.length) log.appendChild(renderTurnCounter(events));
+  // Render the error exactly once, after any transcript re-render (which
+  // clears the log and would otherwise wipe an earlier error bubble).
   if (data.error) addMessage("system", data.error, { error: true });
   // In verbose mode every completed turn ends with its background
   // activity tally so the operator can see what the turn cost.
@@ -1029,6 +1063,7 @@ function applyTurnPayload(data) {
 async function uzSendPromptSync(prompt, convId = conversationId) {
   netStats.turn = newStatBucket();
   addMessage("user", prompt);
+  scrollLogToBottom();
   setBusy(true);
   thinkingEl = showThinking();
   turnController = new AbortController();
@@ -1076,14 +1111,14 @@ async function uzSendPrompt(prompt, convId = conversationId) {
   if (!window.EventSource) return uzSendPromptSync(prompt, convId);
   netStats.turn = newStatBucket();
   addMessage("user", prompt);
+  scrollLogToBottom();
   setBusy(true);
   thinkingEl = showThinking();
   turnController = new AbortController();
-  let timeoutId = null;
   let completed = false;
   const armTimeout = () => {
-    if (timeoutId !== null) clearTimeout(timeoutId);
-    timeoutId = setTimeout(
+    if (turnTimeoutId !== null) clearTimeout(turnTimeoutId);
+    turnTimeoutId = setTimeout(
       () => abortTurn(`No response after ${Math.round(CLIENT_TURN_TIMEOUT_MS / 1000)}s - giving up.`),
       CLIENT_TURN_TIMEOUT_MS);
   };
@@ -1158,10 +1193,16 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       return line;
     };
     const endToolLine = (name, ok, note) => {
-      const stack = toolLineStacks.get(name) || [];
       // A tool_end without a matching tool_start (out-of-order or
-      // dropped frame) still gets a completed line so it is visible.
-      const line = stack.shift() || startToolLine(name, note);
+      // dropped frame) still gets a completed line so it is visible —
+      // and that fallback line is consumed immediately (startToolLine
+      // pushed it) so it cannot swallow a later tool_end for this name.
+      const stack = toolLineStacks.get(name);
+      let line = stack ? stack.shift() : undefined;
+      if (!line) {
+        startToolLine(name, note);
+        line = toolLineStacks.get(name).shift();
+      }
       line.className = `act ${ok === false ? "failed" : "done"}`;
       line.replaceChildren(
         el("span", { class: "icon", text: ok === false ? "✗" : "✓" }),
@@ -1190,7 +1231,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
 
     const completeUi = () => {
       settleLive(null);
-      if (timeoutId !== null) { clearTimeout(timeoutId); timeoutId = null; }
+      if (turnTimeoutId !== null) { clearTimeout(turnTimeoutId); turnTimeoutId = null; }
       turnController = null;
       setBusy(false);
       promptEl.focus();
@@ -1334,7 +1375,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     return null;
   } finally {
     if (!activeEventSource) {
-      if (timeoutId !== null) clearTimeout(timeoutId);
+      if (turnTimeoutId !== null) { clearTimeout(turnTimeoutId); turnTimeoutId = null; }
       turnController = null;
       setBusy(false);
       promptEl.focus();

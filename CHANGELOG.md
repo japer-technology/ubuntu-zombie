@@ -27,6 +27,19 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   bridge-executed tools report more than a bare "done".
 
 ### Fixed
+- **Chat UX hardening after a deep review.** Five browser-side fixes
+  in the chat page, all UI-only: a failed turn no longer renders its
+  error bubble twice; stopping a streamed turn now disarms the
+  client-side turn timeout (a stale timer could previously fire
+  minutes later and abort a *newer* in-flight turn); the transcript
+  only auto-follows streaming output when the operator is already
+  reading the tail, so scrolling up to study earlier output is no
+  longer yanked back to the bottom (sending a message still snaps to
+  the bottom); a `tool_end` stream frame arriving without its
+  matching `tool_start` no longer leaves a consumed activity line in
+  the bookkeeping where it could swallow the next result for the same
+  tool; and the Approve/Deny buttons on a pending elevated call
+  recover from a network failure instead of wedging disabled.
 - **No more stray blank lines around tool activity.** An empty live
   activity block no longer reserves vertical space in the assistant
   bubble (it is collapsed until the first tool line arrives), streamed
