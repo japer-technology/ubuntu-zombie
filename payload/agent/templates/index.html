@@ -39,6 +39,7 @@
   .system.error { background: #e74c3c30; border-color: #e74c3c; }
   .queued { background: #4a90e214; border: 1px dashed #4a90e299; }
   .queued .actions { margin-top: .4rem; }
+  .queued pre { margin: .35rem 0 0; white-space: pre-wrap; }
   .live-status { font-size: .8rem; opacity: .8; margin-top: .35rem; }
   .role { font-size: .7rem; text-transform: uppercase; opacity: .6;
           margin-bottom: .2rem; }
@@ -665,14 +666,18 @@ function showQueuedPrompt(prompt, replaced = null) {
     queuedBubble.appendChild(el("div", { class: "role", text: "queued" }));
     log.appendChild(queuedBubble);
   }
-  const note = replaced
-    ? `Queued - replaced previous queued message:\n${replaced}\n\nWill send next:\n${prompt}`
-    : `Queued - will be sent when the current turn finishes.\n` +
-      `A page refresh discards it.\n\n${prompt}`;
   queuedBubble.replaceChildren(
     el("div", { class: "role", text: "queued" }),
-    el("div", { text: note })
+    el("div", { text: replaced
+      ? "Queued - replaced the previous queued message shown below."
+      : "Queued - will be sent when the current turn finishes. A page refresh discards it." })
   );
+  if (replaced) {
+    queuedBubble.appendChild(el("div", { class: "role", text: "replaced" }));
+    queuedBubble.appendChild(el("pre", { text: replaced.slice(0, 4000) }));
+    queuedBubble.appendChild(el("div", { class: "role", text: "will send next" }));
+  }
+  queuedBubble.appendChild(el("pre", { text: prompt.slice(0, 4000) }));
   const actions = el("div", { class: "actions" });
   const discard = el("button", { type: "button", text: "Discard queued message" });
   discard.addEventListener("click", () => {
@@ -1049,7 +1054,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
         try { await uzLoadConversation(conversationId, "Reloaded after streaming interruption."); }
         catch (err) { addMessage("system", String(err), { error: true }); }
       } else {
-        addMessage("system", "Live stream interrupted before a conversation was created.", { error: true });
+        addMessage("system",
+          "Live stream interrupted before the server returned a conversation id.",
+          { error: true });
       }
       completeUi();
     };

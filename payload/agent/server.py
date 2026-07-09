@@ -362,31 +362,19 @@ class App:
             pass
         # Prefer dropping stale token deltas; phase/tool/final/error
         # events carry state transitions and should survive overflow.
-        saved: list[tuple[str, dict[str, Any]]] = []
-        dropped = False
-        while True:
-            try:
-                old = state.queue.get_nowait()
-            except queue.Empty:
-                break
-            if not dropped and old[0] == "token":
-                dropped = True
-                continue
-            saved.append(old)
-        for item in saved:
-            try:
-                state.queue.put_nowait(item)
-            except queue.Full:
-                break
-        try:
-            state.queue.put_nowait(frame)
-        except queue.Full:
-            if event != "token":
-                try:
-                    state.queue.get_nowait()
-                    state.queue.put_nowait(frame)
-                except (queue.Empty, queue.Full):
-                    pass
+        with state.queue.mutex:
+            drop_index: int | None = None
+            for idx, old in enumerate(state.queue.queue):
+                if old[0] == "token":
+                    drop_index = idx
+                    break
+            if drop_index is None:
+                if event == "token":
+                    return
+                drop_index = 0
+            del state.queue.queue[drop_index]
+            state.queue.queue.append(frame)
+            state.queue.not_empty.notify()
 
     def _finish_turn(self, state: TurnStream, payload: dict[str, Any],
                      event: str = "turn_done") -> None:
@@ -689,10 +677,13 @@ class App:
         def on_bridge_event(event: dict[str, Any]) -> None:
             kind = event.get("type")
             if kind == "token":
-                send_event("token", {"delta": str(event.get("delta") or "")})
+                delta = event.get("delta")
+                if isinstance(delta, str) and delta:
+                    send_event("token", {"delta": delta})
             elif kind == "progress":
-                progress = str(event.get("kind") or "")
-                tool = str(event.get("name") or "")
+                progress = event.get("kind")
+                raw_tool = event.get("name")
+                tool = raw_tool if isinstance(raw_tool, str) and raw_tool else "tool"
                 if progress == "tool_start":
                     send_event("tool_start", {
                         "tool": tool, "classification": "bridge",
