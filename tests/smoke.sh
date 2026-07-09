@@ -369,6 +369,7 @@ import pi_mono, tools, policy
 
 p = policy.load_policy()
 collected = []
+streamed = []
 
 def on_tool_call(call_id, name, args):
     collected.append((name, dict(args)))
@@ -392,6 +393,7 @@ out = pi_mono.run_turn(
     history=[],
     on_tool_call=on_tool_call,
     tool_names=tools.tool_names(),
+    on_event=lambda event: streamed.append(event),
 )
 if out["final"] != "stubbed pi-mono turn complete":
     raise SystemExit(f"unexpected final: {out['final']!r}")
@@ -401,6 +403,8 @@ if not any(e.get("type") == "tool_call" for e in out["events"]):
     raise SystemExit("no tool_call events recorded")
 if not any(e.get("type") == "final" for e in out["events"]):
     raise SystemExit("no final event recorded")
+if [e.get("type") for e in streamed] != ["progress", "token", "progress", "token"]:
+    raise SystemExit(f"stream callback order wrong: {streamed!r}")
 PY
 
     # Unified model selection + auth isolation: pi_mono.run_turn must
@@ -803,6 +807,10 @@ if elapsed > 10:
 # surface tool_execution_* events as mediated tool_call frames.
 if any(e.get("type") == "tool_call" for e in out["events"]):
     raise SystemExit("bridge must not re-dispatch pi's tool_execution events")
+if not any(e.get("type") == "progress" for e in out["events"]):
+    raise SystemExit("bridge must forward tool progress events")
+if not any(e.get("type") == "token" for e in out["events"]):
+    raise SystemExit("bridge must forward token events")
 PY
 
     # The real bridge must forward the prior conversation into pi's
@@ -1825,6 +1833,26 @@ run_standards() {
     || { echo "chat UI must hide Logoff when the password gate is removed" >&2; exit 1; }
   grep -q 'Available commands (alphabetic by group)' payload/agent/templates/index.html \
     || { echo "chat /help must keep grouped alphabetic output" >&2; exit 1; }
+  grep -q 'EventSource' payload/agent/templates/index.html \
+    || { echo "chat UI must keep the SSE EventSource path" >&2; exit 1; }
+  grep -q 'Live stream interrupted; reloading conversation' payload/agent/templates/index.html \
+    || { echo "chat UI must keep the streaming fallback reload path" >&2; exit 1; }
+  grep -q 'queued' payload/agent/templates/index.html \
+    || { echo "chat UI must keep the queued-message affordance" >&2; exit 1; }
+  grep -q '/api/stream' payload/agent/server.py \
+    || { echo "server.py must expose the SSE stream endpoint" >&2; exit 1; }
+  grep -q '"type":"progress"' payload/agent/pi_mono.py \
+    || { echo "pi_mono.py protocol docs must mention progress events" >&2; exit 1; }
+  grep -q '"type":"token"' payload/agent/pi_mono.py \
+    || { echo "pi_mono.py protocol docs must mention token events" >&2; exit 1; }
+  grep -q '"type":"progress"' payload/agent/pi-mono-bridge.mjs \
+    || { echo "pi-mono bridge protocol docs must mention progress events" >&2; exit 1; }
+  grep -q '"type":"token"' payload/agent/pi-mono-bridge.mjs \
+    || { echo "pi-mono bridge protocol docs must mention token events" >&2; exit 1; }
+  if grep -qi '<script[[:space:]][^>]*src=' payload/agent/templates/index.html; then
+    echo "chat UI must not add external script dependencies" >&2
+    exit 1
+  fi
   grep -q "s|__ZOMBIE_DIR__|\\\${ZOMBIE_DIR}|g" scripts/install.sh \
     || { echo "install.sh must render __ZOMBIE_DIR__ in systemd units" >&2; exit 1; }
   if grep -n '\[\[ "${JSON}"' scripts/install.sh; then

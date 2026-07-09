@@ -27,9 +27,12 @@ is the chat service on `127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}`.
 ## Runtime components
 
 - `server.py` serves the chat UI, session APIs, approval flow, health
-  endpoints, and model selection endpoints.
+  endpoints, model selection endpoints, and the authenticated
+  server-sent-events stream used for live turn progress.
 - `pi_mono.py` starts `pi-mono-bridge.mjs`, enforces turn timeouts, and
-  returns structured events to the server.
+  returns structured events to the server. Optional bridge `token` and
+  `progress` events are forwarded as live UI hints; the final persisted
+  conversation remains authoritative.
 - `tools.py` defines the closed tool registry: shell, filesystem,
   package, service, network status, and skill loading tools.
 - `policy.py` classifies commands and tool calls before execution.
@@ -50,6 +53,31 @@ is the chat service on `127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}`.
 The local agent account has passwordless sudo by design. The policy gate
 and audit trail are the runtime safety boundary; they do not make the
 agent account unprivileged.
+
+## Chat turn transport
+
+The browser normally asks `POST /api/message` for a streaming turn. The
+server validates the prompt and TTL, registers an opaque `turn_id`, starts
+the model turn in a worker thread, and returns immediately. The browser
+then opens `GET /api/stream/{turn_id}` with `EventSource`; the endpoint is
+behind the same session-cookie gate as the JSON APIs and is not public.
+
+The stream is one-way SSE over the existing loopback `ThreadingHTTPServer`
+and carries a small vocabulary:
+
+| Event | Purpose |
+| ----- | ------- |
+| `phase` | Coarse turn state such as model work or finalising. |
+| `token` | Best-effort assistant text deltas from the bridge. |
+| `tool_start` / `tool_end` | Live tool activity from the same paths that write history/audit records, or display-only pi built-in tool progress. |
+| `pending_approval` | An elevated call has entered the operator approval queue. |
+| `turn_done` | The exact final JSON payload the synchronous path returns. |
+| `turn_error` | Provider, bridge, TTL, or stream setup failure. |
+
+Clients that omit `stream: true`, lack `EventSource`, or lose the stream
+fall back to the original synchronous JSON response or a conversation
+reload. Closing the stream does not cancel the server-side turn; history
+and the audit log continue to be written and can be reloaded later.
 
 ## Tool policy
 

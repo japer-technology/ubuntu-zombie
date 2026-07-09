@@ -310,6 +310,18 @@ browser confirmation and clears existing login sessions. `/password`
 removes the password after confirmation; because the gate is disabled,
 no logoff is required.
 
+During a normal turn the browser uses an authenticated server-sent-events
+stream to show live phase, token, tool, and approval updates before the
+final answer. There is no extra configuration for this: if streaming is
+unavailable, the UI falls back to the same JSON turn/reload behaviour used
+by older versions.
+
+The prompt box stays editable while the agent is working. Submitting a
+normal message during a busy turn stores one visible queued message and
+sends it automatically when the current turn finishes; submitting another
+normal message replaces that queued item with an explicit notice. Slash
+commands such as `/stop`, `/approve`, and `/deny` still run immediately.
+
 ### Time to Live (the kill switch)
 
 Every install gives the root-capable agent a bounded lifetime. The

@@ -9,6 +9,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Changed
+- **Chat turns now stream live progress and never silently drop busy
+  input.** `POST /api/message` keeps its synchronous JSON behaviour but
+  also accepts `stream: true`, returning a `turn_id` for the authenticated
+  `GET /api/stream/{turn_id}` SSE endpoint. The UI uses `EventSource` to
+  show turn phases, best-effort token deltas, live tool activity, and
+  pending approvals before the final reply, with automatic fallback to
+  the existing reload path if streaming is unavailable. Submitting a
+  normal prompt during a running turn now stores one visible queued
+  message (replaceable/discardable) and sends it when the current turn
+  finishes; slash commands still run immediately.
 - **`LOGO-MEANING.md` rewritten for clarity and voice.** The logo
   explainer now opens with a one-line reading, gives each section an
   evocative tagline, and tightens the prose throughout while keeping

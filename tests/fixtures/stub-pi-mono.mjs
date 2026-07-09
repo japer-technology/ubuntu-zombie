@@ -7,9 +7,10 @@
 // ships with Node >=18.
 //
 // The stub script reads ZOMBIE_STUB_PLAN (a JSON array) and emits
-// each step in order. Defaults to a single read-only fs.read call
-// against /etc/os-release followed by a "final" message — enough to
-// exercise the schema-validation + dispatch + observation path.
+// each step in order. Defaults to live progress/token hints, a single
+// read-only fs.read call against /etc/os-release, and a "final"
+// message — enough to exercise streaming, schema-validation,
+// dispatch, and observation paths.
 
 import { createInterface } from "node:readline";
 import { writeFileSync } from "node:fs";
@@ -37,6 +38,10 @@ function recordStart(start) {
 }
 
 const plan = JSON.parse(process.env.ZOMBIE_STUB_PLAN || JSON.stringify([
+  { type: "progress", kind: "tool_start", id: "stub-progress", name: "read" },
+  { type: "token", delta: "stubbed " },
+  { type: "progress", kind: "tool_end", id: "stub-progress", name: "read" },
+  { type: "token", delta: "pi-mono " },
   { type: "tool_call", id: "1", name: "fs.read",
     args: { path: "/etc/os-release", max_bytes: 256 } },
   { type: "final", text: "stubbed pi-mono turn complete" },
@@ -54,10 +59,13 @@ rl.on("line", (line) => {
     let i = 0;
     function step() {
       if (i >= plan.length) return;
-      const item = plan[i++];
-      send(item);
-      if (item.type === "final" || item.type === "error") {
-        process.exit(0);
+      while (i < plan.length) {
+        const item = plan[i++];
+        send(item);
+        if (item.type === "final" || item.type === "error") {
+          process.exit(0);
+        }
+        if (item.type === "tool_call") return;
       }
     }
     step();
