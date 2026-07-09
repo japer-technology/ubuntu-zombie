@@ -707,7 +707,7 @@ function drainQueuedPrompt() {
   queuedBubble = null;
   // Let the DOM remove the queued bubble before the next turn appends
   // its user message and starts streaming.
-  setTimeout(() => { void uzSendPrompt(next); }, 0);
+  setTimeout(() => { uzSendPrompt(next); }, 0);
 }
 
 async function uzPostJson(path, body = {}) {

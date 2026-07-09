@@ -277,7 +277,11 @@ def run_turn(
             if kind in {"token", "progress"} and on_event is not None:
                 try:
                     on_event(event)
-                except Exception:
+                except Exception as exc:  # noqa: BLE001
+                    print(
+                        f"pi_mono on_event callback failed: {exc.__class__.__name__}: {exc}",
+                        file=sys.stderr,
+                    )
                     pass
             if kind == "tool_call":
                 calls_made += 1

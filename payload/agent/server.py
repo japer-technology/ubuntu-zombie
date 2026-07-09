@@ -368,7 +368,11 @@ class App:
         # events carry state transitions and should survive overflow.
         # ``queue.Queue`` has no drop-oldest API, so this uses its
         # documented synchronization primitives while touching the
-        # underlying deque under the queue mutex.
+        # underlying deque under the queue mutex. That keeps the worker
+        # non-blocking and avoids draining 1000 queued frames into a
+        # temporary list; CPython's stdlib queue exposes these attributes
+        # for subclass implementations, and Ubuntu's supported Python
+        # versions preserve that contract.
         with state.queue.mutex:
             drop_index: int | None = None
             for idx, old in enumerate(state.queue.queue):
@@ -433,12 +437,12 @@ class App:
                     terminal = "turn_error" if result.get("error") and not result.get("reply") else "turn_done"
                     self._finish_turn(state, result, terminal)
             except Exception as exc:  # noqa: BLE001
-                err = {"conversation_id": conv_id,
-                       "error": (
-                           f"streaming turn {turn_id} failed for conversation #{conv_id} "
-                           f"(prompt {len(prompt)} chars): "
-                           f"{exc.__class__.__name__}: {exc}"
-                       )}
+                msg = (
+                    f"streaming turn {turn_id} failed for conversation #{conv_id} "
+                    f"(prompt {len(prompt)} chars): "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+                err = {"conversation_id": conv_id, "error": msg}
                 self._finish_turn(state, err, "turn_error")
 
         threading.Thread(

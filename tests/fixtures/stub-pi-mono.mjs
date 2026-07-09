@@ -58,7 +58,6 @@ rl.on("line", (line) => {
     try { recordStart(JSON.parse(line)); } catch (_e) { /* ignore */ }
     let i = 0;
     function step() {
-      if (i >= plan.length) return;
       while (i < plan.length) {
         const item = plan[i++];
         send(item);
