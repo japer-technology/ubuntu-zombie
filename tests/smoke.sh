@@ -405,6 +405,10 @@ if not any(e.get("type") == "final" for e in out["events"]):
     raise SystemExit("no final event recorded")
 if [e.get("type") for e in streamed] != ["progress", "token", "progress", "token"]:
     raise SystemExit(f"stream callback order wrong: {streamed!r}")
+if streamed[0].get("name") != "read" or streamed[2].get("name") != "read":
+    raise SystemExit(f"stream progress payload wrong: {streamed!r}")
+if "".join(e.get("delta", "") for e in streamed if e.get("type") == "token") != "stubbed pi-mono ":
+    raise SystemExit(f"stream token payload wrong: {streamed!r}")
 PY
 
     # Unified model selection + auth isolation: pi_mono.run_turn must

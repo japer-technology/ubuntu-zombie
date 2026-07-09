@@ -316,6 +316,11 @@ final answer. There is no extra configuration for this: if streaming is
 unavailable, the UI falls back to the same JSON turn/reload behaviour used
 by older versions.
 
+The stream's queue bound, completed-turn retention window, and keepalive
+interval are fixed implementation limits in `payload/agent/server.py`,
+not operator-tuned environment variables. They exist to bound memory for a
+disconnected browser while keeping one active local operator turn lively.
+
 The prompt box stays editable while the agent is working. Submitting a
 normal message during a busy turn stores one visible queued message and
 sends it automatically when the current turn finishes; submitting another

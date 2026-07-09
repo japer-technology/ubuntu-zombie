@@ -65,6 +65,9 @@ rl.on("line", (line) => {
         if (item.type === "final" || item.type === "error") {
           process.exit(0);
         }
+        // Progress/token frames do not require a Python response, so
+        // emit them immediately. Tool calls must pause until the next
+        // readline, which is the tool_result from pi_mono.py.
         if (item.type === "tool_call") return;
       }
     }

@@ -433,7 +433,7 @@ class App:
             except Exception as exc:  # noqa: BLE001
                 err = {"conversation_id": conv_id,
                        "error": (
-                           f"streaming turn failed for conversation #{conv_id} "
+                           f"streaming turn {turn_id} failed for conversation #{conv_id} "
                            f"(prompt {len(prompt)} chars): "
                            f"{exc.__class__.__name__}: {exc}"
                        )}
@@ -555,8 +555,8 @@ class App:
                     "tool_call_id": call_id, "tool": name, "args": _summarize(args),
                     "decision": "schema_rejected", "error": str(exc),
                 })
-                send_event("tool_start", {
-                    "tool": name, "classification": "unknown",
+                send_event("tool_end", {
+                    "tool": name, "ok": False,
                     "decision": "schema_rejected", "error": str(exc),
                 })
                 return {"ok": False, "error": f"schema_rejected: {exc}"}

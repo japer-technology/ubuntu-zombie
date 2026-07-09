@@ -43,6 +43,8 @@ import { dirname } from "node:path";
 
 const stdin = process.stdin;
 const stdout = process.stdout;
+const TOKEN_FLUSH_CHARS = 64;
+const TOKEN_FLUSH_MS = 50;
 
 function send(obj) {
   stdout.write(JSON.stringify(obj) + "\n");
@@ -65,14 +67,13 @@ function sendTokenDelta(delta) {
   if (!delta) return;
   tokenBuffer += delta;
   // Coalesce tiny provider deltas so a fast model cannot flood stdout
-  // line-by-line; 64 chars or 50 ms keeps the UI lively without making
-  // every token a separate Python/SSE frame.
-  if (tokenBuffer.length >= 64) {
+  // line-by-line while keeping the UI lively.
+  if (tokenBuffer.length >= TOKEN_FLUSH_CHARS) {
     flushTokenBuffer();
     return;
   }
   if (tokenTimer === null) {
-    tokenTimer = setTimeout(flushTokenBuffer, 50);
+    tokenTimer = setTimeout(flushTokenBuffer, TOKEN_FLUSH_MS);
     if (typeof tokenTimer.unref === "function") tokenTimer.unref();
   }
 }
