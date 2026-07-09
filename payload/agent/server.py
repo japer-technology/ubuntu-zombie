@@ -670,18 +670,21 @@ class App:
                 )
                 turn_events.append({"kind": "tool_observation", "tool": name,
                                     "result": result})
+                # Byte counts let the UI's /verbose mode tally how
+                # much data each tool moved without shipping the
+                # full output over the progress stream.
+                def _out_bytes(field: str) -> int | None:
+                    if not isinstance(result, dict):
+                        return None
+                    return len((result.get(field) or "").encode("utf-8"))
+
                 send_event("tool_end", {
                     "tool": name,
                     "ok": True,
                     "exit_code": result.get("exit_code") if isinstance(result, dict) else None,
                     "duration_ms": result.get("duration_ms") if isinstance(result, dict) else None,
-                    # Byte counts let the UI's /verbose mode tally how
-                    # much data each tool moved without shipping the
-                    # full output over the progress stream.
-                    "stdout_bytes": (len((result.get("stdout") or "").encode("utf-8"))
-                                     if isinstance(result, dict) else None),
-                    "stderr_bytes": (len((result.get("stderr") or "").encode("utf-8"))
-                                     if isinstance(result, dict) else None),
+                    "stdout_bytes": _out_bytes("stdout"),
+                    "stderr_bytes": _out_bytes("stderr"),
                 })
                 return {"ok": True, "result": result}
             except Exception as exc:  # noqa: BLE001

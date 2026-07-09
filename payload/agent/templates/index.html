@@ -262,8 +262,9 @@ function newStatBucket() {
 }
 const netStats = { session: newStatBucket(), turn: newStatBucket() };
 
+const uzTextEncoder = new TextEncoder();
 function byteLength(s) {
-  try { return new TextEncoder().encode(String(s)).length; }
+  try { return uzTextEncoder.encode(String(s)).length; }
   catch (_e) { return String(s).length; }
 }
 
@@ -527,17 +528,17 @@ function renderResult(result) {
   // Tool output almost always ends with "\n"; a raw trailing newline
   // inside the dark <pre> paints an extra empty dark line under every
   // observation, so trim it (and skip whitespace-only output entirely).
-  const clip = (s) => String(s).replace(/\s+$/, "");
-  if (result && result.stdout && clip(result.stdout)) {
-    wrap.appendChild(el("pre", { text: clip(result.stdout) }));
+  const rtrim = (s) => String(s).replace(/\s+$/, "");
+  if (result && result.stdout && rtrim(result.stdout)) {
+    wrap.appendChild(el("pre", { text: rtrim(result.stdout) }));
   }
-  if (result && result.stderr && clip(result.stderr)) {
-    const pre = el("pre", { text: clip(result.stderr) });
+  if (result && result.stderr && rtrim(result.stderr)) {
+    const pre = el("pre", { text: rtrim(result.stderr) });
     pre.style.color = "#e74c3c";
     wrap.appendChild(pre);
   }
-  if (result && result.content && !result.stdout && clip(result.content)) {
-    wrap.appendChild(el("pre", { text: clip(result.content) }));
+  if (result && result.content && !result.stdout && rtrim(result.content)) {
+    wrap.appendChild(el("pre", { text: rtrim(result.content) }));
   }
   if (result && result.follow_up && result.follow_up.length) {
     const f = el("div", {});
