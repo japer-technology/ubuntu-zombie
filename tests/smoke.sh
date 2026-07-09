@@ -1835,7 +1835,7 @@ run_standards() {
     || { echo "chat /help must keep grouped alphabetic output" >&2; exit 1; }
   grep -q 'EventSource' payload/agent/templates/index.html \
     || { echo "chat UI must keep the SSE EventSource path" >&2; exit 1; }
-  grep -q 'Live stream interrupted; reloading conversation' payload/agent/templates/index.html \
+  grep -q 'Live stream interrupted' payload/agent/templates/index.html \
     || { echo "chat UI must keep the streaming fallback reload path" >&2; exit 1; }
   grep -q 'queued' payload/agent/templates/index.html \
     || { echo "chat UI must keep the queued-message affordance" >&2; exit 1; }
@@ -1849,6 +1849,8 @@ run_standards() {
     || { echo "pi-mono bridge protocol docs must mention progress events" >&2; exit 1; }
   grep -q '"type":"token"' payload/agent/pi-mono-bridge.mjs \
     || { echo "pi-mono bridge protocol docs must mention token events" >&2; exit 1; }
+  # HTML tag names are case-insensitive; keep the no-external-script
+  # guard case-insensitive so <SCRIPT SRC=...> is caught too.
   if grep -qi '<script[[:space:]][^>]*src=' payload/agent/templates/index.html; then
     echo "chat UI must not add external script dependencies" >&2
     exit 1

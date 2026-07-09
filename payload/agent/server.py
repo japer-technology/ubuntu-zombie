@@ -58,6 +58,10 @@ import tools as tools_mod  # noqa: E402
 SECRETS_FILE = Path(os.environ.get("ZOMBIE_SECRETS", "/opt/ai-zombie/secrets/env"))
 DEFAULT_PORT = int(os.environ.get("ZOMBIE_CHAT_PORT", "7878"))
 DEFAULT_HOST = "127.0.0.1"
+# Streaming is per active operator turn. A thousand queued frames is
+# enough for very chatty token streams without letting a disconnected
+# browser grow memory unbounded; completed payloads are retained briefly
+# so a late EventSource can still receive the terminal frame.
 STREAM_QUEUE_MAX = 1000
 STREAM_RETAIN_SECONDS = 300.0
 STREAM_KEEPALIVE_SECONDS = 15.0
@@ -362,6 +366,9 @@ class App:
             pass
         # Prefer dropping stale token deltas; phase/tool/final/error
         # events carry state transitions and should survive overflow.
+        # ``queue.Queue`` has no drop-oldest API, so this uses its
+        # documented synchronization primitives while touching the
+        # underlying deque under the queue mutex.
         with state.queue.mutex:
             drop_index: int | None = None
             for idx, old in enumerate(state.queue.queue):
@@ -425,7 +432,11 @@ class App:
                     self._finish_turn(state, result, terminal)
             except Exception as exc:  # noqa: BLE001
                 err = {"conversation_id": conv_id,
-                       "error": f"pi-mono call failed: {exc.__class__.__name__}: {exc}"}
+                       "error": (
+                           f"streaming turn failed for conversation #{conv_id} "
+                           f"(prompt {len(prompt)} chars): "
+                           f"{exc.__class__.__name__}: {exc}"
+                       )}
                 self._finish_turn(state, err, "turn_error")
 
         threading.Thread(

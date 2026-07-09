@@ -672,12 +672,15 @@ function showQueuedPrompt(prompt, replaced = null) {
       ? "Queued - replaced the previous queued message shown below."
       : "Queued - will be sent when the current turn finishes. A page refresh discards it." })
   );
+  // Keep the transient queue bubble bounded; the full prompt is still
+  // sent from queuedPrompt, only the on-screen preview is clipped.
+  const previewLimit = 4000;
   if (replaced) {
     queuedBubble.appendChild(el("div", { class: "role", text: "replaced" }));
-    queuedBubble.appendChild(el("pre", { text: replaced.slice(0, 4000) }));
+    queuedBubble.appendChild(el("pre", { text: replaced.slice(0, previewLimit) }));
     queuedBubble.appendChild(el("div", { class: "role", text: "will send next" }));
   }
-  queuedBubble.appendChild(el("pre", { text: prompt.slice(0, 4000) }));
+  queuedBubble.appendChild(el("pre", { text: prompt.slice(0, previewLimit) }));
   const actions = el("div", { class: "actions" });
   const discard = el("button", { type: "button", text: "Discard queued message" });
   discard.addEventListener("click", () => {
@@ -1046,10 +1049,12 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     });
     activeEventSource.onerror = async () => {
       if (completed) return;
+      const readyState = activeEventSource ? activeEventSource.readyState : "closed";
       if (activeEventSource) activeEventSource.close();
       activeEventSource = null;
       clearThinking();
-      statusEl.textContent = "Live stream interrupted; reloading conversation…";
+      statusEl.textContent =
+        `Live stream interrupted (readyState ${readyState}); reloading conversation…`;
       if (conversationId) {
         try { await uzLoadConversation(conversationId, "Reloaded after streaming interruption."); }
         catch (err) { addMessage("system", String(err), { error: true }); }
