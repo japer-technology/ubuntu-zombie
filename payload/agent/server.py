@@ -712,12 +712,27 @@ class App:
                 raw_tool = event.get("name")
                 tool = raw_tool if isinstance(raw_tool, str) and raw_tool else "tool"
                 if progress == "tool_start":
-                    send_event("tool_start", {
+                    payload: dict[str, Any] = {
                         "tool": tool, "classification": "bridge",
                         "decision": "running",
-                    })
+                    }
+                    args = event.get("args")
+                    if isinstance(args, dict) and args:
+                        payload["args_summary"] = _summarize(args)
+                    send_event("tool_start", payload)
                 elif progress == "tool_end":
-                    send_event("tool_end", {"tool": tool, "ok": True})
+                    # Forward the bridge's full account of the call —
+                    # outcome, duration and output size — so the UI's
+                    # verbose mode shows more than a bare "done".
+                    payload = {"tool": tool,
+                               "ok": event.get("ok", True) is not False}
+                    duration = event.get("duration_ms")
+                    if isinstance(duration, (int, float)):
+                        payload["duration_ms"] = int(duration)
+                    out_bytes = event.get("output_bytes")
+                    if isinstance(out_bytes, (int, float)):
+                        payload["stdout_bytes"] = int(out_bytes)
+                    send_event("tool_end", payload)
 
         try:
             send_event("phase", {"phase": "model"})

@@ -15,13 +15,25 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   failures, bytes of tool stdout/stderr, and streamed reply
   characters — for both the current turn and the whole browser
   session. `/verbose` (or `/verbose on|off`) toggles the detail: when
-  on, live tool lines show the policy decision and output size, and
-  every completed turn ends with a muted "Turn activity" tally. The
-  toggle persists in `localStorage`. The server's `tool_end` stream
+  on, live tool lines show the policy decision, argument summary,
+  duration and output size, and every completed turn — including a
+  failed one — ends with a muted "Turn activity" tally that also
+  reports elapsed time. Verbose always assumes **off**: it is a
+  per-page opt-in and resets on reload. The server's `tool_end` stream
   event now includes `stdout_bytes`/`stderr_bytes` so sizes can be
-  reported without shipping full output over the progress stream.
+  reported without shipping full output over the progress stream, and
+  the pi-mono bridge's tool progress frames now carry the tool
+  arguments, outcome, wall-clock duration and output byte count so
+  bridge-executed tools report more than a bare "done".
 
 ### Fixed
+- **No more stray blank lines around tool activity.** An empty live
+  activity block no longer reserves vertical space in the assistant
+  bubble (it is collapsed until the first tool line arrives), streamed
+  replies have their trailing newline trimmed when the live bubble
+  settles, and replaying a conversation skips stored messages with no
+  content instead of painting empty bubbles. UI only; stored
+  transcripts are unchanged.
 - **Tool observations no longer paint a stray dark line.** Tool
   output almost always ends with a newline; the transcript's dark
   `<pre>` blocks rendered that trailing newline as an extra empty

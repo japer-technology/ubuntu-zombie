@@ -13,7 +13,8 @@
 //   stdin  ← {"type":"tool_result", "id", "ok": bool, "result"|"error": ...}
 //   stdout → {"type":"final", "text"}
 //   stdout → {"type":"error", "message"}
-//   stdout → {"type":"progress", "kind":"tool_start"|"tool_end", "name", "id"}
+//   stdout → {"type":"progress", "kind":"tool_start"|"tool_end", "name", "id",
+//             tool_start: "args"; tool_end: "ok", "duration_ms", "output_bytes"}
 //   stdout → {"type":"token", "delta"}
 //
 // On systems without `pi` installed this bridge emits a clear
@@ -313,6 +314,9 @@ async function run() {
   let assistantText = "";   // latest successful assistant answer
   let lastError = "";       // latest provider/assistant error message
   let finalEmitted = false;
+  // Wall-clock start times per toolCallId so tool_end progress frames
+  // can report how long each of pi's built-in tool runs took.
+  const toolStarts = new Map();
 
   function finish() {
     if (finalEmitted) return;
@@ -358,14 +362,42 @@ async function run() {
         }
       }
     } else if (kind === "tool_execution_start" || kind === "tool_execution_end") {
-      // pi executes its own tools in --mode json; surface progress only.
+      // pi executes its own tools in --mode json; surface progress only,
+      // enriched so the chat UI's verbose mode has a full account of the
+      // call: args on start; outcome, wall-clock duration, and output
+      // size on end. Duration is measured here because pi's event stream
+      // does not carry one.
       logLine("pi_tool", { kind, name: evt.toolName, id: evt.toolCallId });
-      send({
-        type: "progress",
-        kind: kind === "tool_execution_start" ? "tool_start" : "tool_end",
-        name: evt.toolName || "",
-        id: evt.toolCallId || "",
-      });
+      const toolId = evt.toolCallId || "";
+      if (kind === "tool_execution_start") {
+        if (toolId) toolStarts.set(toolId, Date.now());
+        const progress = {
+          type: "progress",
+          kind: "tool_start",
+          name: evt.toolName || "",
+          id: toolId,
+        };
+        if (evt.args && typeof evt.args === "object") progress.args = evt.args;
+        send(progress);
+      } else {
+        const startedAt = toolId ? toolStarts.get(toolId) : undefined;
+        if (toolId) toolStarts.delete(toolId);
+        const progress = {
+          type: "progress",
+          kind: "tool_end",
+          name: evt.toolName || "",
+          id: toolId,
+          ok: evt.isError !== true,
+        };
+        if (typeof startedAt === "number") {
+          progress.duration_ms = Date.now() - startedAt;
+        }
+        const outText = typeof evt.result === "string"
+          ? evt.result
+          : extractText(evt.result && evt.result.content);
+        if (outText) progress.output_bytes = Buffer.byteLength(outText, "utf8");
+        send(progress);
+      }
     } else if (kind === "agent_end") {
       // `willRetry === true` means pi will auto-retry after a transient
       // error; only the terminal agent_end (or process exit) ends the turn.

@@ -50,6 +50,9 @@
   .live-activity { display: flex; flex-direction: column; gap: .2rem;
                    margin: .25rem 0 .35rem;
                    font-family: ui-monospace, monospace; font-size: .8rem; }
+  /* A turn with no tool calls must not draw a blank strip in the
+     bubble: collapse the activity block entirely while it is empty. */
+  .live-activity:empty { display: none; margin: 0; }
   .live-activity .act { display: flex; align-items: center; gap: .45rem; }
   .live-activity .act .icon { width: 1rem; text-align: center; flex: none; }
   .live-activity .act.done { opacity: .75; }
@@ -249,14 +252,15 @@ const QUEUED_PROMPT_PREVIEW_CHARS = 4000;
 // and the bytes their stdout/stderr moved, plus streamed reply
 // characters. Two buckets: the current turn and the whole browser
 // session. Pure bookkeeping — no behaviour depends on it beyond the
-// optional detail shown when verbose mode is on.
-const VERBOSE_STORAGE_KEY = "uz_verbose";
+// optional detail shown when verbose mode is on. Verbose always
+// assumes OFF: it is an explicit per-page opt-in via /verbose and is
+// deliberately not restored from storage, so a reload returns the UI
+// to its quiet default.
 let verboseMode = false;
-try { verboseMode = localStorage.getItem(VERBOSE_STORAGE_KEY) === "1"; }
-catch (_e) { /* storage unavailable; default off */ }
 
 function newStatBucket() {
-  return { apiCalls: 0, bytesOut: 0, bytesIn: 0, sseEvents: 0,
+  return { startedAt: Date.now(),
+           apiCalls: 0, bytesOut: 0, bytesIn: 0, sseEvents: 0,
            toolCalls: 0, toolFailures: 0, toolOutputBytes: 0,
            streamChars: 0 };
 }
@@ -285,13 +289,25 @@ function formatBytes(n) {
 
 function statsSummary(bucket) {
   const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
-  return `${plural(bucket.apiCalls, "API call")}` +
+  const elapsed = Math.max(0, Math.round((Date.now() - bucket.startedAt) / 1000));
+  return `${elapsed}s elapsed` +
+    ` · ${plural(bucket.apiCalls, "API call")}` +
     ` (${formatBytes(bucket.bytesOut)} out · ${formatBytes(bucket.bytesIn)} in)` +
     ` · ${plural(bucket.toolCalls, "tool call")}` +
     (bucket.toolFailures ? ` (${bucket.toolFailures} failed)` : "") +
     ` · ${formatBytes(bucket.toolOutputBytes)} tool output` +
     ` · ${plural(bucket.sseEvents, "stream event")}` +
     ` · ${bucket.streamChars} streamed chars`;
+}
+
+// The full per-turn account, appended after every completed turn while
+// verbose mode is on — including failed turns, so nothing the page did
+// in the background ever goes unreported.
+function appendVerboseTally() {
+  if (!verboseMode) return;
+  log.appendChild(el("div", { class: "muted",
+    text: `Turn activity: ${statsSummary(netStats.turn)}` }));
+  scrollLog();
 }
 
 // Route every API call through one wrapper so verbose accounting sees
@@ -711,7 +727,7 @@ const SLASH_COMMANDS = [
   ["/tools", "List the closed tool registry.", "Tools"],
   ["/ttl [duration|reset [duration]|--die]", "Show, extend, reset, or trip the Time to Live.", "Session"],
   ["/undo [n]", "Rewind n user turns in a new branch.", "Conversation"],
-  ["/verbose [on|off]", "Toggle background-activity detail: API calls, tool calls, bytes moved.", "Diagnostics"],
+  ["/verbose [on|off]", "Toggle background-activity detail: API calls, tool calls, bytes moved. Off by default; resets on reload.", "Diagnostics"],
   ["/version", "Show Ubuntu Zombie and bridge versions.", "Diagnostics"],
   ["/whoami", "Show the active agent identity.", "Configuration"]
 ];
@@ -735,6 +751,10 @@ function renderConversation(messages, events) {
   let seq = 0;
   for (const m of messages || []) {
     if (m.role === "user" || m.role === "assistant") {
+      // A stored message with no content (e.g. an empty final reply)
+      // would paint a blank bubble — an empty line in the transcript —
+      // so skip it entirely.
+      if (!m.content || !String(m.content).trim()) continue;
       items.push({ at: m.created_at, seq: seq++, node: () => addMessage(m.role, m.content) });
     }
   }
@@ -1001,10 +1021,7 @@ function applyTurnPayload(data) {
   if (data.error) addMessage("system", data.error, { error: true });
   // In verbose mode every completed turn ends with its background
   // activity tally so the operator can see what the turn cost.
-  if (verboseMode) {
-    log.appendChild(el("div", { class: "muted",
-      text: `Turn activity: ${statsSummary(netStats.turn)}` }));
-  }
+  appendVerboseTally();
   scrollLog();
   return data;
 }
@@ -1157,6 +1174,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       dots.remove();
       spinner.remove();
       liveTurnCleanup = null;
+      // Streamed replies routinely end with a trailing newline; inside
+      // a pre-wrap bubble that paints as an extra blank line, so trim it.
+      body.textContent = body.textContent.replace(/\s+$/, "");
       if (finalStatus === null) return;
       if (!body.textContent && !activity.childElementCount) {
         live.remove();
@@ -1216,8 +1236,13 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const tool = p.tool || "tool";
       const detail = (p.classification && p.classification !== "bridge")
         ? ` · ${p.classification}` : "";
-      const verboseDetail = (verboseMode && p.decision)
-        ? ` · ${p.decision}` : "";
+      // Verbose mode accounts for the full call: the policy decision
+      // and the (already summarised) arguments the tool was given.
+      let verboseDetail = "";
+      if (verboseMode) {
+        if (p.decision) verboseDetail += ` · ${p.decision}`;
+        if (p.args_summary) verboseDetail += ` · ${p.args_summary}`;
+      }
       startToolLine(tool, `${tool}${detail}${verboseDetail} — running…`);
       setStatus(`Running ${tool}…`);
     });
@@ -1237,7 +1262,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
         const bits = [];
         if (p.exit_code !== undefined && p.exit_code !== null) bits.push(`exit ${p.exit_code}`);
         if (typeof p.duration_ms === "number") bits.push(`${p.duration_ms} ms`);
-        if (verboseMode && moved > 0) bits.push(`${formatBytes(moved)} output`);
+        // Verbose accounts for the output even when nothing moved, so
+        // "done" is never the whole story.
+        if (verboseMode) bits.push(`${formatBytes(moved)} output`);
         endToolLine(tool, true, `${tool} — done${bits.length ? ` (${bits.join(" · ")})` : ""}`);
       }
       setStatus(`Finished ${tool}.`);
@@ -1270,6 +1297,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       settleLive("Turn failed.");
       if (p.dead) showTombstone(p);
       if (p.error) addMessage("system", p.error, { error: true });
+      appendVerboseTally();
       completeUi();
     });
     activeEventSource.onerror = async () => {
@@ -1469,14 +1497,12 @@ async function handleSlashCommand(input) {
         addMessage("system", "Usage: /verbose [on|off]", { error: true });
         return true;
       }
-      try {
-        localStorage.setItem(VERBOSE_STORAGE_KEY, verboseMode ? "1" : "0");
-      } catch (_e) { /* storage unavailable; toggle applies to this page only */ }
       addMessage("system",
         `Verbose mode ${verboseMode ? "on" : "off"}.` +
         (verboseMode
           ? " Each turn now ends with its background-activity tally" +
-            " and tool lines include extra detail."
+            " and tool lines include extra detail." +
+            " Verbose resets to off when the page reloads."
           : "") +
         `\nSession activity so far: ${statsSummary(netStats.session)}`);
       return true;
