@@ -16,6 +16,17 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `SECURITY.md`. Documentation only; no behaviour changes.
 
 ### Added
+- **New research note `docs/research/OPEN-WEBUI-LESSONS-PLAN.md`.**
+  A phased implementation plan that turns the distilled ten-item
+  shortlist in `docs/research/OPEN-WEBUI-LESSONS.md` into concrete
+  work items grounded in the current codebase — five phases
+  (liveness plumbing, input/output ergonomics, continuity, memory
+  and hygiene, proactivity and installer work), each naming touch
+  points, design, policy/audit obligations, tests, docs, and an
+  acceptance check, plus cross-cutting guardrails and open
+  questions to settle before work starts. Linked from
+  `docs/research/README.md`. Documentation only; no behaviour
+  changes.
 - **New research note `docs/research/OPEN-WEBUI-LESSONS.md`.**
   A companion to `OPEN-WEBUI-POSSIBILITIES.md` that distils the
   study into lessons for Zombie's local chat — the operator's only
