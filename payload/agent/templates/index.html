@@ -1181,29 +1181,28 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     // "running…" to done/failed in place instead of stacking empty
     // proposal/observation boxes mid-turn.
     const toolLineStacks = new Map();
-    const startToolLine = (name, note) => {
+    // ``track: false`` renders a line without registering it in the
+    // per-tool stack — used when a tool_end has no matching tool_start,
+    // so the orphan line cannot swallow a later result for the tool.
+    const startToolLine = (name, note, track = true) => {
       const line = el("div", { class: "act running" });
       line.appendChild(el("span", { class: "icon", text: "⏳" }));
       line.appendChild(el("span", { text: note }));
       activity.appendChild(line);
-      const stack = toolLineStacks.get(name) || [];
-      stack.push(line);
-      toolLineStacks.set(name, stack);
+      if (track) {
+        const stack = toolLineStacks.get(name) || [];
+        stack.push(line);
+        toolLineStacks.set(name, stack);
+      }
       scrollLog();
       return line;
     };
     const endToolLine = (name, ok, note) => {
       // A tool_end without a matching tool_start (out-of-order or
-      // dropped frame) still gets a completed line so it is visible —
-      // and that fallback line is consumed immediately (startToolLine
-      // pushed it) so it cannot swallow a later tool_end for this name.
+      // dropped frame) still gets a completed line so it is visible.
       const stack = toolLineStacks.get(name);
-      let line = stack ? stack.shift() : undefined;
-      if (!line) {
-        line = startToolLine(name, note);
-        const created = toolLineStacks.get(name);
-        if (created) created.pop();
-      }
+      const line = (stack ? stack.shift() : undefined) ||
+                   startToolLine(name, note, false);
       line.className = `act ${ok === false ? "failed" : "done"}`;
       line.replaceChildren(
         el("span", { class: "icon", text: ok === false ? "✗" : "✓" }),
