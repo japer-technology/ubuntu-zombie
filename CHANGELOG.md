@@ -16,6 +16,17 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `SECURITY.md`. Documentation only; no behaviour changes.
 
 ### Added
+- **New research note `docs/research/OPEN-WEBUI-LESSONS.md`.**
+  A companion to `OPEN-WEBUI-POSSIBILITIES.md` that distils the
+  study into lessons for Zombie's local chat — the operator's only
+  interface — grouped into perceived liveness (SSE streaming,
+  rendering), context ergonomics (`#` injection, curated skills,
+  auto-compaction), continuity (machine memory, FTS + tags,
+  audit-grounded export), proactivity (scheduled read-only
+  check-ups, `/` presets, fixed filters), and what the chat must
+  refuse to become, with a distilled ten-item shortlist. Linked
+  from `docs/research/README.md`. Documentation only; no behaviour
+  changes.
 - **New research note `docs/research/OPEN-WEBUI-POSSIBILITIES.md`.**
   A deep study of the Open WebUI chat platform
   (`open-webui/open-webui` 0.10.2): architecture, license history

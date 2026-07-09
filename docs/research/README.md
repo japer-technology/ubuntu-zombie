@@ -11,9 +11,11 @@ Ubuntu Zombie:
   evaluated (LinuxAgent, LinuxOSAI, Missy, SysAdminAgents, SysKnife).
 - `SIMILAR.md` — a shorter catalog of adjacent projects that overlap
   with parts of the design.
-- `OPEN-WEBUI-POSSIBILITIES.md` — a study of the Open WebUI chat
-  platform: what it offers, and which of its capabilities Zombie's
-  chat should borrow, translate, defer, or refuse.
+- `OPEN-WEBUI-POSSIBILITIES.md` and `OPEN-WEBUI-LESSONS.md` — a study
+  of the Open WebUI chat platform (what it offers, and which of its
+  capabilities Zombie's chat should borrow, translate, defer, or
+  refuse) and the distilled lessons for making Zombie's local chat —
+  the operator's only interface — world class.
 
 If you are trying to **use** Ubuntu Zombie, you almost certainly want
 [`docs/QUICKSTART.md`](../QUICKSTART.md),
