@@ -395,7 +395,7 @@ async function run() {
         const outText = typeof evt.result === "string"
           ? evt.result
           : extractText(evt.result && evt.result.content);
-        if (outText) progress.output_bytes = Buffer.byteLength(outText, "utf8");
+        progress.output_bytes = Buffer.byteLength(outText || "", "utf8");
         send(progress);
       }
     } else if (kind === "agent_end") {
