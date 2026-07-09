@@ -602,22 +602,31 @@ behaviour is unchanged.
    for A1's first release, with token streaming following once the
    pi-mono bridge grows delta support — or is token streaming a
    hard requirement for the phase?
+   ANSWER: Not Hard!
+   
 2. **Check-up default.** Should E1 be default-on (env-disable) or
    an opt-in `ZOMBIE_INSTALL_CHECKUP` optional component? The
    lessons note leans core; the options contract leans opt-in.
+   ANSWER: Optional!
+   
 3. **Memory approval ergonomics.** Is one approval click per
    remembered fact acceptable, or should `memory.append` get an
    `auto` policy default with the audit log as the safety net?
    (Plan assumes approval-gated; relaxing it is a policy.yaml edit,
    not a code change.)
+   ANSWER: auto and log!
+   
 4. **Tag storage shape.** JSON-array column (planned) versus a
    normalised `tags` table — the former is simpler; the latter is
    only needed if tag queries grow beyond C1's filter.
+   ANSWER: JSON!
+   
 5. **`#journal:` scope.** Should journal references land with B2 or
    be deferred until a `journalctl` read-only shim exists in
    `tools.py`? (Plan text assumes it ships with B2 via `shell.run`
    being avoided and a small dedicated shim added instead — confirm
    appetite for one new read-only tool.)
+   ANSWER: Confirmed!
 
 ---
 
