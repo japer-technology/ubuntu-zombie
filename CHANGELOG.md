@@ -8,6 +8,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Changed
+- **`LOGO-MEANING.md` rewritten for clarity and voice.** The logo
+  explainer now opens with a one-line reading, gives each section an
+  evocative tagline, and tightens the prose throughout while keeping
+  every claim anchored to `README.md`, `docs/VISION.md`, and
+  `SECURITY.md`. Documentation only; no behaviour changes.
+
 ### Added
 - **New `multipliers/` analysis library.** A documentation-only
   design surface (like `options/`) analysing how to multiply the
