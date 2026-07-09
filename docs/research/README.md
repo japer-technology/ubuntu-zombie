@@ -16,6 +16,9 @@ Ubuntu Zombie:
   capabilities Zombie's chat should borrow, translate, defer, or
   refuse) and the distilled lessons for making Zombie's local chat —
   the operator's only interface — world class.
+- `OPEN-WEBUI-LESSONS-PLAN.md` — a phased implementation plan that
+  turns the distilled shortlist in `OPEN-WEBUI-LESSONS.md` into
+  concrete work items against the current codebase.
 
 If you are trying to **use** Ubuntu Zombie, you almost certainly want
 [`docs/QUICKSTART.md`](../QUICKSTART.md),
