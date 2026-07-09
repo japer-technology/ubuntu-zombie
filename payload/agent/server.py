@@ -378,6 +378,8 @@ class App:
             if drop_index is None:
                 if event == "token":
                     return
+                # No stale token exists; make room for this state
+                # transition by dropping the oldest queued frame.
                 drop_index = 0
             del state.queue.queue[drop_index]
             state.queue.queue.append(frame)

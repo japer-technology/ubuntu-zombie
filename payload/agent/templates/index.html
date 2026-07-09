@@ -694,9 +694,9 @@ function showQueuedPrompt(prompt, replaced = null) {
 }
 
 function queuePrompt(prompt) {
-  const replaced = queuedPrompt;
+  const previousPrompt = queuedPrompt;
   queuedPrompt = prompt;
-  showQueuedPrompt(prompt, replaced);
+  showQueuedPrompt(prompt, previousPrompt);
 }
 
 function drainQueuedPrompt() {
@@ -1051,6 +1051,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     });
     activeEventSource.onerror = async () => {
       if (completed) return;
+      // EventSource.readyState is 0 CONNECTING, 1 OPEN, 2 CLOSED.
       const states = ["connecting", "open", "closed"];
       const readyState = activeEventSource ? activeEventSource.readyState : 2;
       const stateName = states[readyState] || "unknown";
