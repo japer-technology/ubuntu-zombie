@@ -13,6 +13,8 @@
 //   stdin  ← {"type":"tool_result", "id", "ok": bool, "result"|"error": ...}
 //   stdout → {"type":"final", "text"}
 //   stdout → {"type":"error", "message"}
+//   stdout → {"type":"progress", "kind":"tool_start"|"tool_end", "name", "id"}
+//   stdout → {"type":"token", "delta"}
 //
 // On systems without `pi` installed this bridge emits a clear
 // error and exits; smoke tests override it via $ZOMBIE_PI_MONO_BRIDGE.
@@ -41,9 +43,39 @@ import { dirname } from "node:path";
 
 const stdin = process.stdin;
 const stdout = process.stdout;
+const TOKEN_FLUSH_CHARS = 64;
+const TOKEN_FLUSH_MS = 50;
 
 function send(obj) {
   stdout.write(JSON.stringify(obj) + "\n");
+}
+
+let tokenBuffer = "";
+let tokenTimer = null;
+
+function flushTokenBuffer() {
+  if (!tokenBuffer) return;
+  send({ type: "token", delta: tokenBuffer });
+  tokenBuffer = "";
+  if (tokenTimer !== null) {
+    clearTimeout(tokenTimer);
+    tokenTimer = null;
+  }
+}
+
+function sendTokenDelta(delta) {
+  if (!delta) return;
+  tokenBuffer += delta;
+  // Coalesce tiny provider deltas so a fast model cannot flood stdout
+  // line-by-line while keeping the UI lively.
+  if (tokenBuffer.length >= TOKEN_FLUSH_CHARS) {
+    flushTokenBuffer();
+    return;
+  }
+  if (tokenTimer === null) {
+    tokenTimer = setTimeout(flushTokenBuffer, TOKEN_FLUSH_MS);
+    if (typeof tokenTimer.unref === "function") tokenTimer.unref();
+  }
 }
 
 function fatal(message) {
@@ -286,6 +318,7 @@ async function run() {
     if (finalEmitted) return;
     finalEmitted = true;
     clearIdle();
+    flushTokenBuffer();
     if (assistantText) {
       send({ type: "final", text: assistantText });
     } else if (lastError) {
@@ -310,6 +343,7 @@ async function run() {
       const ame = evt.assistantMessageEvent;
       if (ame && ame.type === "text_delta" && typeof ame.delta === "string") {
         assistantText += ame.delta;
+        sendTokenDelta(ame.delta);
       }
     } else if (kind === "message_end") {
       const msg = evt.message;
@@ -324,8 +358,14 @@ async function run() {
         }
       }
     } else if (kind === "tool_execution_start" || kind === "tool_execution_end") {
-      // pi executes its own tools in --mode json; log for diagnostics only.
+      // pi executes its own tools in --mode json; surface progress only.
       logLine("pi_tool", { kind, name: evt.toolName, id: evt.toolCallId });
+      send({
+        type: "progress",
+        kind: kind === "tool_execution_start" ? "tool_start" : "tool_end",
+        name: evt.toolName || "",
+        id: evt.toolCallId || "",
+      });
     } else if (kind === "agent_end") {
       // `willRetry === true` means pi will auto-retry after a transient
       // error; only the terminal agent_end (or process exit) ends the turn.

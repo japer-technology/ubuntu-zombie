@@ -23,6 +23,10 @@ Protocol (Python ↔ bridge, one JSON object per line):
      ...}`` — Python → bridge
 * ``{"type":"final", "text": str}`` — bridge → Python (terminates)
 * ``{"type":"error", "message": str}`` — bridge → Python (terminates)
+* ``{"type":"progress", "kind": "tool_start"|"tool_end", "name": str,
+     "id": str}`` — bridge → Python (optional live progress)
+* ``{"type":"token", "delta": str}`` — bridge → Python (optional
+  assistant text delta)
 
 The bridge handles the actual ``pi --mode rpc`` (or ``--mode json``)
 plumbing, including ``--no-builtin-tools`` and ``--tools <names>``
@@ -124,6 +128,7 @@ def run_turn(
     max_tool_calls: int = 8,
     settings_path: Path | str | None = None,
     timeout: float | None = None,
+    on_event: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run one pi-mono turn.
 
@@ -138,6 +143,10 @@ def run_turn(
     error rather than blocking the operator forever. ``None`` falls back
     to ``ZOMBIE_PI_MONO_TIMEOUT`` then :data:`DEFAULT_TURN_TIMEOUT`; a
     non-positive value disables the watchdog.
+
+    ``on_event`` receives optional ``token`` and ``progress`` bridge
+    events as they arrive. The callback is best-effort: exceptions are
+    swallowed so UI streaming can never break the turn.
     """
     argv = _bridge_argv()
     log = _log_path()
@@ -265,6 +274,15 @@ def run_turn(
                 raise BridgeError(f"Malformed bridge event: {exc}: {line!r}") from exc
             kind = event.get("type")
             events.append(event)
+            if kind in {"token", "progress"} and on_event is not None:
+                try:
+                    on_event(event)
+                except Exception as exc:  # noqa: BLE001
+                    print(
+                        f"pi_mono on_event callback failed: {exc.__class__.__name__}: {exc}",
+                        file=sys.stderr,
+                    )
+                    pass
             if kind == "tool_call":
                 calls_made += 1
                 if calls_made > max_tool_calls:

@@ -37,6 +37,10 @@
   .system { background: #f5a62320; border: 1px solid #f5a62366;
             font-family: ui-monospace, monospace; font-size: .85rem; }
   .system.error { background: #e74c3c30; border-color: #e74c3c; }
+  .queued { background: #4a90e214; border: 1px dashed #4a90e299; }
+  .queued .actions { margin-top: .4rem; }
+  .queued pre { margin: .35rem 0 0; white-space: pre-wrap; }
+  .live-status { font-size: .8rem; opacity: .8; margin-top: .35rem; }
   .role { font-size: .7rem; text-transform: uppercase; opacity: .6;
           margin-bottom: .2rem; }
   .proposal { border: 1px solid #f5a623; border-radius: .5rem;
@@ -210,9 +214,14 @@ let authRequired = false;
 // ZOMBIE_PI_MONO_IDLE_TIMEOUT) — so a legitimately slow turn always
 // completes (or fails cleanly) server-side before the browser gives up.
 let turnController = null;
+let activeEventSource = null;
+let turnBusy = false;
 let thinkingEl = null;
 let thinkingTimer = null;
+let queuedPrompt = null;
+let queuedBubble = null;
 const CLIENT_TURN_TIMEOUT_MS = 720000;
+const QUEUED_PROMPT_PREVIEW_CHARS = 4000;
 
 function el(tag, attrs = {}, ...children) {
   const e = document.createElement(tag);
@@ -397,6 +406,7 @@ function setBusy(busy) {
   // Keep the textarea enabled so slash commands (/help, /clear, /stop)
   // remain usable, but reflect the turn state on the controls.
   sendBtn.disabled = busy;
+  turnBusy = busy;
   stopBtn.hidden = !busy;
   log.setAttribute("aria-busy", busy ? "true" : "false");
   statusEl.textContent = busy ? "Agent is working…" : "";
@@ -405,6 +415,13 @@ function setBusy(busy) {
 function abortTurn(reason) {
   if (turnController) {
     try { turnController.abort(); } catch (_e) { /* ignore */ }
+  }
+  if (activeEventSource) {
+    try { activeEventSource.close(); } catch (_e) { /* ignore */ }
+    activeEventSource = null;
+    setBusy(false);
+    promptEl.focus();
+    drainQueuedPrompt();
   }
   if (reason) statusEl.textContent = reason;
 }
@@ -644,6 +661,55 @@ async function uzFetchJson(path) {
   return data;
 }
 
+function showQueuedPrompt(prompt, replaced = null) {
+  if (!queuedBubble) {
+    queuedBubble = el("div", { class: "msg user queued" });
+    queuedBubble.appendChild(el("div", { class: "role", text: "queued" }));
+    log.appendChild(queuedBubble);
+  }
+  queuedBubble.replaceChildren(
+    el("div", { class: "role", text: "queued" }),
+    el("div", { text: replaced
+      ? "Queued - replaced the previous queued message shown below."
+      : "Queued - will be sent when the current turn finishes. A page refresh discards it." })
+  );
+  // Keep the transient queue bubble bounded; the full prompt is still
+  // sent from queuedPrompt, only the on-screen preview is clipped.
+  if (replaced) {
+    queuedBubble.appendChild(el("div", { class: "role", text: "replaced" }));
+    queuedBubble.appendChild(el("pre", { text: replaced.slice(0, QUEUED_PROMPT_PREVIEW_CHARS) }));
+    queuedBubble.appendChild(el("div", { class: "role", text: "will send next" }));
+  }
+  queuedBubble.appendChild(el("pre", { text: prompt.slice(0, QUEUED_PROMPT_PREVIEW_CHARS) }));
+  const actions = el("div", { class: "actions" });
+  const discard = el("button", { type: "button", text: "Discard queued message" });
+  discard.addEventListener("click", () => {
+    queuedPrompt = null;
+    if (queuedBubble) queuedBubble.remove();
+    queuedBubble = null;
+  });
+  actions.appendChild(discard);
+  queuedBubble.appendChild(actions);
+  scrollLog();
+}
+
+function queuePrompt(prompt) {
+  const previousPrompt = queuedPrompt;
+  queuedPrompt = prompt;
+  showQueuedPrompt(prompt, previousPrompt);
+}
+
+function drainQueuedPrompt() {
+  if (!queuedPrompt || turnBusy) return;
+  const next = queuedPrompt;
+  queuedPrompt = null;
+  if (queuedBubble) queuedBubble.remove();
+  queuedBubble = null;
+  // Let the DOM remove the queued bubble before the next turn appends
+  // its user message and starts streaming.
+  setTimeout(() => { uzSendPrompt(next); }, 0);
+}
+
 async function uzPostJson(path, body = {}) {
   const r = await fetch(path, {
     method: "POST",
@@ -668,6 +734,14 @@ function uzCommandEntries(filter = "") {
 
 function uzCommandHelp(filter = "") {
   const lines = [];
+  if (!filter.trim()) {
+    lines.push(
+      "General:",
+      "  While the agent is working, another normal message is queued and sent next.",
+      "  Submitting a second queued message replaces the first; slash commands still run immediately.",
+      ""
+    );
+  }
   let group = "";
   for (const [cmd, desc, nextGroup] of uzCommandEntries(filter)) {
     if (nextGroup !== group) {
@@ -808,7 +882,25 @@ async function uzDecidePending(decision, arg) {
   if (result.result) log.appendChild(renderResult(result.result));
 }
 
-async function uzSendPrompt(prompt, convId = conversationId) {
+function applyTurnPayload(data) {
+  if (!data) return data;
+  if (data.dead) showTombstone(data);
+  conversationId = data.conversation_id ?? conversationId;
+  if (data.messages || data.events) {
+    uzClearLog();
+    renderConversation(data.messages || [], data.events || []);
+  } else {
+    if (data.error) addMessage("system", data.error, { error: true });
+    if (data.reply) addMessage("assistant", data.reply);
+  }
+  const events = data.events || [];
+  if (events.length) log.appendChild(renderTurnCounter(events));
+  if (data.error) addMessage("system", data.error, { error: true });
+  scrollLog();
+  return data;
+}
+
+async function uzSendPromptSync(prompt, convId = conversationId) {
   addMessage("user", prompt);
   setBusy(true);
   thinkingEl = showThinking();
@@ -832,17 +924,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       setAuthState(true, false);
       showLogin(true);
     }
-    conversationId = data.conversation_id ?? conversationId;
-    if (data.error) addMessage("system", data.error, { error: true });
-    if (data.reply) addMessage("assistant", data.reply);
-    const events = data.events || [];
-    for (const ev of events) {
-      const node = renderEvent(ev);
-      if (node) log.appendChild(node);
-    }
-    if (events.length) log.appendChild(renderTurnCounter(events));
-    scrollLog();
-    return data;
+    return applyTurnPayload(data);
   } catch (err) {
     clearThinking();
     if (err && err.name === "AbortError") {
@@ -859,6 +941,154 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     turnController = null;
     setBusy(false);
     promptEl.focus();
+    drainQueuedPrompt();
+  }
+}
+
+async function uzSendPrompt(prompt, convId = conversationId) {
+  if (!window.EventSource) return uzSendPromptSync(prompt, convId);
+  addMessage("user", prompt);
+  setBusy(true);
+  thinkingEl = showThinking();
+  turnController = new AbortController();
+  let timeoutId = null;
+  let completed = false;
+  const armTimeout = () => {
+    if (timeoutId !== null) clearTimeout(timeoutId);
+    timeoutId = setTimeout(
+      () => abortTurn(`No response after ${Math.round(CLIENT_TURN_TIMEOUT_MS / 1000)}s - giving up.`),
+      CLIENT_TURN_TIMEOUT_MS);
+  };
+  armTimeout();
+  try {
+    const r = await fetch("/api/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, conversation_id: convId, stream: true }),
+      signal: turnController.signal,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) {
+      setAuthState(true, false);
+      showLogin(true);
+      return data;
+    }
+    if (r.status === 410 || data.dead) {
+      showTombstone(data);
+      return data;
+    }
+    if (!r.ok || data.error || !data.turn_id) {
+      clearThinking();
+      return applyTurnPayload(data);
+    }
+    conversationId = data.conversation_id ?? conversationId;
+    clearThinking();
+    const live = addMessage("assistant", "", { record: false });
+    const body = live.lastElementChild;
+    const status = el("div", { class: "live-status", text: "Connecting to live turn…" });
+    live.appendChild(status);
+    activeEventSource = new EventSource(`/api/stream/${encodeURIComponent(data.turn_id)}`);
+
+    const completeUi = () => {
+      if (timeoutId !== null) { clearTimeout(timeoutId); timeoutId = null; }
+      turnController = null;
+      setBusy(false);
+      promptEl.focus();
+      drainQueuedPrompt();
+    };
+    const finish = (payload) => {
+      completed = true;
+      if (activeEventSource) activeEventSource.close();
+      activeEventSource = null;
+      applyTurnPayload(payload);
+      completeUi();
+    };
+    activeEventSource.addEventListener("phase", (ev) => {
+      armTimeout();
+      const p = JSON.parse(ev.data || "{}");
+      status.textContent = `Phase: ${p.phase || "working"}`;
+    });
+    activeEventSource.addEventListener("token", (ev) => {
+      armTimeout();
+      const p = JSON.parse(ev.data || "{}");
+      body.textContent += p.delta || "";
+      scrollLog();
+    });
+    activeEventSource.addEventListener("tool_start", (ev) => {
+      armTimeout();
+      const p = JSON.parse(ev.data || "{}");
+      status.textContent = `Running ${p.tool || "tool"}…`;
+      log.appendChild(renderToolCall(p));
+      scrollLog();
+    });
+    activeEventSource.addEventListener("tool_end", (ev) => {
+      armTimeout();
+      const p = JSON.parse(ev.data || "{}");
+      status.textContent = `Finished ${p.tool || "tool"}.`;
+      log.appendChild(renderToolObservation({ tool: p.tool, ok: p.ok, result: p, error: p.error }));
+      scrollLog();
+    });
+    activeEventSource.addEventListener("pending_approval", (ev) => {
+      armTimeout();
+      const p = JSON.parse(ev.data || "{}");
+      status.textContent = `Approval required for ${p.tool || "tool"}.`;
+      log.appendChild(renderPendingToolCall(p));
+      scrollLog();
+    });
+    activeEventSource.addEventListener("turn_done", (ev) => {
+      armTimeout();
+      finish(JSON.parse(ev.data || "{}"));
+    });
+    activeEventSource.addEventListener("turn_error", (ev) => {
+      armTimeout();
+      completed = true;
+      const p = JSON.parse(ev.data || "{}");
+      if (activeEventSource) activeEventSource.close();
+      activeEventSource = null;
+      if (p.dead) showTombstone(p);
+      if (p.error) addMessage("system", p.error, { error: true });
+      completeUi();
+    });
+    activeEventSource.onerror = async () => {
+      if (completed) return;
+      // EventSource.readyState is 0 CONNECTING, 1 OPEN, 2 CLOSED.
+      const states = ["connecting", "open", "closed"];
+      const readyState = activeEventSource ? activeEventSource.readyState : 2;
+      const stateName = states[readyState] || "unknown";
+      if (activeEventSource) activeEventSource.close();
+      activeEventSource = null;
+      clearThinking();
+      statusEl.textContent =
+        `Live stream interrupted (${stateName}); reloading conversation…`;
+      if (conversationId) {
+        try { await uzLoadConversation(conversationId, "Reloaded after streaming interruption."); }
+        catch (err) { addMessage("system", String(err), { error: true }); }
+      } else {
+        addMessage("system",
+          "Live stream interrupted before the server returned a conversation id.",
+          { error: true });
+      }
+      completeUi();
+    };
+    return data;
+  } catch (err) {
+    clearThinking();
+    if (err && err.name === "AbortError") {
+      addMessage("system",
+        "Request cancelled. The agent may still finish in the background; " +
+        "reload to see the latest conversation.", { error: true });
+    } else {
+      addMessage("system", String(err), { error: true });
+    }
+    return null;
+  } finally {
+    if (!activeEventSource) {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      turnController = null;
+      setBusy(false);
+      promptEl.focus();
+      drainQueuedPrompt();
+    }
   }
 }
 
@@ -914,6 +1144,7 @@ async function handleSlashCommand(input) {
         "Keyboard shortcuts:\n" +
         "Enter - send the current message\n" +
         "Shift+Enter (or Ctrl/Cmd+Enter) - insert a newline\n" +
+        "Enter during a running turn - queue one next message\n" +
         "/stop - cancel the in-flight turn");
       return true;
     }
@@ -1285,11 +1516,16 @@ async function handleSlashCommand(input) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (sendBtn.disabled) return; // a turn is already in flight
   const prompt = promptEl.value.trim();
   if (!prompt) return;
   if (await handleSlashCommand(prompt)) {
     promptEl.value = "";
+    promptEl.focus();
+    return;
+  }
+  if (turnBusy) {
+    promptEl.value = "";
+    queuePrompt(prompt);
     promptEl.focus();
     return;
   }

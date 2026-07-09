@@ -56,6 +56,9 @@ password is stored. When the TTL expires — or you run `/ttl --die` in
 the chat — the zombie permanently disables itself until the next
 reinstall. Extend it from the chat with `/ttl <days>`. See
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#chat-access) for details.
+The chat streams live turn progress when the browser supports
+`EventSource`, falls back automatically when it does not, and keeps one
+visible queued message if you submit while the agent is already working.
 
 Provider and model selection are read from
 `/opt/ai-zombie/secrets/env`, not from `pi`'s native `~/.pi` defaults:

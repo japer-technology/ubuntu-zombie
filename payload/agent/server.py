@@ -28,14 +28,17 @@ import html
 import json
 import os
 import platform
+import queue
 import socket
 import stat
 import sys
 import threading
+import time
+import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import unquote
 
 HERE = Path(__file__).resolve().parent
@@ -55,6 +58,26 @@ import tools as tools_mod  # noqa: E402
 SECRETS_FILE = Path(os.environ.get("ZOMBIE_SECRETS", "/opt/ai-zombie/secrets/env"))
 DEFAULT_PORT = int(os.environ.get("ZOMBIE_CHAT_PORT", "7878"))
 DEFAULT_HOST = "127.0.0.1"
+# Streaming is per active operator turn. A thousand queued frames is
+# enough for very chatty token streams without letting a disconnected
+# browser grow memory unbounded; completed payloads are retained briefly
+# so a late EventSource can still receive the terminal frame.
+STREAM_QUEUE_MAX = 1000
+STREAM_RETAIN_SECONDS = 300.0
+STREAM_KEEPALIVE_SECONDS = 15.0
+
+
+class TurnStream:
+    def __init__(self, turn_id: str, conversation_id: int) -> None:
+        self.turn_id = turn_id
+        self.conversation_id = conversation_id
+        self.queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue(
+            maxsize=STREAM_QUEUE_MAX
+        )
+        self.created_at = time.monotonic()
+        self.done_at: float | None = None
+        self.attached = False
+        self.final_payload: dict[str, Any] | None = None
 
 
 def _agent_account() -> str:
@@ -233,6 +256,10 @@ class App:
         # restart so every browser re-authenticates; tokens are opaque
         # and never persisted.
         self.sessions: set[str] = set()
+        # Active / recently completed streaming turns, keyed by opaque
+        # turn id. The final payload is retained briefly so a late
+        # EventSource can receive a terminal event instead of hanging.
+        self.turns: dict[str, TurnStream] = {}
         self._lock = threading.Lock()
 
     # ---- authentication + lifecycle ----
@@ -329,7 +356,56 @@ class App:
         return {"ok": True, "required": False, "logoff_required": False}
 
     # ---- conversation flow ----
-    def post_message(self, conv_id: int | None, prompt: str) -> dict[str, Any]:
+    def _emit_turn(self, state: TurnStream, event: str,
+                   payload: dict[str, Any]) -> None:
+        frame = (event, payload)
+        try:
+            state.queue.put_nowait(frame)
+            return
+        except queue.Full:
+            pass
+        # Prefer dropping stale token deltas; phase/tool/final/error
+        # events carry state transitions and should survive overflow.
+        # ``queue.Queue`` has no drop-oldest API, so this uses its
+        # documented synchronization primitives while touching the
+        # underlying deque under the queue mutex. That keeps the worker
+        # non-blocking and avoids draining 1000 queued frames into a
+        # temporary list; CPython's stdlib queue exposes these attributes
+        # for subclass implementations, and Ubuntu's supported Python
+        # versions preserve that contract.
+        with state.queue.mutex:
+            drop_index: int | None = None
+            for idx, old in enumerate(state.queue.queue):
+                if old[0] == "token":
+                    drop_index = idx
+                    break
+            if drop_index is None:
+                if event == "token":
+                    return
+                # No stale token exists; make room for this state
+                # transition by dropping the oldest queued frame.
+                drop_index = 0
+            del state.queue.queue[drop_index]
+            state.queue.queue.append(frame)
+            state.queue.not_empty.notify()
+
+    def _finish_turn(self, state: TurnStream, payload: dict[str, Any],
+                     event: str = "turn_done") -> None:
+        state.final_payload = payload
+        state.done_at = time.monotonic()
+        self._emit_turn(state, event, payload)
+
+    def _sweep_turns(self) -> None:
+        now = time.monotonic()
+        expired = [
+            tid for tid, state in self.turns.items()
+            if state.done_at is not None and now - state.done_at > STREAM_RETAIN_SECONDS
+        ]
+        for tid in expired:
+            self.turns.pop(tid, None)
+
+    def start_streaming_message(self, conv_id: int | None,
+                                prompt: str) -> dict[str, Any]:
         life = lifecycle.status()
         if life["dead"]:
             return {
@@ -340,6 +416,78 @@ class App:
                 ),
                 "dead": True,
             }
+        if not conv_id:
+            conv_id = self.history.create_conversation()
+        turn_id = uuid.uuid4().hex
+        state = TurnStream(turn_id, conv_id)
+        with self._lock:
+            self._sweep_turns()
+            self.turns[turn_id] = state
+
+        def emit(event: str, payload: dict[str, Any]) -> None:
+            if event in {"turn_done", "turn_error"}:
+                state.final_payload = payload
+                state.done_at = time.monotonic()
+            self._emit_turn(state, event, payload)
+
+        def worker() -> None:
+            try:
+                result = self.post_message(conv_id, prompt, emit=emit)
+                if state.done_at is None:
+                    terminal = "turn_error" if result.get("error") and not result.get("reply") else "turn_done"
+                    self._finish_turn(state, result, terminal)
+            except Exception as exc:  # noqa: BLE001
+                msg = (
+                    f"streaming turn {turn_id} failed for conversation #{conv_id} "
+                    f"(prompt {len(prompt)} chars): "
+                    f"{exc.__class__.__name__}: {exc}"
+                )
+                err = {"conversation_id": conv_id, "error": msg}
+                self._finish_turn(state, err, "turn_error")
+
+        threading.Thread(
+            target=worker, name=f"turn-{turn_id[:12]}", daemon=True
+        ).start()
+        return {"turn_id": turn_id, "conversation_id": conv_id}
+
+    def get_turn_stream(self, turn_id: str) -> TurnStream | None:
+        with self._lock:
+            self._sweep_turns()
+            return self.turns.get(turn_id)
+
+    def attach_turn_stream(self, turn_id: str) -> TurnStream | None:
+        with self._lock:
+            self._sweep_turns()
+            state = self.turns.get(turn_id)
+            if state is None:
+                return None
+            if state.attached:
+                return None
+            state.attached = True
+            return state
+
+    def post_message(
+        self,
+        conv_id: int | None,
+        prompt: str,
+        emit: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        def send_event(event: str, payload: dict[str, Any]) -> None:
+            if emit is not None:
+                emit(event, payload)
+
+        life = lifecycle.status()
+        if life["dead"]:
+            payload = {
+                "error": (
+                    "The Ubuntu Zombie has been permanently disabled "
+                    f"({life['dead_reason'] or 'expired'}). It is unusable "
+                    "until a reinstall."
+                ),
+                "dead": True,
+            }
+            send_event("turn_error", payload)
+            return payload
         if not conv_id:
             conv_id = self.history.create_conversation()
         log_event("prompt", conversation_id=conv_id, prompt=prompt)
@@ -413,6 +561,10 @@ class App:
                     "tool_call_id": call_id, "tool": name, "args": _summarize(args),
                     "decision": "schema_rejected", "error": str(exc),
                 })
+                send_event("tool_end", {
+                    "tool": name, "ok": False,
+                    "decision": "schema_rejected", "error": str(exc),
+                })
                 return {"ok": False, "error": f"schema_rejected: {exc}"}
 
             classification = policy.classify_tool(name, cleaned)
@@ -440,6 +592,10 @@ class App:
                         "ok": False, "decision": "budget_exceeded",
                         "error": err,
                     })
+                    send_event("tool_end", {
+                        "tool": name, "ok": False,
+                        "decision": "budget_exceeded", "error": err,
+                    })
                     return {"ok": False, "error": err}
 
             entry_id = log_tool_call(
@@ -457,6 +613,11 @@ class App:
                 "decision": ("queued" if requires_approval else "auto"),
                 "requires_phrase": requires_phrase,
             })
+            send_event("tool_start", {
+                "tool": name,
+                "classification": classification,
+                "decision": ("queued" if requires_approval else "auto"),
+            })
 
             if requires_approval:
                 with self._lock:
@@ -472,6 +633,13 @@ class App:
                     self.pending[entry_id] = pending
                     self.pending[call_id] = pending
                 self.history.add_event(conv_id, "pending_tool_call", {
+                    "id": entry_id, "tool_call_id": call_id, "tool": name,
+                    "classification": classification,
+                    "requires_phrase": requires_phrase,
+                    "confirm_phrase": (policy.destructive_confirmation
+                                        if requires_phrase else None),
+                })
+                send_event("pending_approval", {
                     "id": entry_id, "tool_call_id": call_id, "tool": name,
                     "classification": classification,
                     "requires_phrase": requires_phrase,
@@ -502,6 +670,12 @@ class App:
                 )
                 turn_events.append({"kind": "tool_observation", "tool": name,
                                     "result": result})
+                send_event("tool_end", {
+                    "tool": name,
+                    "ok": True,
+                    "exit_code": result.get("exit_code") if isinstance(result, dict) else None,
+                    "duration_ms": result.get("duration_ms") if isinstance(result, dict) else None,
+                })
                 return {"ok": True, "result": result}
             except Exception as exc:  # noqa: BLE001
                 self.history.add_event(conv_id, "tool_observation", {
@@ -512,9 +686,31 @@ class App:
                               decision="error",
                               args_summary=_summarize(cleaned),
                               error=str(exc), conversation_id=conv_id)
+                send_event("tool_end", {
+                    "tool": name, "ok": False, "error": str(exc),
+                })
                 return {"ok": False, "error": str(exc)}
 
+        def on_bridge_event(event: dict[str, Any]) -> None:
+            kind = event.get("type")
+            if kind == "token":
+                delta = event.get("delta")
+                if isinstance(delta, str) and delta:
+                    send_event("token", {"delta": delta})
+            elif kind == "progress":
+                progress = event.get("kind")
+                raw_tool = event.get("name")
+                tool = raw_tool if isinstance(raw_tool, str) and raw_tool else "tool"
+                if progress == "tool_start":
+                    send_event("tool_start", {
+                        "tool": tool, "classification": "bridge",
+                        "decision": "running",
+                    })
+                elif progress == "tool_end":
+                    send_event("tool_end", {"tool": tool, "ok": True})
+
         try:
+            send_event("phase", {"phase": "model"})
             turn = pi_mono.run_turn(
                 prompt=prompt,
                 system_prompt=system_prompt,
@@ -523,28 +719,36 @@ class App:
                 tool_names=tools_mod.tool_names(),
                 max_tool_calls=max_calls,
                 timeout=turn_timeout,
+                on_event=on_bridge_event,
             )
         except pi_mono.BridgeError as exc:
             err = str(exc)
             self.history.add_message(conv_id, "system", err, {"error": True})
             log_event("provider_error", conversation_id=conv_id, error=err)
-            return {"conversation_id": conv_id, "error": err}
+            payload = {"conversation_id": conv_id, "error": err}
+            send_event("turn_error", payload)
+            return payload
         except Exception as exc:  # noqa: BLE001
             err = f"pi-mono call failed: {exc.__class__.__name__}: {exc}"
             self.history.add_message(conv_id, "system", err, {"error": True})
             log_event("provider_error", conversation_id=conv_id, error=err)
-            return {"conversation_id": conv_id, "error": err}
+            payload = {"conversation_id": conv_id, "error": err}
+            send_event("turn_error", payload)
+            return payload
 
+        send_event("phase", {"phase": "finalising"})
         reply = turn.get("final") or ""
         self.history.add_message(conv_id, "assistant", reply,
                                  {"engine": "pi-mono",
                                   "log_path": turn.get("log_path")})
-        return {
+        payload = {
             "conversation_id": conv_id,
             "reply": reply,
             "events": self.history.get_events(conv_id),
             "messages": self.history.get_messages(conv_id),
         }
+        send_event("turn_done", payload)
+        return payload
 
     def approve(self, tool_call_id: str, decision: str,
                 phrase: str | None = None) -> dict[str, Any]:
@@ -1102,6 +1306,55 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         return [unquote(p) for p in path.strip("/").split("/") if p]
 
+    def _write_sse(self, event: str, payload: dict[str, Any]) -> bool:
+        try:
+            self.wfile.write(f"event: {event}\n".encode("utf-8"))
+            self.wfile.write(
+                b"data: " + json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n\n"
+            )
+            flush = getattr(self.wfile, "flush", None)
+            if callable(flush):
+                flush()
+            return True
+        except (BrokenPipeError, ConnectionError, OSError):
+            return False
+
+    def _stream_turn(self, turn_id: str) -> None:
+        state = self.app.attach_turn_stream(turn_id)
+        if state is None:
+            existing = self.app.get_turn_stream(turn_id)
+            if existing and existing.final_payload is not None:
+                event = "turn_error" if existing.final_payload.get("error") else "turn_done"
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self._write_sse(event, existing.final_payload)
+                return
+            self._send_json({"error": "unknown or already attached stream"}, 404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        while True:
+            try:
+                event, payload = state.queue.get(timeout=STREAM_KEEPALIVE_SECONDS)
+            except queue.Empty:
+                try:
+                    self.wfile.write(b": keepalive\n\n")
+                    flush = getattr(self.wfile, "flush", None)
+                    if callable(flush):
+                        flush()
+                except (BrokenPipeError, ConnectionError, OSError):
+                    return
+                continue
+            if not self._write_sse(event, payload):
+                return
+            if event in {"turn_done", "turn_error"}:
+                return
+
     # ---- routes ----
     # Endpoints reachable without a valid login. Everything else is
     # gated when a password hash is configured (``auth.auth_required``).
@@ -1133,6 +1386,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/session":
             self._send_json(self.app.session_info(self._session_token()))
+            return
+        if len(parts) == 3 and parts[:2] == ["api", "stream"]:
+            self._stream_turn(parts[2])
             return
         if self.path == "/api/ttl":
             self._send_json(self.app.ttl_status())
@@ -1251,6 +1507,10 @@ class Handler(BaseHTTPRequestHandler):
                 cid = int(conv_id) if conv_id else None
             except (TypeError, ValueError):
                 cid = None
+            if data.get("stream") is True:
+                result = self.app.start_streaming_message(cid, prompt)
+                self._send_json(result, 410 if result.get("dead") else 200)
+                return
             result = self.app.post_message(cid, prompt)
             self._send_json(result, 410 if result.get("dead") else 200)
             return
