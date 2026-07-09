@@ -1200,8 +1200,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const stack = toolLineStacks.get(name);
       let line = stack ? stack.shift() : undefined;
       if (!line) {
-        startToolLine(name, note);
-        line = toolLineStacks.get(name).shift();
+        line = startToolLine(name, note);
+        const created = toolLineStacks.get(name);
+        if (created) created.pop();
       }
       line.className = `act ${ok === false ? "failed" : "done"}`;
       line.replaceChildren(
