@@ -16,6 +16,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `SECURITY.md`. Documentation only; no behaviour changes.
 
 ### Added
+- **New research note `docs/research/OPEN-WEBUI-POSSIBILITIES.md`.**
+  A deep study of the Open WebUI chat platform
+  (`open-webui/open-webui` 0.10.2): architecture, license history
+  (BSD-3 plus branding clause), full feature inventory, the
+  Pipelines/Functions extension systems, and security posture — each
+  capability read through the Ubuntu Zombie trust model with a
+  borrow / translate / integrate / defer / refuse verdict, plus a
+  ranked shortlist of chat upgrades implementable without new
+  runtime dependencies. Linked from `docs/research/README.md`.
+  Documentation only; no behaviour changes.
 - **New `multipliers/` analysis library.** A documentation-only
   design surface (like `options/`) analysing how to multiply the
   existing Ubuntu installation mechanism across Windows and macOS
