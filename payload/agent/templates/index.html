@@ -1047,20 +1047,22 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     // stream reports starts and ends by name only). Lines flip from
     // "running…" to done/failed in place instead of stacking empty
     // proposal/observation boxes mid-turn.
-    const openTools = new Map();
+    const toolLineStacks = new Map();
     const startToolLine = (name, note) => {
       const line = el("div", { class: "act running" });
       line.appendChild(el("span", { class: "icon", text: "⏳" }));
       line.appendChild(el("span", { text: note }));
       activity.appendChild(line);
-      const stack = openTools.get(name) || [];
+      const stack = toolLineStacks.get(name) || [];
       stack.push(line);
-      openTools.set(name, stack);
+      toolLineStacks.set(name, stack);
       scrollLog();
       return line;
     };
     const endToolLine = (name, ok, note) => {
-      const stack = openTools.get(name) || [];
+      const stack = toolLineStacks.get(name) || [];
+      // A tool_end without a matching tool_start (out-of-order or
+      // dropped frame) still gets a completed line so it is visible.
       const line = stack.shift() || startToolLine(name, note);
       line.className = `act ${ok === false ? "failed" : "done"}`;
       line.replaceChildren(
