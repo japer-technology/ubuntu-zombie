@@ -8,6 +8,28 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Added
+- **`/verbose` chat command for background-activity detail.** The chat
+  now tallies everything the page can observe moving — HTTP API calls
+  with request/response byte sizes, live-stream frames, tool calls and
+  failures, bytes of tool stdout/stderr, and streamed reply
+  characters — for both the current turn and the whole browser
+  session. `/verbose` (or `/verbose on|off`) toggles the detail: when
+  on, live tool lines show the policy decision and output size, and
+  every completed turn ends with a muted "Turn activity" tally. The
+  toggle persists in `localStorage`. The server's `tool_end` stream
+  event now includes `stdout_bytes`/`stderr_bytes` so sizes can be
+  reported without shipping full output over the progress stream.
+
+### Fixed
+- **Tool observations no longer paint a stray dark line.** Tool
+  output almost always ends with a newline; the transcript's dark
+  `<pre>` blocks rendered that trailing newline as an extra empty
+  dark line under every bash/tool observation. Trailing whitespace is
+  now trimmed and whitespace-only output is skipped (falling back to
+  the existing `(no output)` note). UI only; stored transcripts are
+  unchanged.
+
 ### Changed
 - **Live streamed turns now show real activity instead of empty
   boxes.** The chat's live turn view renders one compact activity
