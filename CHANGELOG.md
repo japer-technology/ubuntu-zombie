@@ -9,6 +9,19 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Changed
+- **Live streamed turns now show real activity instead of empty
+  boxes.** The chat's live turn view renders one compact activity
+  line per tool execution (running → done/failed, updated in place)
+  inside the assistant bubble, animated thinking dots until the
+  first token arrives, and a status row with a spinner, humanized
+  phase labels ("Model is thinking…", "Running tools…"), and an
+  elapsed-seconds timer. Previously, mid-turn tool events drew
+  proposal/observation boxes with empty argument and result bodies.
+  Stopping a turn now freezes the live bubble with a clear notice.
+  Transcript rendering also stops emitting contentless fragments:
+  empty tool observations say `(no output)`, `exit null` lines are
+  suppressed, and empty argument code blocks are omitted. UI only;
+  no server or protocol changes.
 - **Chat turns now stream live progress and never silently drop busy
   input.** `POST /api/message` keeps its synchronous JSON behaviour but
   also accepts `stream: true`, returning a `turn_id` for the authenticated
