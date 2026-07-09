@@ -85,13 +85,13 @@ The shortlist order in the lessons note is roughly the value order;
 this plan re-groups it into five phases so that shared plumbing is
 built once and each phase lands independently shippable:
 
-| Phase | Work items (lesson #) | Theme |
-|-------|-----------------------|-------|
-| A | SSE streaming (1); input never lost (Lesson 3) | liveness plumbing |
-| B | Rendering polish (Lesson 2); `#` context injection (2); `/` presets (5) | input/output ergonomics |
-| C | FTS + tags (6); auto-compaction (8); audit-grounded export (7) | continuity |
-| D | Machine memory (4); deterministic filters (10) | memory + hygiene |
-| E | Scheduled check-ups (3); Ollama discovery (9) | proactivity + installer |
+| Phase | Work items (shortlist # / lesson) | Theme |
+|-------|-----------------------------------|-------|
+| A | SSE streaming (#1); input never lost (Lesson 3, unranked) | liveness plumbing |
+| B | Rendering polish (Lesson 2, unranked); `#` context injection (#2); `/` presets (#5) | input/output ergonomics |
+| C | FTS + tags (#6); auto-compaction (#8); audit-grounded export (#7) | continuity |
+| D | Machine memory (#4); deterministic filters (#10) | memory + hygiene |
+| E | Scheduled check-ups (#3); Ollama discovery (#9) | proactivity + installer |
 
 Phases B–E have no hard dependency on A except where noted; A is
 first because it changes the turn transport that several later
@@ -222,9 +222,9 @@ token: `#/var/log/syslog`, `#systemd:nginx.service`, `#pkg:nginx`.
 `payload/agent/tools.py` (reuse, not extend),
 `payload/agent/templates/index.html` (completion UI),
 `docs/CONFIGURATION.md`, `docs/ARCHITECTURE.md`, `tests/smoke.sh`,
-plus the command list in
-[`HERMES-CHAT-COMMANDS-SELECTED.md`](HERMES-CHAT-COMMANDS-SELECTED.md)'s
-successor docs.
+plus the chat-command reference in
+[`HERMES-CHAT-COMMANDS-SELECTED.md`](HERMES-CHAT-COMMANDS-SELECTED.md)
+(or whatever user-facing command doc supersedes it by then).
 
 **Design.**
 
@@ -355,7 +355,7 @@ surface a one-line notice in chat ("Older turns summarised to keep
 context small — `/history` still shows everything"). Original
 messages are never deleted (matching current `/compress`
 semantics); only the payload sent to the model shrinks by relying
-on `latest_summary()` plus a recent-window of messages.
+on `latest_summary()` plus a recent window of messages.
 
 **Tests.** Python regression in smoke: seed a conversation past the
 threshold, call the pre-turn hook, assert a summary system message
