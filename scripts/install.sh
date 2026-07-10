@@ -1916,11 +1916,14 @@ _SECTION_T0=""
 
 # Re-define section() to: record a step breadcrumb, number the phase, and
 # report how long the previous phase took so a long silent step is visibly
-# making progress rather than appearing hung.
+# making progress rather than appearing hung. The timing is shown as a
+# clean bracketed duration in plain English — e.g. "[35 seconds]" or
+# "[1 minute 5 seconds]" — printed on its own line immediately after the
+# phase that just finished (see fmt_duration in scripts/lib.sh).
 section() {
   local now; now="$(date +%s)"
   if [[ -n "${_SECTION_T0}" ]]; then
-    (( ZOMBIE_QUIET )) || printf '%s    (previous step took %s)%s\n' \
+    (( ZOMBIE_QUIET )) || printf '%s    [%s]%s\n' \
       "${C_CYAN}" "$(fmt_duration "$(( now - _SECTION_T0 ))")" "${C_RESET}"
   fi
   _SECTION_T0="${now}"

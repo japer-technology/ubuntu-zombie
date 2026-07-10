@@ -212,14 +212,30 @@ field() {
 # Timing
 # ---------------------------------------------------------------------------
 
-# Format a number of seconds as "12s" or "3m07s".
+# fmt_duration <seconds>
+#   Format a number of seconds as friendly, spelled-out English so timing
+#   lines read naturally to an operator, e.g.:
+#     0    -> "0 seconds"
+#     1    -> "1 second"
+#     35   -> "35 seconds"
+#     60   -> "1 minute"
+#     65   -> "1 minute 5 seconds"
+#     3600 -> "1 hour"
+#     3725 -> "1 hour 2 minutes 5 seconds"
+#   Zero-valued middle/trailing units are omitted ("2 minutes", not
+#   "2 minutes 0 seconds") and every unit is correctly singular/plural.
+#   Non-numeric or negative input is clamped to 0 so callers never have
+#   to sanity-check arithmetic edge cases (e.g. clock skew) themselves.
 fmt_duration() {
   local s="${1:-0}"
-  if (( s < 60 )); then
-    printf '%ds' "${s}"
-  else
-    printf '%dm%02ds' $(( s / 60 )) $(( s % 60 ))
-  fi
+  [[ "${s}" =~ ^[0-9]+$ ]] || s=0
+  local h=$(( s / 3600 )) m=$(( (s % 3600) / 60 )) sec=$(( s % 60 ))
+  local -a parts=()
+  (( h > 0 ))   && parts+=("${h} $( (( h == 1 ))   && echo hour   || echo hours )")
+  (( m > 0 ))   && parts+=("${m} $( (( m == 1 ))   && echo minute || echo minutes )")
+  (( sec > 0 )) && parts+=("${sec} $( (( sec == 1 )) && echo second || echo seconds )")
+  (( ${#parts[@]} == 0 )) && parts=("0 seconds")
+  printf '%s' "${parts[*]}"
 }
 
 # ---------------------------------------------------------------------------

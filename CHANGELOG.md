@@ -56,6 +56,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   unchanged.
 
 ### Changed
+- **Installer phase timings now read as plain English.** The line
+  printed after each install phase is a clean bracketed duration —
+  `[35 seconds]` or `[1 minute 5 seconds]` — instead of the cryptic
+  `(previous step took 1m05s)`. `fmt_duration` in `scripts/lib.sh`
+  now spells out hours/minutes/seconds with correct singular/plural
+  forms and omits zero units, so the spinner, install receipt, and
+  final "Install took …" summary all use the same friendly format.
 - **Live streamed turns now show real activity instead of empty
   boxes.** The chat's live turn view renders one compact activity
   line per tool execution (running → done/failed, updated in place)
