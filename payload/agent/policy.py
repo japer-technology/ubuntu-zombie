@@ -390,7 +390,9 @@ def _load_yaml(text: str) -> dict[str, Any]:
     support anchors, flow style, multi-line scalars, or complex keys.
     """
     root: dict[str, Any] = {}
-    stack: list[tuple[int, Any]] = [(-1, root)]
+    # Stack entries are (indent, container, owner, owner_key) where
+    # ``owner[owner_key] is container``; the root has no owner.
+    stack: list[tuple[int, Any, Any, Any]] = [(-1, root, None, None)]
     pending_list_item: dict[str, Any] | None = None
     pending_list_indent: int = -1
 
@@ -406,22 +408,33 @@ def _load_yaml(text: str) -> dict[str, Any]:
             stack.pop()
             pending_list_item = None
 
-        parent_indent, parent = stack[-1]
+        parent_indent, parent, owner, owner_key = stack[-1]
 
         if content.startswith("- "):
             # List item. The current parent must be (or become) a list.
             item_text = content[2:].strip()
             if not isinstance(parent, list):
-                # Convert: parent is a mapping where the *previous* key
-                # opened this list. Find that key and replace.
-                raise ValueError("unexpected list item")
+                # Convert: parent is the empty mapping created when the
+                # previous key opened this block. Replace it with a list
+                # in its owner.
+                if (
+                    isinstance(parent, dict)
+                    and not parent
+                    and isinstance(owner, dict)
+                ):
+                    new_list: list[Any] = []
+                    owner[owner_key] = new_list
+                    parent = new_list
+                    stack[-1] = (parent_indent, parent, owner, owner_key)
+                else:
+                    raise ValueError("unexpected list item")
             if ":" in item_text:
                 key, _, val = item_text.partition(":")
                 item: dict[str, Any] = {key.strip(): _parse_value(val)}
                 parent.append(item)
                 pending_list_item = item
                 pending_list_indent = indent
-                stack.append((indent + 2, item))
+                stack.append((indent + 2, item, None, None))
             else:
                 parent.append(_parse_value(item_text))
             continue
@@ -435,13 +448,19 @@ def _load_yaml(text: str) -> dict[str, Any]:
                 # looking ahead implicitly: create a dict; if the
                 # next sibling starts with "- " we'll replace it.
                 new_container: Any = {}
+                container_owner: Any = None
+                container_key: Any = None
                 if isinstance(parent, dict):
                     parent[key] = new_container
+                    container_owner, container_key = parent, key
                 elif isinstance(parent, list):
                     if pending_list_item is None:
                         raise ValueError("nested mapping outside list item")
                     pending_list_item[key] = new_container
-                stack.append((indent + 2, new_container))
+                    container_owner, container_key = pending_list_item, key
+                stack.append(
+                    (indent + 2, new_container, container_owner, container_key)
+                )
                 # Peek the next non-comment, non-blank line is handled
                 # naturally: if it starts with "- ", we need a list.
             else:
