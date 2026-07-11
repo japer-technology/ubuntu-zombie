@@ -98,15 +98,15 @@ class Policy:
     # Per-turn agent budgets that bound runaway loops. The 12 / 3
     # defaults match the typical turn shape once parallel
     # skill-driven tool calls are in play.
-    max_tool_calls_per_turn: int = 12
-    max_elevated_calls_per_turn: int = 3
+    max_tool_calls_per_turn: int = 128
+    max_elevated_calls_per_turn: int = 32
     # Wall-clock idle deadline (seconds) for a single agent turn. If the
     # model/provider produces no event for this long the turn is
     # terminated and the operator sees a clean error instead of an
     # indefinitely-pending request. It measures *silence* (any streamed
     # token / tool call / tool result resets it), so a generous value
     # does not slow normal turns. ``0`` disables the watchdog.
-    max_turn_seconds: int = 600
+    max_turn_seconds: int = 6000
 
     def classify(self, command: str | Iterable[str]) -> str:
         """Return the most-elevated class implied by ``command``.
