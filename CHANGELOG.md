@@ -60,6 +60,15 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   unchanged.
 
 ### Changed
+- **The chat now feels at home on every screen.** A polished responsive
+  shell adds an informative empty state with starter prompts, clearer
+  host and provider context, comfortable message bubbles, a growing
+  composer with visible keyboard guidance, mobile-friendly controls,
+  and light/dark-aware surfaces. Assistant replies have a one-click
+  copy action, confirmation fields have explicit labels, errors announce
+  themselves to assistive technology, and the Send control visibly
+  becomes Queue during an active turn so pointer users can queue a
+  follow-up just as keyboard users can.
 - **Installer phase timings now read as plain English.** The line
   printed after each install phase is a clean bracketed duration —
   `[35 seconds]` or `[1 minute 5 seconds]` — instead of the cryptic

@@ -1850,6 +1850,19 @@ run_standards() {
     || { echo "chat UI must keep the streaming fallback reload path" >&2; exit 1; }
   grep -q 'queued' payload/agent/templates/index.html \
     || { echo "chat UI must keep the queued-message affordance" >&2; exit 1; }
+  grep -q 'aria-label="Chat transcript"' payload/agent/templates/index.html \
+    || { echo "chat transcript must retain its accessible name" >&2; exit 1; }
+  grep -q 'class="sr-only">Message the systems administrator' \
+    payload/agent/templates/index.html \
+    || { echo "chat composer must retain its accessible label" >&2; exit 1; }
+  grep -q 'data-starter=' payload/agent/templates/index.html \
+    || { echo "chat welcome must retain its starter prompts" >&2; exit 1; }
+  grep -q '@media (max-width: 640px)' payload/agent/templates/index.html \
+    || { echo "chat UI must retain its mobile layout" >&2; exit 1; }
+  grep -q 'text: "Copy"' payload/agent/templates/index.html \
+    || { echo "assistant responses must retain their copy action" >&2; exit 1; }
+  grep -q 'busy ? "Queue" : "Send"' payload/agent/templates/index.html \
+    || { echo "busy chat submit must retain its queue affordance" >&2; exit 1; }
   grep -Fq '["api", "stream"]' payload/agent/server.py \
     || { echo "server.py must expose the SSE stream endpoint" >&2; exit 1; }
   grep -q '"type":"progress"' payload/agent/pi_mono.py \
