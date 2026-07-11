@@ -27,6 +27,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   bridge-executed tools report more than a bare "done".
 
 ### Fixed
+- **New chat answers stay visible and render Markdown while streaming.**
+  The transcript now keeps following the active answer when it was already
+  at the bottom, while still respecting an operator who deliberately scrolls
+  up. Loaded conversations explicitly open at their newest content, and
+  streamed assistant text uses the same safe Markdown renderer as the final
+  reply instead of showing raw Markdown until completion.
 - **Offline installer preflight no longer stalls for 45 seconds.** The
   outbound-connectivity check now makes one bounded HTTP probe before its
   fallback checks instead of using the download helper's exponential retry
