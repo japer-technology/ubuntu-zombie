@@ -675,8 +675,10 @@ preflight() {
     pf ok "DNS resolution"
   fi
 
-  # Outbound connectivity
-  if ! curl_get -o /dev/null -m 8 https://archive.ubuntu.com/ >/dev/null 2>&1 \
+  # Outbound connectivity. Keep this to one bounded attempt: curl_get is the
+  # retrying download helper and can otherwise add 45 seconds of backoff before
+  # the fallback probes run on an offline host.
+  if ! curl -fsSL -o /dev/null -m 8 https://archive.ubuntu.com/ >/dev/null 2>&1 \
      && ! ping -c1 -W2 1.1.1.1 >/dev/null 2>&1 \
      && ! ping -c1 -W2 8.8.8.8 >/dev/null 2>&1; then
     warn "No outbound connectivity detected. Package installation will fail."

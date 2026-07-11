@@ -27,6 +27,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   bridge-executed tools report more than a bare "done".
 
 ### Fixed
+- **Offline installer preflight no longer stalls for 45 seconds.** The
+  outbound-connectivity check now makes one bounded HTTP probe before its
+  fallback checks instead of using the download helper's exponential retry
+  loop.
 - **Chat UX hardening after a deep review.** Five browser-side fixes
   in the chat page, all UI-only: a failed turn no longer renders its
   error bubble twice; stopping a streamed turn now disarms the
