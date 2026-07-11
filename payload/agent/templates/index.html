@@ -248,7 +248,9 @@
 </head>
 <body>
 <header>
-  <h1>Ubuntu Zombie <span class="host">{{HOSTNAME}} · {{USERNAME}}</span></h1>
+  <h1 aria-label="Ubuntu Zombie on {{HOSTNAME}}, user {{USERNAME}}">
+    Ubuntu Zombie <span class="host">{{HOSTNAME}} · {{USERNAME}}</span>
+  </h1>
   <div class="header-actions">
     <!-- Session control is hidden unless the password gate is active and
          this browser owns a valid session. Removing the password must also
@@ -259,7 +261,7 @@
   <div class="status">{{PROVIDER_STATUS}}</div>
 </header>
 <main id="viewport">
-<section id="welcome" class="welcome" aria-labelledby="welcome-title">
+<div id="welcome" class="welcome">
 <pre class="wordmark" aria-hidden="true">██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗
 ██║   ██║██╔══██╗██║   ██║████╗  ██║╚══██╔══╝██║   ██║    ╚══███╔╝██╔═══██╗████╗ ████║██╔══██╗██║██╔════╝
 ██║   ██║██████╔╝██║   ██║██╔██╗ ██║   ██║   ██║   ██║      ███╔╝ ██║   ██║██╔████╔██║██████╔╝██║█████╗
@@ -274,7 +276,7 @@
     <button type="button" data-starter="Show me what is using the most disk space">Investigate disk usage</button>
     <button type="button" data-starter="Check for recent system errors and explain them">Explain recent errors</button>
   </div>
-</section>
+</div>
 <div id="log" role="log" aria-live="polite" aria-relevant="additions text"
      aria-label="Chat transcript"></div>
 </main>
@@ -283,7 +285,7 @@
   <div class="composer">
     <form id="form">
       <label for="prompt" class="sr-only">Message the systems administrator</label>
-      <textarea id="prompt" rows="1" placeholder="Message the systems administrator…"
+      <textarea id="prompt" rows="1" placeholder="Ask about this machine…"
                 aria-describedby="prompt-help" required></textarea>
       <div class="composer-actions">
         <button type="submit" id="send" class="primary">Send</button>
