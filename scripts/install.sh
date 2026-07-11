@@ -282,12 +282,15 @@ Subcommands:
 
 Flags:
   Behaviour
-    -n, --dry-run     Print the install plan without touching the host.
-                      Only meaningful with the 'install' subcommand.
+    -n, --dry-run     Print the plan without touching the host.
+                      Meaningful with 'install' and 'uninstall'.
     -y, --yes         Skip the "Type YES" confirmation. Still prompts for
                       any missing inputs (use ZOMBIE_NONINTERACTIVE=1 to
                       skip every prompt for fully unattended installs).
         --strict      Treat preflight warnings as fatal.
+  Uninstall only
+        --archive     Archive /opt/ai-zombie before removing it.
+        --keep-agent  Do not remove the agent user account.
   Output
     -q, --quiet       Only show warnings and errors.
         --verbose,
@@ -375,6 +378,8 @@ EOF
 SUBCOMMAND="install"
 SUBCOMMAND_SEEN=0
 DRY_RUN=0
+UNINSTALL_ARCHIVE=0
+UNINSTALL_KEEP_AGENT=0
 PARSED_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -387,6 +392,8 @@ while [[ $# -gt 0 ]]; do
     --no-color|--no-colour) export ZOMBIE_COLOR=never; lib_setup_colors; shift ;;
     --strict)     STRICT=1; shift ;;
     --json)       JSON_OUTPUT=1; shift ;;
+    --archive)    UNINSTALL_ARCHIVE=1; shift ;;
+    --keep-agent) UNINSTALL_KEEP_AGENT=1; shift ;;
     install|verify|doctor|repair|uninstall)
                   if (( SUBCOMMAND_SEEN )); then
                     # A second subcommand token (e.g. `install install`) is
@@ -454,22 +461,6 @@ apt_install() {
 
 curl_get() {
   retry 5 3 -- curl -fsSL --retry 3 --retry-delay 2 "$@"
-}
-
-append_line_once() {
-  local line="$1"
-  local file="$2"
-  if grep -qxF "$line" "$file" 2>/dev/null; then
-    note_satisfied
-    return 0
-  fi
-  # Ensure the file ends with a newline before appending, so we don't
-  # concatenate the new line onto whatever was on the final partial line.
-  if [[ -s "$file" ]] && [[ "$(tail -c1 "$file" 2>/dev/null)" != $'\n' ]]; then
-    printf '\n' >> "$file"
-  fi
-  printf '%s\n' "$line" >> "$file"
-  note_changed
 }
 
 is_supported_agent_username() {
@@ -962,7 +953,18 @@ cmd_repair() {
 
 cmd_uninstall() {
   if [[ -x "${SCRIPT_DIR}/uninstall.sh" ]]; then
-    exec "${SCRIPT_DIR}/uninstall.sh" "${PARSED_ARGS[@]}"
+    # Forward the behaviour flags parsed by this wrapper so that
+    # `install.sh uninstall --dry-run` really previews (and does not
+    # perform a live uninstall), and `--yes`, `--quiet`, `--no-color`,
+    # `--archive`, and `--keep-agent` reach the uninstaller.
+    local -a fwd=()
+    (( DRY_RUN ))              && fwd+=(--dry-run)
+    (( ASSUME_YES ))           && fwd+=(--yes)
+    (( ZOMBIE_QUIET ))         && fwd+=(--quiet)
+    (( UNINSTALL_ARCHIVE ))    && fwd+=(--archive)
+    (( UNINSTALL_KEEP_AGENT )) && fwd+=(--keep-agent)
+    [[ "${ZOMBIE_COLOR:-}" == "never" ]] && fwd+=(--no-color)
+    exec "${SCRIPT_DIR}/uninstall.sh" "${fwd[@]}" "${PARSED_ARGS[@]}"
   fi
   die "uninstall.sh not found alongside ${SCRIPT_NAME}." 1
 }
@@ -1803,6 +1805,11 @@ write_receipt_fail() {
 trap 'on_error ${LINENO}' ERR
 
 validate_config
+
+if [[ "${SUBCOMMAND}" != "uninstall" ]] \
+  && (( UNINSTALL_ARCHIVE || UNINSTALL_KEEP_AGENT )); then
+  die "--archive/--keep-agent only apply to the uninstall subcommand." 2
+fi
 
 case "${SUBCOMMAND}" in
   verify)    reject_unexpected_positional_args; cmd_verify; exit $? ;;

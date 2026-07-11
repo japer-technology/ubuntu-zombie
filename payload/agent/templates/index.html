@@ -548,13 +548,21 @@ function renderInline(escaped) {
     return `\u0000CODE${codes.length - 1}\u0000`;
   });
   // Links: only http(s); the URL was escaped above so quotes are safe.
+  // Stash rendered links behind placeholders too, so the emphasis
+  // passes below cannot rewrite `**`/`__`/`*`/`_` sequences inside a
+  // generated href (e.g. https://example.com/a__b__c).
+  const links = [];
   out = out.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    (_m, text, url) =>
-      `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`);
+    (_m, text, url) => {
+      links.push(
+        `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`);
+      return `\u0000LINK${links.length - 1}\u0000`;
+    });
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/__([^_]+)__/g, "<strong>$1</strong>");
   out = out.replace(/(^|[^*])\*([^*\s](?:[^*]*[^*\s])?)\*/g, "$1<em>$2</em>");
   out = out.replace(/(^|[^_\w])_([^_\s](?:[^_]*[^_\s])?)_/g, "$1<em>$2</em>");
+  out = out.replace(/\u0000LINK(\d+)\u0000/g, (_m, i) => links[Number(i)]);
   out = out.replace(/\u0000CODE(\d+)\u0000/g,
     (_m, i) => `<code>${codes[Number(i)]}</code>`);
   return out;
@@ -663,6 +671,8 @@ function clearThinking() {
   if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
 }
 
+let pendingAbortStatus = null;
+
 function setBusy(busy) {
   // Keep both composer and submit enabled so keyboard and pointer users
   // can queue the next message while slash commands remain available.
@@ -672,7 +682,8 @@ function setBusy(busy) {
   turnBusy = busy;
   stopBtn.hidden = !busy;
   log.setAttribute("aria-busy", busy ? "true" : "false");
-  statusEl.textContent = busy ? "Agent is working…" : "";
+  statusEl.textContent = busy ? "Agent is working…" : (pendingAbortStatus || "");
+  pendingAbortStatus = null;
 }
 
 function abortTurn(reason) {
@@ -683,15 +694,22 @@ function abortTurn(reason) {
   if (activeEventSource) {
     try { activeEventSource.close(); } catch (_e) { /* ignore */ }
     activeEventSource = null;
-    turnController = null;
     if (liveTurnCleanup) {
       liveTurnCleanup("Stopped — the agent may still finish in the background.");
     }
-    setBusy(false);
-    promptEl.focus();
-    drainQueuedPrompt();
   }
-  if (reason) statusEl.textContent = reason;
+  // Reset uniformly for both the streaming and the sync fallback path,
+  // and keep the abort reason visible even though the sync path's
+  // `finally` calls setBusy(false) after this runs.
+  turnController = null;
+  setBusy(false);
+  promptEl.focus();
+  if (reason) {
+    statusEl.textContent = reason;
+    // Let the reason survive the sync fallback's `finally` setBusy(false).
+    pendingAbortStatus = reason;
+  }
+  drainQueuedPrompt();
 }
 
 stopBtn.addEventListener("click", () => abortTurn("Stopped."));
@@ -1283,11 +1301,13 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     });
     const data = await r.json().catch(() => ({}));
     if (r.status === 401) {
+      clearThinking();
       setAuthState(true, false);
       showLogin(true);
       return data;
     }
     if (r.status === 410 || data.dead) {
+      clearThinking();
       showTombstone(data);
       return data;
     }
@@ -1308,6 +1328,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     const body = el("div", { class: "md" });
     live.appendChild(body);
     let liveMarkdown = "";
+    let livePaintPending = null;
     const dots = el("div", { class: "thinking" },
       el("div", { class: "dots" }, el("i", {}), el("i", {}), el("i", {})));
     live.appendChild(dots);
@@ -1363,6 +1384,10 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     };
     const settleLive = (finalStatus) => {
       if (liveTimer !== null) { clearInterval(liveTimer); liveTimer = null; }
+      if (livePaintPending !== null) {
+        cancelAnimationFrame(livePaintPending);
+        livePaintPending = null;
+      }
       dots.remove();
       spinner.remove();
       liveTurnCleanup = null;
@@ -1417,7 +1442,15 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("streamChars", p.delta.length);
       dots.remove();
       liveMarkdown += p.delta;
-      body.innerHTML = renderMarkdown(liveMarkdown);
+      // Throttle to one markdown re-render per animation frame; a full
+      // re-parse per token is O(n^2) over a long streamed reply.
+      if (livePaintPending === null) {
+        livePaintPending = requestAnimationFrame(() => {
+          livePaintPending = null;
+          body.innerHTML = renderMarkdown(liveMarkdown);
+          scrollLog();
+        });
+      }
       setStatus("Streaming the reply…");
       scrollLog();
     });
@@ -1497,8 +1530,16 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     activeEventSource.onerror = async () => {
       if (completed) return;
       // EventSource.readyState is 0 CONNECTING, 1 OPEN, 2 CLOSED.
+      // CONNECTING means the browser is auto-reconnecting after a
+      // transient drop; the server releases the attachment on a broken
+      // connection so the reconnect can resume the stream. Only treat
+      // a CLOSED source as fatal.
       const states = ["connecting", "open", "closed"];
       const readyState = activeEventSource ? activeEventSource.readyState : 2;
+      if (readyState === 0) {
+        statusEl.textContent = "Live stream interrupted; reconnecting…";
+        return;
+      }
       const stateName = states[readyState] || "unknown";
       if (activeEventSource) activeEventSource.close();
       activeEventSource = null;

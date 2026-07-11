@@ -208,6 +208,30 @@ def run_turn(
     )
     assert proc.stdin is not None and proc.stdout is not None
 
+    # Drain stderr concurrently into a bounded buffer. If it were left
+    # unread until EOF (as ``proc.stderr.read()`` alone would do), a
+    # chatty bridge could fill the OS pipe buffer, block on its own
+    # stderr writes, and stall stdout — deadlocking the turn until the
+    # idle watchdog kills it with a misleading timeout.
+    stderr_chunks: list[str] = []
+    stderr_len = 0
+
+    def _drain_stderr() -> None:
+        nonlocal stderr_len
+        if proc.stderr is None:
+            return
+        try:
+            for err_line in proc.stderr:
+                if stderr_len < 65536:
+                    stderr_chunks.append(err_line)
+                    stderr_len += len(err_line)
+        except (OSError, ValueError):
+            pass
+
+    stderr_thread = threading.Thread(
+        target=_drain_stderr, name="pi-mono-stderr", daemon=True)
+    stderr_thread.start()
+
     # Idle watchdog: if the bridge produces no event for ``timeout``
     # seconds the turn is presumed wedged and the subprocess is killed.
     # ``readline`` below then returns EOF and we raise a timeout-specific
@@ -260,7 +284,8 @@ def run_turn(
                         f"the provider configuration."
                     )
                 # Bridge exited; capture stderr for diagnostics.
-                err = proc.stderr.read() if proc.stderr else ""
+                stderr_thread.join(timeout=2)
+                err = "".join(stderr_chunks)
                 raise BridgeError(
                     f"pi-mono bridge exited without 'final'. stderr:\n{err[-2000:]}"
                 )
@@ -333,6 +358,7 @@ def run_turn(
             proc.wait(timeout=5)
         if watchdog is not None:
             watchdog.join(timeout=2)
+        stderr_thread.join(timeout=2)
 
     return {"final": final_text, "events": events, "log_path": str(log)}
 
