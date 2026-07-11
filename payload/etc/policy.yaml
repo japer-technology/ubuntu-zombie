@@ -16,7 +16,7 @@ settings:
   # once a workflow is proven safe; the ``sudo_allow_list:`` block
   # below keeps common privileged commands at ``system_change``
   # despite the conservative default.
-  default_class: system_change
+  default_class: destructive
 
 # Curated ``sudo`` targets pre-classified as ``system_change``. The
 # standard approval prompt still fires for these — they do not
@@ -69,13 +69,13 @@ classes:
     approval: auto
     description: Diagnostics and inspection only.
   user_change:
-    approval: auto
+    approval: required
     description: Changes within the agent account's home directory or user-owned files.
   system_change:
-    approval: auto
+    approval: required
     description: Package, service, or file mutation.
   network_change:
-    approval: auto
+    approval: required
     confirm_phrase: true
     description: Firewall or interface mutation.
   destructive:
@@ -88,7 +88,12 @@ classes:
 # regular expressions, matched with re.search().
 rules:
   # ----- destructive -----
-  - pattern: '\brm\s+-rf\s+/'
+  # rm with recursive AND force flags in any order or spelling
+  # (-rf, -fr, -Rf, combined short flags, --recursive/--force, or with
+  # options in between such as --no-preserve-root) on an absolute path.
+  - pattern: '\brm(?=.*\s(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?:\s|$))(?=.*\s(?:-[A-Za-z]*f[A-Za-z]*|--force)(?:\s|$))(?=.*\s/)'
+    class: destructive
+  - pattern: '\brm\b.*--no-preserve-root'
     class: destructive
   - pattern: '\bmkfs(\.|\s)'
     class: destructive
@@ -252,6 +257,6 @@ tool_classes: {}
 #   Python (this value) < bridge ZOMBIE_PI_MONO_IDLE_TIMEOUT < client
 #   CLIENT_TURN_TIMEOUT_MS (templates/index.html).
 agent:
-  max_tool_calls_per_turn: 128
-  max_elevated_calls_per_turn: 32
-  max_turn_seconds: 6000
+  max_tool_calls_per_turn: 12
+  max_elevated_calls_per_turn: 3
+  max_turn_seconds: 600

@@ -466,6 +466,15 @@ class App:
             state.attached = True
             return state
 
+    def detach_turn_stream(self, turn_id: str) -> None:
+        """Release a stream attachment after a dropped connection so the
+        browser's automatic EventSource reconnect can re-attach and still
+        receive the remaining (including terminal) frames."""
+        with self._lock:
+            state = self.turns.get(turn_id)
+            if state is not None:
+                state.attached = False
+
     def post_message(
         self,
         conv_id: int | None,
@@ -1373,9 +1382,11 @@ class Handler(BaseHTTPRequestHandler):
                     if callable(flush):
                         flush()
                 except (BrokenPipeError, ConnectionError, OSError):
+                    self.app.detach_turn_stream(turn_id)
                     return
                 continue
             if not self._write_sse(event, payload):
+                self.app.detach_turn_stream(turn_id)
                 return
             if event in {"turn_done", "turn_error"}:
                 return

@@ -92,7 +92,7 @@ the tool when a question implies a lookup.
 
 ### 3. Make read-only fetches auto-run (policy gate)
 
-`payload/etc/policy.yaml` sets `default_class: system_change`, so an
+`payload/etc/policy.yaml` sets `default_class: destructive`, so an
 unrecognised `curl`/`wget` is gated behind an approval prompt every time
 — painful for casual questions.
 

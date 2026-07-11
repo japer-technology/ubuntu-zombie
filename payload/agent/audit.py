@@ -231,12 +231,16 @@ def log_tool_call(
         fields["stdout_sha256"] = hashlib.sha256(stdout.encode("utf-8", "replace")).hexdigest()
         fields["stdout_bytes"] = len(stdout.encode("utf-8", "replace"))
         if verbose and cap > 0:
-            fields["stdout_preview"] = _preview(stdout, cap)
+            # Redact before truncating: truncating first can split a
+            # token at the byte cap so the remaining fragment is too
+            # short for the redaction patterns to match, leaking a
+            # partial secret into the preview.
+            fields["stdout_preview"] = _preview(redact(stdout), cap)
     if stderr is not None:
         fields["stderr_sha256"] = hashlib.sha256(stderr.encode("utf-8", "replace")).hexdigest()
         fields["stderr_bytes"] = len(stderr.encode("utf-8", "replace"))
         if verbose and cap > 0:
-            fields["stderr_preview"] = _preview(stderr, cap)
+            fields["stderr_preview"] = _preview(redact(stderr), cap)
     fields.update(extra)
     return log_event("tool_call", **fields)
 

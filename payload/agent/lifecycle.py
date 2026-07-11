@@ -152,8 +152,12 @@ def parse_duration(text: str, *, default_seconds: float | None = None) -> float:
             amount = float(raw_amount)
         except ValueError as exc:
             raise ValueError(f"bad duration amount: {raw_amount}") from exc
-        unit = raw_unit[:-1] if raw_unit.endswith("s") else raw_unit
-        seconds = _DURATION_UNITS.get(unit)
+        stripped = raw_unit[:-1] if raw_unit.endswith("s") else raw_unit
+        # Prefer the plural-stripped form, but fall back to the raw
+        # token so the bare unit "s" (seconds) is not stripped to "".
+        seconds = _DURATION_UNITS.get(stripped)
+        if seconds is None:
+            seconds = _DURATION_UNITS.get(raw_unit)
         if seconds is None:
             raise ValueError(f"bad duration unit: {raw_unit}")
         total += amount * seconds

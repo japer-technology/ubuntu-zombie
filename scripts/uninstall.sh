@@ -356,6 +356,20 @@ shopt -u nullglob
 info "Removing policy, logrotate rule, and legacy desktop artefacts"
 run "rm -f /etc/logrotate.d/ubuntu-zombie"
 
+# Reverse the installer's "Prevent sleep, suspend, and screen lock"
+# masking so the desktop can sleep again after the product is gone.
+info "Unmasking sleep/suspend targets"
+run "systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true"
+
+# Remove the installer-specific unattended-upgrades reboot policy so
+# the machine no longer auto-reboots at 04:00 after uninstall. The
+# stock 20auto-upgrades file is left as-is: unattended upgrades are a
+# sensible default and other software may rely on them.
+if [[ -f /etc/apt/apt.conf.d/52unattended-upgrades-local ]]; then
+  info "Removing installer unattended-upgrades auto-reboot policy"
+  run "rm -f /etc/apt/apt.conf.d/52unattended-upgrades-local"
+fi
+
 # -------------------------------------------------------------------
 # 4. Archive user data if requested.
 # -------------------------------------------------------------------
@@ -476,10 +490,10 @@ elif id "${AGENT_USER}" >/dev/null 2>&1; then
         if getent group "${AGENT_USER}" >/dev/null 2>&1; then
           run "delgroup --only-if-empty ${AGENT_USER} >/dev/null 2>&1 || true"
         fi
-        # install.sh writes /var/lib/AccountsService/users/${AGENT_USER}
-        # to pin the XSession to ubuntu-xorg; userdel does not clean it
-        # up, leaving a stale AccountsService entry referencing a missing
-        # account. Remove it once the user is actually gone.
+        # Older installs wrote /var/lib/AccountsService/users/${AGENT_USER}
+        # to pin the XSession; userdel does not clean it up, leaving a
+        # stale AccountsService entry referencing a missing account.
+        # Remove it (existence-guarded) once the user is actually gone.
         if [[ -f "/var/lib/AccountsService/users/${AGENT_USER}" ]]; then
           run "rm -f /var/lib/AccountsService/users/${AGENT_USER}"
         fi
@@ -505,6 +519,10 @@ fi
 Left intact on purpose:
   - Node, Python, and other shared runtime packages
     (remove them with apt only if you know nothing else needs them).
+  - The NodeSource apt repository (/etc/apt/sources.list.d/nodesource.sources,
+    /usr/share/keyrings/nodesource.gpg, /etc/apt/preferences.d/nodejs) is
+    kept so an installed Node keeps receiving updates. Remove those three
+    files if you also remove the nodejs package.
   - /var/log/ubuntu-zombie/ and /var/log/ubuntu-zombie-install.log
     are retained for audit. Remove them with:
         sudo rm -rf /var/log/ubuntu-zombie /var/log/ubuntu-zombie-install.log
