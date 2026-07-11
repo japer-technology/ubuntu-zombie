@@ -254,4 +254,4 @@ tool_classes: {}
 agent:
   max_tool_calls_per_turn: 128
   max_elevated_calls_per_turn: 32
-  max_turn_seconds: 600
+  max_turn_seconds: 6000
