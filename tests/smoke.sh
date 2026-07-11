@@ -1863,6 +1863,11 @@ run_standards() {
     || { echo "assistant responses must retain their copy action" >&2; exit 1; }
   grep -q 'busy ? "Queue" : "Send"' payload/agent/templates/index.html \
     || { echo "busy chat submit must retain its queue affordance" >&2; exit 1; }
+  grep -q 'transcriptPinnedToBottom' payload/agent/templates/index.html \
+    || { echo "chat transcript must retain sticky tail tracking" >&2; exit 1; }
+  grep -q 'body.innerHTML = renderMarkdown(liveMarkdown)' \
+    payload/agent/templates/index.html \
+    || { echo "streamed assistant replies must render as Markdown" >&2; exit 1; }
   grep -Fq '["api", "stream"]' payload/agent/server.py \
     || { echo "server.py must expose the SSE stream endpoint" >&2; exit 1; }
   grep -q '"type":"progress"' payload/agent/pi_mono.py \
