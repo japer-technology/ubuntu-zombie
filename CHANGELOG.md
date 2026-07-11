@@ -27,6 +27,64 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   bridge-executed tools report more than a bare "done".
 
 ### Fixed
+- **Policy file is honoured again.** The minimal YAML reader in
+  `payload/agent/policy.py` raised on the first scalar list item
+  (e.g. `sudo_allow_list:`) and the loader silently swallowed the
+  error, so every `settings:`, `classes:`, `tool_classes:` and
+  `agent:` value in `policy.yaml` was discarded in favour of code
+  defaults. The parser now converts an opened mapping into a list
+  when the block turns out to be a sequence.
+- **Policy defaults re-aligned with the documented, tested semantics**
+  that the parser bug had been masking: `default_class` is again
+  fail-closed at `destructive`, elevated classes (`user_change`,
+  `system_change`, `network_change`) require operator approval, and
+  the per-turn budgets are 12 tool calls / 3 elevated / 600 s idle —
+  matching `docs/CONFIGURATION.md` and the layered-timeout invariant.
+- **Destructive `rm` detection matches flag variants.** The rule only
+  caught the literal `rm -rf /`; `rm -fr /`, `rm -Rf`, long options
+  (`--recursive --force`), option-separated forms, and
+  `--no-preserve-root` now classify as `destructive` too.
+- **`install.sh uninstall` forwards its flags.** `--dry-run`, `--yes`,
+  `--quiet`, and `--no-color` were consumed by the wrapper and never
+  reached `uninstall.sh`, so `install.sh uninstall --dry-run`
+  performed a **real** uninstall instead of a preview, and
+  `--archive`/`--keep-agent` were rejected outright. All six flags now
+  reach the uninstaller.
+- **Uninstall reverses more of the install.** It now unmasks the
+  sleep/suspend/hibernate targets and removes the installer's
+  unattended-upgrades auto-reboot policy
+  (`/etc/apt/apt.conf.d/52unattended-upgrades-local`); the NodeSource
+  apt repository is documented in the "left intact" notice.
+- **Chat spinner no longer sticks on session expiry or kill-switch.**
+  A streamed turn that hit 401 (login expired) or 410 (zombie dead)
+  returned before clearing the "Thinking…" bubble, leaving it — and
+  its ticking interval — on screen forever.
+- **Markdown links survive emphasis rendering.** URLs containing
+  `__`, `**`, or `*` (e.g. `https://example.com/a__b__c`) were being
+  rewritten inside the generated `href`, breaking the link; rendered
+  links are now stashed behind placeholders like code spans.
+- **Stop button feedback is uniform.** Aborting a turn on the
+  non-streaming fallback path now resets the composer, refocuses the
+  prompt, drains the queued message, and keeps the "Stopped." status
+  visible instead of having it instantly blanked.
+- **Streaming replies render smoothly.** Live markdown is re-rendered
+  at most once per animation frame instead of once per token, removing
+  the quadratic re-parse jank on long answers.
+- **Live streams survive transient drops.** The server releases a
+  turn-stream attachment when the connection breaks so the browser's
+  automatic EventSource reconnect can resume it, and the client no
+  longer tears down the live view while the source is still
+  reconnecting.
+- **pi-mono bridge stderr can no longer deadlock a turn.** stderr is
+  drained concurrently into a bounded buffer; previously a chatty
+  bridge could fill the pipe, stall stdout, and get killed by the idle
+  watchdog with a misleading timeout error.
+- **Audit previews redact before truncating** so a secret split at the
+  preview byte cap can no longer leak a partial token, and
+  `collect-diagnostics` now also redacts `tskey-…` values and
+  `AUTHKEY=` assignments.
+- **`/ttl set 30 s` works.** The lifecycle duration parser stripped
+  the plural `s` from the bare seconds unit, rejecting it.
 - **New chat answers stay visible and render Markdown while streaming.**
   The transcript now keeps following the active answer when it was already
   at the bottom, while still respecting an operator who deliberately scrolls
