@@ -1667,6 +1667,13 @@ run_noninteractive() {
   # probed `sudo -n true` but discarded both, so they have been removed
   # (FIX-1-13).
   ./scripts/install.sh --help | grep -q ZOMBIE_NONINTERACTIVE
+  # The connectivity preflight must not use the retrying download helper:
+  # curl_get adds 45 seconds of wrapper backoff before fallback probes run.
+  if sed -n '/^preflight() {/,/^}/p' scripts/install.sh \
+      | grep -q 'curl_get.*archive\.ubuntu\.com'; then
+    echo "FAIL: connectivity preflight uses the retrying download helper" >&2
+    exit 1
+  fi
 
   echo "[smoke] optional components (Forgejo) dry-run"
   # The Forgejo option must parse from env alone (no new required
