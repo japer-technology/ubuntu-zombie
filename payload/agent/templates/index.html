@@ -1992,7 +1992,9 @@ form.addEventListener("submit", async (event) => {
 
 function resizePrompt() {
   promptEl.style.height = "auto";
-  promptEl.style.height = `${Math.min(promptEl.scrollHeight, 192)}px`;
+  // CSS owns the visual cap; using the measured content height here keeps
+  // JavaScript from duplicating the ``max-height`` design token.
+  promptEl.style.height = `${promptEl.scrollHeight}px`;
 }
 
 promptEl.addEventListener("input", resizePrompt);
