@@ -15,25 +15,76 @@
      colour schemes, keyboard navigation, and assistive technology all get
      first-class behaviour without a build step.
    */
-  :root { color-scheme: light dark; }
+  :root {
+    color-scheme: light dark;
+    --accent: #7c3aed;
+    --accent-soft: #7c3aed18;
+    --border: #64748b55;
+    --surface: #ffffffd9;
+    --surface-raised: #fff;
+    --text: #172033;
+    --text-muted: #536174;
+    --user-surface: #e8f2ff;
+    --user-border: #4a90e266;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --accent: #c084fc;
+      --accent-soft: #c084fc18;
+      --border: #94a3b855;
+      --surface: #111827e6;
+      --surface-raised: #1f2937;
+      --text: #f3f4f6;
+      --text-muted: #cbd5e1;
+      --user-surface: #172b46;
+      --user-border: #60a5fa66;
+    }
+  }
+  * { box-sizing: border-box; }
   body { font-family: system-ui, sans-serif; margin: 0; padding: 0;
-         display: flex; flex-direction: column; height: 100vh; }
-  header { padding: .6rem 1rem; border-bottom: 1px solid #8884;
+         display: flex; flex-direction: column; height: 100vh; height: 100dvh;
+         color: var(--text); background:
+         radial-gradient(circle at 50% -20%, var(--accent-soft), transparent 35%),
+         Canvas; }
+  header { padding: .7rem clamp(.75rem, 3vw, 1.5rem);
+           border-bottom: 1px solid var(--border);
            display: grid; grid-template-columns: 1fr auto 1fr;
-           gap: .75rem; align-items: center; }
-  header h1 { font-size: 1rem; margin: 0; }
-  header .status { font-size: .8rem; opacity: .8; justify-self: end; text-align: right; }
+           gap: .75rem; align-items: center; background: var(--surface);
+           backdrop-filter: blur(12px); z-index: 10; }
+  header h1 { font-size: 1rem; margin: 0; display: flex; align-items: baseline;
+             gap: .5rem; }
+  header h1::before { content: ""; width: .65rem; height: .65rem;
+                     border-radius: 50%; background: #2ecc71;
+                     box-shadow: 0 0 0 .2rem #2ecc7126; flex: none; }
+  header .host { color: var(--text-muted); font-size: .75rem; font-weight: 500; }
+  header .status { font-size: .8rem; color: var(--text-muted);
+                  justify-self: end; text-align: right; }
   header .header-actions { justify-self: center; }
   main { flex: 1; overflow-y: auto; padding: 1rem; max-width: 60rem;
-         width: 100%; margin: 0 auto; box-sizing: border-box; }
-  .wordmark { margin: 0 0 1rem; overflow-x: auto; color: #ac43d9;
+         width: 100%; margin: 0 auto; scroll-behavior: smooth; }
+  .welcome { margin: clamp(1rem, 8vh, 5rem) auto 2rem; text-align: center;
+             max-width: 44rem; }
+  .welcome[hidden] { display: none; }
+  .welcome h2 { margin: .5rem 0; font-size: clamp(1.45rem, 4vw, 2.25rem);
+               letter-spacing: -.025em; }
+  .welcome > p { color: var(--text-muted); margin: .4rem auto 1.25rem;
+                max-width: 34rem; line-height: 1.55; }
+  .starter-actions { display: flex; flex-wrap: wrap; justify-content: center;
+                    gap: .5rem; }
+  .starter-actions button { background: var(--surface-raised);
+                           border-color: var(--border); }
+  .wordmark { margin: 0 auto 1rem; overflow: hidden; color: var(--accent);
              font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-             font-size: clamp(.34rem, 1vw, .72rem); line-height: 1.05;
-             white-space: pre; }
+             font-size: clamp(.25rem, 1.05vw, .68rem); line-height: 1.05;
+             white-space: pre; width: min-content; max-width: 100%; }
   .msg { margin: .8rem 0; padding: .6rem .8rem; border-radius: .5rem;
-         white-space: pre-wrap; word-wrap: break-word; }
-  .user { background: #4a90e220; border: 1px solid #4a90e266; }
-  .assistant { background: #8884; }
+         white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+  .user { background: var(--user-surface); border: 1px solid var(--user-border);
+          margin-left: auto; max-width: min(82%, 44rem);
+          border-radius: 1rem 1rem .25rem 1rem; }
+  .assistant { background: var(--surface-raised); border: 1px solid var(--border);
+              box-shadow: 0 1px 2px #0000000c;
+              border-radius: 1rem 1rem 1rem .25rem; }
   .system { background: #f5a62320; border: 1px solid #f5a62366;
             font-family: ui-monospace, monospace; font-size: .85rem; }
   .system.error { background: #e74c3c30; border-color: #e74c3c; }
@@ -59,9 +110,11 @@
   .live-activity .act.done .icon { color: #2ecc71; }
   .live-activity .act.failed .icon { color: #e74c3c; }
   .live-activity .act.failed { color: #e74c3c; }
-  .muted { opacity: .6; font-size: .8rem; }
-  .role { font-size: .7rem; text-transform: uppercase; opacity: .6;
-          margin-bottom: .2rem; }
+  .muted { color: var(--text-muted); font-size: .8rem; }
+  .msg-head { display: flex; align-items: center; justify-content: space-between;
+              gap: .5rem; min-height: 1.4rem; }
+  .role { font-size: .72rem; text-transform: uppercase; color: var(--text-muted);
+          font-weight: 650; letter-spacing: .04em; margin-bottom: .2rem; }
   .proposal { border: 1px solid #f5a623; border-radius: .5rem;
               padding: .6rem .8rem; margin: .5rem 0;
               background: #f5a62315; }
@@ -75,17 +128,25 @@
   .proposal.destructive { border-color: #e74c3c; background: #e74c3c15; }
   .proposal .actions { margin-top: .5rem; display: flex; gap: .5rem;
                        align-items: center; flex-wrap: wrap; }
-  button { padding: .35rem .8rem; border-radius: .3rem;
-           border: 1px solid #8888; background: #fff2; cursor: pointer; }
+  button { padding: .55rem .85rem; min-height: 2.5rem; border-radius: .55rem;
+           border: 1px solid var(--border); background: #fff2; color: inherit;
+           font: inherit; font-weight: 600; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent);
+                                background: var(--accent-soft); }
   button.primary { background: #2ecc7140; border-color: #2ecc71; }
   button.danger { background: #e74c3c40; border-color: #e74c3c; }
-  button:disabled { cursor: not-allowed; opacity: .55; }
+  button:disabled { cursor: not-allowed; opacity: .7; }
+  .icon-button { min-height: 1.8rem; padding: .2rem .5rem; border: 0;
+                 background: transparent; color: var(--text-muted);
+                 font-size: .75rem; }
   button:focus-visible, textarea:focus-visible, input:focus-visible {
     outline: 2px solid #ac43d9; outline-offset: 2px; }
-  input[type=text] { padding: .35rem .5rem; border-radius: .3rem;
+  input[type=text] { padding: .55rem .65rem; border-radius: .45rem;
                      border: 1px solid #8888; background: #fff2;
-                     min-width: 18rem; }
-  footer { padding: .8rem 1rem; border-top: 1px solid #8884; }
+                     min-width: min(18rem, 100%); font: inherit; }
+  footer { padding: .75rem clamp(.75rem, 3vw, 1.5rem);
+           border-top: 1px solid var(--border); background: var(--surface);
+           backdrop-filter: blur(12px); }
   /* Modal overlay for the password gate and the TTL tombstone. Covers
      the whole viewport so a locked-out / expired zombie cannot be
      driven from the chat box behind it. */
@@ -94,7 +155,7 @@
              display: flex; align-items: center; justify-content: center;
              padding: 1rem; }
   .overlay[hidden] { display: none; }
-  .overlay .panel { background: Canvas; color: CanvasText;
+  .overlay .panel { background: var(--surface-raised); color: var(--text);
                     border: 1px solid #ac43d9; border-radius: .6rem;
                     padding: 1.4rem 1.6rem; max-width: 28rem; width: 100%;
                     box-shadow: 0 0 0 1px #ac43d955, 0 8px 40px #0008; }
@@ -107,10 +168,20 @@
   .overlay.tomb .panel { border-color: #e74c3c;
                          box-shadow: 0 0 0 1px #e74c3c55, 0 8px 40px #0008; }
   .overlay.tomb h2 { color: #e74c3c; }
-  form { display: flex; gap: .5rem; max-width: 60rem; margin: 0 auto; }
-  textarea { flex: 1; min-height: 3rem; padding: .5rem;
-             border-radius: .3rem; border: 1px solid #8888;
-             font: inherit; resize: vertical; background: #fff2; }
+  .composer { max-width: 60rem; margin: 0 auto; }
+  .composer form { display: flex; gap: .5rem; align-items: end; }
+  .composer-actions { display: flex; gap: .5rem; }
+  .composer-meta { display: flex; align-items: center; justify-content: space-between;
+                   gap: 1rem; margin-top: .35rem; min-height: 1.2rem; }
+  .prompt-help { color: var(--text-muted); font-size: .75rem; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0;
+             margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0);
+             white-space: nowrap; border: 0; }
+  textarea { flex: 1; min-height: 3rem; max-height: 12rem; padding: .7rem .8rem;
+             border-radius: .65rem; border: 1px solid var(--border);
+             font: inherit; line-height: 1.4; resize: none;
+             overflow-y: auto; background: var(--surface-raised); color: inherit; }
+  textarea::placeholder { color: var(--text-muted); }
   /* Rendered Markdown inside an assistant bubble. The bubble keeps
      white-space: pre-wrap for plain text, but once we render Markdown to
      real HTML we want normal wrapping with the block elements supplying
@@ -138,8 +209,8 @@
   .result pre { background: #0003; padding: .4rem .6rem;
                 border-radius: .3rem; max-height: 16rem; overflow: auto;
                 font-size: .8rem; }
-  .turn-status { max-width: 60rem; margin: .3rem auto 0; padding: 0 1rem;
-                 font-size: .8rem; opacity: .75; min-height: 1.1rem; }
+  .turn-status { color: var(--text-muted); font-size: .8rem;
+                 min-height: 1.1rem; text-align: right; }
   .thinking { display: flex; align-items: center; gap: .5rem; }
   .thinking .dots { display: inline-flex; gap: .25rem; }
   .thinking .dots i { width: .4rem; height: .4rem; border-radius: 50%;
@@ -150,14 +221,34 @@
   @keyframes zblink { 0%, 80%, 100% { opacity: .25; }
                       40% { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) {
+    main { scroll-behavior: auto; }
     .thinking .dots i { animation: none; opacity: .6; }
     .spin { animation: none; border-top-color: currentColor; opacity: .4; }
+  }
+  @media (max-width: 640px) {
+    header { grid-template-columns: 1fr auto; gap: .35rem .5rem; }
+    header .header-actions { grid-column: 2; grid-row: 1; justify-self: end; }
+    header .status { grid-column: 1 / -1; justify-self: start; text-align: left;
+                     white-space: nowrap; max-width: 100%; overflow: hidden;
+                     text-overflow: ellipsis; }
+    main { padding: .65rem; }
+    .welcome { margin-top: 1.25rem; }
+    .wordmark { font-size: clamp(.19rem, 1.05vw, .4rem); }
+    .user { max-width: 92%; }
+    footer { padding: .6rem; }
+    .composer form { align-items: stretch; }
+    .composer-actions { flex-direction: column; }
+    .composer-actions button { min-width: 4.5rem; }
+    .prompt-help { display: none; }
+    .composer-meta { justify-content: flex-end; }
+    .proposal .actions { align-items: stretch; }
+    .proposal .actions input { flex-basis: 100%; width: 100%; }
   }
 </style>
 </head>
 <body>
 <header>
-  <h1>{{HOSTNAME}}({{USERNAME}})</h1>
+  <h1>Ubuntu Zombie <span class="host">{{HOSTNAME}} · {{USERNAME}}</span></h1>
   <div class="header-actions">
     <!-- Session control is hidden unless the password gate is active and
          this browser owns a valid session. Removing the password must also
@@ -168,22 +259,42 @@
   <div class="status">{{PROVIDER_STATUS}}</div>
 </header>
 <main id="viewport">
-<pre class="wordmark" aria-label="Ubuntu Zombie">██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗
+<section id="welcome" class="welcome" aria-labelledby="welcome-title">
+<pre class="wordmark" aria-hidden="true">██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗
 ██║   ██║██╔══██╗██║   ██║████╗  ██║╚══██╔══╝██║   ██║    ╚══███╔╝██╔═══██╗████╗ ████║██╔══██╗██║██╔════╝
 ██║   ██║██████╔╝██║   ██║██╔██╗ ██║   ██║   ██║   ██║      ███╔╝ ██║   ██║██╔████╔██║██████╔╝██║█████╗
 ██║   ██║██╔══██╗██║   ██║██║╚██╗██║   ██║   ██║   ██║     ███╔╝  ██║   ██║██║╚██╔╝██║██╔══██╗██║██╔══╝
 ╚██████╔╝██████╔╝╚██████╔╝██║ ╚████║   ██║   ╚██████╔╝    ███████╗╚██████╔╝██║ ╚═╝ ██║██████╔╝██║███████╗
  ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝     ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═════╝ ╚═╝╚══════╝</pre>
-<div id="log" aria-live="polite"></div>
+  <h2 id="welcome-title">Your private systems administrator</h2>
+  <p>Ask about this machine, investigate a problem, or safely carry out
+    maintenance. Privileged changes still require your approval.</p>
+  <div class="starter-actions" aria-label="Example prompts">
+    <button type="button" data-starter="Summarize this system's health">Summarize system health</button>
+    <button type="button" data-starter="Show me what is using the most disk space">Investigate disk usage</button>
+    <button type="button" data-starter="Check for recent system errors and explain them">Explain recent errors</button>
+  </div>
+</section>
+<div id="log" role="log" aria-live="polite" aria-relevant="additions text"
+     aria-label="Chat transcript"></div>
 </main>
 <pre id="examples" hidden>{{EXAMPLES}}</pre>
 <footer>
-  <form id="form">
-    <textarea id="prompt" placeholder="Ask the System Administrator…  (Enter to send, Shift+Enter for newline, /help for commands)" required></textarea>
-    <button type="submit" id="send" class="primary">Send</button>
-    <button type="button" id="stop" class="danger" hidden>Stop</button>
-  </form>
-  <div id="status" class="turn-status" role="status" aria-live="polite"></div>
+  <div class="composer">
+    <form id="form">
+      <label for="prompt" class="sr-only">Message the systems administrator</label>
+      <textarea id="prompt" rows="1" placeholder="Message the systems administrator…"
+                aria-describedby="prompt-help" required></textarea>
+      <div class="composer-actions">
+        <button type="submit" id="send" class="primary">Send</button>
+        <button type="button" id="stop" class="danger" hidden>Stop</button>
+      </div>
+    </form>
+    <div class="composer-meta">
+      <span id="prompt-help" class="prompt-help">Enter to send · Shift+Enter for a new line · /help for commands</span>
+      <div id="status" class="turn-status" role="status" aria-live="polite"></div>
+    </div>
+  </div>
 </footer>
 
 <!-- Authentication overlay. The password is never persisted in the DOM after
@@ -223,8 +334,10 @@ const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
 const logoutBtn = document.getElementById("logout");
 const statusEl = document.getElementById("status");
+const welcomeEl = document.getElementById("welcome");
 let visibleMessages = [];
 let authRequired = false;
+let chatDisabled = false;
 
 // In-flight turn state. ``turnController`` lets the operator (or a
 // client-side timeout) abort a request that the server is taking too
@@ -345,8 +458,30 @@ function el(tag, attrs = {}, ...children) {
 
 function addMessage(role, content, opts = {}) {
   const cls = opts.error ? `msg ${role} error` : `msg ${role}`;
-  const wrap = el("div", { class: cls });
-  wrap.appendChild(el("div", { class: "role", text: role }));
+  const attrs = { class: cls };
+  if (opts.error) attrs.role = "alert";
+  const wrap = el("div", attrs);
+  const head = el("div", { class: "msg-head" });
+  head.appendChild(el("div", { class: "role",
+    text: opts.error ? "error" : role }));
+  if (role === "assistant" && content && !opts.error) {
+    const copy = el("button", {
+      type: "button", class: "icon-button", text: "Copy",
+      title: "Copy this response", "aria-label": "Copy this assistant response"
+    });
+    copy.addEventListener("click", async () => {
+      try {
+        await uzCopyText(content);
+        copy.textContent = "Copied";
+        statusEl.textContent = "Response copied.";
+        setTimeout(() => { copy.textContent = "Copy"; }, 1500);
+      } catch (err) {
+        statusEl.textContent = `Could not copy: ${String(err)}`;
+      }
+    });
+    head.appendChild(copy);
+  }
+  wrap.appendChild(head);
   // Assistant replies are Markdown: render them to safe HTML so code
   // blocks, lists, headings and emphasis display nicely instead of as
   // raw characters. Every other role (user/system) stays as plain text.
@@ -521,9 +656,11 @@ function clearThinking() {
 }
 
 function setBusy(busy) {
-  // Keep the textarea enabled so slash commands (/help, /clear, /stop)
-  // remain usable, but reflect the turn state on the controls.
-  sendBtn.disabled = busy;
+  // Keep both composer and submit enabled so keyboard and pointer users
+  // can queue the next message while slash commands remain available.
+  sendBtn.disabled = chatDisabled;
+  sendBtn.textContent = busy ? "Queue" : "Send";
+  sendBtn.title = busy ? "Queue this message to send next" : "Send message";
   turnBusy = busy;
   stopBtn.hidden = !busy;
   log.setAttribute("aria-busy", busy ? "true" : "false");
@@ -635,8 +772,14 @@ function renderPendingToolCall(p) {
   const actions = el("div", { class: "actions" });
   let phraseInput = null;
   if (p.requires_phrase) {
+    const inputId = `approval-${String(p.tool_call_id || p.id || "tool")
+      .replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+    actions.appendChild(el("label", {
+      for: inputId, text: `Type “${p.confirm_phrase}” to confirm`
+    }));
     phraseInput = el("input", { type: "text",
-      placeholder: `type: ${p.confirm_phrase}` });
+      id: inputId, placeholder: p.confirm_phrase,
+      autocomplete: "off", spellcheck: "false" });
     actions.appendChild(phraseInput);
   }
   const approve = el("button", { class: "primary", text: "Approve" });
@@ -1831,27 +1974,53 @@ form.addEventListener("submit", async (event) => {
   if (!prompt) return;
   if (await handleSlashCommand(prompt)) {
     promptEl.value = "";
+    resizePrompt();
     promptEl.focus();
     return;
   }
   if (turnBusy) {
     promptEl.value = "";
+    resizePrompt();
     queuePrompt(prompt);
     promptEl.focus();
     return;
   }
   promptEl.value = "";
+  resizePrompt();
   await uzSendPrompt(prompt);
 });
 
+function resizePrompt() {
+  promptEl.style.height = "auto";
+  promptEl.style.height = `${Math.min(promptEl.scrollHeight, 192)}px`;
+}
+
+promptEl.addEventListener("input", resizePrompt);
 promptEl.addEventListener("keydown", (event) => {
   // Enter sends; Shift+Enter (or Ctrl/Meta+Enter) inserts a newline —
   // the standard chat affordance, so a one-word "Hello" just works.
-  if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+  if (event.key === "Enter" && !event.isComposing &&
+      !event.shiftKey && !event.ctrlKey && !event.metaKey) {
     event.preventDefault();
     form.requestSubmit();
   }
 });
+
+for (const starter of document.querySelectorAll("[data-starter]")) {
+  starter.addEventListener("click", () => {
+    promptEl.value = starter.dataset.starter || "";
+    resizePrompt();
+    promptEl.focus();
+  });
+}
+
+// Keep the welcome useful on an empty view, then get it out of the way as
+// soon as a transcript starts. A MutationObserver also covers direct event
+// rendering and conversation reloads without coupling each path to the shell.
+const welcomeObserver = new MutationObserver(() => {
+  welcomeEl.hidden = log.childElementCount > 0;
+});
+welcomeObserver.observe(log, { childList: true });
 
 // --- Password gate + TTL tombstone ----------------------------------
 const loginOverlay = document.getElementById("login-overlay");
@@ -1889,6 +2058,7 @@ function showTombstone(status) {
   }
   tombOverlay.hidden = false;
   showLogin(false);
+  chatDisabled = true;
   sendBtn.disabled = true;
   promptEl.disabled = true;
 }
