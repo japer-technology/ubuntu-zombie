@@ -1156,7 +1156,7 @@ function updateCommandMenu() {
   commandMatches.forEach((entry, index) => {
     const option = el("div", {
       class: "command-option", role: "option", id: `command-option-${index}`,
-      "aria-selected": "false"
+      "aria-selected": String(index === commandSelection)
     }, el("code", { text: entry[0] }), el("span", { text: entry[1] }));
     option.addEventListener("mousedown", event => event.preventDefault());
     option.addEventListener("click", () => selectCommand(entry));
@@ -2144,6 +2144,8 @@ promptEl.addEventListener("input", () => {
 });
 promptEl.addEventListener("keydown", (event) => {
   if (!commandMenu.hidden) {
+    const selectedCommand =
+      commandMatches[commandSelection][0].split(" ")[0].toLowerCase();
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const direction = event.key === "ArrowDown" ? 1 : -1;
@@ -2154,8 +2156,7 @@ promptEl.addEventListener("keydown", (event) => {
     }
     if (event.key === "Tab" ||
         (event.key === "Enter" &&
-         promptEl.value.trim().toLowerCase() !==
-           commandMatches[commandSelection][0].split(" ")[0].toLowerCase())) {
+         promptEl.value.trim().toLowerCase() !== selectedCommand)) {
       event.preventDefault();
       selectCommand(commandMatches[commandSelection]);
       return;

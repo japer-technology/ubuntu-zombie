@@ -1924,8 +1924,8 @@ fi
 _SECTION_T0=""
 
 # Re-define section() to record a breadcrumb, number each phase, and report
-# how long the previous phase took without surrounding every transition in
-# three heavy separator lines.
+# how long the previous phase took in a plain-English "Completed in …" line,
+# without surrounding every transition in three heavy separator lines.
 section() {
   local now; now="$(date +%s)"
   if [[ -n "${_SECTION_T0}" ]]; then
