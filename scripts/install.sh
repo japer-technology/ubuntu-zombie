@@ -1929,7 +1929,7 @@ _SECTION_T0=""
 section() {
   local now; now="$(date +%s)"
   if [[ -n "${_SECTION_T0}" ]]; then
-    (( ZOMBIE_QUIET )) || printf '%s    completed in %s%s\n' \
+    (( ZOMBIE_QUIET )) || printf '%s    Completed in %s%s\n' \
       "${C_DIM}" "$(fmt_duration "$(( now - _SECTION_T0 ))")" "${C_RESET}"
   fi
   _SECTION_T0="${now}"

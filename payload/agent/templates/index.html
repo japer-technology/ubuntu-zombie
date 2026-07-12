@@ -387,6 +387,7 @@ let queuedBubble = null;
 let transcriptPinnedToBottom = true;
 const CLIENT_TURN_TIMEOUT_MS = 720000;
 const QUEUED_PROMPT_PREVIEW_CHARS = 4000;
+const COMMAND_MENU_BLUR_DELAY_MS = 100;
 
 // ---- /verbose background-activity accounting -----------------------
 // Counts everything the page can see moving: HTTP API calls (with
@@ -1081,7 +1082,7 @@ function uzCommandEntries(filter = "") {
 function uzCommandHelp(filter = "") {
   if (!filter.trim()) {
     const groups = new Map();
-    for (const [cmd, , group] of uzCommandEntries()) {
+    for (const [cmd, _description, group] of uzCommandEntries()) {
       if (!groups.has(group)) groups.set(group, []);
       groups.get(group).push(cmd.split(" ")[0]);
     }
@@ -2173,7 +2174,8 @@ promptEl.addEventListener("keydown", (event) => {
     form.requestSubmit();
   }
 });
-promptEl.addEventListener("blur", () => setTimeout(closeCommandMenu, 100));
+promptEl.addEventListener("blur", () =>
+  setTimeout(closeCommandMenu, COMMAND_MENU_BLUR_DELAY_MS));
 
 for (const starter of document.querySelectorAll("[data-starter]")) {
   starter.addEventListener("click", () => {
