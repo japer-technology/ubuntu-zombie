@@ -1459,7 +1459,7 @@ PY
 run_branding() {
   echo "[smoke] startup branding"
   local first_line
-  first_line='██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗'
+  first_line='╭──────────────────────────────────╮'
   grep -Fq "$first_line" scripts/lib.sh
   grep -Fq "$first_line" payload/bin/zombie-chat
   grep -Fq "$first_line" payload/agent/templates/index.html
@@ -1863,6 +1863,14 @@ run_standards() {
     || { echo "assistant responses must retain their copy action" >&2; exit 1; }
   grep -q 'busy ? "Queue" : "Send"' payload/agent/templates/index.html \
     || { echo "busy chat submit must retain its queue affordance" >&2; exit 1; }
+  grep -q 'id="command-menu"' payload/agent/templates/index.html \
+    && grep -q 'aria-label="Slash commands"' payload/agent/templates/index.html \
+    || { echo "chat UI must provide slash-command completion" >&2; exit 1; }
+  grep -q 'Type /commands <filter> for descriptions.' \
+    payload/agent/templates/index.html \
+    || { echo "chat /help must retain its compact command index" >&2; exit 1; }
+  grep -q 'section "Install policy and operator tools"' scripts/install.sh \
+    || { echo "installer must retain separated deployment phases" >&2; exit 1; }
   grep -q 'transcriptPinnedToBottom' payload/agent/templates/index.html \
     || { echo "chat transcript must retain sticky tail tracking" >&2; exit 1; }
   grep -q 'body.innerHTML = renderMarkdown(liveMarkdown)' \

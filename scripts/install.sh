@@ -1923,17 +1923,14 @@ if (( ZOMBIE_PHASE_TOTAL > 0 )); then
 fi
 _SECTION_T0=""
 
-# Re-define section() to: record a step breadcrumb, number the phase, and
-# report how long the previous phase took so a long silent step is visibly
-# making progress rather than appearing hung. The timing is shown as a
-# clean bracketed duration in plain English — e.g. "[35 seconds]" or
-# "[1 minute 5 seconds]" — printed on its own line immediately after the
-# phase that just finished (see fmt_duration in scripts/lib.sh).
+# Re-define section() to record a breadcrumb, number each phase, and report
+# how long the previous phase took without surrounding every transition in
+# three heavy separator lines.
 section() {
   local now; now="$(date +%s)"
   if [[ -n "${_SECTION_T0}" ]]; then
-    (( ZOMBIE_QUIET )) || printf '%s    [%s]%s\n' \
-      "${C_CYAN}" "$(fmt_duration "$(( now - _SECTION_T0 ))")" "${C_RESET}"
+    (( ZOMBIE_QUIET )) || printf '%s    completed in %s%s\n' \
+      "${C_DIM}" "$(fmt_duration "$(( now - _SECTION_T0 ))")" "${C_RESET}"
   fi
   _SECTION_T0="${now}"
   ZOMBIE_PHASE=$(( ZOMBIE_PHASE + 1 ))
@@ -1945,9 +1942,9 @@ section() {
   else
     counter="[${ZOMBIE_PHASE}]"
   fi
-  printf '\n%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
-  printf '%s%s %s%s\n' "${C_BOLD}" "${counter}" "$*" "${C_RESET}"
-  printf '%s============================================================%s\n' "${C_BOLD}" "${C_RESET}"
+  printf '\n%s%sPhase %s%s  %s\n' \
+    "${C_BRAND}" "${C_BOLD}" "${counter}" "${C_RESET}" "$*"
+  brand_rule 60
 }
 
 # Augment on_error() with the step trail so an operator pasting the
@@ -2029,12 +2026,12 @@ write_receipt_start
 # System packages
 # ---------------------------------------------------------------------------
 
-section "System update"
+section "Update the operating system"
 
 apt_get update
 apt_get -y upgrade
 
-section "Base packages"
+section "Install system dependencies"
 
 apt_install \
   sudo \
@@ -2073,7 +2070,7 @@ apt_install \
 # Agent user and sudo
 # ---------------------------------------------------------------------------
 
-section "Create ${AGENT_USER} user"
+section "Configure the ${AGENT_USER} agent identity"
 
 if id "${AGENT_USER}" >/dev/null 2>&1; then
   info "User ${AGENT_USER} already exists."
@@ -2102,7 +2099,7 @@ ok "Configured passwordless sudo for ${AGENT_USER}."
 # Security services and unattended upgrades
 # ---------------------------------------------------------------------------
 
-section "Unattended upgrades"
+section "Configure automatic security updates"
 
 systemctl enable --now unattended-upgrades >/dev/null || true
 
@@ -2121,7 +2118,7 @@ EOF
 
 ok "Automatic security updates enabled (reboots at 04:00 if required)."
 
-section "Prevent sleep, suspend, and screen lock"
+section "Keep the desktop available"
 
 systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
 
@@ -2131,7 +2128,7 @@ ok "Sleep and suspend targets masked."
 # Workspace at /opt/ai-zombie
 # ---------------------------------------------------------------------------
 
-section "Create Ubuntu Zombie workspace"
+section "Prepare application state"
 
 install -d -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" "${ZOMBIE_DIR}" \
   "${ZOMBIE_DIR}/bin" "${ZOMBIE_DIR}/logs" "${ZOMBIE_DIR}/state" \
@@ -2234,7 +2231,7 @@ chmod 600 "${ZOMBIE_DIR}/secrets/env"
 # Python cloud-agent runtime
 # ---------------------------------------------------------------------------
 
-section "Python cloud-agent runtime"
+section "Build the Python runtime"
 
 # Stage the venv setup helper into ${ZOMBIE_DIR}/bin early so the
 # unprivileged setup below can exec it. The rest of the operator
@@ -2260,7 +2257,7 @@ ok "Python venv ready at ${AGENT_HOME}/agent-env."
 # Node runtime
 # ---------------------------------------------------------------------------
 
-section "Node runtime"
+section "Build the Node agent runtime"
 
 # The npm bundled with Ubuntu's apt-provided `nodejs` (Node 18 on
 # 22.04/24.04) is too old to self-upgrade to npm@latest, which now
@@ -2813,7 +2810,7 @@ fi
 # Deploy payload: chat service, helpers, policy, systemd, logrotate.
 # ---------------------------------------------------------------------------
 
-section "Deploy chat service, helpers, and policy"
+section "Deploy the agent runtime"
 
 if [[ ! -d "${PAYLOAD_DIR}" ]]; then
   die "Payload directory ${PAYLOAD_DIR} not found. Re-clone the repository." 1
@@ -2891,6 +2888,8 @@ if [[ -f "${ZOMBIE_DIR}/state/conversations.db" ]]; then
     || warn "Could not snapshot conversations.db (continuing)."
 fi
 
+section "Install policy and operator tools"
+
 # Operator helpers.
 for f in audit-recent health-check collect-diagnostics secrets-edit zombie-chat setup-agent-venv verify-release; do
   install -m 755 -o "${AGENT_USER}" -g "${AGENT_USER}" \
@@ -2938,6 +2937,8 @@ if [[ ! -f "${ZOMBIE_LOG_DIR}/audit.log" ]]; then
   install -m 640 -o "${AGENT_USER}" -g "${AGENT_USER}" /dev/null "${ZOMBIE_LOG_DIR}/audit.log"
 fi
 
+section "Enable background services"
+
 # systemd units. The shipped unit files use the literal placeholders
 # `__AGENT_USER__` and `__AGENT_HOME__` so the chosen account name is
 # substituted in at install time. This keeps the units valid for the
@@ -2965,7 +2966,7 @@ ok "Chat service installed and enabled."
 # Verification script
 # ---------------------------------------------------------------------------
 
-section "Install verification script"
+section "Install health checks"
 
 cat > "${ZOMBIE_DIR}/bin/verify" <<EOF
 #!/usr/bin/env bash
@@ -3115,7 +3116,7 @@ ln -sf "${ZOMBIE_DIR}/bin/verify" /usr/local/bin/zombie-verify
 # First-run status summary
 # ---------------------------------------------------------------------------
 
-section "First-run status"
+section "Verify the installation"
 
 PROVIDER_OK=0
 if grep -Eq '^(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
@@ -3156,50 +3157,24 @@ if [[ "${PROVIDER_OK}" != "1" ]]; then
 elif [[ "${CHAT_OK}" != "1" ]]; then
   NEXT_STEP="sudo systemctl start ubuntu-zombie-chat.service"
 else
-  NEXT_STEP="open http://127.0.0.1:${CHAT_PORT}/ locally"
+  NEXT_STEP="sudo reboot"
 fi
 
+INSTALL_DURATION="$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
 cat <<EOF
 
-${C_GREEN}${C_BOLD}Install complete.${C_RESET}
-
-Next obvious step:
-  ${C_BOLD}${NEXT_STEP}${C_RESET}
-
-Then:
-
-  1. Reboot:
-       sudo reboot
-
-  2. After reboot, open the chat UI locally:
-       http://127.0.0.1:${CHAT_PORT}/
-
-  3. Add cloud LLM keys (if not done already):
-       sudo ${ZOMBIE_DIR}/bin/secrets-edit
-
-  4. Inspect what the AI has done:
-       ${ZOMBIE_DIR}/bin/audit-recent
-
-Surfaces installed:
-  - OS:       apt + systemctl + logs + files
-  - Chat:     loopback HTTP on ${CHAT_PORT}, policy + audit
-$([[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && printf '  - Forge:    Forgejo on port %s (PostgreSQL-backed%s)\n' "${FORGEJO_HTTP_PORT}" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', Actions runner co-located')")
-Public exposure:
-  - Chat:          localhost only
-$([[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && printf '  - Forgejo:       all interfaces on %s/tcp (normal network access)\n' "${FORGEJO_HTTP_PORT}")
-
-Install transcript: ${LOG_FILE}
-Install receipt:    $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "(disabled)")
-Audit log:          ${ZOMBIE_LOG_DIR}/audit.log
-Policy:             ${ZOMBIE_ETC}/policy.yaml
-Uninstall:          sudo ${SCRIPT_DIR}/uninstall.sh --dry-run
+${C_GREEN}${C_BOLD}Install complete in ${INSTALL_DURATION}.${C_RESET}
+Next:    ${C_BOLD}${NEXT_STEP}${C_RESET}
+Chat:    http://127.0.0.1:${CHAT_PORT}/ (localhost only, after reboot)
+Check:   ${ZOMBIE_DIR}/bin/verify  ·  ${ZOMBIE_DIR}/bin/audit-recent
+Records: ${LOG_FILE}
+         $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "receipt disabled")  ·  ${ZOMBIE_ETC}/policy.yaml
+$([[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && printf 'Forgejo: http://<host>:%s/ (all interfaces%s)\n' "${FORGEJO_HTTP_PORT}" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled')")
+Remove:  sudo ${SCRIPT_DIR}/uninstall.sh --dry-run
 EOF
 
-echo
-echo "A reboot is required: sudo reboot"
-
-if [[ -n "${INSTALL_T0:-}" ]]; then
-  ok "Install took $(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")."
+if [[ "${NEXT_STEP}" != "sudo reboot" ]]; then
+  info "Reboot after completing the next step: sudo reboot"
 fi
 
 if (( STEPS_SATISFIED + STEPS_CHANGED > 0 )); then
