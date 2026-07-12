@@ -1894,6 +1894,7 @@ fi
 # numbered "[n/total]". Derived from this file so it stays correct as
 # phases are added or removed.
 ZOMBIE_PHASE=0
+SECTION_RULE_WIDTH=60
 ZOMBIE_PHASE_TOTAL="$(awk '/^# install — the rest of the file/{f=1} f && /^section "/{c++} END{print c+0}' "${BASH_SOURCE[0]}" 2>/dev/null || echo 0)"
 # The count is derived by scanning this file, so guard against a 0/empty
 # result (e.g. if the marker comment is ever moved) — fall back to an
@@ -1944,7 +1945,7 @@ section() {
   fi
   printf '\n%s%sPhase %s%s  %s\n' \
     "${C_BRAND}" "${C_BOLD}" "${counter}" "${C_RESET}" "$*"
-  brand_rule 60
+  brand_rule "${SECTION_RULE_WIDTH}"
 }
 
 # Augment on_error() with the step trail so an operator pasting the

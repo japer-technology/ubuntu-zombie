@@ -387,6 +387,8 @@ let queuedBubble = null;
 let transcriptPinnedToBottom = true;
 const CLIENT_TURN_TIMEOUT_MS = 720000;
 const QUEUED_PROMPT_PREVIEW_CHARS = 4000;
+const MAX_COMMAND_MENU_ITEMS = 8;
+// Leave time for a pointer press on an option before textarea blur closes it.
 const COMMAND_MENU_BLUR_DELAY_MS = 100;
 
 // ---- /verbose background-activity accounting -----------------------
@@ -1155,7 +1157,7 @@ function updateCommandMenu() {
   const typed = promptEl.value.toLowerCase();
   commandMatches = SLASH_COMMANDS
     .filter(([signature]) => signature.split(" ")[0].toLowerCase().startsWith(typed))
-    .slice(0, 8);
+    .slice(0, MAX_COMMAND_MENU_ITEMS);
   if (!commandMatches.length) {
     closeCommandMenu();
     return;
@@ -2168,6 +2170,7 @@ promptEl.addEventListener("keydown", (event) => {
       paintCommandSelection();
       return;
     }
+    // An exact command should submit normally; a partial command completes.
     if (event.key === "Tab" ||
         (event.key === "Enter" &&
          promptEl.value.trim().toLowerCase() !== selectedCommand)) {
