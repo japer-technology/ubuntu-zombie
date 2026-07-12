@@ -9,6 +9,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Added
+- **Live slash-command completion in chat.** Typing `/` now opens an
+  accessible, keyboard-navigable command picker that narrows as you type;
+  use arrow keys and Tab or Enter to complete a valid command.
 - **`/verbose` chat command for background-activity detail.** The chat
   now tallies everything the page can observe moving — HTTP API calls
   with request/response byte sizes, live-stream frames, tool calls and
@@ -27,6 +30,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   bridge-executed tools report more than a bare "done".
 
 ### Fixed
+- **Chat and installer presentation is tighter and clearer.** `/help` is
+  now a compact category index, the oversized wordmark is a stable
+  responsive sign, installer deployment work is split into focused phases,
+  and the final install summary keeps only the next action and essential
+  operational paths.
 - **Policy file is honoured again.** The minimal YAML reader in
   `payload/agent/policy.py` raised on the first scalar list item
   (e.g. `sudo_allow_list:`) and the loader silently swallowed the

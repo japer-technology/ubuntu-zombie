@@ -73,9 +73,10 @@
                     gap: .5rem; }
   .starter-actions button { background: var(--surface-raised);
                            border-color: var(--border); }
-  .wordmark { margin: 0 auto 1rem; overflow: hidden; color: var(--accent);
+  .wordmark { margin: 0 auto 1rem; color: var(--accent);
              font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-             font-size: clamp(.25rem, 1.05vw, .68rem); line-height: 1.05;
+             font-size: clamp(.62rem, 2.5vw, .82rem); line-height: 1.2;
+             letter-spacing: 0; font-variant-ligatures: none;
              white-space: pre; width: min-content; max-width: 100%; }
   .msg { margin: .8rem 0; padding: .6rem .8rem; border-radius: .5rem;
          white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
@@ -170,6 +171,22 @@
   .overlay.tomb h2 { color: #e74c3c; }
   .composer { max-width: 60rem; margin: 0 auto; }
   .composer form { display: flex; gap: .5rem; align-items: end; }
+  .prompt-wrap { position: relative; flex: 1; min-width: 0; }
+  .prompt-wrap textarea { width: 100%; display: block; }
+  .command-menu { position: absolute; z-index: 20; left: 0; right: 0;
+                  bottom: calc(100% + .45rem); margin: 0; padding: .35rem;
+                  max-height: min(20rem, 45vh); overflow-y: auto;
+                  list-style: none; border: 1px solid var(--border);
+                  border-radius: .7rem; background: var(--surface-raised);
+                  box-shadow: 0 .8rem 2rem #0003; }
+  .command-menu[hidden] { display: none; }
+  .command-option { display: grid; grid-template-columns: minmax(9rem, auto) 1fr;
+                    gap: .75rem; padding: .5rem .6rem; border-radius: .45rem;
+                    cursor: pointer; }
+  .command-option[aria-selected=true] { background: var(--accent-soft);
+                                        color: var(--text); }
+  .command-option code { color: var(--accent); font-weight: 700; }
+  .command-option span { color: var(--text-muted); font-size: .82rem; }
   .composer-actions { display: flex; gap: .5rem; }
   .composer-meta { display: flex; align-items: center; justify-content: space-between;
                    gap: 1rem; margin-top: .35rem; min-height: 1.2rem; }
@@ -233,7 +250,7 @@
                      text-overflow: ellipsis; }
     main { padding: .65rem; }
     .welcome { margin-top: 1.25rem; }
-    .wordmark { font-size: clamp(.19rem, 1.05vw, .4rem); }
+    .wordmark { font-size: clamp(.54rem, 2.7vw, .7rem); }
     .user { max-width: 92%; }
     footer { padding: .6rem; }
     .composer form { align-items: stretch; }
@@ -262,13 +279,10 @@
 </header>
 <main id="viewport">
 <div id="welcome" class="welcome">
-<pre class="wordmark" aria-hidden="true">
-██╗   ██╗██████╗ ██╗   ██╗███╗   ██╗████████╗██╗   ██╗    ███████╗ ██████╗ ███╗   ███╗██████╗ ██╗███████╗
-██║   ██║██╔══██╗██║   ██║████╗  ██║╚══██╔══╝██║   ██║    ╚══███╔╝██╔═══██╗████╗ ████║██╔══██╗██║██╔════╝
-██║   ██║██████╔╝██║   ██║██╔██╗ ██║   ██║   ██║   ██║      ███╔╝ ██║   ██║██╔████╔██║██████╔╝██║█████╗
-██║   ██║██╔══██╗██║   ██║██║╚██╗██║   ██║   ██║   ██║     ███╔╝  ██║   ██║██║╚██╔╝██║██╔══██╗██║██╔══╝
-╚██████╔╝██████╔╝╚██████╔╝██║ ╚████║   ██║   ╚██████╔╝    ███████╗╚██████╔╝██║ ╚═╝ ██║██████╔╝██║███████╗
- ╚═════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝   ╚═╝    ╚═════╝     ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚═════╝ ╚═╝╚══════╝</pre>
+<pre class="wordmark" aria-hidden="true">╭──────────────────────────────────╮
+│  UBUNTU ZOMBIE                   │
+│  AI SYSTEMS ADMINISTRATOR        │
+╰──────────────────────────────────╯</pre>
   <h2 id="welcome-title">Your private systems administrator</h2>
   <p>Ask about this machine, investigate a problem, or safely carry out
     maintenance. Privileged changes still require your approval.</p>
@@ -286,8 +300,14 @@
   <div class="composer">
     <form id="form">
       <label for="prompt" class="sr-only">Message the systems administrator</label>
-      <textarea id="prompt" rows="1" placeholder="Ask about this machine…"
-                aria-describedby="prompt-help" required></textarea>
+      <div class="prompt-wrap">
+        <textarea id="prompt" rows="1" placeholder="Ask about this machine…"
+                  aria-describedby="prompt-help" aria-autocomplete="list"
+                  aria-controls="command-menu" aria-expanded="false"
+                  role="combobox" required></textarea>
+        <div id="command-menu" class="command-menu" role="listbox"
+             aria-label="Slash commands" hidden></div>
+      </div>
       <div class="composer-actions">
         <button type="submit" id="send" class="primary">Send</button>
         <button type="button" id="stop" class="danger" hidden>Stop</button>
@@ -338,6 +358,7 @@ const stopBtn = document.getElementById("stop");
 const logoutBtn = document.getElementById("logout");
 const statusEl = document.getElementById("status");
 const welcomeEl = document.getElementById("welcome");
+const commandMenu = document.getElementById("command-menu");
 let visibleMessages = [];
 let authRequired = false;
 let chatDisabled = false;
@@ -366,6 +387,9 @@ let queuedBubble = null;
 let transcriptPinnedToBottom = true;
 const CLIENT_TURN_TIMEOUT_MS = 720000;
 const QUEUED_PROMPT_PREVIEW_CHARS = 4000;
+const MAX_COMMAND_MENU_ITEMS = 8;
+// Leave time for a pointer press on an option before textarea blur closes it.
+const COMMAND_MENU_BLUR_DELAY_MS = 100;
 
 // ---- /verbose background-activity accounting -----------------------
 // Counts everything the page can see moving: HTTP API calls (with
@@ -1058,15 +1082,18 @@ function uzCommandEntries(filter = "") {
 }
 
 function uzCommandHelp(filter = "") {
-  const lines = [];
   if (!filter.trim()) {
-    lines.push(
-      "General:",
-      "  While the agent is working, another normal message is queued and sent next.",
-      "  Submitting a second queued message replaces the first; slash commands still run immediately.",
-      ""
-    );
+    const groups = new Map();
+    for (const [cmd, _description, group] of uzCommandEntries()) {
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(cmd.split(" ")[0]);
+    }
+    const lines = Array.from(groups, ([group, commands]) =>
+      `${group}: ${commands.join("  ")}`);
+    lines.push("", "Type /commands <filter> for descriptions.");
+    return lines;
   }
+  const lines = [];
   let group = "";
   for (const [cmd, desc, nextGroup] of uzCommandEntries(filter)) {
     if (nextGroup !== group) {
@@ -1077,6 +1104,78 @@ function uzCommandHelp(filter = "") {
     lines.push(`  ${cmd} - ${desc}`);
   }
   return lines;
+}
+
+let commandMatches = [];
+let commandSelection = 0;
+let commandMenuBlurTimer = null;
+
+function closeCommandMenu() {
+  commandMatches = [];
+  commandSelection = 0;
+  commandMenu.hidden = true;
+  commandMenu.replaceChildren();
+  promptEl.setAttribute("aria-expanded", "false");
+  promptEl.removeAttribute("aria-activedescendant");
+}
+
+function cancelCommandMenuBlur() {
+  if (commandMenuBlurTimer !== null) {
+    clearTimeout(commandMenuBlurTimer);
+    commandMenuBlurTimer = null;
+  }
+}
+
+function selectCommand(entry) {
+  cancelCommandMenuBlur();
+  const signature = entry[0];
+  const command = signature.split(" ")[0];
+  promptEl.value = command + (signature.includes(" ") ? " " : "");
+  closeCommandMenu();
+  resizePrompt();
+  promptEl.focus();
+}
+
+function paintCommandSelection() {
+  const options = Array.from(commandMenu.children);
+  options.forEach((option, index) => {
+    const selected = index === commandSelection;
+    option.setAttribute("aria-selected", String(selected));
+    if (selected) {
+      promptEl.setAttribute("aria-activedescendant", option.id);
+      option.scrollIntoView({ block: "nearest" });
+    }
+  });
+}
+
+function updateCommandMenu() {
+  const match = promptEl.value.match(/^\/[^\s/]*$/);
+  if (!match) {
+    closeCommandMenu();
+    return;
+  }
+  const typed = promptEl.value.toLowerCase();
+  commandMatches = SLASH_COMMANDS
+    .filter(([signature]) => signature.split(" ")[0].toLowerCase().startsWith(typed))
+    .slice(0, MAX_COMMAND_MENU_ITEMS);
+  if (!commandMatches.length) {
+    closeCommandMenu();
+    return;
+  }
+  commandSelection = Math.min(commandSelection, commandMatches.length - 1);
+  commandMenu.replaceChildren();
+  commandMatches.forEach((entry, index) => {
+    const option = el("div", {
+      class: "command-option", role: "option", id: `command-option-${index}`,
+      "aria-selected": String(index === commandSelection)
+    }, el("code", { text: entry[0] }), el("span", { text: entry[1] }));
+    option.addEventListener("mousedown", event => event.preventDefault());
+    option.addEventListener("click", () => selectCommand(entry));
+    commandMenu.appendChild(option);
+  });
+  commandMenu.hidden = false;
+  promptEl.setAttribute("aria-expanded", "true");
+  paintCommandSelection();
 }
 
 async function uzLoadConversation(id, notice = null) {
@@ -1591,7 +1690,7 @@ async function handleSlashCommand(input) {
       const lines = uzCommandHelp(filter);
       const title = filter
         ? `Available commands matching "${filter}":`
-        : "Available commands (alphabetic by group):";
+        : "Commands by category:";
       addMessage("system", lines.length ? title + "\n" + lines.join("\n")
         : "No commands matched.");
       return true;
@@ -2022,6 +2121,7 @@ async function handleSlashCommand(input) {
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
+  closeCommandMenu();
   const prompt = promptEl.value.trim();
   if (!prompt) return;
   if (await handleSlashCommand(prompt)) {
@@ -2049,8 +2149,41 @@ function resizePrompt() {
   promptEl.style.height = `${promptEl.scrollHeight}px`;
 }
 
-promptEl.addEventListener("input", resizePrompt);
+promptEl.addEventListener("input", () => {
+  cancelCommandMenuBlur();
+  resizePrompt();
+  updateCommandMenu();
+});
+promptEl.addEventListener("focus", () => {
+  cancelCommandMenuBlur();
+  updateCommandMenu();
+});
 promptEl.addEventListener("keydown", (event) => {
+  if (!commandMenu.hidden) {
+    const selectedCommand =
+      commandMatches[commandSelection][0].split(" ")[0].toLowerCase();
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      commandSelection =
+        (commandSelection + direction + commandMatches.length) % commandMatches.length;
+      paintCommandSelection();
+      return;
+    }
+    // An exact command should submit normally; a partial command completes.
+    if (event.key === "Tab" ||
+        (event.key === "Enter" &&
+         promptEl.value.trim().toLowerCase() !== selectedCommand)) {
+      event.preventDefault();
+      selectCommand(commandMatches[commandSelection]);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeCommandMenu();
+      return;
+    }
+  }
   // Enter sends; Shift+Enter (or Ctrl/Meta+Enter) inserts a newline —
   // the standard chat affordance, so a one-word "Hello" just works.
   if (event.key === "Enter" && !event.isComposing &&
@@ -2058,6 +2191,13 @@ promptEl.addEventListener("keydown", (event) => {
     event.preventDefault();
     form.requestSubmit();
   }
+});
+promptEl.addEventListener("blur", () => {
+  cancelCommandMenuBlur();
+  commandMenuBlurTimer = setTimeout(() => {
+    commandMenuBlurTimer = null;
+    closeCommandMenu();
+  }, COMMAND_MENU_BLUR_DELAY_MS);
 });
 
 for (const starter of document.querySelectorAll("[data-starter]")) {
