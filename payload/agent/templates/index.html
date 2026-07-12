@@ -1106,6 +1106,7 @@ function uzCommandHelp(filter = "") {
 
 let commandMatches = [];
 let commandSelection = 0;
+let commandMenuBlurTimer = null;
 
 function closeCommandMenu() {
   commandMatches = [];
@@ -1116,7 +1117,15 @@ function closeCommandMenu() {
   promptEl.removeAttribute("aria-activedescendant");
 }
 
+function cancelCommandMenuBlur() {
+  if (commandMenuBlurTimer !== null) {
+    clearTimeout(commandMenuBlurTimer);
+    commandMenuBlurTimer = null;
+  }
+}
+
 function selectCommand(entry) {
+  cancelCommandMenuBlur();
   const signature = entry[0];
   const command = signature.split(" ")[0];
   promptEl.value = command + (signature.includes(" ") ? " " : "");
@@ -2139,7 +2148,12 @@ function resizePrompt() {
 }
 
 promptEl.addEventListener("input", () => {
+  cancelCommandMenuBlur();
   resizePrompt();
+  updateCommandMenu();
+});
+promptEl.addEventListener("focus", () => {
+  cancelCommandMenuBlur();
   updateCommandMenu();
 });
 promptEl.addEventListener("keydown", (event) => {
@@ -2175,8 +2189,13 @@ promptEl.addEventListener("keydown", (event) => {
     form.requestSubmit();
   }
 });
-promptEl.addEventListener("blur", () =>
-  setTimeout(closeCommandMenu, COMMAND_MENU_BLUR_DELAY_MS));
+promptEl.addEventListener("blur", () => {
+  cancelCommandMenuBlur();
+  commandMenuBlurTimer = setTimeout(() => {
+    commandMenuBlurTimer = null;
+    closeCommandMenu();
+  }, COMMAND_MENU_BLUR_DELAY_MS);
+});
 
 for (const starter of document.querySelectorAll("[data-starter]")) {
   starter.addEventListener("click", () => {
