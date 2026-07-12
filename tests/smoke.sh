@@ -1842,8 +1842,8 @@ run_standards() {
     || { echo "chat UI must expose the /logout command" >&2; exit 1; }
   grep -q 'setAuthState(false, false)' payload/agent/templates/index.html \
     || { echo "chat UI must hide Logoff when the password gate is removed" >&2; exit 1; }
-  grep -q 'Available commands (alphabetic by group)' payload/agent/templates/index.html \
-    || { echo "chat /help must keep grouped alphabetic output" >&2; exit 1; }
+  grep -q 'Commands by category:' payload/agent/templates/index.html \
+    || { echo "chat /help must keep compact grouped output" >&2; exit 1; }
   grep -q 'EventSource' payload/agent/templates/index.html \
     || { echo "chat UI must keep the SSE EventSource path" >&2; exit 1; }
   grep -q 'Live stream interrupted' payload/agent/templates/index.html \
