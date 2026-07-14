@@ -825,6 +825,19 @@ cmd_doctor() {
     else
       dr warn forgejo "Forgejo installed but not running. Likely causes: port in use (ss -ltnp), DB auth (journalctl -u forgejo | grep -i password), or migrations not run. Fix: sudo systemctl restart forgejo"
     fi
+    local forgejo_dir_state forgejo_config_state
+    forgejo_dir_state="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
+    forgejo_config_state="$(
+      stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
+        || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
+        || true
+    )"
+    if [[ "${forgejo_dir_state}" == "root:git 750" \
+          && "${forgejo_config_state}" == "root:git 640" ]]; then
+      dr ok forgejo_config "Forgejo config permissions are root:git 750/640."
+    elif [[ -n "${forgejo_config_state}" ]]; then
+      dr warn forgejo_config "Forgejo config permissions are ${forgejo_dir_state:-unknown}/${forgejo_config_state}; expected root:git 750/640. Fix: sudo ./${SCRIPT_NAME} repair"
+    fi
     if systemctl is-active --quiet postgresql 2>/dev/null; then
       dr ok forgejo_db "PostgreSQL active."
     else
@@ -940,7 +953,7 @@ cmd_repair() {
   # Optional component: Forgejo — re-assert ownership/permissions and
   # restart the units when the component is installed.
   if [[ -d /etc/forgejo || -d /var/lib/forgejo ]]; then
-    [[ -d /etc/forgejo ]] && { chown root:git /etc/forgejo; chmod 770 /etc/forgejo; }
+    [[ -d /etc/forgejo ]] && { chown root:git /etc/forgejo; chmod 750 /etc/forgejo; }
     [[ -f /etc/forgejo/app.ini ]] && { chown root:git /etc/forgejo/app.ini; chmod 640 /etc/forgejo/app.ini; }
     [[ -d /var/lib/forgejo ]] && { chown -R git:git /var/lib/forgejo; chmod 750 /var/lib/forgejo; }
     if [[ -f /etc/systemd/system/forgejo.service ]]; then
@@ -2566,7 +2579,7 @@ if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
   section "Create Forgejo directories"
 
   install -d -m 750 -o git -g git /var/lib/forgejo
-  install -d -m 770 -o root -g git /etc/forgejo
+  install -d -m 750 -o root -g git /etc/forgejo
   note_satisfied
 
   section "Configure PostgreSQL for Forgejo"
@@ -2620,6 +2633,14 @@ PSQL
   fi
 
   section "Write Forgejo configuration"
+
+  # A re-run may replace app.ini and migrate the database. Stop an existing
+  # daemon first so it cannot race either operation or use a half-updated
+  # schema. The service is started again only after migration and admin setup.
+  if [[ -f /etc/systemd/system/forgejo.service ]]; then
+    systemctl stop forgejo.service \
+      || die "Could not stop Forgejo safely before migration." 1
+  fi
 
   # Reuse existing secrets from app.ini so a re-run never rotates them
   # behind the running service; generate them exactly once otherwise.
@@ -2703,15 +2724,31 @@ EOF
   # generated value can be recorded there; other secrets are one-shot.
   unset _fj_secret_key _fj_internal_token _fj_jwt_secret _fj_lfs_jwt_secret
 
-  section "Enable Forgejo service"
+  section "Initialize Forgejo database and service"
 
   install -m 644 "${PAYLOAD_DIR}/systemd/forgejo.service" \
     /etc/systemd/system/forgejo.service
   systemctl daemon-reload
+  # Forgejo persists newly introduced generated settings while loading an
+  # installed configuration. Allow that only for the stopped, one-shot
+  # migration command, then restore the standard locked-down permissions even
+  # when migration fails. This also makes upgrades resilient to future
+  # Forgejo settings without leaving the running daemon able to rewrite config.
+  chown root:git /etc/forgejo /etc/forgejo/app.ini
+  chmod 770 /etc/forgejo
+  chmod 660 /etc/forgejo/app.ini
+  _fj_migrate_status=0
   runuser -u git -- /usr/local/bin/forgejo migrate \
-    --config /etc/forgejo/app.ini --work-path /var/lib/forgejo
-  systemctl enable --now forgejo.service \
-    || die "Forgejo service failed to start; see journalctl -u forgejo." 1
+    --config /etc/forgejo/app.ini --work-path /var/lib/forgejo \
+    || _fj_migrate_status=$?
+  chown root:git /etc/forgejo /etc/forgejo/app.ini
+  chmod 750 /etc/forgejo
+  chmod 640 /etc/forgejo/app.ini
+  if (( _fj_migrate_status != 0 )); then
+    die "Forgejo database migration failed (exit ${_fj_migrate_status}); config permissions were restored. See the output above." 1
+  fi
+  unset _fj_migrate_status
+
   if runuser -u git -- /usr/local/bin/forgejo admin user list --admin \
        --config /etc/forgejo/app.ini --work-path /var/lib/forgejo 2>/dev/null \
        | awk '{print $2}' | grep -qx "${FORGEJO_ADMIN_USER}"; then
@@ -2747,6 +2784,14 @@ EOF
     unset _fj_must_change
     note_changed
   fi
+  systemctl enable --now forgejo.service \
+    || die "Forgejo service failed to start; see journalctl -u forgejo." 1
+  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
+       "http://127.0.0.1:${FORGEJO_HTTP_PORT}/api/healthz"; then
+    systemctl disable --now forgejo.service >/dev/null 2>&1 || true
+    die "Forgejo started but did not become healthy; it was stopped. See journalctl -u forgejo." 1
+  fi
+  ok "Forgejo is healthy at http://${_fj_domain}:${FORGEJO_HTTP_PORT}/."
   # option-sections: forgejo end
 
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
@@ -3103,8 +3148,10 @@ if sudo -n test -f /etc/forgejo/app.ini 2>/dev/null; then
   check "forgejo reports a version"          /usr/local/bin/forgejo --version
   check "postgresql active"                  systemctl is-active postgresql
   check "forgejo database \${FORGEJO_DB} present" bash -c "sudo -n runuser -u postgres -- psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '\${FORGEJO_DB}'\" | grep -q 1"
+  check "forgejo config directory root:git 750" bash -c "test \"\$(sudo -n stat -c '%U:%G %a' /etc/forgejo)\" = 'root:git 750'"
+  check "forgejo app.ini root:git 640"       bash -c "test \"\$(sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini)\" = 'root:git 640'"
   check "forgejo.service active"             systemctl is-active forgejo.service
-  check "forgejo answering on 127.0.0.1:\${FORGEJO_PORT}" curl -fsS -m 5 -o /dev/null "http://127.0.0.1:\${FORGEJO_PORT}/"
+  check "forgejo healthy on 127.0.0.1:\${FORGEJO_PORT}" curl -fsS -m 5 -o /dev/null "http://127.0.0.1:\${FORGEJO_PORT}/api/healthz"
   if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
     check "forgejo-runner.service active"    systemctl is-active forgejo-runner.service
     check "runner registration present"      sudo -n test -f /var/lib/forgejo-runner/.runner

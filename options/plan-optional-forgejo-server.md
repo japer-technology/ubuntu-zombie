@@ -274,7 +274,9 @@ returns early when `ZOMBIE_INSTALL_FORGEJO != 1`. Model the logic on
   if the target version is already installed. Reuse `curl_get`/retry
   helpers and architecture mapping like the Node bridge install.
 - `section "Create Forgejo directories"` — `/var/lib/forgejo`
-  (`git:git`, `750`) and `/etc/forgejo` (`root:git`, `770`), idempotent.
+  (`git:git`, `750`) and `/etc/forgejo` (`root:git`, `750`), idempotent.
+  The config directory is temporarily mode `770` only while the stopped
+  service's one-shot migration command may persist generated settings.
 - `section "Configure PostgreSQL for Forgejo"` — `systemctl enable
   --now postgresql`; create role + database only if absent (the
   upstream `DO $$ ... pg_roles`/`pg_database` guards); generate the DB
