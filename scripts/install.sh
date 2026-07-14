@@ -2785,8 +2785,8 @@ EOF
   fi
   systemctl enable --now forgejo.service \
     || die "Forgejo service failed to start; see journalctl -u forgejo." 1
-  # Six exponentially backed-off probes allow roughly a minute for schema
-  # checks and startup on slower hosts, while each request is capped at 5s.
+  # retry() doubles its 2-second initial delay after each failed probe, allowing
+  # roughly a minute for startup on slower hosts; each request is capped at 5s.
   if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
        "http://127.0.0.1:${FORGEJO_HTTP_PORT}/api/healthz"; then
     systemctl disable --now forgejo.service >/dev/null \
