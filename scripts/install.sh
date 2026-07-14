@@ -360,7 +360,7 @@ remove_component_manifest() {
 
 _read_manifest_value() {
   local file="$1" key="$2"
-  awk -F= -v want="${key}" '$1 == want { print substr($0, length($1) + 2); found=1 } END { if (!found) exit 1 }' "${file}" 2>/dev/null
+  awk -v want="${key}" 'index($0, want "=") == 1 { print substr($0, length(want) + 2); found=1 } END { if (!found) exit 1 }' "${file}" 2>/dev/null
 }
 
 valid_component_manifest_entry() {
@@ -1003,6 +1003,10 @@ validate_noninteractive() {
 # ---------------------------------------------------------------------------
 
 cmd_verify() {
+  # Preserve the deployed verifier for zombie-only runs: it contains the
+  # richest runtime checks and the root-to-agent re-exec behaviour operators
+  # already rely on. Mixed or non-zombie verification uses the component-aware
+  # checks below so one component cannot hide another component's result.
   if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}" && (( ! COMPONENT_FORGEJO_SELECTED )); then
     if [[ ! -x "${ZOMBIE_DIR}/bin/verify" ]]; then
       die "${ZOMBIE_DIR}/bin/verify not found. Run 'sudo ./${SCRIPT_NAME} install zombie' first." 1

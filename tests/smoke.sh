@@ -1560,6 +1560,8 @@ EOF_MANIFEST
     || { echo "FAIL: doctor --json did not discover forgejo manifest" >&2; exit 1; }
   ! grep -q '"component": "zombie"' <<<"${manifest_out}" \
     || { echo "FAIL: doctor --json should not include unselected zombie checks" >&2; exit 1; }
+  # Duplicate keys must make a manifest malformed rather than silently
+  # accepting ambiguous component state.
   cat > "${manifest_tmp}/zombie" <<'EOF_BAD_MANIFEST'
 format=1
 format=1

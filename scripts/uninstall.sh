@@ -555,53 +555,53 @@ fi
 # -------------------------------------------------------------------
 # 7. Remove the agent user (last, so its home is still owned).
 # -------------------------------------------------------------------
-if ! is_target_selected "${COMPONENT_ZOMBIE}"; then
-  :
-elif [[ "${KEEP_AGENT}" == "1" ]]; then
-  info "Keeping user ${AGENT_USER} (--keep-agent)."
-elif id "${AGENT_USER}" >/dev/null 2>&1; then
-  if confirm "Remove the ${AGENT_USER} user and ${AGENT_HOME} ?"; then
-    # Kill any session first so userdel does not refuse.
-    run "loginctl terminate-user ${AGENT_USER} 2>/dev/null || true"
-    run "pkill -KILL -u ${AGENT_USER} 2>/dev/null || true"
-    sleep 1
-    # FIX-2-05: do not swallow removal failures. Capture the rc and verify
-    # the account is actually gone before printing the success line.
-    if [[ "${DRY_RUN}" == "1" ]]; then
-      run "deluser --remove-home ${AGENT_USER} 2>/dev/null || userdel -r ${AGENT_USER}"
-      ok "Would remove user ${AGENT_USER}"
-    else
-      set +e
-      deluser --remove-home "${AGENT_USER}" >/dev/null 2>&1
-      rc=$?
-      if (( rc != 0 )); then
-        userdel -r "${AGENT_USER}" >/dev/null 2>&1
-        rc=$?
-      fi
-      set -e
-      if (( rc == 0 )) && ! id "${AGENT_USER}" >/dev/null 2>&1; then
-        ok "Removed user ${AGENT_USER}"
-        # FIX-2-12: drop the now-orphaned primary group so a future
-        # `adduser` of the same name does not pick up unexpected file
-        # ownership. --only-if-empty makes this safe.
-        if getent group "${AGENT_USER}" >/dev/null 2>&1; then
-          run "delgroup --only-if-empty ${AGENT_USER} >/dev/null 2>&1 || true"
-        fi
-        # Older installs wrote /var/lib/AccountsService/users/${AGENT_USER}
-        # to pin the XSession; userdel does not clean it up, leaving a
-        # stale AccountsService entry referencing a missing account.
-        # Remove it (existence-guarded) once the user is actually gone.
-        if [[ -f "/var/lib/AccountsService/users/${AGENT_USER}" ]]; then
-          run "rm -f /var/lib/AccountsService/users/${AGENT_USER}"
-        fi
+if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  if [[ "${KEEP_AGENT}" == "1" ]]; then
+    info "Keeping user ${AGENT_USER} (--keep-agent)."
+  elif id "${AGENT_USER}" >/dev/null 2>&1; then
+    if confirm "Remove the ${AGENT_USER} user and ${AGENT_HOME} ?"; then
+      # Kill any session first so userdel does not refuse.
+      run "loginctl terminate-user ${AGENT_USER} 2>/dev/null || true"
+      run "pkill -KILL -u ${AGENT_USER} 2>/dev/null || true"
+      sleep 1
+      # FIX-2-05: do not swallow removal failures. Capture the rc and verify
+      # the account is actually gone before printing the success line.
+      if [[ "${DRY_RUN}" == "1" ]]; then
+        run "deluser --remove-home ${AGENT_USER} 2>/dev/null || userdel -r ${AGENT_USER}"
+        ok "Would remove user ${AGENT_USER}"
       else
-        warn "Failed to remove user ${AGENT_USER}; see 'who', 'loginctl list-sessions',"
-        warn "  'lsof +D ${AGENT_HOME}' and re-run after the processes are gone."
-        UNINSTALL_EXIT=1
+        set +e
+        deluser --remove-home "${AGENT_USER}" >/dev/null 2>&1
+        rc=$?
+        if (( rc != 0 )); then
+          userdel -r "${AGENT_USER}" >/dev/null 2>&1
+          rc=$?
+        fi
+        set -e
+        if (( rc == 0 )) && ! id "${AGENT_USER}" >/dev/null 2>&1; then
+          ok "Removed user ${AGENT_USER}"
+          # FIX-2-12: drop the now-orphaned primary group so a future
+          # `adduser` of the same name does not pick up unexpected file
+          # ownership. --only-if-empty makes this safe.
+          if getent group "${AGENT_USER}" >/dev/null 2>&1; then
+            run "delgroup --only-if-empty ${AGENT_USER} >/dev/null 2>&1 || true"
+          fi
+          # Older installs wrote /var/lib/AccountsService/users/${AGENT_USER}
+          # to pin the XSession; userdel does not clean it up, leaving a
+          # stale AccountsService entry referencing a missing account.
+          # Remove it (existence-guarded) once the user is actually gone.
+          if [[ -f "/var/lib/AccountsService/users/${AGENT_USER}" ]]; then
+            run "rm -f /var/lib/AccountsService/users/${AGENT_USER}"
+          fi
+        else
+          warn "Failed to remove user ${AGENT_USER}; see 'who', 'loginctl list-sessions',"
+          warn "  'lsof +D ${AGENT_HOME}' and re-run after the processes are gone."
+          UNINSTALL_EXIT=1
+        fi
       fi
+    else
+      warn "Keeping user ${AGENT_USER}. Its home and authorized_keys remain."
     fi
-  else
-    warn "Keeping user ${AGENT_USER}. Its home and authorized_keys remain."
   fi
 fi
 
