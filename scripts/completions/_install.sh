@@ -56,9 +56,7 @@ _ubuntu_zombie_install() {
   else
     remaining_components=()
     for component in "${components[@]}"; do
-      if (( ${used_components[(I)${component%%:*}]} )); then
-        continue
-      fi
+      [[ -n "${used_components[(r)${component%%:*}]}" ]] && continue
       remaining_components+=("${component}")
     done
     _arguments -C "${flags[@]}" '*:component:->component'

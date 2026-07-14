@@ -289,7 +289,7 @@ is_public_component() {
   return 1
 }
 
-_has_selected_component() {
+is_selected_component() {
   local candidate="$1" component
   for component in "${SELECTED_COMPONENTS[@]}"; do
     [[ "${candidate}" == "${component}" ]] && return 0
@@ -297,9 +297,9 @@ _has_selected_component() {
   return 1
 }
 
-_add_selected_component() {
+add_selected_component() {
   local component="$1"
-  _has_selected_component "${component}" || SELECTED_COMPONENTS+=("${component}")
+  is_selected_component "${component}" || SELECTED_COMPONENTS+=("${component}")
 }
 
 validate_and_resolve_targets() {
@@ -322,11 +322,11 @@ validate_and_resolve_targets() {
   (( ${#TARGET_ARGS[@]} > 0 )) && EXPLICIT_TARGETS=1
 
   if (( ! EXPLICIT_TARGETS )) && [[ "${SUBCOMMAND}" == "install" ]]; then
-    _add_selected_component "${COMPONENT_ZOMBIE}"
+    add_selected_component "${COMPONENT_ZOMBIE}"
   fi
 
   if forgejo_config_selected; then
-    _add_selected_component "${COMPONENT_FORGEJO}"
+    add_selected_component "${COMPONENT_FORGEJO}"
   fi
 
   for target in "${SELECTED_COMPONENTS[@]}"; do

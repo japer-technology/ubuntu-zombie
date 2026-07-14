@@ -1533,6 +1533,8 @@ run_subcommands() {
     expect_exit_code 2 ./scripts/install.sh "${sub}" zombie zombie
     expect_exit_code 2 ./scripts/install.sh "${sub}" "${sub}"
   done
+  # After --, every token is a component target; flag-looking tokens are
+  # rejected as unknown components instead of being parsed as flags.
   expect_exit_code 2 ./scripts/install.sh install -- forgejo --dry-run
   expect_exit_code 2 ./scripts/install.sh install forgejo --archive
   expect_exit_code 2 ./scripts/install.sh uninstall forgejo --archive --dry-run
