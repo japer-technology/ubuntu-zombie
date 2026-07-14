@@ -128,8 +128,9 @@ warn_remaining_components() {
   (( ${#TARGET_ARGS[@]} > 0 )) || return 0
   for target in "${PUBLIC_COMPONENTS[@]}"; do
     is_target_selected "${target}" && continue
-    [[ -e "$(component_manifest_path "${target}")" ]] \
-      && warn "Component '${target}' remains installed; its manifest entry was preserved."
+    if [[ -e "$(component_manifest_path "${target}")" ]]; then
+      warn "Component '${target}' remains installed; its manifest entry was preserved."
+    fi
   done
 }
 usage() {

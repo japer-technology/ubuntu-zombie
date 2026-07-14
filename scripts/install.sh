@@ -384,8 +384,7 @@ list_manifest_components() {
     path="$(component_manifest_path "${component}")"
     if [[ -e "${path}" ]]; then
       if valid_component_manifest_entry "${path}" "${component}"; then
-        printf '%s
-' "${component}"
+        printf '%s\n' "${component}"
       else
         warn "Ignoring malformed component manifest: ${path}"
       fi
@@ -1012,7 +1011,9 @@ cmd_verify() {
     fi
     if [[ ${EUID} -eq 0 ]] && [[ "$(id -un)" != "${AGENT_USER}" ]]; then
       if id "${AGENT_USER}" >/dev/null 2>&1; then
-        exec runuser -l "${AGENT_USER}" -c "ZOMBIE_JSON=${ZOMBIE_JSON:-0} ${ZOMBIE_DIR}/bin/verify"
+        local verify_cmd
+        printf -v verify_cmd 'ZOMBIE_JSON=%q %q' "${ZOMBIE_JSON:-0}" "${ZOMBIE_DIR}/bin/verify"
+        exec runuser -l "${AGENT_USER}" -c "${verify_cmd}"
       fi
     fi
     exec "${ZOMBIE_DIR}/bin/verify"
