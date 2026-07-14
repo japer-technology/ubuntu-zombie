@@ -307,7 +307,7 @@ validate_and_resolve_targets() {
   declare -A seen_targets=()
   for target in "${TARGET_ARGS[@]}"; do
     if is_lifecycle_verb "${target}"; then
-      die "Unexpected lifecycle verb after ${SUBCOMMAND}: ${target}" 2
+      die "Lifecycle verb cannot be used as a component target after ${SUBCOMMAND}: ${target}" 2
     fi
     if ! is_public_component "${target}"; then
       die "Unknown component target '${target}'. Valid components: $(component_names)" 2

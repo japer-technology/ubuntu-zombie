@@ -1531,6 +1531,7 @@ run_subcommands() {
   for sub in install verify doctor repair uninstall; do
     expect_exit_code 2 ./scripts/install.sh "${sub}" nope
     expect_exit_code 2 ./scripts/install.sh "${sub}" zombie zombie
+    expect_exit_code 2 ./scripts/install.sh "${sub}" forgejo forgejo
     expect_exit_code 2 ./scripts/install.sh "${sub}" "${sub}"
   done
   # After --, every token is a component target; flag-looking tokens are

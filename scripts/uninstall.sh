@@ -161,7 +161,7 @@ if (( ${#TARGET_ARGS[@]} > 0 )); then
     printf 'Selective uninstall syntax is accepted, but non-dry-run targeted removal is gated until the component manifest phase lands.\n'
     exit 0
   fi
-  die "Selective uninstall targets are accepted but gated until the component manifest phase lands. Use no target for the current all-managed-artefacts uninstall." 2
+  die "Selective uninstall targets are accepted but gated until the component manifest phase lands. Use no target for the current all-managed-artifacts uninstall." 2
 fi
 
 # The splash is printed only for a real uninstall run: after argument
