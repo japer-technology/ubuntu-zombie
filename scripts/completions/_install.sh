@@ -56,6 +56,8 @@ _ubuntu_zombie_install() {
   else
     remaining_components=()
     for component in "${components[@]}"; do
+      # (r) returns the matching array value, so a non-empty result means the
+      # component target has already been used and should not be suggested.
       [[ -n "${used_components[(r)${component%%:*}]}" ]] && continue
       remaining_components+=("${component}")
     done

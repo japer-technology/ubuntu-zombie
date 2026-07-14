@@ -83,17 +83,15 @@ is_public_component() {
 
 validate_targets() {
   local target
+  declare -A seen_targets=()
   for target in "${TARGET_ARGS[@]}"; do
     if ! is_public_component "${target}"; then
       die "Unknown component target '${target}'. Valid components: $(component_names)" 2
     fi
-  done
-  for (( i = 0; i < ${#TARGET_ARGS[@]}; i++ )); do
-    for (( j = i + 1; j < ${#TARGET_ARGS[@]}; j++ )); do
-      if [[ "${TARGET_ARGS[i]}" == "${TARGET_ARGS[j]}" ]]; then
-        die "Duplicate component target '${TARGET_ARGS[i]}'." 2
-      fi
-    done
+    if [[ -n "${seen_targets[${target}]+x}" ]]; then
+      die "Duplicate component target '${target}'." 2
+    fi
+    seen_targets["${target}"]=1
   done
 }
 

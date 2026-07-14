@@ -303,7 +303,8 @@ add_selected_component() {
 }
 
 validate_and_resolve_targets() {
-  local target seen
+  local target
+  declare -A seen_targets=()
   for target in "${TARGET_ARGS[@]}"; do
     if is_lifecycle_verb "${target}"; then
       die "Unexpected lifecycle verb after ${SUBCOMMAND}: ${target}" 2
@@ -311,11 +312,10 @@ validate_and_resolve_targets() {
     if ! is_public_component "${target}"; then
       die "Unknown component target '${target}'. Valid components: $(component_names)" 2
     fi
-    for seen in "${SELECTED_COMPONENTS[@]}"; do
-      if [[ "${target}" == "${seen}" ]]; then
-        die "Duplicate component target '${target}'." 2
-      fi
-    done
+    if [[ -n "${seen_targets[${target}]+x}" ]]; then
+      die "Duplicate component target '${target}'." 2
+    fi
+    seen_targets["${target}"]=1
     SELECTED_COMPONENTS+=("${target}")
   done
 
