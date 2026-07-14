@@ -351,7 +351,9 @@ fi
 # Only runs when Forgejo artefacts are present, so a baseline-only
 # install is untouched. Dropping the database and removing the data
 # directory are destructive and sit behind their own confirmations.
-if is_target_selected "${COMPONENT_FORGEJO}"     && [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo       || -x /usr/local/bin/forgejo ]]; then
+if is_target_selected "${COMPONENT_FORGEJO}" \
+    && [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
+      || -x /usr/local/bin/forgejo ]]; then
   info "Removing optional Forgejo component"
   # Capture the database/role names from app.ini before the config is
   # removed (the operator may have customised FORGEJO_DB_NAME/USER).

@@ -1556,8 +1556,10 @@ component_version=1.0.0
 suboptions=runner
 EOF_MANIFEST
   manifest_out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_tmp}" ./scripts/install.sh doctor --json)"
-  grep -q '"component": "forgejo"' <<<"${manifest_out}"     || { echo "FAIL: doctor --json did not discover forgejo manifest" >&2; exit 1; }
-  ! grep -q '"component": "zombie"' <<<"${manifest_out}"     || { echo "FAIL: doctor --json should not include unselected zombie checks" >&2; exit 1; }
+  grep -q '"component": "forgejo"' <<<"${manifest_out}" \
+    || { echo "FAIL: doctor --json did not discover forgejo manifest" >&2; exit 1; }
+  ! grep -q '"component": "zombie"' <<<"${manifest_out}" \
+    || { echo "FAIL: doctor --json should not include unselected zombie checks" >&2; exit 1; }
   cat > "${manifest_tmp}/zombie" <<'EOF_BAD_MANIFEST'
 format=1
 format=1
@@ -1568,7 +1570,8 @@ component_version=1.0.0
 suboptions=
 EOF_BAD_MANIFEST
   manifest_out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_tmp}" ./scripts/install.sh doctor --json 2>/dev/null)"
-  ! grep -q '"component": "zombie"' <<<"${manifest_out}"     || { echo "FAIL: malformed duplicate-key manifest should be ignored" >&2; exit 1; }
+  ! grep -q '"component": "zombie"' <<<"${manifest_out}" \
+    || { echo "FAIL: malformed duplicate-key manifest should be ignored" >&2; exit 1; }
   rm -rf "${manifest_tmp}"
   trap - RETURN
 }

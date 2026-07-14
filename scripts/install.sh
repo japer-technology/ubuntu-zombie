@@ -312,7 +312,8 @@ component_manifest_path() {
 }
 
 validate_component_manifest_dir() {
-  is_safe_absolute_path "${COMPONENT_MANIFEST_DIR}"     || die "ZOMBIE_COMPONENT_MANIFEST_DIR must be an absolute safe path." 2
+  is_safe_absolute_path "${COMPONENT_MANIFEST_DIR}" \
+    || die "ZOMBIE_COMPONENT_MANIFEST_DIR must be an absolute safe path." 2
 }
 
 ensure_component_manifest_dir() {
@@ -1213,7 +1214,8 @@ cmd_doctor() {
 # Subcommand: repair
 # ---------------------------------------------------------------------------
 
-cmd_repair() {  section "Repair"
+cmd_repair() {
+  section "Repair"
 
   if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}" && id "${AGENT_USER}" >/dev/null 2>&1; then
     if [[ -f "${ZOMBIE_DIR}/secrets/env" ]]; then
