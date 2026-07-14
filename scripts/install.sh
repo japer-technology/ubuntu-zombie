@@ -1155,7 +1155,9 @@ cmd_doctor() {
       local forgejo_dir_perms forgejo_config_perms
       forgejo_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
       forgejo_config_perms="$(
-        stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null           || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null           || true
+        stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
+          || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
+          || true
       )"
       if [[ "${forgejo_dir_perms}" == "root:git 750" && "${forgejo_config_perms}" == "root:git 640" ]]; then
         dr ok forgejo forgejo_config "Forgejo config permissions are root:git 750/640."
