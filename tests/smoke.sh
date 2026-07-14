@@ -1829,6 +1829,8 @@ run_standards() {
     || { echo "missing payload/systemd/forgejo-runner.service" >&2; exit 1; }
   grep -q "NoNewPrivileges=true" payload/systemd/forgejo.service \
     || { echo "forgejo.service must stay hardened (NoNewPrivileges)" >&2; exit 1; }
+  grep -q 'LFS_JWT_SECRET = ${_fj_lfs_jwt_secret}' scripts/install.sh \
+    || { echo "install.sh must preconfigure Forgejo's LFS JWT secret" >&2; exit 1; }
   grep -q 'dropdb' payload/etc/policy.yaml \
     || { echo "policy.yaml must classify dropdb/dropuser as destructive" >&2; exit 1; }
   grep -q "option-sections: forgejo begin" scripts/install.sh \

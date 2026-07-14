@@ -2616,14 +2616,17 @@ PSQL
   # Reuse existing secrets from app.ini so a re-run never rotates them
   # behind the running service; generate them exactly once otherwise.
   _fj_secret_key=""; _fj_internal_token=""; _fj_jwt_secret=""
+  _fj_lfs_jwt_secret=""
   if [[ -f /etc/forgejo/app.ini ]]; then
     _fj_secret_key="$(ini_get /etc/forgejo/app.ini security SECRET_KEY || true)"
     _fj_internal_token="$(ini_get /etc/forgejo/app.ini security INTERNAL_TOKEN || true)"
     _fj_jwt_secret="$(ini_get /etc/forgejo/app.ini oauth2 JWT_SECRET || true)"
+    _fj_lfs_jwt_secret="$(ini_get /etc/forgejo/app.ini server LFS_JWT_SECRET || true)"
   fi
   [[ -n "${_fj_secret_key}" ]]     || _fj_secret_key="$(/usr/local/bin/forgejo generate secret SECRET_KEY)"
   [[ -n "${_fj_internal_token}" ]] || _fj_internal_token="$(/usr/local/bin/forgejo generate secret INTERNAL_TOKEN)"
   [[ -n "${_fj_jwt_secret}" ]]     || _fj_jwt_secret="$(/usr/local/bin/forgejo generate secret JWT_SECRET)"
+  [[ -n "${_fj_lfs_jwt_secret}" ]] || _fj_lfs_jwt_secret="$(/usr/local/bin/forgejo generate secret JWT_SECRET)"
   _fj_domain="$(hostname -f 2>/dev/null || hostname)"
   _fj_tmp="$(mktemp)"
   cat > "${_fj_tmp}" <<EOF
@@ -2648,6 +2651,7 @@ HTTP_PORT = ${FORGEJO_HTTP_PORT}
 DOMAIN = ${_fj_domain}
 ROOT_URL = http://${_fj_domain}:${FORGEJO_HTTP_PORT}/
 LFS_START_SERVER = true
+LFS_JWT_SECRET = ${_fj_lfs_jwt_secret}
 
 [repository]
 ROOT = /var/lib/forgejo/data/forgejo-repositories
@@ -2681,7 +2685,7 @@ EOF
   fi
   # FORGEJO_DB_PASSWORD is kept until the finish receipt is written so a
   # generated value can be recorded there; other secrets are one-shot.
-  unset _fj_secret_key _fj_internal_token _fj_jwt_secret
+  unset _fj_secret_key _fj_internal_token _fj_jwt_secret _fj_lfs_jwt_secret
 
   section "Enable Forgejo service"
 

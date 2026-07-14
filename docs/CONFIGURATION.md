@@ -445,10 +445,11 @@ runner and edit the port, the admin account (username, email,
 password), the PostgreSQL database (name, role/username, password),
 and the version pins and runner labels before anything is installed.
 
-Secrets (`SECRET_KEY`, `INTERNAL_TOKEN`, `JWT_SECRET`) are generated at
-install time and stored only in `/etc/forgejo/app.ini` (mode `640`,
-owner `root:git`); re-runs reuse them rather than rotating them. The
-admin and database passwords are options: set
+Secrets (`SECRET_KEY`, `INTERNAL_TOKEN`, `JWT_SECRET`,
+`LFS_JWT_SECRET`) are generated at install time and stored only in
+`/etc/forgejo/app.ini` (mode `640`, owner `root:git`); re-runs reuse
+them rather than rotating them. The admin and database passwords are
+options: set
 `FORGEJO_ADMIN_PASSWORD` / `FORGEJO_DB_PASSWORD` to choose them, or
 leave them empty to have the installer generate them randomly and
 record the generated values in the install receipt (root-only, mode
