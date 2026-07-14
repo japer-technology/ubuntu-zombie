@@ -344,13 +344,13 @@ write_component_manifest() {
 }
 
 remove_component_manifest() {
-  local component="$1" path parent_dir
+  local component="$1" path manifest_parent_dir
   path="$(component_manifest_path "${component}")"
-  parent_dir="$(dirname "${COMPONENT_MANIFEST_DIR}")"
+  manifest_parent_dir="$(dirname "${COMPONENT_MANIFEST_DIR}")"
   (( DRY_RUN )) && return 0
   rm -f -- "${path}"
   rmdir --ignore-fail-on-non-empty "${COMPONENT_MANIFEST_DIR}" 2>/dev/null || true
-  rmdir --ignore-fail-on-non-empty "${parent_dir}" 2>/dev/null || true
+  rmdir --ignore-fail-on-non-empty "${manifest_parent_dir}" 2>/dev/null || true
 }
 
 _read_manifest_value() {
@@ -370,7 +370,7 @@ valid_component_manifest_entry() {
   local file="$1" component="$2" seen_format=0 seen_component=0 key
   [[ -f "${file}" ]] || return 1
   while IFS='=' read -r key _value; do
-    [[ -n "${key}" ]] || return 1
+    [[ -n "${key}" ]] || continue
     case "${key}" in
       format) seen_format=$((seen_format + 1)) ;;
       component) seen_component=$((seen_component + 1)) ;;
@@ -3636,9 +3636,9 @@ fi
 # Record components only after the install path and health summary have converged.
 write_component_manifest "${COMPONENT_ZOMBIE}" "${SCRIPT_VERSION}" ""
 if (( COMPONENT_FORGEJO_SELECTED )); then
-  _forgejo_suboptions=""
-  [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && _forgejo_suboptions="runner"
-  write_component_manifest "${COMPONENT_FORGEJO}" "${FORGEJO_RESOLVED_VERSION:-${FORGEJO_VERSION:-}}" "${_forgejo_suboptions}"
+  forgejo_suboptions=""
+  [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && forgejo_suboptions="runner"
+  write_component_manifest "${COMPONENT_FORGEJO}" "${FORGEJO_RESOLVED_VERSION:-${FORGEJO_VERSION:-}}" "${forgejo_suboptions}"
 fi
 
 # Finalise the install receipt with the outcome of this run.
