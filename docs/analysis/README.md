@@ -11,6 +11,9 @@ ground without rediscovering it from scratch.
   re-checked against the current tree.
 - [`improvements-2.md`](improvements-2.md) — second review pass with
   the same structure.
+- [`improvements-3.md`](improvements-3.md) — design analysis of a
+  component-oriented install/uninstall CLI (verb + component targets,
+  standalone Forgejo, component registry and manifest).
 - [`install-enhancement-1.md`](install-enhancement-1.md) — focused
   analysis of installer UX and robustness enhancements.
 

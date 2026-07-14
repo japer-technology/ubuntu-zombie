@@ -9,6 +9,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Added
+- **`docs/analysis/improvements-3.md` design analysis.** A written
+  recommendation for evolving the installer CLI to component-oriented
+  syntax (`install.sh <verb> [component ...]`): keep the five lifecycle
+  verbs, add component targets (`zombie`, `forgejo`), support
+  standalone Forgejo without the zombie via a shared core layer, a
+  component registry, an on-host component manifest, and symmetric
+  per-component uninstall. Analysis only — no behaviour change.
 - **Live slash-command completion in chat.** Typing `/` now opens an
   accessible, keyboard-navigable command picker that narrows as you type;
   use arrow keys and Tab or Enter to complete a valid command.
