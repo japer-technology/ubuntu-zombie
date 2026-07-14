@@ -1543,6 +1543,37 @@ run_subcommands() {
   expect_exit_code 2 ./scripts/install.sh uninstall forgejo --archive --dry-run
   expect_exit_code 0 ./scripts/install.sh uninstall forgejo --dry-run
   expect_exit_code 0 ./scripts/install.sh uninstall zombie --archive --keep-agent --dry-run
+
+  local manifest_tmp manifest_out
+  manifest_tmp="$(mktemp -d)"
+  trap 'rm -rf "${manifest_tmp}"' RETURN
+  cat > "${manifest_tmp}/forgejo" <<'EOF_MANIFEST'
+format=1
+component=forgejo
+ubuntu_zombie_version=1970.01.01.00.00.00
+converged_utc=1970-01-01T00:00:00Z
+component_version=1.0.0
+suboptions=runner
+EOF_MANIFEST
+  manifest_out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_tmp}" ./scripts/install.sh doctor --json)"
+  grep -q '"component": "forgejo"' <<<"${manifest_out}" \
+    || { echo "FAIL: doctor --json did not discover forgejo manifest" >&2; exit 1; }
+  ! grep -q '"component": "zombie"' <<<"${manifest_out}" \
+    || { echo "FAIL: doctor --json should not include unselected zombie checks" >&2; exit 1; }
+  # Duplicate keys must make a manifest malformed rather than silently
+  # accepting ambiguous component state.
+  cat > "${manifest_tmp}/zombie" <<'EOF_BAD_MANIFEST'
+format=1
+format=1
+component=zombie
+ubuntu_zombie_version=1970.01.01.00.00.00
+converged_utc=1970-01-01T00:00:00Z
+component_version=1.0.0
+suboptions=
+EOF_BAD_MANIFEST
+  manifest_out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_tmp}" ./scripts/install.sh doctor --json 2>/dev/null)"
+  ! grep -q '"component": "zombie"' <<<"${manifest_out}" \
+    || { echo "FAIL: malformed duplicate-key manifest should be ignored" >&2; exit 1; }
 }
 
 expect_exit_code() {

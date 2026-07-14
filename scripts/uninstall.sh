@@ -54,7 +54,10 @@ ARCHIVE=0
 ASSUME_YES=0
 KEEP_AGENT=0
 TARGET_ARGS=()
-readonly PUBLIC_COMPONENTS=(zombie forgejo)
+readonly COMPONENT_ZOMBIE="zombie"
+readonly COMPONENT_FORGEJO="forgejo"
+readonly PUBLIC_COMPONENTS=("${COMPONENT_ZOMBIE}" "${COMPONENT_FORGEJO}")
+COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
 UNINSTALL_EXIT=0
@@ -95,6 +98,42 @@ validate_targets() {
   done
 }
 
+
+is_target_selected() {
+  local candidate="$1" target
+  (( ${#TARGET_ARGS[@]} == 0 )) && return 0
+  for target in "${TARGET_ARGS[@]}"; do
+    [[ "${candidate}" == "${target}" ]] && return 0
+  done
+  return 1
+}
+
+component_manifest_path() {
+  local component="$1"
+  is_public_component "${component}" || die "Unknown or invalid component name: ${component}. Valid components: $(component_names)" 2
+  printf '%s/%s' "${COMPONENT_MANIFEST_DIR}" "${component}"
+}
+
+remove_component_manifest() {
+  local component="$1" path manifest_parent_dir
+  path="$(component_manifest_path "${component}")"
+  manifest_parent_dir="$(dirname "${COMPONENT_MANIFEST_DIR}")"
+  [[ "${DRY_RUN}" == "1" ]] && return 0
+  rm -f -- "${path}"
+  rmdir --ignore-fail-on-non-empty "${COMPONENT_MANIFEST_DIR}" 2>/dev/null || true
+  rmdir --ignore-fail-on-non-empty "${manifest_parent_dir}" 2>/dev/null || true
+}
+
+warn_remaining_components() {
+  local target
+  (( ${#TARGET_ARGS[@]} > 0 )) || return 0
+  for target in "${PUBLIC_COMPONENTS[@]}"; do
+    is_target_selected "${target}" && continue
+    if [[ -e "$(component_manifest_path "${target}")" ]]; then
+      warn "Component '${target}' remains installed; its manifest entry was preserved."
+    fi
+  done
+}
 usage() {
   # Heredoc instead of `sed -n '2,30p' "$0"` so the help output cannot
   # drift into the executable preamble when the header comment grows or
@@ -301,10 +340,12 @@ confirm() {
 # -------------------------------------------------------------------
 # 1. Stop and disable the chat service + health timer.
 # -------------------------------------------------------------------
-info "Stopping ubuntu-zombie services"
-run "systemctl disable --now ubuntu-zombie-health.timer 2>/dev/null || true"
-run "systemctl disable --now ubuntu-zombie-health.service 2>/dev/null || true"
-run "systemctl disable --now ubuntu-zombie-chat.service   2>/dev/null || true"
+if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  info "Stopping ubuntu-zombie services"
+  run "systemctl disable --now ubuntu-zombie-health.timer 2>/dev/null || true"
+  run "systemctl disable --now ubuntu-zombie-health.service 2>/dev/null || true"
+  run "systemctl disable --now ubuntu-zombie-chat.service   2>/dev/null || true"
+fi
 
 # -------------------------------------------------------------------
 # 1b. Optional component: Forgejo server + Actions runner.
@@ -312,7 +353,8 @@ run "systemctl disable --now ubuntu-zombie-chat.service   2>/dev/null || true"
 # Only runs when Forgejo artefacts are present, so a baseline-only
 # install is untouched. Dropping the database and removing the data
 # directory are destructive and sit behind their own confirmations.
-if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
+if is_target_selected "${COMPONENT_FORGEJO}" \
+    && [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
       || -x /usr/local/bin/forgejo ]]; then
   info "Removing optional Forgejo component"
   # Capture the database/role names from app.ini before the config is
@@ -360,14 +402,20 @@ if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
       fi
     fi
   done
+  if (( UNINSTALL_EXIT == 0 )); then
+    remove_component_manifest "${COMPONENT_FORGEJO}"
+  else
+    warn "Keeping Forgejo manifest because removal finished with errors."
+  fi
   ok "Forgejo component removal finished."
 fi
 
 # -------------------------------------------------------------------
 # 2. Remove systemd units and sudoers drop-ins.
 # -------------------------------------------------------------------
-info "Removing systemd units and sudoers drop-ins"
-for unit in ubuntu-zombie-chat.service ubuntu-zombie-health.service ubuntu-zombie-health.timer; do
+if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  info "Removing systemd units and sudoers drop-ins"
+  for unit in ubuntu-zombie-chat.service ubuntu-zombie-health.service ubuntu-zombie-health.timer; do
   run "rm -f /etc/systemd/system/${unit}"
 done
 run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
@@ -392,13 +440,15 @@ for f in /etc/sudoers.d/90-*-ubuntu-zombie; do
   fi
   run "rm -f -- $(shell_quote "${f}")"
 done
-shopt -u nullglob
+  shopt -u nullglob
+fi
 
 # -------------------------------------------------------------------
 # 3. Remove policy/logrotate and legacy desktop artefacts.
 # -------------------------------------------------------------------
-info "Removing policy, logrotate rule, and legacy desktop artefacts"
-run "rm -f /etc/logrotate.d/ubuntu-zombie"
+if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  info "Removing policy, logrotate rule, and legacy desktop artefacts"
+  run "rm -f /etc/logrotate.d/ubuntu-zombie"
 
 # Reverse the installer's "Prevent sleep, suspend, and screen lock"
 # masking so the desktop can sleep again after the product is gone.
@@ -409,16 +459,17 @@ run "systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.
 # the machine no longer auto-reboots at 04:00 after uninstall. The
 # stock 20auto-upgrades file is left as-is: unattended upgrades are a
 # sensible default and other software may rely on them.
-if [[ -f /etc/apt/apt.conf.d/52unattended-upgrades-local ]]; then
-  info "Removing installer unattended-upgrades auto-reboot policy"
-  run "rm -f /etc/apt/apt.conf.d/52unattended-upgrades-local"
+  if [[ -f /etc/apt/apt.conf.d/52unattended-upgrades-local ]]; then
+    info "Removing installer unattended-upgrades auto-reboot policy"
+    run "rm -f /etc/apt/apt.conf.d/52unattended-upgrades-local"
+  fi
 fi
 
 # -------------------------------------------------------------------
 # 4. Archive user data if requested.
 # -------------------------------------------------------------------
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
-if [[ "${ARCHIVE}" == "1" ]]; then
+if is_target_selected "${COMPONENT_ZOMBIE}" && [[ "${ARCHIVE}" == "1" ]]; then
   info "Archiving ${AGENT_HOME} and ${ZOMBIE_DIR}/state to ${BACKUP_DIR}"
   # Only assert mode when creating the directory new; otherwise leave the
   # existing mode/ownership alone (e.g. /var/backups must stay 0755 so dpkg,
@@ -440,7 +491,7 @@ fi
 # -------------------------------------------------------------------
 # 5. Remove /opt/ai-zombie (state/secrets only with confirmation).
 # -------------------------------------------------------------------
-if [[ -d "${ZOMBIE_DIR}" ]]; then
+if is_target_selected "${COMPONENT_ZOMBIE}" && [[ -d "${ZOMBIE_DIR}" ]]; then
   if confirm "Remove ${ZOMBIE_DIR} (includes secrets, state, and chat history)?"; then
     remove_tree_checked "${ZOMBIE_DIR}" "${ZOMBIE_DIR}"
   else
@@ -456,7 +507,7 @@ fi
 # ``rm -rf /opt/ai-zombie`` removes our source tree but leaves the
 # Node packages installed system-wide. Uninstall them explicitly so
 # the host is left clean.
-if command -v npm >/dev/null 2>&1; then
+if is_target_selected "${COMPONENT_ZOMBIE}" && command -v npm >/dev/null 2>&1; then
   for _pkg in @earendil-works/pi-coding-agent @earendil-works/pi-ai; do
     if npm ls -g --depth=0 "${_pkg}" >/dev/null 2>&1; then
       if confirm "Remove global npm package ${_pkg}?"; then
@@ -475,8 +526,9 @@ fi
 # dangling symlinks after step 5 removes ${ZOMBIE_DIR}. Only remove a
 # link if it is a symlink whose target lives under ${ZOMBIE_DIR}, so we
 # never delete an operator-owned binary of the same name.
-info "Removing /usr/local/bin shims that point into ${ZOMBIE_DIR}"
-for _shim in zombie-chat audit-recent secrets-edit zombie-health zombie-diagnostics zombie-verify; do
+if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  info "Removing /usr/local/bin shims that point into ${ZOMBIE_DIR}"
+  for _shim in zombie-chat audit-recent secrets-edit zombie-health zombie-diagnostics zombie-verify; do
   _path="/usr/local/bin/${_shim}"
   if [[ -L "${_path}" ]]; then
     _target="$(readlink -f "${_path}" 2>/dev/null || true)"
@@ -490,12 +542,13 @@ for _shim in zombie-chat audit-recent secrets-edit zombie-health zombie-diagnost
         ;;
     esac
   fi
-done
+  done
+fi
 
 # -------------------------------------------------------------------
 # 6. Remove /etc/ubuntu-zombie policy config.
 # -------------------------------------------------------------------
-if [[ -d /etc/ubuntu-zombie ]]; then
+if is_target_selected "${COMPONENT_ZOMBIE}" && [[ -d /etc/ubuntu-zombie ]]; then
   if confirm "Remove /etc/ubuntu-zombie (policy.yaml)?"; then
     remove_tree_checked "/etc/ubuntu-zombie" "/etc/ubuntu-zombie"
   fi
@@ -504,52 +557,63 @@ fi
 # -------------------------------------------------------------------
 # 7. Remove the agent user (last, so its home is still owned).
 # -------------------------------------------------------------------
-if [[ "${KEEP_AGENT}" == "1" ]]; then
-  info "Keeping user ${AGENT_USER} (--keep-agent)."
-elif id "${AGENT_USER}" >/dev/null 2>&1; then
-  if confirm "Remove the ${AGENT_USER} user and ${AGENT_HOME} ?"; then
-    # Kill any session first so userdel does not refuse.
-    run "loginctl terminate-user ${AGENT_USER} 2>/dev/null || true"
-    run "pkill -KILL -u ${AGENT_USER} 2>/dev/null || true"
-    sleep 1
-    # FIX-2-05: do not swallow removal failures. Capture the rc and verify
-    # the account is actually gone before printing the success line.
-    if [[ "${DRY_RUN}" == "1" ]]; then
-      run "deluser --remove-home ${AGENT_USER} 2>/dev/null || userdel -r ${AGENT_USER}"
-      ok "Would remove user ${AGENT_USER}"
-    else
-      set +e
-      deluser --remove-home "${AGENT_USER}" >/dev/null 2>&1
-      rc=$?
-      if (( rc != 0 )); then
-        userdel -r "${AGENT_USER}" >/dev/null 2>&1
-        rc=$?
-      fi
-      set -e
-      if (( rc == 0 )) && ! id "${AGENT_USER}" >/dev/null 2>&1; then
-        ok "Removed user ${AGENT_USER}"
-        # FIX-2-12: drop the now-orphaned primary group so a future
-        # `adduser` of the same name does not pick up unexpected file
-        # ownership. --only-if-empty makes this safe.
-        if getent group "${AGENT_USER}" >/dev/null 2>&1; then
-          run "delgroup --only-if-empty ${AGENT_USER} >/dev/null 2>&1 || true"
-        fi
-        # Older installs wrote /var/lib/AccountsService/users/${AGENT_USER}
-        # to pin the XSession; userdel does not clean it up, leaving a
-        # stale AccountsService entry referencing a missing account.
-        # Remove it (existence-guarded) once the user is actually gone.
-        if [[ -f "/var/lib/AccountsService/users/${AGENT_USER}" ]]; then
-          run "rm -f /var/lib/AccountsService/users/${AGENT_USER}"
-        fi
+if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  if [[ "${KEEP_AGENT}" == "1" ]]; then
+    info "Keeping user ${AGENT_USER} (--keep-agent)."
+  elif id "${AGENT_USER}" >/dev/null 2>&1; then
+    if confirm "Remove the ${AGENT_USER} user and ${AGENT_HOME} ?"; then
+      # Kill any session first so userdel does not refuse.
+      run "loginctl terminate-user ${AGENT_USER} 2>/dev/null || true"
+      run "pkill -KILL -u ${AGENT_USER} 2>/dev/null || true"
+      sleep 1
+      # FIX-2-05: do not swallow removal failures. Capture the rc and verify
+      # the account is actually gone before printing the success line.
+      if [[ "${DRY_RUN}" == "1" ]]; then
+        run "deluser --remove-home ${AGENT_USER} 2>/dev/null || userdel -r ${AGENT_USER}"
+        ok "Would remove user ${AGENT_USER}"
       else
-        warn "Failed to remove user ${AGENT_USER}; see 'who', 'loginctl list-sessions',"
-        warn "  'lsof +D ${AGENT_HOME}' and re-run after the processes are gone."
-        UNINSTALL_EXIT=1
+        set +e
+        deluser --remove-home "${AGENT_USER}" >/dev/null 2>&1
+        rc=$?
+        if (( rc != 0 )); then
+          userdel -r "${AGENT_USER}" >/dev/null 2>&1
+          rc=$?
+        fi
+        set -e
+        if (( rc == 0 )) && ! id "${AGENT_USER}" >/dev/null 2>&1; then
+          ok "Removed user ${AGENT_USER}"
+          # FIX-2-12: drop the now-orphaned primary group so a future
+          # `adduser` of the same name does not pick up unexpected file
+          # ownership. --only-if-empty makes this safe.
+          if getent group "${AGENT_USER}" >/dev/null 2>&1; then
+            run "delgroup --only-if-empty ${AGENT_USER} >/dev/null 2>&1 || true"
+          fi
+          # Older installs wrote /var/lib/AccountsService/users/${AGENT_USER}
+          # to pin the XSession; userdel does not clean it up, leaving a
+          # stale AccountsService entry referencing a missing account.
+          # Remove it (existence-guarded) once the user is actually gone.
+          if [[ -f "/var/lib/AccountsService/users/${AGENT_USER}" ]]; then
+            run "rm -f /var/lib/AccountsService/users/${AGENT_USER}"
+          fi
+        else
+          warn "Failed to remove user ${AGENT_USER}; see 'who', 'loginctl list-sessions',"
+          warn "  'lsof +D ${AGENT_HOME}' and re-run after the processes are gone."
+          UNINSTALL_EXIT=1
+        fi
       fi
+    else
+      warn "Keeping user ${AGENT_USER}. Its home and authorized_keys remain."
     fi
-  else
-    warn "Keeping user ${AGENT_USER}. Its home and authorized_keys remain."
   fi
+fi
+
+if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  if (( UNINSTALL_EXIT == 0 )); then
+    remove_component_manifest "${COMPONENT_ZOMBIE}"
+  else
+    warn "Keeping zombie manifest because removal finished with errors."
+  fi
+  warn_remaining_components
 fi
 
 echo

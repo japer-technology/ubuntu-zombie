@@ -264,6 +264,8 @@ on_error() {
 readonly COMPONENT_ZOMBIE="zombie"
 readonly COMPONENT_FORGEJO="forgejo"
 readonly PUBLIC_COMPONENTS=("${COMPONENT_ZOMBIE}" "${COMPONENT_FORGEJO}")
+readonly COMPONENT_MANIFEST_FORMAT_VERSION="1"
+COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
 TARGET_ARGS=()
 SELECTED_COMPONENTS=()
 EXPLICIT_TARGETS=0
@@ -300,6 +302,146 @@ is_selected_component() {
 add_selected_component() {
   local component="$1"
   is_selected_component "${component}" || SELECTED_COMPONENTS+=("${component}")
+}
+
+
+component_manifest_path() {
+  local component="$1"
+  is_public_component "${component}" || die "Unknown or invalid component name: ${component}. Valid components: $(component_names)" 2
+  printf '%s/%s' "${COMPONENT_MANIFEST_DIR}" "${component}"
+}
+
+validate_component_manifest_dir() {
+  is_safe_absolute_path "${COMPONENT_MANIFEST_DIR}" \
+    || die "ZOMBIE_COMPONENT_MANIFEST_DIR must be an absolute safe path." 2
+}
+
+ensure_component_manifest_dir() {
+  validate_component_manifest_dir
+  (( DRY_RUN )) && return 0
+  install -d -m 755 -o root -g root "${COMPONENT_MANIFEST_DIR}"
+}
+
+write_component_manifest() {
+  local component="$1" component_version="${2:-}" suboptions="${3:-}"
+  local path tmp
+  is_public_component "${component}" || die "Unknown manifest component: ${component}" 2
+  ensure_component_manifest_dir
+  (( DRY_RUN )) && return 0
+  path="$(component_manifest_path "${component}")"
+  tmp="${path}.tmp.$$"
+  {
+    printf 'format=%s\n' "${COMPONENT_MANIFEST_FORMAT_VERSION}"
+    printf 'component=%s\n' "${component}"
+    printf 'ubuntu_zombie_version=%s\n' "${SCRIPT_VERSION}"
+    printf 'converged_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'component_version=%s\n' "${component_version}"
+    printf 'suboptions=%s\n' "${suboptions}"
+  } > "${tmp}"
+  chown root:root "${tmp}" 2>/dev/null || true
+  chmod 644 "${tmp}"
+  mv -f "${tmp}" "${path}"
+}
+
+remove_component_manifest() {
+  local component="$1" path manifest_parent_dir
+  path="$(component_manifest_path "${component}")"
+  manifest_parent_dir="$(dirname "${COMPONENT_MANIFEST_DIR}")"
+  (( DRY_RUN )) && return 0
+  rm -f -- "${path}"
+  rmdir --ignore-fail-on-non-empty "${COMPONENT_MANIFEST_DIR}" 2>/dev/null || true
+  rmdir --ignore-fail-on-non-empty "${manifest_parent_dir}" 2>/dev/null || true
+}
+
+_read_manifest_value() {
+  local file="$1" key="$2"
+  # Match lines starting with `key=`, return everything after the first
+  # equals sign, and exit 1 if the key is absent.
+  awk -v want="${key}" '
+    index($0, want "=") == 1 {
+      print substr($0, length(want) + 2)
+      found = 1
+    }
+    END { if (!found) exit 1 }
+  ' "${file}" 2>/dev/null
+}
+
+valid_component_manifest_entry() {
+  local file="$1" component="$2" seen_format=0 seen_component=0 key
+  [[ -f "${file}" ]] || return 1
+  while IFS='=' read -r key _value; do
+    [[ -n "${key}" ]] || continue
+    case "${key}" in
+      format) seen_format=$((seen_format + 1)) ;;
+      component) seen_component=$((seen_component + 1)) ;;
+      ubuntu_zombie_version|converged_utc|component_version|suboptions) ;;
+      *) return 1 ;;
+    esac
+  done < "${file}"
+  (( seen_format == 1 && seen_component == 1 )) || return 1
+  [[ "$(_read_manifest_value "${file}" format)" == "${COMPONENT_MANIFEST_FORMAT_VERSION}" ]] || return 1
+  [[ "$(_read_manifest_value "${file}" component)" == "${component}" ]] || return 1
+}
+
+list_manifest_components() {
+  local component path
+  validate_component_manifest_dir
+  [[ -d "${COMPONENT_MANIFEST_DIR}" ]] || return 0
+  for component in "${PUBLIC_COMPONENTS[@]}"; do
+    path="$(component_manifest_path "${component}")"
+    if [[ -e "${path}" ]]; then
+      if valid_component_manifest_entry "${path}" "${component}"; then
+        printf '%s\n' "${component}"
+      else
+        warn "Ignoring malformed component manifest: ${path}"
+      fi
+    fi
+  done
+  shopt -s nullglob
+  for path in "${COMPONENT_MANIFEST_DIR}"/*; do
+    component="$(basename -- "${path}")"
+    is_public_component "${component}" || warn "Ignoring unknown component manifest: ${path}"
+  done
+  shopt -u nullglob
+}
+
+legacy_component_present() {
+  case "$1" in
+    "${COMPONENT_ZOMBIE}") [[ -d "${ZOMBIE_DIR}" || -f "/etc/systemd/system/ubuntu-zombie-chat.service" || -d "${ZOMBIE_ETC}" ]] ;;
+    "${COMPONENT_FORGEJO}") [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo || -x /usr/local/bin/forgejo ]] ;;
+    *) return 1 ;;
+  esac
+}
+
+resolve_lifecycle_targets_from_manifest() {
+  local component found=0
+  (( EXPLICIT_TARGETS )) && return 0
+  [[ "${SUBCOMMAND}" == "verify" || "${SUBCOMMAND}" == "doctor" || "${SUBCOMMAND}" == "repair" ]] || return 0
+  SELECTED_COMPONENTS=()
+  while IFS= read -r component; do
+    [[ -n "${component}" ]] || continue
+    add_selected_component "${component}"
+    found=1
+  done < <(list_manifest_components)
+  if (( ! found )); then
+    for component in "${PUBLIC_COMPONENTS[@]}"; do
+      if legacy_component_present "${component}"; then
+        add_selected_component "${component}"
+      fi
+    done
+  fi
+  COMPONENT_ZOMBIE_SELECTED=0
+  COMPONENT_FORGEJO_SELECTED=0
+  for component in "${SELECTED_COMPONENTS[@]}"; do
+    case "${component}" in
+      "${COMPONENT_ZOMBIE}") COMPONENT_ZOMBIE_SELECTED=1 ;;
+      "${COMPONENT_FORGEJO}") COMPONENT_FORGEJO_SELECTED=1 ;;
+    esac
+  done
+}
+
+component_selected_for_lifecycle() {
+  is_selected_component "$1"
 }
 
 validate_and_resolve_targets() {
@@ -677,6 +819,7 @@ validate_config() {
   if [[ "${ZOMBIE_RECEIPT}" == "1" ]] && ! is_safe_absolute_path "${RECEIPT_FILE}"; then
     die "ZOMBIE_RECEIPT_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
+  validate_component_manifest_dir
   if zombie_config_selected; then
     if ! is_valid_tcp_port "${CHAT_PORT}"; then
       die "ZOMBIE_CHAT_PORT must be an integer from 1 to 65535." 2
@@ -862,23 +1005,80 @@ validate_noninteractive() {
 # ---------------------------------------------------------------------------
 
 cmd_verify() {
-  if [[ ! -x "${ZOMBIE_DIR}/bin/verify" ]]; then
-    die "${ZOMBIE_DIR}/bin/verify not found. Run 'sudo ./${SCRIPT_NAME} install' first." 1
-  fi
-  # Propagate --json to the deployed verify script.
-  if (( JSON_OUTPUT )); then
-    export ZOMBIE_JSON=1
-  fi
-  # The embedded verify script's checks ("running as ${AGENT_USER}",
-  # passwordless sudo, runtime files) only make sense when run by the
-  # agent account. If invoked as root, re-exec
-  # under the agent identity. See FIX-2-09.
-  if [[ ${EUID} -eq 0 ]] && [[ "$(id -un)" != "${AGENT_USER}" ]]; then
-    if id "${AGENT_USER}" >/dev/null 2>&1; then
-      exec runuser -l "${AGENT_USER}" -c "ZOMBIE_JSON=${ZOMBIE_JSON:-0} ${ZOMBIE_DIR}/bin/verify"
+  # Preserve the deployed verifier for zombie-only runs: it contains the
+  # richest runtime checks and the root-to-agent re-exec behaviour operators
+  # already rely on. Mixed or non-zombie verification uses the component-aware
+  # checks below so one component cannot hide another component's result.
+  if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}" && (( ! COMPONENT_FORGEJO_SELECTED )); then
+    if [[ ! -x "${ZOMBIE_DIR}/bin/verify" ]]; then
+      die "${ZOMBIE_DIR}/bin/verify not found. Run 'sudo ./${SCRIPT_NAME} install zombie' first." 1
     fi
+    if (( JSON_OUTPUT )); then
+      export ZOMBIE_JSON=1
+    fi
+    if [[ ${EUID} -eq 0 ]] && [[ "$(id -un)" != "${AGENT_USER}" ]]; then
+      if id "${AGENT_USER}" >/dev/null 2>&1; then
+        local verify_cmd
+        printf -v verify_cmd 'ZOMBIE_JSON=%q %q' "${ZOMBIE_JSON:-0}" "${ZOMBIE_DIR}/bin/verify"
+        exec runuser -l "${AGENT_USER}" -c "${verify_cmd}"
+      fi
+    fi
+    exec "${ZOMBIE_DIR}/bin/verify"
   fi
-  exec "${ZOMBIE_DIR}/bin/verify"
+
+  local -a v_status=() v_component=() v_id=() v_msg=()
+  vr() { v_status+=("$1"); v_component+=("$2"); v_id+=("$3"); v_msg+=("$4"); }
+
+  if (( ${#SELECTED_COMPONENTS[@]} == 0 )); then
+    vr fail none manifest "No managed components found."
+  fi
+  if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}"; then
+    [[ -x "${ZOMBIE_DIR}/bin/verify" ]] \
+      && vr ok zombie verify_script "${ZOMBIE_DIR}/bin/verify present." \
+      || vr fail zombie verify_script "${ZOMBIE_DIR}/bin/verify not found. Run 'sudo ./${SCRIPT_NAME} install zombie' first."
+  fi
+  if component_selected_for_lifecycle "${COMPONENT_FORGEJO}"; then
+    [[ -x /usr/local/bin/forgejo ]] \
+      && vr ok forgejo binary "Forgejo binary present." \
+      || vr fail forgejo binary "Forgejo binary missing."
+    [[ -f /etc/systemd/system/forgejo.service ]] \
+      && vr ok forgejo service_unit "Forgejo service unit present." \
+      || vr fail forgejo service_unit "Forgejo service unit missing."
+    systemctl is-active --quiet forgejo.service 2>/dev/null \
+      && vr ok forgejo service_active "Forgejo service active." \
+      || vr fail forgejo service_active "Forgejo service not active."
+    [[ -f /etc/forgejo/app.ini ]] \
+      && vr ok forgejo config "Forgejo config present." \
+      || vr fail forgejo config "Forgejo config missing."
+  fi
+
+  local n="${#v_status[@]}" i failed=0 passed=0
+  for (( i = 0; i < n; i++ )); do
+    case "${v_status[i]}" in
+      ok) passed=$((passed + 1)) ;;
+      *) failed=$((failed + 1)) ;;
+    esac
+  done
+  if (( JSON_OUTPUT )); then
+    printf '{"tool":"verify","passed":%d,"failed":%d,"checks":[' "${passed}" "${failed}"
+    for (( i = 0; i < n; i++ )); do
+      printf '{"component":"%s","id":"%s","status":"%s","message":"%s"}' \
+        "$(json_escape "${v_component[i]}")" "$(json_escape "${v_id[i]}")" "${v_status[i]}" "$(json_escape "${v_msg[i]}")"
+      [[ $i -lt $((n - 1)) ]] && printf ','
+    done
+    printf ']}\n'
+  else
+    printf '%s== ubuntu-zombie verify ==%s\n\n' "${C_BOLD}" "${C_RESET}"
+    printf '%sComponents:%s %s\n\n' "${C_BOLD}" "${C_RESET}" "$(selected_components_label)"
+    for (( i = 0; i < n; i++ )); do
+      if [[ "${v_status[i]}" == "ok" ]]; then
+        ok "[${v_component[i]}] ${v_msg[i]}"
+      else
+        printf '%s[x]%s [%s] %s\n' "${C_RED}" "${C_RESET}" "${v_component[i]}" "${v_msg[i]}"
+      fi
+    done
+  fi
+  (( failed == 0 ))
 }
 
 # ---------------------------------------------------------------------------
@@ -888,90 +1088,96 @@ cmd_verify() {
 cmd_doctor() {
   load_os_release
 
-  # Collected results: parallel arrays of status (ok|warn|info),
-  # human message, and machine-readable check id.
-  local -a d_status=() d_msg=() d_id=()
-  dr() { d_status+=("$1"); d_id+=("$2"); d_msg+=("$3"); }
+  local -a d_status=() d_msg=() d_id=() d_component=()
+  dr() { d_status+=("$1"); d_component+=("$2"); d_id+=("$3"); d_msg+=("$4"); }
 
   local host_arch
   host_arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
 
-  if id "${AGENT_USER}" >/dev/null 2>&1; then
-    dr ok user "User ${AGENT_USER} exists."
-  else
-    dr warn user "User ${AGENT_USER} missing. Fix: sudo ./${SCRIPT_NAME} install"
+  if (( ${#SELECTED_COMPONENTS[@]} == 0 )); then
+    dr info none manifest "No managed components found. Run 'sudo ./${SCRIPT_NAME} install' to install Ubuntu Zombie."
   fi
 
-  if [[ -f "/etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie" ]]; then
-    dr ok sudoers "Sudoers drop-in present."
-  else
-    dr warn sudoers "Sudoers drop-in missing. Fix: sudo ./${SCRIPT_NAME} repair"
-  fi
+  if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}"; then
+    if id "${AGENT_USER}" >/dev/null 2>&1; then
+      dr ok zombie user "User ${AGENT_USER} exists."
+    else
+      dr warn zombie user "User ${AGENT_USER} missing. Fix: sudo ./${SCRIPT_NAME} install zombie"
+    fi
 
-  if [[ -d "${ZOMBIE_DIR}" ]]; then
-    dr ok install_root "${ZOMBIE_DIR} present."
-  else
-    dr warn install_root "${ZOMBIE_DIR} missing. Fix: sudo ./${SCRIPT_NAME} install"
-  fi
+    if [[ -f "/etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie" ]]; then
+      dr ok zombie sudoers "Sudoers drop-in present."
+    else
+      dr warn zombie sudoers "Sudoers drop-in missing. Fix: sudo ./${SCRIPT_NAME} repair zombie"
+    fi
 
-  if [[ -f "${ZOMBIE_DIR}/secrets/env" ]]; then
-    local perms
-    perms="$(stat -c %a "${ZOMBIE_DIR}/secrets/env" 2>/dev/null || echo ???)"
-    if [[ "${perms}" == "600" ]]; then
-      dr ok secrets_perms "secrets/env permissions 600."
+    if [[ -d "${ZOMBIE_DIR}" ]]; then
+      dr ok zombie install_root "${ZOMBIE_DIR} present."
     else
-      dr warn secrets_perms "secrets/env permissions ${perms} (must be 600). Fix: sudo ./${SCRIPT_NAME} repair"
+      dr warn zombie install_root "${ZOMBIE_DIR} missing. Fix: sudo ./${SCRIPT_NAME} install zombie"
     fi
-    if grep -Eq '^(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
-      dr ok provider_token "Provider token present."
-    else
-      dr warn provider_token "No provider token. Fix: sudo ${ZOMBIE_DIR}/bin/secrets-edit"
-    fi
-  else
-    dr warn secrets_env "secrets/env missing. Fix: sudo ./${SCRIPT_NAME} install"
-  fi
 
-  if systemctl list-unit-files ubuntu-zombie-chat.service >/dev/null 2>&1; then
-    if systemctl is-active --quiet ubuntu-zombie-chat.service; then
-      dr ok chat_service "Chat service active."
-    else
-      dr warn chat_service "Chat service installed but not running. Fix: sudo systemctl start ubuntu-zombie-chat"
-    fi
-  else
-    dr warn chat_service "Chat service unit missing. Fix: sudo ./${SCRIPT_NAME} install"
-  fi
-
-  # Optional component: Forgejo (detected from the installed unit/config).
-  if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo ]]; then
-    if systemctl is-active --quiet forgejo.service 2>/dev/null; then
-      dr ok forgejo "Forgejo service active."
-    else
-      dr warn forgejo "Forgejo installed but not running. Likely causes: port in use (ss -ltnp), DB auth (journalctl -u forgejo | grep -i password), or migrations not run. Fix: sudo systemctl restart forgejo"
-    fi
-    local forgejo_dir_perms forgejo_config_perms
-    forgejo_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
-    forgejo_config_perms="$(
-      stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
-        || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
-        || true
-    )"
-    if [[ "${forgejo_dir_perms}" == "root:git 750" \
-          && "${forgejo_config_perms}" == "root:git 640" ]]; then
-      dr ok forgejo_config "Forgejo config permissions are root:git 750/640."
-    elif [[ -n "${forgejo_config_perms}" ]]; then
-      dr warn forgejo_config "Forgejo config permissions are ${forgejo_dir_perms:-unknown}/${forgejo_config_perms}; expected root:git 750/640. Fix: sudo ./${SCRIPT_NAME} repair"
-    fi
-    if systemctl is-active --quiet postgresql 2>/dev/null; then
-      dr ok forgejo_db "PostgreSQL active."
-    else
-      dr warn forgejo_db "PostgreSQL not running (Forgejo needs it). Fix: sudo systemctl start postgresql"
-    fi
-    if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
-      if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
-        dr ok forgejo_runner "Forgejo Actions runner active."
+    if [[ -f "${ZOMBIE_DIR}/secrets/env" ]]; then
+      local perms
+      perms="$(stat -c %a "${ZOMBIE_DIR}/secrets/env" 2>/dev/null || echo ???)"
+      if [[ "${perms}" == "600" ]]; then
+        dr ok zombie secrets_perms "secrets/env permissions 600."
       else
-        dr warn forgejo_runner "Forgejo runner not running. Check registration (/var/lib/forgejo-runner/.runner) and Docker (systemctl status docker). Fix: sudo systemctl restart forgejo-runner"
+        dr warn zombie secrets_perms "secrets/env permissions ${perms} (must be 600). Fix: sudo ./${SCRIPT_NAME} repair zombie"
       fi
+      if grep -Eq '^(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
+        dr ok zombie provider_token "Provider token present."
+      else
+        dr warn zombie provider_token "No provider token. Fix: sudo ${ZOMBIE_DIR}/bin/secrets-edit"
+      fi
+    else
+      dr warn zombie secrets_env "secrets/env missing. Fix: sudo ./${SCRIPT_NAME} install zombie"
+    fi
+
+    if systemctl list-unit-files ubuntu-zombie-chat.service >/dev/null 2>&1; then
+      if systemctl is-active --quiet ubuntu-zombie-chat.service; then
+        dr ok zombie chat_service "Chat service active."
+      else
+        dr warn zombie chat_service "Chat service installed but not running. Fix: sudo systemctl start ubuntu-zombie-chat"
+      fi
+    else
+      dr warn zombie chat_service "Chat service unit missing. Fix: sudo ./${SCRIPT_NAME} install zombie"
+    fi
+  fi
+
+  if component_selected_for_lifecycle "${COMPONENT_FORGEJO}"; then
+    if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo || -x /usr/local/bin/forgejo ]]; then
+      if systemctl is-active --quiet forgejo.service 2>/dev/null; then
+        dr ok forgejo forgejo "Forgejo service active."
+      else
+        dr warn forgejo forgejo "Forgejo installed but not running. Likely causes: port in use, DB auth, or migrations not run. Fix: sudo systemctl restart forgejo"
+      fi
+      local forgejo_dir_perms forgejo_config_perms
+      forgejo_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
+      forgejo_config_perms="$(
+        stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
+          || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
+          || true
+      )"
+      if [[ "${forgejo_dir_perms}" == "root:git 750" && "${forgejo_config_perms}" == "root:git 640" ]]; then
+        dr ok forgejo forgejo_config "Forgejo config permissions are root:git 750/640."
+      elif [[ -n "${forgejo_config_perms}" ]]; then
+        dr warn forgejo forgejo_config "Forgejo config permissions are ${forgejo_dir_perms:-unknown}/${forgejo_config_perms}; expected root:git 750/640. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+      fi
+      if systemctl is-active --quiet postgresql 2>/dev/null; then
+        dr ok forgejo forgejo_db "PostgreSQL active."
+      else
+        dr warn forgejo forgejo_db "PostgreSQL not running (Forgejo needs it). Fix: sudo systemctl start postgresql"
+      fi
+      if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+        if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
+          dr ok forgejo forgejo_runner "Forgejo Actions runner active."
+        else
+          dr warn forgejo forgejo_runner "Forgejo runner not running. Check registration and Docker. Fix: sudo systemctl restart forgejo-runner"
+        fi
+      fi
+    else
+      dr warn forgejo forgejo_missing "Forgejo artefacts missing. Fix: sudo ./${SCRIPT_NAME} install forgejo"
     fi
   fi
 
@@ -985,11 +1191,12 @@ cmd_doctor() {
     printf '  "tool": "doctor",\n'
     printf '  "host": {"id": "%s", "version": "%s", "arch": "%s"},\n' \
       "$(json_escape "${ID:-}")" "$(json_escape "${VERSION_ID:-}")" "$(json_escape "${host_arch}")"
+    printf '  "components": "%s",\n' "$(json_escape "$(selected_components_label)")"
     printf '  "warnings": %d,\n' "${warns}"
     printf '  "checks": [\n'
     for (( i = 0; i < n; i++ )); do
-      printf '    {"id": "%s", "status": "%s", "message": "%s"}' \
-        "$(json_escape "${d_id[i]}")" "${d_status[i]}" "$(json_escape "${d_msg[i]}")"
+      printf '    {"component": "%s", "id": "%s", "status": "%s", "message": "%s"}' \
+        "$(json_escape "${d_component[i]}")" "$(json_escape "${d_id[i]}")" "${d_status[i]}" "$(json_escape "${d_msg[i]}")"
       [[ $i -lt $((n - 1)) ]] && printf ','
       printf '\n'
     done
@@ -999,17 +1206,20 @@ cmd_doctor() {
   fi
 
   printf '%s== ubuntu-zombie doctor ==%s\n\n' "${C_BOLD}" "${C_RESET}"
-  printf '%sHost:%s %s %s on %s\n\n' "${C_BOLD}" "${C_RESET}" \
+  printf '%sHost:%s %s %s on %s\n' "${C_BOLD}" "${C_RESET}" \
     "${ID:-?}" "${VERSION_ID:-?}" "${host_arch}"
+  printf '%sComponents:%s %s\n\n' "${C_BOLD}" "${C_RESET}" "$(selected_components_label)"
   for (( i = 0; i < n; i++ )); do
     case "${d_status[i]}" in
-      ok)   ok   "${d_msg[i]}" ;;
-      warn) warn "${d_msg[i]}" ;;
-      *)    info "${d_msg[i]}" ;;
+      ok)   ok   "[${d_component[i]}] ${d_msg[i]}" ;;
+      warn) warn "[${d_component[i]}] ${d_msg[i]}" ;;
+      *)    info "[${d_component[i]}] ${d_msg[i]}" ;;
     esac
   done
   echo
-  info "For a runtime health summary: ${ZOMBIE_DIR}/bin/health-check"
+  if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}"; then
+    info "For a runtime health summary: ${ZOMBIE_DIR}/bin/health-check"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1019,7 +1229,7 @@ cmd_doctor() {
 cmd_repair() {
   section "Repair"
 
-  if id "${AGENT_USER}" >/dev/null 2>&1; then
+  if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}" && id "${AGENT_USER}" >/dev/null 2>&1; then
     if [[ -f "${ZOMBIE_DIR}/secrets/env" ]]; then
       chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/secrets/env"
       chmod 600 "${ZOMBIE_DIR}/secrets/env"
@@ -1030,7 +1240,7 @@ cmd_repair() {
     fi
   fi
 
-  if systemctl list-unit-files ubuntu-zombie-chat.service >/dev/null 2>&1; then
+  if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}" && systemctl list-unit-files ubuntu-zombie-chat.service >/dev/null 2>&1; then
     systemctl daemon-reload
     systemctl restart ubuntu-zombie-chat.service || warn "Chat service failed to restart; see journalctl -u ubuntu-zombie-chat"
     ok "Chat service restarted."
@@ -1040,7 +1250,7 @@ cmd_repair() {
   # Operators routinely use ``install.sh repair`` to recover after
   # manual edits, so the pi/ tree must be brought back into a known
   # good state.
-  if [[ -d "${ZOMBIE_DIR}/agent/templates" ]]; then
+  if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}" && [[ -d "${ZOMBIE_DIR}/agent/templates" ]]; then
     install -d -m 755 -o root -g root "${ZOMBIE_DIR}/pi"
     install -d -m 750 -o "${AGENT_USER}" -g "${AGENT_USER}" \
       "${ZOMBIE_DIR}/state/logs" "${ZOMBIE_DIR}/state/pi-mono-sessions" 2>/dev/null || true
@@ -1062,7 +1272,7 @@ cmd_repair() {
   # tree so manual edits to /opt/ai-zombie/skills/ are reverted, and
   # ensures /etc/ubuntu-zombie/skills.d/ exists so operator skills
   # survive a repair run.
-  if [[ -d "${PAYLOAD_DIR}/agent/skills" ]]; then
+  if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}" && [[ -d "${PAYLOAD_DIR}/agent/skills" ]]; then
     install -d -m 755 -o root -g root "${ZOMBIE_DIR}/skills"
     shopt -s nullglob
     for f in "${PAYLOAD_DIR}/agent/skills/"*.md; do
@@ -1075,7 +1285,7 @@ cmd_repair() {
 
   # Optional component: Forgejo — re-assert ownership/permissions and
   # restart the units when the component is installed.
-  if [[ -d /etc/forgejo || -d /var/lib/forgejo ]]; then
+  if component_selected_for_lifecycle "${COMPONENT_FORGEJO}" && [[ -d /etc/forgejo || -d /var/lib/forgejo ]]; then
     [[ -d /etc/forgejo ]] && { chown root:git /etc/forgejo; chmod 750 /etc/forgejo; }
     [[ -f /etc/forgejo/app.ini ]] && { chown root:git /etc/forgejo/app.ini; chmod 640 /etc/forgejo/app.ini; }
     [[ -d /var/lib/forgejo ]] && { chown -R git:git /var/lib/forgejo; chmod 750 /var/lib/forgejo; }
@@ -1989,6 +2199,7 @@ write_receipt_fail() {
 trap 'on_error ${LINENO}' ERR
 
 validate_config
+resolve_lifecycle_targets_from_manifest
 
 if [[ "${SUBCOMMAND}" != "uninstall" ]] \
   && (( UNINSTALL_ARCHIVE || UNINSTALL_KEEP_AGENT )); then
@@ -3420,6 +3631,14 @@ fi
 
 if (( STEPS_SATISFIED + STEPS_CHANGED > 0 )); then
   info "Idempotent steps: ${STEPS_SATISFIED} already satisfied, ${STEPS_CHANGED} applied this run."
+fi
+
+# Record components only after the install path and health summary have converged.
+write_component_manifest "${COMPONENT_ZOMBIE}" "${SCRIPT_VERSION}" ""
+if (( COMPONENT_FORGEJO_SELECTED )); then
+  forgejo_suboptions=""
+  [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && forgejo_suboptions="runner"
+  write_component_manifest "${COMPONENT_FORGEJO}" "${FORGEJO_RESOLVED_VERSION:-${FORGEJO_VERSION:-}}" "${forgejo_suboptions}"
 fi
 
 # Finalise the install receipt with the outcome of this run.
