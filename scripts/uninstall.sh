@@ -82,14 +82,11 @@ is_public_component() {
 }
 
 validate_targets() {
-  local target seen
+  local target
   for target in "${TARGET_ARGS[@]}"; do
     if ! is_public_component "${target}"; then
       die "Unknown component target '${target}'. Valid components: $(component_names)" 2
     fi
-    for seen in "${TARGET_ARGS[@]}"; do
-      [[ "${seen}" == "${target}" ]] && break
-    done
   done
   for (( i = 0; i < ${#TARGET_ARGS[@]}; i++ )); do
     for (( j = i + 1; j < ${#TARGET_ARGS[@]}; j++ )); do
@@ -161,7 +158,7 @@ validate_targets
 
 if (( ${#TARGET_ARGS[@]} > 0 )); then
   if (( DRY_RUN )); then
-    printf 'uninstall.sh %s  —  dry-run\n\n' "${SCRIPT_VERSION}"
+    printf 'uninstall.sh %s  --  dry-run\n\n' "${SCRIPT_VERSION}"
     printf 'Component target(s): %s\n' "${TARGET_ARGS[*]}"
     printf 'Selective uninstall syntax is accepted, but non-dry-run targeted removal is gated until the component manifest phase lands.\n'
     exit 0
