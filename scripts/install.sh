@@ -516,6 +516,14 @@ is_valid_forgejo_runner_labels() {
   [[ "$1" =~ ^[A-Za-z0-9._:/,+-]{1,512}$ ]]
 }
 
+# Forgejo JWT secrets are unpadded base64url encodings of exactly 32 bytes,
+# which occupy 43 characters (ceil(32 * 8 / 6)). Reject older malformed values
+# so a re-run can repair app.ini before Forgejo tries (and fails) to rewrite
+# the intentionally root-owned configuration.
+is_valid_forgejo_jwt_secret() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]{43}$ ]]
+}
+
 # An optional operator-supplied password (empty means "generate randomly").
 # Conservative because the value is interpolated into psql literals, app.ini
 # lines, and CLI arguments: 8-256 printable characters, no control characters
@@ -2622,6 +2630,14 @@ PSQL
     _fj_internal_token="$(ini_get /etc/forgejo/app.ini security INTERNAL_TOKEN || true)"
     _fj_jwt_secret="$(ini_get /etc/forgejo/app.ini oauth2 JWT_SECRET || true)"
     _fj_lfs_jwt_secret="$(ini_get /etc/forgejo/app.ini server LFS_JWT_SECRET || true)"
+  fi
+  if [[ -n "${_fj_jwt_secret}" ]] && ! is_valid_forgejo_jwt_secret "${_fj_jwt_secret}"; then
+    warn "Existing Forgejo OAuth2 JWT secret is malformed; regenerating it."
+    _fj_jwt_secret=""
+  fi
+  if [[ -n "${_fj_lfs_jwt_secret}" ]] && ! is_valid_forgejo_jwt_secret "${_fj_lfs_jwt_secret}"; then
+    warn "Existing Forgejo LFS JWT secret is malformed; regenerating it."
+    _fj_lfs_jwt_secret=""
   fi
   [[ -n "${_fj_secret_key}" ]]     || _fj_secret_key="$(/usr/local/bin/forgejo generate secret SECRET_KEY)"
   [[ -n "${_fj_internal_token}" ]] || _fj_internal_token="$(/usr/local/bin/forgejo generate secret INTERNAL_TOKEN)"

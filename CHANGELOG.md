@@ -30,11 +30,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   bridge-executed tools report more than a bare "done".
 
 ### Fixed
-- **Forgejo installation now initializes its LFS JWT secret.** Forgejo
-  could not migrate its database because it tried to add a missing
-  `LFS_JWT_SECRET` to the intentionally root-owned `app.ini` and exited
-  with `permission denied`. The installer now generates that secret
-  before migration and preserves it on re-runs.
+- **Forgejo installation now initializes and validates its JWT secrets.**
+  Forgejo could not migrate its database because it tried to replace a
+  missing or malformed `LFS_JWT_SECRET` in the intentionally root-owned
+  `app.ini` and exited with `permission denied`. The installer now generates
+  valid secrets before migration, preserves valid values on re-runs, and
+  repairs malformed values left by earlier attempts.
 - **Chat and installer presentation is tighter and clearer.** `/help` is
   now a compact category index, the oversized wordmark is a stable
   responsive sign, installer deployment work is split into focused phases,
