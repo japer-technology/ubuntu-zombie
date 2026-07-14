@@ -21,8 +21,8 @@ remain `install`, `verify`, `doctor`, `repair`, and `uninstall`.
 
 The intended selection rules are:
 
-- `install` with no component keeps its current meaning: install or upgrade
-  the `zombie` baseline.
+- The `install` verb with no following component target keeps its current
+  meaning: install or upgrade the `zombie` baseline.
 - `install forgejo` installs Forgejo and PostgreSQL without implicitly
   installing the zombie account or runtime.
 - `install zombie forgejo` converges both components in one run.
@@ -140,7 +140,10 @@ Use one root-owned file per component under:
 ```
 
 The directory must be independent of `/opt/ai-zombie` so it survives selective
-zombie removal. Each entry records only:
+zombie removal. The `ubuntu-zombie` namespace deliberately matches the existing
+`/etc/ubuntu-zombie` and `/var/log/ubuntu-zombie` installer-owned paths; the
+`ai-zombie` name remains the deployed agent runtime path. Each entry records
+only:
 
 - a fixed manifest format version;
 - component name;
@@ -382,10 +385,11 @@ Make disk, memory, network, package, and expected-duration preflight messages
 target-aware. Forgejo-only installation must not claim to create an AI
 administrator, install chat, or require zombie runtime capacity.
 
-Keep transcript and receipt paths under `/var/log/ubuntu-zombie/`; treat them
-as installer-owned core state. Ensure the core creates them without relying on
-the zombie user. A forgejo-only receipt must contain Forgejo credentials when
-generated, but omit zombie password, provider, TTL, and chat fields.
+Keep the existing transcript and receipt paths under
+`/var/log/ubuntu-zombie/`; treat them as installer-owned core state. Ensure the
+core creates them without relying on the zombie user. A forgejo-only receipt
+must contain Forgejo credentials when generated, but omit zombie password,
+provider, TTL, and chat fields.
 
 ### Extract the zombie hook
 
@@ -549,7 +553,7 @@ should not require edits to parser or dispatcher conditionals.
   contract while retaining environment compatibility.
 - `CHANGELOG.md`: user-visible CLI, manifest, and selective lifecycle changes.
 - `VERSION`: update whenever the changelog is updated, using the required UTC
-  timestamp format.
+  `yyyy.mm.dd.hh.nn.ss` timestamp format.
 
 Review packaging wrappers and documentation for assumptions that every command
 installs the zombie. The existing package wrapper must forward component
