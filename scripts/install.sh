@@ -2634,9 +2634,9 @@ PSQL
 
   section "Write Forgejo configuration"
 
-  # A re-run may replace app.ini and migrate the database. Stop an existing
-  # daemon first so it cannot race either operation or use a half-updated
-  # schema. The service is started again only after migration and admin setup.
+  # An install or upgrade may replace app.ini and migrate the database. Stop
+  # an existing daemon first so it cannot race either operation or use a
+  # half-updated schema. Start it again only after migration and admin setup.
   if [[ -f /etc/systemd/system/forgejo.service ]]; then
     systemctl stop forgejo.service \
       || die "Could not stop Forgejo safely before migration; check systemctl status forgejo.service and journalctl -u forgejo." 1
@@ -2785,8 +2785,8 @@ EOF
   fi
   systemctl enable --now forgejo.service \
     || die "Forgejo service failed to start; see journalctl -u forgejo." 1
-  # retry() doubles its 2-second initial delay after each failed probe, allowing
-  # roughly a minute for startup on slower hosts; each request is capped at 5s.
+  # retry() waits 2, 4, 8, 16, then 32 seconds between these six probes;
+  # each request is capped at 5s.
   if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
        "http://127.0.0.1:${FORGEJO_HTTP_PORT}/api/healthz"; then
     systemctl disable --now forgejo.service >/dev/null \
