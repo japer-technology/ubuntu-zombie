@@ -1831,6 +1831,12 @@ run_standards() {
     || { echo "forgejo.service must stay hardened (NoNewPrivileges)" >&2; exit 1; }
   grep -q 'LFS_JWT_SECRET = ${_fj_lfs_jwt_secret}' scripts/install.sh \
     || { echo "install.sh must preconfigure Forgejo's LFS JWT secret" >&2; exit 1; }
+  local forgejo_jwt_validator
+  forgejo_jwt_validator="$(sed -n '/^is_valid_forgejo_jwt_secret() {/,/^}/p' scripts/install.sh)"
+  bash -c "${forgejo_jwt_validator}
+    is_valid_forgejo_jwt_secret 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+    ! is_valid_forgejo_jwt_secret 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'" \
+    || { echo "install.sh must reject malformed preserved Forgejo JWT secrets" >&2; exit 1; }
   grep -q 'dropdb' payload/etc/policy.yaml \
     || { echo "policy.yaml must classify dropdb/dropuser as destructive" >&2; exit 1; }
   grep -q "option-sections: forgejo begin" scripts/install.sh \
