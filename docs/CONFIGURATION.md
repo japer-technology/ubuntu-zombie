@@ -457,6 +457,12 @@ record the generated values in the install receipt (root-only, mode
 admin password is also printed once to the console and must be changed
 on first sign-in; an operator-chosen one is kept as-is.
 
+The configuration directory is mode `750` and the running Forgejo service
+cannot rewrite it. During an install or upgrade, the installer stops Forgejo,
+temporarily grants the `git` account write access for the one-shot database
+migration, and restores the directory/file to `750`/`640` even if migration
+fails. Startup is considered successful only after `/api/healthz` responds.
+
 Caveats:
 
 - The forge listens on **all interfaces without HTTPS** by default. On a

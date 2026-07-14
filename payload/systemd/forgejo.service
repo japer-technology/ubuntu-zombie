@@ -20,8 +20,8 @@ StandardError=journal
 
 # Unlike the chat unit (where sandboxing is deliberately off so the agent
 # can administer the whole host), the forge is an ordinary network service:
-# harden it, but keep /var/lib/forgejo and /etc/forgejo writable/readable
-# so repositories, LFS objects, and the config keep working.
+# harden it, keep /var/lib/forgejo writable for repositories and LFS objects,
+# and leave the root-owned configuration read-only to the running daemon.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

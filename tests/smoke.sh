@@ -1831,6 +1831,16 @@ run_standards() {
     || { echo "forgejo.service must stay hardened (NoNewPrivileges)" >&2; exit 1; }
   grep -q 'LFS_JWT_SECRET = ${_fj_lfs_jwt_secret}' scripts/install.sh \
     || { echo "install.sh must preconfigure Forgejo's LFS JWT secret" >&2; exit 1; }
+  grep -q 'chmod 660 /etc/forgejo/app.ini' scripts/install.sh \
+    || { echo "Forgejo migration must temporarily permit config updates" >&2; exit 1; }
+  ! grep -q 'chmod 770 /etc/forgejo' scripts/install.sh \
+    || { echo "Forgejo migration must not make the config directory writable" >&2; exit 1; }
+  grep -q 'chmod 640 /etc/forgejo/app.ini' scripts/install.sh \
+    || { echo "Forgejo migration must restore app.ini permissions" >&2; exit 1; }
+  grep -q 'chmod 750 /etc/forgejo' scripts/install.sh \
+    || { echo "Forgejo config directory must be locked after migration" >&2; exit 1; }
+  grep -q '/api/healthz' scripts/install.sh \
+    || { echo "Forgejo install must verify application health" >&2; exit 1; }
   local forgejo_jwt_validator
   forgejo_jwt_validator="$(sed -n '/^is_valid_forgejo_jwt_secret() {/,/^}/p' scripts/install.sh)"
   bash -c "${forgejo_jwt_validator}

@@ -30,12 +30,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   bridge-executed tools report more than a bare "done".
 
 ### Fixed
-- **Forgejo installation now initializes and validates its JWT secrets.**
-  Forgejo could not migrate its database because it tried to replace a
-  missing or malformed `LFS_JWT_SECRET` in the intentionally root-owned
-  `app.ini` and exited with `permission denied`. The installer now generates
-  valid secrets before migration, preserves valid values on re-runs, and
-  repairs malformed values left by earlier attempts.
+- **Forgejo installation and upgrades are resilient to config migrations.**
+  Forgejo could not migrate its database when it needed to persist a missing,
+  malformed, or newly introduced generated setting in the root-owned
+  `app.ini`. The installer now validates and preserves JWT secrets, stops an
+  existing daemon before migration, permits config writes only for that
+  one-shot command, restores restrictive permissions on success or failure,
+  creates the admin before startup, and waits for `/api/healthz`.
 - **Chat and installer presentation is tighter and clearer.** `/help` is
   now a compact category index, the oversized wordmark is a stable
   responsive sign, installer deployment work is split into focused phases,
