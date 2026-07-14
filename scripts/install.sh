@@ -825,18 +825,18 @@ cmd_doctor() {
     else
       dr warn forgejo "Forgejo installed but not running. Likely causes: port in use (ss -ltnp), DB auth (journalctl -u forgejo | grep -i password), or migrations not run. Fix: sudo systemctl restart forgejo"
     fi
-    local forgejo_dir_state forgejo_config_state
-    forgejo_dir_state="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
-    forgejo_config_state="$(
+    local forgejo_dir_perms forgejo_config_perms
+    forgejo_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
+    forgejo_config_perms="$(
       stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
         || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
         || true
     )"
-    if [[ "${forgejo_dir_state}" == "root:git 750" \
-          && "${forgejo_config_state}" == "root:git 640" ]]; then
+    if [[ "${forgejo_dir_perms}" == "root:git 750" \
+          && "${forgejo_config_perms}" == "root:git 640" ]]; then
       dr ok forgejo_config "Forgejo config permissions are root:git 750/640."
-    elif [[ -n "${forgejo_config_state}" ]]; then
-      dr warn forgejo_config "Forgejo config permissions are ${forgejo_dir_state:-unknown}/${forgejo_config_state}; expected root:git 750/640. Fix: sudo ./${SCRIPT_NAME} repair"
+    elif [[ -n "${forgejo_config_perms}" ]]; then
+      dr warn forgejo_config "Forgejo config permissions are ${forgejo_dir_perms:-unknown}/${forgejo_config_perms}; expected root:git 750/640. Fix: sudo ./${SCRIPT_NAME} repair"
     fi
     if systemctl is-active --quiet postgresql 2>/dev/null; then
       dr ok forgejo_db "PostgreSQL active."
@@ -2639,7 +2639,7 @@ PSQL
   # half-updated schema. Start it again only after migration and admin setup.
   if [[ -f /etc/systemd/system/forgejo.service ]]; then
     systemctl stop forgejo.service \
-      || die "Could not stop Forgejo safely before migration; check systemctl status forgejo.service and journalctl -u forgejo." 1
+      || die "Could not stop Forgejo safely before migration; check systemctl status forgejo and journalctl -u forgejo." 1
   fi
 
   # Reuse existing secrets from app.ini so a re-run never rotates them
@@ -2744,7 +2744,7 @@ EOF
   chmod 750 /etc/forgejo
   chmod 640 /etc/forgejo/app.ini
   if (( _fj_migrate_status != 0 )); then
-    die "Forgejo database migration failed (exit ${_fj_migrate_status}); config permissions were restored. See the output above." 1
+    die "Forgejo database migration failed (exit ${_fj_migrate_status}); config permissions were restored. Transcript: ${LOG_FILE}" 1
   fi
   unset _fj_migrate_status
 
