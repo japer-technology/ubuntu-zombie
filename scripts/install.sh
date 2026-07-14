@@ -258,6 +258,109 @@ on_error() {
   exit "${exit_code}"
 }
 
+
+# Public component targets accepted after the lifecycle verb. Keep this list
+# in sync with the static shell completions and smoke standards.
+readonly COMPONENT_ZOMBIE="zombie"
+readonly COMPONENT_FORGEJO="forgejo"
+readonly PUBLIC_COMPONENTS=("${COMPONENT_ZOMBIE}" "${COMPONENT_FORGEJO}")
+TARGET_ARGS=()
+SELECTED_COMPONENTS=()
+EXPLICIT_TARGETS=0
+COMPONENT_ZOMBIE_SELECTED=0
+COMPONENT_FORGEJO_SELECTED=0
+
+component_names() {
+  printf '%s' "${PUBLIC_COMPONENTS[*]}"
+}
+
+is_lifecycle_verb() {
+  case "$1" in
+    install|verify|doctor|repair|uninstall) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+is_public_component() {
+  local candidate="$1" component
+  for component in "${PUBLIC_COMPONENTS[@]}"; do
+    [[ "${candidate}" == "${component}" ]] && return 0
+  done
+  return 1
+}
+
+_has_selected_component() {
+  local candidate="$1" component
+  for component in "${SELECTED_COMPONENTS[@]}"; do
+    [[ "${candidate}" == "${component}" ]] && return 0
+  done
+  return 1
+}
+
+_add_selected_component() {
+  local component="$1"
+  _has_selected_component "${component}" || SELECTED_COMPONENTS+=("${component}")
+}
+
+validate_and_resolve_targets() {
+  local target seen
+  for target in "${TARGET_ARGS[@]}"; do
+    if is_lifecycle_verb "${target}"; then
+      die "Unexpected lifecycle verb after ${SUBCOMMAND}: ${target}" 2
+    fi
+    if ! is_public_component "${target}"; then
+      die "Unknown component target '${target}'. Valid components: $(component_names)" 2
+    fi
+    for seen in "${SELECTED_COMPONENTS[@]}"; do
+      if [[ "${target}" == "${seen}" ]]; then
+        die "Duplicate component target '${target}'." 2
+      fi
+    done
+    SELECTED_COMPONENTS+=("${target}")
+  done
+
+  (( ${#TARGET_ARGS[@]} > 0 )) && EXPLICIT_TARGETS=1
+
+  if (( ! EXPLICIT_TARGETS )) && [[ "${SUBCOMMAND}" == "install" ]]; then
+    _add_selected_component "${COMPONENT_ZOMBIE}"
+  fi
+
+  if forgejo_config_selected; then
+    _add_selected_component "${COMPONENT_FORGEJO}"
+  fi
+
+  for target in "${SELECTED_COMPONENTS[@]}"; do
+    case "${target}" in
+      "${COMPONENT_ZOMBIE}") COMPONENT_ZOMBIE_SELECTED=1 ;;
+      "${COMPONENT_FORGEJO}") COMPONENT_FORGEJO_SELECTED=1; ZOMBIE_INSTALL_FORGEJO=1 ;;
+    esac
+  done
+}
+
+zombie_config_selected() {
+  (( COMPONENT_ZOMBIE_SELECTED )) && return 0
+  (( EXPLICIT_TARGETS )) && return 1
+  # No-target non-install verbs keep the legacy zombie-centric fallback until
+  # the component manifest lands. No-target uninstall delegates to uninstall.sh.
+  [[ "${SUBCOMMAND}" != "uninstall" ]]
+}
+
+forgejo_config_selected() {
+  (( COMPONENT_FORGEJO_SELECTED )) && return 0
+  [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]
+}
+
+selected_components_label() {
+  if (( ${#SELECTED_COMPONENTS[@]} == 0 )); then
+    case "${SUBCOMMAND}" in
+      uninstall) printf 'all managed artefacts (compatibility mode)' ;;
+      *) printf 'installed components (manifest discovery pending)' ;;
+    esac
+  else
+    printf '%s' "${SELECTED_COMPONENTS[*]}"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -269,16 +372,30 @@ ${SCRIPT_NAME} ${SCRIPT_VERSION}
 Ubuntu Zombie baseline installer + AI Systems Administrator chat service.
 
 Usage:
-  sudo ./${SCRIPT_NAME} [SUBCOMMAND] [FLAGS]
+  sudo ./${SCRIPT_NAME} [VERB] [COMPONENT ...] [FLAGS]
 
-Subcommands:
-  install     Full install (default). Idempotent. Interactive runs open an
-              editable parameter review before any change is made.
+Verbs:
+  install     Full install (default). With no component target, installs the
+              zombie baseline. Interactive runs open an editable parameter
+              review before any change is made.
   verify      Read-only state check. Does not change state.
   doctor      Explain failures and likely fixes.
   repair      Apply known-safe fixes (re-assert permissions, restart
               the chat service).
-  uninstall   Reverse the install (delegates to uninstall.sh).
+  uninstall   Reverse the install (delegates to uninstall.sh). With no target,
+              keeps the current all-managed-artefacts behaviour.
+
+Components:
+  zombie      The Ubuntu Zombie account, runtime, chat UI, policy, and services.
+  forgejo     Forgejo + PostgreSQL option. The component target is accepted for
+              parser/dry-run compatibility; standalone non-dry-run Forgejo
+              install remains gated until the component extraction phase lands.
+
+Selection rules:
+  install with no component target selects zombie. Explicit targets select
+  exactly those components, plus any enabled legacy ZOMBIE_INSTALL_* options.
+  verify/doctor/repair targets are accepted now; no-target discovery falls back
+  to current legacy checks until the component manifest lands.
 
 Flags:
   Behaviour
@@ -360,9 +477,20 @@ Examples:
   # Fully unattended (CI / cloud-init):
   sudo ZOMBIE_NONINTERACTIVE=1 ./${SCRIPT_NAME} install
 
-  # Baseline plus a Forgejo forge with a co-located Actions runner:
+  # Canonical component form for the baseline:
+  sudo ./${SCRIPT_NAME} install zombie
+
+  # Baseline plus a Forgejo forge with a co-located Actions runner
+  # (environment flags remain supported for automation):
   sudo ZOMBIE_INSTALL_FORGEJO=1 ZOMBIE_INSTALL_FORGEJO_RUNNER=1 \\
     ./${SCRIPT_NAME} install
+
+  # Equivalent component-target preview for the combined install:
+  sudo ./${SCRIPT_NAME} install zombie forgejo --dry-run
+
+  # Accepted syntax for standalone Forgejo planning; the non-dry-run
+  # standalone install is gated until component extraction is complete:
+  ./${SCRIPT_NAME} install forgejo --dry-run
 
   # Machine-readable health for monitoring:
   ./${SCRIPT_NAME} verify --json
@@ -380,7 +508,6 @@ SUBCOMMAND_SEEN=0
 DRY_RUN=0
 UNINSTALL_ARCHIVE=0
 UNINSTALL_KEEP_AGENT=0
-PARSED_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)    usage; exit 0 ;;
@@ -396,19 +523,16 @@ while [[ $# -gt 0 ]]; do
     --keep-agent) UNINSTALL_KEEP_AGENT=1; shift ;;
     install|verify|doctor|repair|uninstall)
                   if (( SUBCOMMAND_SEEN )); then
-                    # A second subcommand token (e.g. `install install`) is
-                    # ambiguous — fall through to the catch-all so it is
-                    # reported as an unexpected positional. See FIX-1-15.
-                    PARSED_ARGS+=("$1"); shift
-                  else
-                    SUBCOMMAND="$1"; SUBCOMMAND_SEEN=1; shift
-                  fi ;;
-    --) shift; PARSED_ARGS+=("$@"); break ;;
+                    die "Unexpected lifecycle verb after ${SUBCOMMAND}: $1" 2
+                  fi
+                  SUBCOMMAND="$1"; SUBCOMMAND_SEEN=1; shift ;;
+    --) shift; TARGET_ARGS+=("$@"); break ;;
     -*) die "Unknown flag: $1 (try --help)" 2 ;;
-    *)  PARSED_ARGS+=("$1"); shift ;;
+    *)  TARGET_ARGS+=("$1"); shift ;;
   esac
 done
 readonly DRY_RUN
+validate_and_resolve_targets
 
 if [[ "${SUBCOMMAND}" == "install" ]] && ! (( ZOMBIE_QUIET )); then
   brand_splash "install" "${SCRIPT_VERSION}"
@@ -537,11 +661,13 @@ is_valid_forgejo_password() {
 # Validate user-controlled install settings before they are interpolated into
 # paths, sudoers entries, generated unit files, or shell commands.
 validate_config() {
-  if ! is_supported_agent_username "${AGENT_USER}"; then
-    die "Invalid agent username '${AGENT_USER}'. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation)." 2
-  fi
-  if ! is_safe_absolute_path "${ZOMBIE_DIR}"; then
-    die "ZOMBIE_DIR must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
+  if zombie_config_selected; then
+    if ! is_supported_agent_username "${AGENT_USER}"; then
+      die "Invalid agent username '${AGENT_USER}'. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation)." 2
+    fi
+    if ! is_safe_absolute_path "${ZOMBIE_DIR}"; then
+      die "ZOMBIE_DIR must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
+    fi
   fi
   if ! is_safe_absolute_path "${LOG_FILE}"; then
     die "LOG_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
@@ -549,11 +675,13 @@ validate_config() {
   if [[ "${ZOMBIE_RECEIPT}" == "1" ]] && ! is_safe_absolute_path "${RECEIPT_FILE}"; then
     die "ZOMBIE_RECEIPT_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
-  if ! is_valid_tcp_port "${CHAT_PORT}"; then
-    die "ZOMBIE_CHAT_PORT must be an integer from 1 to 65535." 2
-  fi
-  if ! is_valid_ttl_days "${TTL_DAYS}"; then
-    die "ZOMBIE_TTL_DAYS must be an integer number of days from 1 to 36500." 2
+  if zombie_config_selected; then
+    if ! is_valid_tcp_port "${CHAT_PORT}"; then
+      die "ZOMBIE_CHAT_PORT must be an integer from 1 to 65535." 2
+    fi
+    if ! is_valid_ttl_days "${TTL_DAYS}"; then
+      die "ZOMBIE_TTL_DAYS must be an integer number of days from 1 to 36500." 2
+    fi
   fi
   if ! is_valid_option_flag "${ZOMBIE_INSTALL_FORGEJO}"; then
     die "ZOMBIE_INSTALL_FORGEJO must be 0 or 1." 2
@@ -593,13 +721,6 @@ validate_config() {
       die "FORGEJO_RUNNER_LABELS must use only letters, digits, and . _ : / , + - (no spaces or quotes; max 512 chars)." 2
     fi
   fi
-}
-
-# Unknown positional arguments are collected in PARSED_ARGS during option
-# parsing; only the uninstall subcommand forwards them to uninstall.sh.
-reject_unexpected_positional_args() {
-  [[ ${#PARSED_ARGS[@]} -eq 0 ]] && return 0
-  die "Unexpected argument(s) for ${SUBCOMMAND}: ${PARSED_ARGS[*]}" 2
 }
 
 # Source /etc/os-release into the current shell.
@@ -985,7 +1106,7 @@ cmd_uninstall() {
     (( UNINSTALL_ARCHIVE ))    && fwd+=(--archive)
     (( UNINSTALL_KEEP_AGENT )) && fwd+=(--keep-agent)
     [[ "${ZOMBIE_COLOR:-}" == "never" ]] && fwd+=(--no-color)
-    exec "${SCRIPT_DIR}/uninstall.sh" "${fwd[@]}" "${PARSED_ARGS[@]}"
+    exec "${SCRIPT_DIR}/uninstall.sh" "${fwd[@]}" "${TARGET_ARGS[@]}"
   fi
   die "uninstall.sh not found alongside ${SCRIPT_NAME}." 1
 }
@@ -996,6 +1117,46 @@ cmd_uninstall() {
 
 print_dry_run_plan() {
   load_os_release
+  if (( COMPONENT_FORGEJO_SELECTED )) && (( ! COMPONENT_ZOMBIE_SELECTED )); then
+    cat <<EOF
+${SCRIPT_NAME} ${SCRIPT_VERSION}  —  dry-run
+
+A real standalone Forgejo install is accepted by the parser but gated until
+the component extraction phase lands. With the current environment it would
+plan:
+
+  Components:     $(selected_components_label)
+  Host:           ${ID:-?} ${VERSION_ID:-?} on $(dpkg --print-architecture 2>/dev/null || uname -m)
+  Transcript:     ${LOG_FILE}
+  Receipt:        $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "(disabled)")
+
+Forgejo component:
+  Forgejo server  git forge + PostgreSQL (${FORGEJO_VERSION:-latest release})
+                  apt: git-lfs postgresql postgresql-contrib openssl xz-utils
+                  binary: /usr/local/bin/forgejo (checksum-verified download)
+                  data: /var/lib/forgejo (git:git)  config: /etc/forgejo/app.ini
+                  database: ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))
+                  admin: ${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))
+                  unit: /etc/systemd/system/forgejo.service
+                  exposure: http://<host>:${FORGEJO_HTTP_PORT}/ on all interfaces (normal access)
+EOF
+    if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+      cat <<EOF
+  Actions runner  co-located Forgejo Actions runner (Docker executor)
+                  unit: /etc/systemd/system/forgejo-runner.service
+EOF
+    fi
+    cat <<EOF
+
+Nothing has been changed. To install Forgejo today, use the legacy combined
+Ubuntu Zombie + Forgejo path:
+
+  sudo ZOMBIE_INSTALL_FORGEJO=1 ./${SCRIPT_NAME} install
+
+See docs/QUICKSTART.md and docs/ARCHITECTURE.md for the full picture.
+EOF
+    return 0
+  fi
   cat <<EOF
 ${SCRIPT_NAME} ${SCRIPT_VERSION}  —  dry-run
 
@@ -1831,13 +1992,17 @@ if [[ "${SUBCOMMAND}" != "uninstall" ]] \
   && (( UNINSTALL_ARCHIVE || UNINSTALL_KEEP_AGENT )); then
   die "--archive/--keep-agent only apply to the uninstall subcommand." 2
 fi
+if [[ "${SUBCOMMAND}" == "uninstall" ]] && (( EXPLICIT_TARGETS )) \
+  && (( ! COMPONENT_ZOMBIE_SELECTED )) && (( UNINSTALL_ARCHIVE || UNINSTALL_KEEP_AGENT )); then
+  die "--archive/--keep-agent only apply to a zombie uninstall target." 2
+fi
 
 case "${SUBCOMMAND}" in
-  verify)    reject_unexpected_positional_args; cmd_verify; exit $? ;;
-  doctor)    reject_unexpected_positional_args; cmd_doctor; exit $? ;;
-  repair)    reject_unexpected_positional_args; require_root; cmd_repair; exit $? ;;
-  uninstall) require_root; cmd_uninstall; exit $? ;;
-  install)   reject_unexpected_positional_args ;;
+  verify)    cmd_verify; exit $? ;;
+  doctor)    cmd_doctor; exit $? ;;
+  repair)    require_root; cmd_repair; exit $? ;;
+  uninstall) (( DRY_RUN )) || require_root; cmd_uninstall; exit $? ;;
+  install)   ;;
   *)         die "Unknown subcommand: ${SUBCOMMAND}" 2 ;;
 esac
 
@@ -1847,6 +2012,10 @@ esac
 if (( DRY_RUN )); then
   print_dry_run_plan
   exit 0
+fi
+
+if (( COMPONENT_FORGEJO_SELECTED )) && (( ! COMPONENT_ZOMBIE_SELECTED )); then
+  die "Standalone Forgejo install syntax is accepted, but non-dry-run execution is gated until component extraction is complete. Use 'ZOMBIE_INSTALL_FORGEJO=1 ./${SCRIPT_NAME} install' for the current combined path." 2
 fi
 
 # =============================================================================

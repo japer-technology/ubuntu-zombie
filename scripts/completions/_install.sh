@@ -8,17 +8,22 @@
 # Static completion: it does not execute install.sh.
 
 _ubuntu_zombie_install() {
-  local -a subcommands flags
-  subcommands=(
-    'install:Install and harden the agent host'
-    'verify:Check that the install is healthy'
-    'doctor:Diagnose host/config problems'
-    'repair:Re-apply idempotent fixes'
-    'uninstall:Remove the agent host configuration'
+  local -a verbs components common_flags uninstall_flags flags used_components remaining_components
+  local seen_verb component word
+  verbs=(
+    'install:Install and harden selected components'
+    'verify:Check that selected components are healthy'
+    'doctor:Diagnose host/config problems for selected components'
+    'repair:Re-apply idempotent fixes for selected components'
+    'uninstall:Remove selected component configuration'
   )
-  flags=(
+  components=(
+    'zombie:Ubuntu Zombie account, runtime, chat UI, policy, and services'
+    'forgejo:Forgejo + PostgreSQL option target'
+  )
+  common_flags=(
     '(-h --help)'{-h,--help}'[Show help and exit]'
-    '(-v --version)'{-v,--version}'[Show version and exit]'
+    '(-v --version)'{-v,--version}'[Print version and exit]'
     '(-n --dry-run)'{-n,--dry-run}'[Preview actions without changing the host]'
     '(-y --yes)'{-y,--yes}'[Skip the YES confirmation gate]'
     '(-q --quiet)'{-q,--quiet}'[Only print warnings and errors]'
@@ -29,15 +34,40 @@ _ubuntu_zombie_install() {
     '--strict[Treat preflight warnings as errors]'
     '--json[Machine-readable output for verify/doctor]'
   )
+  uninstall_flags=(
+    '--archive[Archive /opt/ai-zombie before removing it]'
+    '--keep-agent[Do not remove the agent user account]'
+  )
 
-  _arguments -C \
-    "${flags[@]}" \
-    '1: :->subcmd' \
-    '*:: :->args'
+  seen_verb=''
+  used_components=()
+  for word in "${words[@]:1:CURRENT-1}"; do
+    case "${word}" in
+      install|verify|doctor|repair|uninstall) [[ -z "${seen_verb}" ]] && seen_verb="${word}" ;;
+      zombie|forgejo) used_components+=("${word}") ;;
+    esac
+  done
+
+  flags=("${common_flags[@]}")
+  [[ "${seen_verb}" == 'uninstall' ]] && flags+=("${uninstall_flags[@]}")
+
+  if [[ -z "${seen_verb}" ]]; then
+    _arguments -C "${common_flags[@]}" '1:verb:->verb' '*:: :->args'
+  else
+    remaining_components=()
+    for component in "${components[@]}"; do
+      if (( ${used_components[(I)${component%%:*}]} )); then
+        continue
+      fi
+      remaining_components+=("${component}")
+    done
+    _arguments -C "${flags[@]}" '*:component:->component'
+  fi
 
   case "${state}" in
-    subcmd) _describe -t commands 'subcommand' subcommands ;;
-    args)   _arguments "${flags[@]}" ;;
+    verb)      _describe -t commands 'verb' verbs ;;
+    component) _describe -t components 'component' remaining_components ;;
+    args)      _arguments "${flags[@]}" ;;
   esac
 }
 

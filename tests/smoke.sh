@@ -1480,7 +1480,9 @@ run_subcommands() {
   echo "[smoke] subcommand parsing"
   ./scripts/install.sh --help    >/dev/null
   ./scripts/install.sh --version >/dev/null
-  # Each subcommand should at least parse and not bail with code 2 (bad usage).
+  # Each non-mutating subcommand should at least parse and not bail with code 2
+  # (bad usage).
+  local out rc sub target
   for sub in verify doctor; do
     set +e
     out="$(./scripts/install.sh "${sub}" 2>&1)"
@@ -1491,9 +1493,51 @@ run_subcommands() {
       echo "${out}"
       exit 1
     fi
+    for target in zombie forgejo; do
+      set +e
+      out="$(./scripts/install.sh "${sub}" "${target}" 2>&1)"
+      rc=$?
+      set -e
+      if [[ $rc -eq 2 ]]; then
+        echo "FAIL: '${sub} ${target}' returned bad-usage (exit 2). Output:"
+        echo "${out}"
+        exit 1
+      fi
+    done
   done
   # 'doctor' must run as a non-root user without erroring on argument parsing.
   ./scripts/install.sh doctor >/dev/null || true
+
+  # Component-aware install grammar: targets, flags before/between/after,
+  # default selection, explicit forgejo-only planning, env-additive selection,
+  # and -- target validation are all safe under --dry-run.
+  local default_out zombie_out forgejo_out combined_out
+  default_out="$(ZOMBIE_COLOR=never ./scripts/install.sh install --dry-run)"
+  zombie_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run install zombie)"
+  [[ "${default_out}" == "${zombie_out}" ]] \
+    || { echo "FAIL: explicit zombie dry-run must match default install" >&2; exit 1; }
+
+  forgejo_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run install -- forgejo)"
+  grep -q "Components:     forgejo" <<<"${forgejo_out}" \
+    || { echo "FAIL: forgejo-only dry-run did not select only forgejo" >&2; exit 1; }
+  ! grep -q "Agent user:" <<<"${forgejo_out}" \
+    || { echo "FAIL: forgejo-only dry-run should not render zombie settings" >&2; exit 1; }
+
+  combined_out="$(ZOMBIE_COLOR=never ZOMBIE_INSTALL_FORGEJO=1 \
+    ./scripts/install.sh --dry-run install zombie)"
+  grep -q "Optional components enabled" <<<"${combined_out}" \
+    || { echo "FAIL: legacy Forgejo env flag was not additive" >&2; exit 1; }
+
+  for sub in install verify doctor repair uninstall; do
+    expect_exit_code 2 ./scripts/install.sh "${sub}" nope
+    expect_exit_code 2 ./scripts/install.sh "${sub}" zombie zombie
+    expect_exit_code 2 ./scripts/install.sh "${sub}" "${sub}"
+  done
+  expect_exit_code 2 ./scripts/install.sh install -- forgejo --dry-run
+  expect_exit_code 2 ./scripts/install.sh install forgejo --archive
+  expect_exit_code 2 ./scripts/install.sh uninstall forgejo --archive --dry-run
+  expect_exit_code 0 ./scripts/install.sh uninstall forgejo --dry-run
+  expect_exit_code 0 ./scripts/install.sh uninstall zombie --archive --keep-agent --dry-run
 }
 
 expect_exit_code() {
@@ -2037,6 +2081,15 @@ run_flags() {
     || { echo "FAIL: install.bash completion has a syntax error" >&2; exit 1; }
   [[ -r scripts/completions/_install.sh ]] \
     || { echo "FAIL: scripts/completions/_install.sh missing" >&2; exit 1; }
+  for component in zombie forgejo; do
+    grep -q "${component}" scripts/completions/install.bash \
+      || { echo "FAIL: bash completion missing ${component}" >&2; exit 1; }
+    grep -q "${component}" scripts/completions/_install.sh \
+      || { echo "FAIL: zsh completion missing ${component}" >&2; exit 1; }
+  done
+  grep -q -- "--archive" scripts/completions/install.bash \
+    && grep -q -- "--keep-agent" scripts/completions/install.bash \
+    || { echo "FAIL: bash completion missing uninstall-only flags" >&2; exit 1; }
 }
 
 case "${cmd}" in

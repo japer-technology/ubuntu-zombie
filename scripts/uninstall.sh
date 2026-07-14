@@ -53,6 +53,8 @@ DRY_RUN=0
 ARCHIVE=0
 ASSUME_YES=0
 KEEP_AGENT=0
+TARGET_ARGS=()
+readonly PUBLIC_COMPONENTS=(zombie forgejo)
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
 UNINSTALL_EXIT=0
@@ -66,6 +68,37 @@ if [[ -f "${REPO_ROOT}/VERSION" ]]; then
 else
   SCRIPT_VERSION="0000.00.00.00.00.00"
 fi
+
+component_names() {
+  printf '%s' "${PUBLIC_COMPONENTS[*]}"
+}
+
+is_public_component() {
+  local candidate="$1" component
+  for component in "${PUBLIC_COMPONENTS[@]}"; do
+    [[ "${candidate}" == "${component}" ]] && return 0
+  done
+  return 1
+}
+
+validate_targets() {
+  local target seen
+  for target in "${TARGET_ARGS[@]}"; do
+    if ! is_public_component "${target}"; then
+      die "Unknown component target '${target}'. Valid components: $(component_names)" 2
+    fi
+    for seen in "${TARGET_ARGS[@]}"; do
+      [[ "${seen}" == "${target}" ]] && break
+    done
+  done
+  for (( i = 0; i < ${#TARGET_ARGS[@]}; i++ )); do
+    for (( j = i + 1; j < ${#TARGET_ARGS[@]}; j++ )); do
+      if [[ "${TARGET_ARGS[i]}" == "${TARGET_ARGS[j]}" ]]; then
+        die "Duplicate component target '${TARGET_ARGS[i]}'." 2
+      fi
+    done
+  done
+}
 
 usage() {
   # Heredoc instead of `sed -n '2,30p' "$0"` so the help output cannot
@@ -84,9 +117,12 @@ home directory and /opt/ai-zombie/state/ to /var/backups/ before
 deletion.
 
 Usage:
-  sudo ./uninstall.sh                # interactive
-  sudo ./uninstall.sh -n|--dry-run   # preview
-  sudo ./uninstall.sh --archive      # archive then remove
+  sudo ./uninstall.sh [component ...] # interactive
+  sudo ./uninstall.sh -n|--dry-run    # preview
+  sudo ./uninstall.sh forgejo --dry-run
+                                      # accepted target syntax; selective
+                                      # removal is gated until manifest phase
+  sudo ./uninstall.sh --archive       # archive then remove
   sudo ./uninstall.sh -y|--yes       # skip confirmations
   sudo ./uninstall.sh --keep-agent   # do not remove user
   sudo ./uninstall.sh -q|--quiet     # warnings and errors only
@@ -106,19 +142,32 @@ that other things may depend on.
 EOF
 }
 
-for arg in "$@"; do
-  case "${arg}" in
+while [[ $# -gt 0 ]]; do
+  case "$1" in
     -h|--help)    usage; exit 0 ;;
     -v|--version) printf 'uninstall.sh %s\n' "${SCRIPT_VERSION}"; exit 0 ;;
-    -n|--dry-run) DRY_RUN=1 ;;
-    --archive)    ARCHIVE=1 ;;
-    --yes|-y)     ASSUME_YES=1 ;;
-    --keep-agent) KEEP_AGENT=1 ;;
-    -q|--quiet)   ZOMBIE_QUIET=1 ;;
-    --no-color|--no-colour) export ZOMBIE_COLOR=never; lib_setup_colors; C_YEL="${C_YELLOW}" ;;
-    *)            die "Unknown argument: ${arg} (try --help)" 2 ;;
+    -n|--dry-run) DRY_RUN=1; shift ;;
+    --archive)    ARCHIVE=1; shift ;;
+    --yes|-y)     ASSUME_YES=1; shift ;;
+    --keep-agent) KEEP_AGENT=1; shift ;;
+    -q|--quiet)   ZOMBIE_QUIET=1; shift ;;
+    --no-color|--no-colour) export ZOMBIE_COLOR=never; lib_setup_colors; C_YEL="${C_YELLOW}"; shift ;;
+    --) shift; TARGET_ARGS+=("$@"); break ;;
+    -*)           die "Unknown argument: $1 (try --help)" 2 ;;
+    *)            TARGET_ARGS+=("$1"); shift ;;
   esac
 done
+validate_targets
+
+if (( ${#TARGET_ARGS[@]} > 0 )); then
+  if (( DRY_RUN )); then
+    printf 'uninstall.sh %s  —  dry-run\n\n' "${SCRIPT_VERSION}"
+    printf 'Component target(s): %s\n' "${TARGET_ARGS[*]}"
+    printf 'Selective uninstall syntax is accepted, but non-dry-run targeted removal is gated until the component manifest phase lands.\n'
+    exit 0
+  fi
+  die "Selective uninstall targets are accepted but gated until the component manifest phase lands. Use no target for the current all-managed-artefacts uninstall." 2
+fi
 
 # The splash is printed only for a real uninstall run: after argument
 # parsing (so --help/--version/bad-usage stay concise) and honouring
@@ -159,7 +208,7 @@ validate_config() {
 }
 validate_config
 
-[[ ${EUID} -eq 0 ]] || die "Run with sudo: sudo $0"
+(( DRY_RUN )) || [[ ${EUID} -eq 0 ]] || die "Run with sudo: sudo $0"
 
 run() {
   # Defensive guard: callers must pass exactly one composed command string,

@@ -27,6 +27,11 @@ From the repository root:
 sudo ./scripts/install.sh install
 ```
 
+This is equivalent to the explicit component form
+`sudo ./scripts/install.sh install zombie`. The canonical grammar is
+`scripts/install.sh <verb> [component ...] [flags]`; valid component
+targets are `zombie` and `forgejo`.
+
 Interactive installs open a parameter review before changing the host.
 Accept the defaults or edit the agent user, install root, chat port,
 chat password, Time to Live, receipt path, and local LLM settings.
@@ -90,6 +95,10 @@ bring your own remote-access mechanism outside Ubuntu Zombie.
 sudo ./scripts/install.sh verify
 sudo ./scripts/install.sh doctor
 sudo ./scripts/install.sh repair
+
+# Optional explicit component targets:
+sudo ./scripts/install.sh verify zombie
+sudo ./scripts/install.sh doctor forgejo
 ```
 
 - `verify` is read-only.
@@ -111,6 +120,12 @@ Diagnostics are redacted before being bundled.
 ```bash
 sudo ./scripts/install.sh uninstall
 ```
+
+With no target, uninstall keeps the current all-managed-artefacts
+behaviour. Targeted uninstall syntax such as
+`sudo ./scripts/install.sh uninstall forgejo --dry-run` is accepted for
+planning, but non-dry-run selective removal is gated until the component
+manifest work lands.
 
 The uninstaller removes Ubuntu Zombie services, sudoers entries,
 payload files, policy, logrotate rules, and optionally the agent account

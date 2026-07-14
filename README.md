@@ -100,15 +100,33 @@ see also [`docs/UPGRADING.md`](docs/UPGRADING.md) and
 Full walkthrough with expected output and failure branches:
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md).
 
-## Subcommands
+## Installer command grammar
 
+Canonical form:
+
+```text
+sudo ./scripts/install.sh <verb> [component ...] [flags]
 ```
-sudo ./scripts/install.sh install     # full install or upgrade, idempotent
-sudo ./scripts/install.sh verify      # read-only state check
-sudo ./scripts/install.sh doctor      # explain failures
-sudo ./scripts/install.sh repair      # fix known-safe drift
-sudo ./scripts/install.sh uninstall   # reverse the install
+
+Valid verbs are `install`, `verify`, `doctor`, `repair`, and
+`uninstall`. Public component targets are `zombie` and `forgejo`. With
+no target, `install` keeps its existing meaning: install or upgrade the
+`zombie` baseline. Examples:
+
+```bash
+sudo ./scripts/install.sh install             # baseline zombie
+sudo ./scripts/install.sh install zombie      # same, explicit target
+sudo ./scripts/install.sh install zombie forgejo --dry-run
+sudo ./scripts/install.sh verify zombie
+sudo ./scripts/install.sh doctor forgejo
+sudo ./scripts/install.sh uninstall           # current all-components removal
 ```
+
+The `install forgejo` target is accepted for parser and dry-run
+planning, but standalone non-dry-run Forgejo install remains gated until
+the component extraction work lands. Use `ZOMBIE_INSTALL_FORGEJO=1` with
+`install` for the current supported combined Ubuntu Zombie + Forgejo
+path.
 
 To upgrade an existing host (or refresh after fixing a bug upstream),
 pull the latest source and re-run `install`:
@@ -130,9 +148,11 @@ Non-interactive variants and every environment variable: see
 
 The baseline can be extended with opt-in components behind
 `ZOMBIE_INSTALL_*` flags — all off by default, idempotent, audited,
-and reversible by `uninstall.sh`. The first is a self-hosted
-**Forgejo** git forge (PostgreSQL-backed, normal LAN access, optional
-co-located Actions runner):
+and reversible by `uninstall.sh`. These environment flags remain the
+compatibility API for cloud-init and other automation and are additive
+with explicit component targets. The first is a self-hosted **Forgejo**
+git forge (PostgreSQL-backed, normal LAN access, optional co-located
+Actions runner):
 
 ```bash
 sudo ZOMBIE_INSTALL_FORGEJO=1 ZOMBIE_INSTALL_FORGEJO_RUNNER=1 \
