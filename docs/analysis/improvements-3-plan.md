@@ -30,7 +30,7 @@ The intended selection rules are:
 - Existing `ZOMBIE_INSTALL_FORGEJO=1 scripts/install.sh install` invocations
   continue to select both the default zombie and Forgejo.
 - Explicit component arguments and enabled `ZOMBIE_INSTALL_*` variables are
-  combined and de-duplicated. Explicit `install forgejo` does not add the
+  combined and deduplicated. Explicit `install forgejo` does not add the
   default zombie merely because the verb is `install`.
 - `verify`, `doctor`, and `repair` with explicit targets operate only on those
   targets.
@@ -555,8 +555,8 @@ should not require edits to parser or dispatcher conditionals.
 - `options/README.md`: replace the flag-and-guard contract with the registry
   contract while retaining environment compatibility.
 - `CHANGELOG.md`: user-visible CLI, manifest, and selective lifecycle changes.
-- `VERSION`: update whenever the changelog is updated, using the repository’s
-  required literal UTC convention, `yyyy.mm.dd.hh.nn.ss`.
+- `VERSION`: update whenever the changelog is updated with
+  `date -u +%Y.%m.%d.%H.%M.%S > VERSION`.
 
 Review packaging wrappers and documentation for assumptions that every command
 installs the zombie. In particular, the `/usr/sbin/ubuntu-zombie` wrapper
@@ -636,8 +636,10 @@ Confirm these defaults before Phase 1:
    confirmations still apply.
 4. Use per-component entries under
    `/var/lib/ubuntu-zombie/components/`.
-5. Reject duplicate targets rather than silently de-duplicating operator
-   input; environment and positional selection may still overlap harmlessly.
+5. Reject a component repeated in positional arguments rather than silently
+   hiding an operator typo. Treat overlap between an enabled environment
+   selector and one positional target as harmless compatibility input and
+   deduplicate it during selection.
 
 If any decision changes, update the source analysis and this plan together
 before implementation so the public grammar, compatibility tests, and
