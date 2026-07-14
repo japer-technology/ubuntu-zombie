@@ -1543,37 +1543,6 @@ run_subcommands() {
   expect_exit_code 2 ./scripts/install.sh uninstall forgejo --archive --dry-run
   expect_exit_code 0 ./scripts/install.sh uninstall forgejo --dry-run
   expect_exit_code 0 ./scripts/install.sh uninstall zombie --archive --keep-agent --dry-run
-
-  local manifest_tmp manifest_out
-  manifest_tmp="$(mktemp -d)"
-  trap 'rm -rf "${manifest_tmp}"' RETURN
-  cat > "${manifest_tmp}/forgejo" <<'EOF_MANIFEST'
-format=1
-component=forgejo
-ubuntu_zombie_version=1970.01.01.00.00.00
-converged_utc=1970-01-01T00:00:00Z
-component_version=1.0.0
-suboptions=runner
-EOF_MANIFEST
-  manifest_out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_tmp}" ./scripts/install.sh doctor --json)"
-  grep -q '"component": "forgejo"' <<<"${manifest_out}" \
-    || { echo "FAIL: doctor --json did not discover forgejo manifest" >&2; exit 1; }
-  ! grep -q '"component": "zombie"' <<<"${manifest_out}" \
-    || { echo "FAIL: doctor --json should not include unselected zombie checks" >&2; exit 1; }
-  # Duplicate keys must make a manifest malformed rather than silently
-  # accepting ambiguous component state.
-  cat > "${manifest_tmp}/zombie" <<'EOF_BAD_MANIFEST'
-format=1
-format=1
-component=zombie
-ubuntu_zombie_version=1970.01.01.00.00.00
-converged_utc=1970-01-01T00:00:00Z
-component_version=1.0.0
-suboptions=
-EOF_BAD_MANIFEST
-  manifest_out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_tmp}" ./scripts/install.sh doctor --json 2>/dev/null)"
-  ! grep -q '"component": "zombie"' <<<"${manifest_out}" \
-    || { echo "FAIL: malformed duplicate-key manifest should be ignored" >&2; exit 1; }
 }
 
 expect_exit_code() {
@@ -1586,6 +1555,155 @@ expect_exit_code() {
     echo "FAIL: expected exit ${want}, got ${got}: $*" >&2
     exit 1
   fi
+}
+
+run_manifest() {
+  echo "[smoke] component manifest + selective uninstall"
+
+  local scratch_root bogus_zombie_dir out manifest_dir
+  scratch_root="$(pwd)/tests/.smoke-manifest.$$"
+  rm -rf -- "${scratch_root}"
+  mkdir -p "${scratch_root}"
+  trap 'rm -rf -- "'"${scratch_root}"'"' RETURN
+  bogus_zombie_dir="${scratch_root}/missing-zombie-root"
+
+  manifest_dir="${scratch_root}/valid-zombie"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
+format=1
+component=zombie
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh doctor --json)"
+  grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
+    || { echo "FAIL: doctor --json did not discover zombie manifest" >&2; exit 1; }
+
+  manifest_dir="${scratch_root}/duplicate-key"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/zombie" <<'EOF_BAD_MANIFEST'
+format=1
+format=1
+component=zombie
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_BAD_MANIFEST
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh doctor --json 2>/dev/null)"
+  ! grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
+    || { echo "FAIL: malformed duplicate-key manifest should be ignored" >&2; exit 1; }
+
+  manifest_dir="${scratch_root}/unknown-key"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/zombie" <<'EOF_UNKNOWN_MANIFEST'
+format=1
+component=zombie
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+unknown_key=value
+EOF_UNKNOWN_MANIFEST
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh doctor --json 2>/dev/null)"
+  ! grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
+    || { echo "FAIL: manifest with unknown key should be ignored" >&2; exit 1; }
+
+  manifest_dir="${scratch_root}/selective-uninstall"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/forgejo" <<'EOF_MANIFEST'
+format=1
+component=forgejo
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
+format=1
+component=zombie
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+
+  out="$(ZOMBIE_COLOR=never ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ./scripts/uninstall.sh forgejo --dry-run 2>&1 || true)"
+  grep -q "forgejo" <<<"${out}" \
+    || { echo "FAIL: forgejo-only dry-run should mention forgejo" >&2; exit 1; }
+  ! grep -q "ubuntu-zombie-chat" <<<"${out}" \
+    || { echo "FAIL: forgejo-only dry-run should not include zombie service cleanup" >&2; exit 1; }
+
+  out="$(ZOMBIE_COLOR=never ./scripts/uninstall.sh zombie --dry-run 2>&1 || true)"
+  grep -q "ubuntu-zombie" <<<"${out}" \
+    || { echo "FAIL: zombie-only dry-run should mention zombie cleanup" >&2; exit 1; }
+  ! grep -q "forgejo.service" <<<"${out}" \
+    || { echo "FAIL: zombie-only dry-run should not include Forgejo cleanup" >&2; exit 1; }
+
+  expect_exit_code 2 ./scripts/uninstall.sh forgejo --archive --dry-run
+  expect_exit_code 2 ./scripts/uninstall.sh forgejo --keep-agent --dry-run
+  expect_exit_code 0 ./scripts/uninstall.sh zombie --archive --keep-agent --dry-run
+
+  out="$(ZOMBIE_COLOR=never ./scripts/uninstall.sh --dry-run 2>&1 || true)"
+  grep -q "forgejo" <<<"${out}" \
+    || { echo "FAIL: no-target dry-run should mention Forgejo selection" >&2; exit 1; }
+  grep -q "ubuntu-zombie" <<<"${out}" \
+    || { echo "FAIL: no-target dry-run should mention zombie cleanup" >&2; exit 1; }
+
+  manifest_dir="${scratch_root}/dry-run-retains-manifest"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
+format=1
+component=zombie
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" ./scripts/uninstall.sh zombie --dry-run >/dev/null 2>&1 || true
+  [[ -f "${manifest_dir}/zombie" ]] \
+    || { echo "FAIL: dry-run uninstall must not remove zombie manifest" >&2; exit 1; }
+
+  manifest_dir="${scratch_root}/remaining-component-warning"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/forgejo" <<'EOF_MANIFEST'
+format=1
+component=forgejo
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ./scripts/uninstall.sh zombie --dry-run 2>&1 || true)"
+  grep -q "forgejo" <<<"${out}" \
+    || { echo "FAIL: targeted zombie dry-run should warn when Forgejo manifest remains" >&2; exit 1; }
+
+  expect_exit_code 2 ./scripts/uninstall.sh '../etc/passwd' --dry-run
+
+  manifest_dir="${scratch_root}/verify-discovers-forgejo"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/forgejo" <<'EOF_MANIFEST'
+format=1
+component=forgejo
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh verify --json 2>/dev/null || true)"
+  grep -Eq '"component"[[:space:]]*:[[:space:]]*"forgejo"' <<<"${out}" \
+    || { echo "FAIL: verify --json did not discover forgejo manifest" >&2; exit 1; }
+
+  rm -rf -- "${scratch_root}"
+  trap - RETURN
 }
 
 run_bad_usage() {
@@ -2133,6 +2251,7 @@ case "${cmd}" in
   python)         run_python ;;
   branding) run_branding ;;
   subcommands) run_subcommands ;;
+  manifest)       run_manifest ;;
   bad-usage)      run_bad_usage ;;
   flags)          run_flags ;;
   noninteractive) run_noninteractive ;;
@@ -2143,6 +2262,7 @@ case "${cmd}" in
     run_python
     run_branding
     run_subcommands
+    run_manifest
     run_bad_usage
     run_flags
     run_noninteractive

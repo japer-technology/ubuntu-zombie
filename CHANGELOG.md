@@ -8,15 +8,30 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Phase 2 — Component manifest and selective lifecycle
+
+- **Selective uninstall**: `uninstall zombie` and `uninstall forgejo` now work as
+  targeted component removals. No-target `uninstall` retains the previous
+  all-managed-artefacts behaviour.
+- **Component manifest**: `/var/lib/ubuntu-zombie/components/` records installed
+  components. Manifest entries are written only after a successful install and
+  health check, and removed only after successful uninstall. Each component's
+  entry is retained independently when that component's cleanup fails.
+- **Flag isolation**: `--archive` and `--keep-agent` are now rejected (exit 2)
+  when the `zombie` component is not being removed.
+- **Manifest directory**: Independent of `/opt/ai-zombie` so zombie removal does
+  not lose Forgejo's manifest entry.
+- **Safe parsing**: Manifest files are parsed as fixed key/value data and never
+  sourced. Malformed or unknown entries produce a warning and are skipped.
+
 ### Added
 - **Component-aware installer grammar (Phase 1).** `scripts/install.sh`
   now accepts `scripts/install.sh <verb> [component ...] [flags]` with
   public `zombie` and `forgejo` targets, while preserving the default
   no-target zombie install and existing `ZOMBIE_INSTALL_FORGEJO`
-  automation path. Standalone `install forgejo` and targeted uninstall
-  are accepted for dry-run/parser compatibility but remain gated for
-  non-dry-run execution until the component extraction/manifest phases
-  land. Bash and Zsh completions include the component targets.
+  automation path. Standalone `install forgejo` remains gated until the
+  Phase 3 component extraction work lands. Bash and Zsh completions
+  include the component targets.
 - **`docs/analysis/improvements-3.md` design analysis.** A written
   recommendation for evolving the installer CLI to component-oriented
   syntax (`install.sh <verb> [component ...]`): keep the five lifecycle

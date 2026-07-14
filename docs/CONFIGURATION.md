@@ -491,6 +491,24 @@ Caveats:
 - `uninstall.sh` reverses the component; dropping the database/role
   and removing `/var/lib/forgejo` sit behind their own confirmations.
 
+## Component manifest and selective lifecycle
+
+Installed components are recorded under
+`/var/lib/ubuntu-zombie/components/` by default. Set
+`ZOMBIE_COMPONENT_MANIFEST_DIR` to override that directory for tests or
+other hermetic workflows.
+
+The manifest is used by `verify`, `doctor`, and `repair` to discover
+installed components when you do not pass explicit targets. Selective
+`uninstall` uses component targets to decide which component to remove:
+`uninstall zombie` removes only the zombie account/runtime,
+`uninstall forgejo` removes only Forgejo, and bare `uninstall` removes
+all managed components.
+
+`--archive` and `--keep-agent` are lifecycle flags for zombie removal
+only; `uninstall forgejo --archive` and
+`uninstall forgejo --keep-agent` are rejected with exit code `2`.
+
 ## Install receipt
 
 Every install writes a human-readable **receipt** recording all parameters
@@ -524,7 +542,7 @@ documented above. Valid component targets are `zombie` and `forgejo`.
 | `verify`    | Read-only state check. Does not change state.                         |
 | `doctor`    | Explain failures and likely fixes.                                    |
 | `repair`    | Apply known-safe fixes (re-assert permissions, re-render `pi/` tree). |
-| `uninstall` | Reverse the install (delegates to `scripts/uninstall.sh`). With no target, keeps the current all-managed-artefacts behaviour. |
+| `uninstall` | Reverse the install (delegates to `scripts/uninstall.sh`). `uninstall zombie` and `uninstall forgejo` remove only that component; no target removes all managed components. |
 
 Examples:
 

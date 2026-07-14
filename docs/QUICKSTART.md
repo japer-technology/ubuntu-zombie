@@ -118,15 +118,24 @@ Diagnostics are redacted before being bundled.
 ## Uninstall
 
 ```bash
+# Remove everything (default):
 sudo ./scripts/install.sh uninstall
+
+# Remove only the zombie account and runtime, leave Forgejo running:
+sudo ./scripts/install.sh uninstall zombie
+
+# Remove only the Forgejo component, leave zombie running:
+sudo ./scripts/install.sh uninstall forgejo
 ```
 
-With no target, uninstall keeps the current all-managed-artefacts
-behaviour. Targeted uninstall syntax such as
-`sudo ./scripts/install.sh uninstall forgejo --dry-run` is accepted for
-planning, but non-dry-run selective removal is gated until the component
-manifest work lands.
+Selective uninstall targets only the named component. `--archive` and
+`--keep-agent` are valid only when the `zombie` component is being
+removed.
 
 The uninstaller removes Ubuntu Zombie services, sudoers entries,
 payload files, policy, logrotate rules, and optionally the agent account
 and archives. Shared packages such as Node and Python are left alone.
+
+Standalone `install forgejo` remains gated until Phase 3. For the current
+combined Ubuntu Zombie + Forgejo path, use
+`ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh install`.
