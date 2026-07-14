@@ -110,7 +110,7 @@ is_target_selected() {
 
 component_manifest_path() {
   local component="$1"
-  is_public_component "${component}" || die "Unsafe component manifest name: ${component}" 2
+  is_public_component "${component}" || die "Unknown or invalid component name: ${component}. Valid components: $(component_names)" 2
   printf '%s/%s' "${COMPONENT_MANIFEST_DIR}" "${component}"
 }
 

@@ -307,7 +307,7 @@ add_selected_component() {
 
 component_manifest_path() {
   local component="$1"
-  is_public_component "${component}" || die "Unsafe component manifest name: ${component}" 2
+  is_public_component "${component}" || die "Unknown or invalid component name: ${component}. Valid components: $(component_names)" 2
   printf '%s/%s' "${COMPONENT_MANIFEST_DIR}" "${component}"
 }
 
@@ -331,18 +331,12 @@ write_component_manifest() {
   path="$(component_manifest_path "${component}")"
   tmp="${path}.tmp.$$"
   {
-    printf 'format=%s
-' "${COMPONENT_MANIFEST_FORMAT_VERSION}"
-    printf 'component=%s
-' "${component}"
-    printf 'ubuntu_zombie_version=%s
-' "${SCRIPT_VERSION}"
-    printf 'converged_utc=%s
-' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    printf 'component_version=%s
-' "${component_version}"
-    printf 'suboptions=%s
-' "${suboptions}"
+    printf 'format=%s\n' "${COMPONENT_MANIFEST_FORMAT_VERSION}"
+    printf 'component=%s\n' "${component}"
+    printf 'ubuntu_zombie_version=%s\n' "${SCRIPT_VERSION}"
+    printf 'converged_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'component_version=%s\n' "${component_version}"
+    printf 'suboptions=%s\n' "${suboptions}"
   } > "${tmp}"
   chown root:root "${tmp}" 2>/dev/null || true
   chmod 644 "${tmp}"
@@ -360,6 +354,8 @@ remove_component_manifest() {
 
 _read_manifest_value() {
   local file="$1" key="$2"
+  # Match `key=` at the start of the line and return everything after the
+  # first equals sign; exit 1 if the key is absent.
   awk -v want="${key}" 'index($0, want "=") == 1 { print substr($0, length(want) + 2); found=1 } END { if (!found) exit 1 }' "${file}" 2>/dev/null
 }
 
