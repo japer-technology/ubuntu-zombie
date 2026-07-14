@@ -57,7 +57,6 @@ TARGET_ARGS=()
 readonly COMPONENT_ZOMBIE="zombie"
 readonly COMPONENT_FORGEJO="forgejo"
 readonly PUBLIC_COMPONENTS=("${COMPONENT_ZOMBIE}" "${COMPONENT_FORGEJO}")
-readonly COMPONENT_MANIFEST_FORMAT_VERSION="1"
 COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
