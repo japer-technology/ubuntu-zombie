@@ -1528,6 +1528,8 @@ run_subcommands() {
   grep -q "Optional components enabled" <<<"${combined_out}" \
     || { echo "FAIL: legacy Forgejo env flag was not additive" >&2; exit 1; }
 
+  # Single valid component targets are exercised above and by dry-run checks;
+  # the loop below verifies all public duplicate/invalid target failures.
   for sub in install verify doctor repair uninstall; do
     expect_exit_code 2 ./scripts/install.sh "${sub}" nope
     expect_exit_code 2 ./scripts/install.sh "${sub}" zombie zombie

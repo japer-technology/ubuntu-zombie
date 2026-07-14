@@ -340,8 +340,10 @@ validate_and_resolve_targets() {
 zombie_config_selected() {
   (( COMPONENT_ZOMBIE_SELECTED )) && return 0
   (( EXPLICIT_TARGETS )) && return 1
-  # No-target non-install verbs keep the legacy zombie-centric fallback until
-  # the component manifest lands. No-target uninstall delegates to uninstall.sh.
+  # This is validation fallback only. Target selection for install happens in
+  # validate_and_resolve_targets(); no-target non-install verbs keep the legacy
+  # zombie-centric validation path until the component manifest lands. No-target
+  # uninstall delegates to uninstall.sh.
   [[ "${SUBCOMMAND}" != "uninstall" ]]
 }
 
