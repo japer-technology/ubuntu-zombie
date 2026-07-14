@@ -555,7 +555,8 @@ should not require edits to parser or dispatcher conditionals.
 - `options/README.md`: replace the flag-and-guard contract with the registry
   contract while retaining environment compatibility.
 - `CHANGELOG.md`: user-visible CLI, manifest, and selective lifecycle changes.
-- `VERSION`: update whenever the changelog is updated with
+- `VERSION`: update whenever the changelog is updated in the required
+  `yyyy.mm.dd.hh.nn.ss` UTC format by running
   `date -u +%Y.%m.%d.%H.%M.%S > VERSION`.
 
 Review packaging wrappers and documentation for assumptions that every command
