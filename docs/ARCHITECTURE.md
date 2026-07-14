@@ -97,12 +97,16 @@ Built-in skills ship under `/opt/ai-zombie/skills/` and currently cover
 
 ## Optional components
 
-The installer supports opt-in components behind `ZOMBIE_INSTALL_*`
-flags (all default `0`; specifications live under `options/`). Each
-component follows one contract: validated settings, an entry in the
-interactive Options menu, a dry-run stanza, guarded idempotent install
-sections, receipt records, `verify`/`doctor`/`repair` checks, and a
-reversal path in `uninstall.sh`.
+The installer uses the component-aware grammar `scripts/install.sh
+<verb> [component ...] [flags]`. Public targets currently are `zombie`
+(the baseline account, runtime, chat UI, policy, and services) and
+`forgejo`. The legacy `ZOMBIE_INSTALL_*` flags remain supported and are
+additive with explicit targets; all default to `0`, and specifications
+live under `options/`. Each component follows one contract: validated
+settings, an entry in the interactive Options menu, a dry-run stanza,
+guarded idempotent install sections, receipt records,
+`verify`/`doctor`/`repair` checks, and a reversal path in
+`uninstall.sh`.
 
 The first component is the **Forgejo server**
 (`ZOMBIE_INSTALL_FORGEJO`): a git forge backed by PostgreSQL, running
@@ -119,15 +123,23 @@ gate classifies forge administration (`forgejo`, `forgejo-runner`,
 `psql`, `createdb`) as `system_change` and database drops
 (`dropdb`/`dropuser`/`DROP DATABASE`) as `destructive`.
 
-## Installer subcommands
+## Installer command grammar
 
-| Subcommand | Behaviour |
-| ---------- | --------- |
-| `install` | Idempotent full install. |
+```text
+scripts/install.sh <verb> [component ...] [flags]
+```
+
+| Verb | Behaviour |
+| ---- | --------- |
+| `install` | Idempotent install. With no target, selects `zombie`. |
 | `verify` | Read-only state check. |
 | `doctor` | Explain failures and likely fixes. |
 | `repair` | Re-assert permissions, re-render runtime config, redeploy skills, restart chat. |
-| `uninstall` | Delegate to `scripts/uninstall.sh`. |
+| `uninstall` | Delegate to `scripts/uninstall.sh`; no target keeps all-managed-artefacts removal. |
+
+`install forgejo` is accepted for parser and dry-run compatibility, but
+standalone non-dry-run Forgejo install is gated until the Forgejo
+component is extracted from the zombie baseline flow.
 
 ## Logs and state
 

@@ -405,14 +405,23 @@ the review entirely and use the supplied environment unchanged.
 
 ## Optional components ("Ubuntu Zombie + Options")
 
-Beyond the baseline, the installer supports **opt-in components**
-governed by `ZOMBIE_INSTALL_<COMPONENT>` flags. Every flag defaults to
-`0`, so a default install is unchanged. Enabled components appear in
-the interactive review (item `9) Options` opens a nested menu), the
-dry-run plan, the pre-flight banner, and the install receipt; they are
-checked by `verify`/`doctor`, repaired by `repair`, and reversed by
+Beyond the baseline, the installer supports **opt-in components**. The
+canonical command grammar is `scripts/install.sh <verb> [component ...]
+[flags]`; public component targets are `zombie` and `forgejo`. Existing
+`ZOMBIE_INSTALL_<COMPONENT>` flags remain supported for automation and
+are additive with explicit targets. Every flag defaults to `0`, so a
+default install is unchanged. Enabled components appear in the
+interactive review (item `9) Options` opens a nested menu), the dry-run
+plan, the pre-flight banner, and the install receipt; they are checked
+by `verify`/`doctor`, repaired by `repair`, and reversed by
 `uninstall.sh`. The design surface for future components lives under
 [`options/`](../options/README.md).
+
+`install forgejo` is accepted syntax for dry-run planning, but standalone
+non-dry-run Forgejo execution is gated until the component extraction
+phase is complete. Use `ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh
+install` for the current supported combined Ubuntu Zombie + Forgejo
+installation.
 
 ### Forgejo server (`ZOMBIE_INSTALL_FORGEJO=1`)
 
@@ -498,19 +507,34 @@ can retrieve them.
 | `ZOMBIE_RECEIPT`     | `1`                                            | Set to `0` to disable the receipt.                 |
 | `ZOMBIE_RECEIPT_FILE`| `/var/log/ubuntu-zombie/install-receipt.txt`   | Override the receipt file path (absolute).         |
 
-## Install subcommands
+## Install command grammar
 
-`scripts/install.sh` is idempotent and exposes several subcommands;
-all honour the same `ZOMBIE_*` environment variables documented
-above:
+`scripts/install.sh` is idempotent and uses this canonical form:
 
-| Subcommand  | Effect                                                                |
+```text
+scripts/install.sh <verb> [component ...] [flags]
+```
+
+All verbs honour the same relevant `ZOMBIE_*` environment variables
+documented above. Valid component targets are `zombie` and `forgejo`.
+
+| Verb        | Effect                                                                |
 | ----------- | --------------------------------------------------------------------- |
-| `install`   | Full install (default). Safe to re-run.                               |
+| `install`   | Full install (default target: `zombie`). Safe to re-run.              |
 | `verify`    | Read-only state check. Does not change state.                         |
 | `doctor`    | Explain failures and likely fixes.                                    |
 | `repair`    | Apply known-safe fixes (re-assert permissions, re-render `pi/` tree). |
-| `uninstall` | Reverse the install (delegates to `scripts/uninstall.sh`).            |
+| `uninstall` | Reverse the install (delegates to `scripts/uninstall.sh`). With no target, keeps the current all-managed-artefacts behaviour. |
+
+Examples:
+
+```bash
+sudo ./scripts/install.sh install zombie
+sudo ./scripts/install.sh install zombie forgejo --dry-run
+sudo ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh install
+sudo ./scripts/install.sh verify zombie
+sudo ./scripts/install.sh uninstall forgejo --dry-run
+```
 
 After editing `policy.yaml` or any template under
 `/opt/ai-zombie/agent/templates/`, run `sudo ./scripts/install.sh
@@ -518,8 +542,9 @@ repair` to re-render the `pi/` tree and restart the chat service.
 
 ## Command-line flags
 
-`scripts/install.sh` accepts these flags in addition to the subcommands
-above. They can be combined (e.g. `install --yes --strict`):
+`scripts/install.sh` accepts these flags in addition to the verb and
+component targets above. They can be combined (e.g. `install zombie
+--yes --strict`) and may appear before or after the verb/targets:
 
 | Flag                 | Effect                                                                       |
 | -------------------- | ---------------------------------------------------------------------------- |

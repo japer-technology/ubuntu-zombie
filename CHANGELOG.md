@@ -9,6 +9,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 ## [Unreleased]
 
 ### Added
+- **Component-aware installer grammar (Phase 1).** `scripts/install.sh`
+  now accepts `scripts/install.sh <verb> [component ...] [flags]` with
+  public `zombie` and `forgejo` targets, while preserving the default
+  no-target zombie install and existing `ZOMBIE_INSTALL_FORGEJO`
+  automation path. Standalone `install forgejo` and targeted uninstall
+  are accepted for dry-run/parser compatibility but remain gated for
+  non-dry-run execution until the component extraction/manifest phases
+  land. Bash and Zsh completions include the component targets.
 - **`docs/analysis/improvements-3.md` design analysis.** A written
   recommendation for evolving the installer CLI to component-oriented
   syntax (`install.sh <verb> [component ...]`): keep the five lifecycle

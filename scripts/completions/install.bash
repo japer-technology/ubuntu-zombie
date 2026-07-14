@@ -3,37 +3,50 @@
 # Usage:
 #   source scripts/completions/install.bash
 #
-# Completes the subcommands and flags accepted by scripts/install.sh. This is
-# a static completion (it does not execute install.sh), so it is safe to load
-# from an interactive shell.
+# Completes the verbs, component targets, and flags accepted by scripts/install.sh.
+# This is static completion (it does not execute install.sh), so it is safe to
+# load from an interactive shell.
 
 _ubuntu_zombie_install() {
-  local cur subcommands flags
+  local cur verbs components common_flags uninstall_flags flags seen_verb=""
   cur="${COMP_WORDS[COMP_CWORD]}"
 
-  subcommands="install verify doctor repair uninstall"
-  flags="-h --help -v --version -n --dry-run -y --yes -q --quiet \
-         --verbose --debug --no-color --no-colour --strict --json"
+  verbs="install verify doctor repair uninstall"
+  components="zombie forgejo"
+  common_flags="-h --help -v --version -n --dry-run -y --yes -q --quiet \
+                --verbose --debug --no-color --no-colour --strict --json"
+  uninstall_flags="--archive --keep-agent"
+  flags="${common_flags}"
 
-  # Has a subcommand already been chosen on the command line?
-  local i seen=""
+  local i word used_components=" "
   for (( i = 1; i < COMP_CWORD; i++ )); do
-    case "${COMP_WORDS[i]}" in
-      install|verify|doctor|repair|uninstall) seen="${COMP_WORDS[i]}"; break ;;
+    word="${COMP_WORDS[i]}"
+    case "${word}" in
+      install|verify|doctor|repair|uninstall)
+        [[ -z "${seen_verb}" ]] && seen_verb="${word}" ;;
+      zombie|forgejo)
+        used_components+="${word} " ;;
     esac
   done
+
+  [[ "${seen_verb}" == "uninstall" ]] && flags+=" ${uninstall_flags}"
 
   if [[ "${cur}" == -* ]]; then
     mapfile -t COMPREPLY < <(compgen -W "${flags}" -- "${cur}")
     return 0
   fi
 
-  if [[ -z "${seen}" ]]; then
-    mapfile -t COMPREPLY < <(compgen -W "${subcommands} ${flags}" -- "${cur}")
-  else
-    # After a subcommand only flags remain meaningful.
-    mapfile -t COMPREPLY < <(compgen -W "${flags}" -- "${cur}")
+  if [[ -z "${seen_verb}" ]]; then
+    mapfile -t COMPREPLY < <(compgen -W "${verbs} ${common_flags}" -- "${cur}")
+    return 0
   fi
+
+  local remaining="" component
+  for component in ${components}; do
+    [[ "${used_components}" == *" ${component} "* ]] && continue
+    remaining+=" ${component}"
+  done
+  mapfile -t COMPREPLY < <(compgen -W "${remaining} ${flags}" -- "${cur}")
   return 0
 }
 
