@@ -344,19 +344,26 @@ write_component_manifest() {
 }
 
 remove_component_manifest() {
-  local component="$1" path
+  local component="$1" path parent_dir
   path="$(component_manifest_path "${component}")"
+  parent_dir="$(dirname "${COMPONENT_MANIFEST_DIR}")"
   (( DRY_RUN )) && return 0
   rm -f -- "${path}"
   rmdir --ignore-fail-on-non-empty "${COMPONENT_MANIFEST_DIR}" 2>/dev/null || true
-  rmdir --ignore-fail-on-non-empty "$(dirname "${COMPONENT_MANIFEST_DIR}")" 2>/dev/null || true
+  rmdir --ignore-fail-on-non-empty "${parent_dir}" 2>/dev/null || true
 }
 
 _read_manifest_value() {
   local file="$1" key="$2"
-  # Match `key=` at the start of the line and return everything after the
-  # first equals sign; exit 1 if the key is absent.
-  awk -v want="${key}" 'index($0, want "=") == 1 { print substr($0, length(want) + 2); found=1 } END { if (!found) exit 1 }' "${file}" 2>/dev/null
+  # Match lines starting with `key=`, return everything after the first
+  # equals sign, and exit 1 if the key is absent.
+  awk -v want="${key}" '
+    index($0, want "=") == 1 {
+      print substr($0, length(want) + 2)
+      found = 1
+    }
+    END { if (!found) exit 1 }
+  ' "${file}" 2>/dev/null
 }
 
 valid_component_manifest_entry() {
@@ -1147,7 +1154,9 @@ cmd_doctor() {
       fi
       local forgejo_dir_perms forgejo_config_perms
       forgejo_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
-      forgejo_config_perms="$(stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null || true)"
+      forgejo_config_perms="$(
+        stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null           || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null           || true
+      )"
       if [[ "${forgejo_dir_perms}" == "root:git 750" && "${forgejo_config_perms}" == "root:git 640" ]]; then
         dr ok forgejo forgejo_config "Forgejo config permissions are root:git 750/640."
       elif [[ -n "${forgejo_config_perms}" ]]; then

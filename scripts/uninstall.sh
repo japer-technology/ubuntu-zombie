@@ -115,12 +115,13 @@ component_manifest_path() {
 }
 
 remove_component_manifest() {
-  local component="$1" path
+  local component="$1" path parent_dir
   path="$(component_manifest_path "${component}")"
+  parent_dir="$(dirname "${COMPONENT_MANIFEST_DIR}")"
   [[ "${DRY_RUN}" == "1" ]] && return 0
   rm -f -- "${path}"
   rmdir --ignore-fail-on-non-empty "${COMPONENT_MANIFEST_DIR}" 2>/dev/null || true
-  rmdir --ignore-fail-on-non-empty "$(dirname "${COMPONENT_MANIFEST_DIR}")" 2>/dev/null || true
+  rmdir --ignore-fail-on-non-empty "${parent_dir}" 2>/dev/null || true
 }
 
 warn_remaining_components() {

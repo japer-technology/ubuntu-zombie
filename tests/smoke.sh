@@ -1574,8 +1574,6 @@ EOF_BAD_MANIFEST
   manifest_out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_tmp}" ./scripts/install.sh doctor --json 2>/dev/null)"
   ! grep -q '"component": "zombie"' <<<"${manifest_out}" \
     || { echo "FAIL: malformed duplicate-key manifest should be ignored" >&2; exit 1; }
-  rm -rf "${manifest_tmp}"
-  trap - RETURN
 }
 
 expect_exit_code() {
