@@ -23,11 +23,12 @@ The intended selection rules are:
 
 - The `install` verb with no following component target keeps its current
   meaning: install or upgrade the `zombie` baseline.
-- `install forgejo` installs Forgejo and PostgreSQL without implicitly
-  installing the zombie account or runtime.
-- `install zombie forgejo` converges both components in one run.
-- Existing `ZOMBIE_INSTALL_FORGEJO=1 install.sh install` invocations continue
-  to select both the default zombie and Forgejo.
+- `scripts/install.sh install forgejo` installs Forgejo and PostgreSQL without
+  implicitly installing the zombie account or runtime.
+- `scripts/install.sh install zombie forgejo` converges both components in one
+  run.
+- Existing `ZOMBIE_INSTALL_FORGEJO=1 scripts/install.sh install` invocations
+  continue to select both the default zombie and Forgejo.
 - Explicit component arguments and enabled `ZOMBIE_INSTALL_*` variables are
   combined and de-duplicated. Explicit `install forgejo` does not add the
   default zombie merely because the verb is `install`.
@@ -554,8 +555,8 @@ should not require edits to parser or dispatcher conditionals.
 - `options/README.md`: replace the flag-and-guard contract with the registry
   contract while retaining environment compatibility.
 - `CHANGELOG.md`: user-visible CLI, manifest, and selective lifecycle changes.
-- `VERSION`: update whenever the changelog is updated, using the required UTC
-  `yyyy.mm.dd.hh.nn.ss` timestamp format.
+- `VERSION`: update whenever the changelog is updated, using the repository’s
+  required literal UTC convention, `yyyy.mm.dd.hh.nn.ss`.
 
 Review packaging wrappers and documentation for assumptions that every command
 installs the zombie. In particular, the `/usr/sbin/ubuntu-zombie` wrapper
