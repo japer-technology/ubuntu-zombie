@@ -269,7 +269,9 @@ Add core helpers to:
 - list installed known components in registry order;
 - ignore and warn about malformed or unknown entries;
 - remove one entry after successful uninstall;
-- remove the empty directory hierarchy after the final component is gone.
+- remove empty manifest directories on a best-effort basis after the final
+  known component is gone, but leave them in place with a warning if unknown
+  entries or other state remain.
 
 Do not `source` manifest files. Parse a fixed key/value format as data and
 reject duplicate, unknown, or unsafe component names.
@@ -421,7 +423,8 @@ Give Forgejo an explicit package list rather than relying on the baseline
 package phase. Include every command used by the Forgejo path, but install only
 missing packages through the shared apt helper. Do not create the zombie user,
 install Node or the Python agent runtime, alter sleep targets, deploy policy or
-skills, or create chat services.
+skills, or create chat services. Keep the definitive package list beside the
+Forgejo hook and summarise its host dependencies in `docs/ARCHITECTURE.md`.
 
 The optional runner remains nested within Forgejo and continues to require
 `ZOMBIE_INSTALL_FORGEJO_RUNNER=1`. Its registration must use the selected
@@ -452,8 +455,10 @@ dependency:
 - generated Forgejo passwords appear only in the root-only receipt contract;
 - a component manifest is written only after the health check.
 
-On separate disposable Ubuntu 22.04 and 24.04 VMs, exercise the complete matrix
-on both releases:
+On separate disposable Ubuntu 22.04 and 24.04 VMs, the two releases supported
+by the current installer, exercise the complete matrix on both releases. Do not
+add Ubuntu 20.04 to the matrix without separately expanding the project’s
+supported-platform contract.
 
 1. fresh `install forgejo`;
 2. re-run `install forgejo`;
@@ -557,7 +562,8 @@ should not require edits to parser or dispatcher conditionals.
 - `CHANGELOG.md`: user-visible CLI, manifest, and selective lifecycle changes.
 - `VERSION`: update whenever the changelog is updated in the required
   `yyyy.mm.dd.hh.nn.ss` UTC format by running
-  `date -u +%Y.%m.%d.%H.%M.%S > VERSION`.
+  `date -u +%Y.%m.%d.%H.%M.%S > VERSION`; keep this aligned with the release
+  rule in `CONTRIBUTING.md`.
 
 Review packaging wrappers and documentation for assumptions that every command
 installs the zombie. In particular, the `/usr/sbin/ubuntu-zombie` wrapper
@@ -574,7 +580,8 @@ argument vector to `scripts/install.sh` unchanged.
 - Explicit uninstall must work against legacy installations with no manifest.
 - Unknown manifest entries must be preserved and warned about during targeted
   operations; a no-target uninstall must not delete unknown component state
-  blindly.
+  blindly. Leave the manifest directory and unknown entries intact, report
+  their paths, and require an operator to resolve them explicitly.
 - Manifest format changes require an explicit format version and a tolerant
   reader for the previous format.
 - Keep current destructive confirmations for repositories, databases, users,
@@ -631,7 +638,8 @@ Confirm these defaults before Phase 1:
 
 1. Ship only the canonical verb-first grammar initially; defer
    bare-component shorthand.
-2. Keep the runner as a Forgejo option.
+2. Keep the runner environment selector and manifest sub-option owned by
+   Forgejo; do not register it as an independent lifecycle component.
 3. Warn, but do not require an additional acknowledgement, when selectively
    uninstalling zombie while other components remain; existing destructive
    confirmations still apply.
