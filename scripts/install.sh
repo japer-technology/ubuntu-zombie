@@ -516,9 +516,10 @@ is_valid_forgejo_runner_labels() {
   [[ "$1" =~ ^[A-Za-z0-9._:/,+-]{1,512}$ ]]
 }
 
-# Forgejo JWT secrets are unpadded base64url encodings of exactly 32 bytes.
-# Reject older malformed values so a re-run can repair app.ini before Forgejo
-# tries (and fails) to rewrite the intentionally root-owned configuration.
+# Forgejo JWT secrets are unpadded base64url encodings of exactly 32 bytes,
+# which occupy 43 characters (ceil(32 * 8 / 6)). Reject older malformed values
+# so a re-run can repair app.ini before Forgejo tries (and fails) to rewrite
+# the intentionally root-owned configuration.
 is_valid_forgejo_jwt_secret() {
   [[ "$1" =~ ^[A-Za-z0-9_-]{43}$ ]]
 }
