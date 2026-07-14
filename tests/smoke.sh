@@ -1833,6 +1833,8 @@ run_standards() {
     || { echo "install.sh must preconfigure Forgejo's LFS JWT secret" >&2; exit 1; }
   grep -q 'chmod 660 /etc/forgejo/app.ini' scripts/install.sh \
     || { echo "Forgejo migration must temporarily permit config updates" >&2; exit 1; }
+  ! grep -q 'chmod 770 /etc/forgejo' scripts/install.sh \
+    || { echo "Forgejo migration must not make the config directory writable" >&2; exit 1; }
   grep -q 'chmod 640 /etc/forgejo/app.ini' scripts/install.sh \
     || { echo "Forgejo migration must restore app.ini permissions" >&2; exit 1; }
   grep -q 'chmod 750 /etc/forgejo' scripts/install.sh \

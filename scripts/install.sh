@@ -2639,7 +2639,7 @@ PSQL
   # schema. The service is started again only after migration and admin setup.
   if [[ -f /etc/systemd/system/forgejo.service ]]; then
     systemctl stop forgejo.service \
-      || die "Could not stop Forgejo safely before migration." 1
+      || die "Could not stop Forgejo safely before migration; check systemctl status forgejo.service and journalctl -u forgejo." 1
   fi
 
   # Reuse existing secrets from app.ini so a re-run never rotates them
@@ -2735,7 +2735,6 @@ EOF
   # when migration fails. This also makes upgrades resilient to future
   # Forgejo settings without leaving the running daemon able to rewrite config.
   chown root:git /etc/forgejo /etc/forgejo/app.ini
-  chmod 770 /etc/forgejo
   chmod 660 /etc/forgejo/app.ini
   _fj_migrate_status=0
   runuser -u git -- /usr/local/bin/forgejo migrate \
@@ -2786,9 +2785,12 @@ EOF
   fi
   systemctl enable --now forgejo.service \
     || die "Forgejo service failed to start; see journalctl -u forgejo." 1
+  # Six exponentially backed-off probes allow roughly a minute for schema
+  # checks and startup on slower hosts, while each request is capped at 5s.
   if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
        "http://127.0.0.1:${FORGEJO_HTTP_PORT}/api/healthz"; then
-    systemctl disable --now forgejo.service >/dev/null 2>&1 || true
+    systemctl disable --now forgejo.service >/dev/null \
+      || warn "Could not disable the unhealthy Forgejo service."
     die "Forgejo started but did not become healthy; it was stopped. See journalctl -u forgejo." 1
   fi
   ok "Forgejo is healthy at http://${_fj_domain}:${FORGEJO_HTTP_PORT}/."
