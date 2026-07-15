@@ -109,6 +109,8 @@
   .live-activity .act .icon { width: 1rem; text-align: center; flex: none; }
   .live-activity .act.done { opacity: .75; }
   .live-activity .act.done .icon { color: #2ecc71; }
+  .live-activity .act.warning { color: #f5a623; }
+  .live-activity .act.warning .icon { color: #f5a623; }
   .live-activity .act.failed .icon { color: #e74c3c; }
   .live-activity .act.failed { color: #e74c3c; }
   .muted { color: var(--text-muted); font-size: .8rem; }
@@ -1471,14 +1473,17 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       scrollLog();
       return line;
     };
-    const endToolLine = (name, ok, note) => {
+    const endToolLine = (name, ok, note, stateOverride = null) => {
       // A tool_end without a matching tool_start (out-of-order or
       // dropped frame) still gets a completed line so it is visible.
       const stack = toolLineStacks.get(name);
       const line = stack?.shift() || startToolLine(name, note, false);
-      line.className = `act ${ok === false ? "failed" : "done"}`;
+      const state = stateOverride || (ok === false ? "failed" : "done");
+      const icons = { failed: "✗", warning: "!", done: "✓" };
+      const icon = icons[state] || "✓";
+      line.className = `act ${state}`;
       line.replaceChildren(
-        el("span", { class: "icon", text: ok === false ? "✗" : "✓" }),
+        el("span", { class: "icon", text: icon }),
         el("span", { text: note }));
       scrollLog();
       return line;
@@ -1526,6 +1531,18 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       model: "Model is thinking…",
       tools: "Running tools…",
       finalising: "Finalising the reply…",
+    };
+    const isCommandStatusExit = (payload) => {
+      return payload && payload.command_status === true && payload.ok === false;
+    };
+    const commandStatusNote = (tool, payload) => {
+      const bits = [];
+      if (payload.exit_code != null) {
+        bits.push(`exit ${payload.exit_code}`);
+      }
+      if (typeof payload.duration_ms === "number") bits.push(`${payload.duration_ms} ms`);
+      return `${tool} — completed with non-zero status` +
+             (bits.length ? ` (${bits.join(" · ")})` : "");
     };
     activeEventSource.addEventListener("phase", (ev) => {
       armTimeout();
@@ -1583,7 +1600,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const moved = (typeof p.stdout_bytes === "number" ? p.stdout_bytes : 0) +
                     (typeof p.stderr_bytes === "number" ? p.stderr_bytes : 0);
       tallyStat("toolOutputBytes", moved);
-      if (p.ok === false) {
+      if (isCommandStatusExit(p)) {
+        endToolLine(tool, true, commandStatusNote(tool, p), "warning");
+      } else if (p.ok === false) {
         tallyStat("toolFailures");
         endToolLine(tool, false, `${tool} — ${p.error || "failed"}`);
       } else {
