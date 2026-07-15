@@ -2349,6 +2349,34 @@ run_standards() {
     || { echo "Forgejo config directory must be locked after migration" >&2; exit 1; }
   grep -q '/api/healthz' scripts/install.sh \
     || { echo "Forgejo install must verify application health" >&2; exit 1; }
+  local docker_conflict_out forgejo_docker_helper docker_stub
+  forgejo_docker_helper="$(sed -n \
+    '/^ensure_forgejo_runner_docker_package() {/,/^}$/p' scripts/install.sh)"
+  docker_stub="$(mktemp)"
+  chmod +x "${docker_stub}"
+  bash -c "${forgejo_docker_helper}
+    info() { :; }
+    note_satisfied() { :; }
+    apt_install() { return 99; }
+    dpkg-query() { return 1; }
+    ensure_forgejo_runner_docker_package '${docker_stub}'" \
+    || { rm -f "${docker_stub}"; echo "existing Docker must be reused" >&2; exit 1; }
+  rm -f "${docker_stub}"
+  if docker_conflict_out="$(bash -c "${forgejo_docker_helper}
+    apt_install() { return 99; }
+    dpkg-query() { printf 'install ok installed'; }
+    die() { printf '%s\n' \"\$1\" >&2; exit 1; }
+    ensure_forgejo_runner_docker_package /missing/docker" 2>&1)"; then
+    echo "containerd.io conflict must stop Docker package installation" >&2
+    exit 1
+  fi
+  grep -q 'containerd.io is installed' <<<"${docker_conflict_out}" \
+    || { echo "containerd.io conflict needs actionable guidance" >&2; exit 1; }
+  bash -c "${forgejo_docker_helper}
+    apt_install() { [[ \"\$*\" == docker.io ]]; }
+    dpkg-query() { return 1; }
+    ensure_forgejo_runner_docker_package /missing/docker" \
+    || { echo "docker.io must be installed when no Docker engine conflicts" >&2; exit 1; }
   local forgejo_jwt_validator
   forgejo_jwt_validator="$(sed -n '/^is_valid_forgejo_jwt_secret() {/,/^}/p' scripts/install.sh)"
   bash -c "${forgejo_jwt_validator}
