@@ -259,11 +259,11 @@ on_error() {
 }
 
 
-# Public component targets accepted after the lifecycle verb. Keep this list
-# in sync with the static shell completions and smoke standards.
+# Public component targets accepted after the lifecycle verb. Component
+# application logic stays in named hooks; shared infrastructure only walks
+# this ordered registry.
 readonly COMPONENT_ZOMBIE="zombie"
 readonly COMPONENT_FORGEJO="forgejo"
-readonly PUBLIC_COMPONENTS=("${COMPONENT_ZOMBIE}" "${COMPONENT_FORGEJO}")
 readonly COMPONENT_MANIFEST_FORMAT_VERSION="1"
 COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
 TARGET_ARGS=()
@@ -271,6 +271,53 @@ SELECTED_COMPONENTS=()
 EXPLICIT_TARGETS=0
 COMPONENT_ZOMBIE_SELECTED=0
 COMPONENT_FORGEJO_SELECTED=0
+
+# shellcheck source=scripts/component-registry.sh
+. "${SCRIPT_DIR}/component-registry.sh"
+
+component_validate_zombie() { validate_zombie_config; }
+component_validate_forgejo() { validate_forgejo_config; }
+component_review_zombie() { review_parameters; }
+component_review_forgejo() { review_forgejo_parameters; }
+component_dry_run_zombie() { print_zombie_dry_run; }
+component_dry_run_forgejo() { print_forgejo_dry_run; }
+component_receipt_start_zombie() { receipt_start_zombie; }
+component_receipt_start_forgejo() { receipt_start_forgejo; }
+component_receipt_finish_zombie() { receipt_finish_zombie; }
+component_receipt_finish_forgejo() { receipt_finish_forgejo; }
+component_install_zombie() { install_zombie; }
+component_install_forgejo() { install_forgejo; }
+component_manifest_zombie() { write_zombie_manifest; }
+component_manifest_forgejo() { write_forgejo_manifest; }
+component_final_zombie() { final_zombie_summary; }
+component_final_forgejo() { final_forgejo_summary; }
+component_legacy_zombie() { legacy_zombie_present; }
+component_legacy_forgejo() { legacy_forgejo_present; }
+component_verify_zombie() { verify_zombie; }
+component_verify_forgejo() { verify_forgejo; }
+component_doctor_zombie() { doctor_zombie; }
+component_doctor_forgejo() { doctor_forgejo; }
+component_repair_zombie() { repair_zombie; }
+component_repair_forgejo() { repair_forgejo; }
+component_phase_count_zombie() { count_zombie_phases; }
+component_phase_count_forgejo() { count_forgejo_phases; }
+
+register_component "${COMPONENT_ZOMBIE}" "" \
+  validate=component_validate_zombie review=component_review_zombie \
+  dry_run=component_dry_run_zombie receipt_start=component_receipt_start_zombie \
+  receipt_finish=component_receipt_finish_zombie install=component_install_zombie \
+  manifest=component_manifest_zombie final=component_final_zombie \
+  legacy=component_legacy_zombie verify=component_verify_zombie \
+  doctor=component_doctor_zombie repair=component_repair_zombie \
+  phase_count=component_phase_count_zombie
+register_component "${COMPONENT_FORGEJO}" "" \
+  validate=component_validate_forgejo review=component_review_forgejo \
+  dry_run=component_dry_run_forgejo receipt_start=component_receipt_start_forgejo \
+  receipt_finish=component_receipt_finish_forgejo install=component_install_forgejo \
+  manifest=component_manifest_forgejo final=component_final_forgejo \
+  legacy=component_legacy_forgejo verify=component_verify_forgejo \
+  doctor=component_doctor_forgejo repair=component_repair_forgejo \
+  phase_count=component_phase_count_forgejo
 
 component_names() {
   printf '%s' "${PUBLIC_COMPONENTS[*]}"
