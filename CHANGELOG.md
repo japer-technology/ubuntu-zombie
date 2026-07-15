@@ -19,7 +19,8 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Chat command status UX:** live `bash`/shell tool progress now
   labels non-zero command statuses as completed with a non-zero
   status instead of a failed tool execution, matching Linux exit-code
-  semantics for probes such as `dpkg -s`.
+  semantics for probes such as `dpkg -s`, including pi's nested shell
+  result metadata.
 - **Forgejo Caddy repair:** the machine's `.local` Forgejo route is now
   rendered directly in `/etc/caddy/Caddyfile`, preserving unrelated sites
   while replacing the managed route on repair and migrating legacy route
