@@ -95,6 +95,20 @@ CI runs the same script on every push and pull request, plus
 2. Add a handler in `payload/agent/policy.py`.
 3. Document the class in `docs/ARCHITECTURE.md`.
 
+## Adding an installer component
+
+1. Add the public name to the ordered component registry in
+   `scripts/install.sh`.
+2. Keep parsing and selection separate from the component install hook.
+3. Give the hook an explicit dependency list and do not reference state
+   owned by another component.
+4. Add target-scoped validation, review, dry-run, receipt, health,
+   manifest, verify, doctor, repair, and uninstall behaviour.
+5. Preserve the matching `ZOMBIE_INSTALL_<COMPONENT>` selector for
+   automation, where applicable.
+6. Add static and hermetic smoke coverage for isolation and ordering,
+   then update the user and architecture documentation.
+
 ## Filing an issue
 
 Please attach a redacted diagnostic bundle when reporting installer

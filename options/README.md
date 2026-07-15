@@ -3,10 +3,17 @@
 This directory is the **design surface** for Ubuntu Zombie's opt-in
 software components. It holds no runnable code. Each file is a written
 specification for a capability that a future change could add to
-[`scripts/install.sh`](../scripts/install.sh) as an
-`ZOMBIE_INSTALL_<COMPONENT>` flag — off by default, idempotent,
-non-interactive-capable, audited, and reversible by
+[`scripts/install.sh`](../scripts/install.sh) as a public component target
+with a compatible `ZOMBIE_INSTALL_<COMPONENT>` selector — off by default,
+idempotent, non-interactive-capable, audited, and reversible by
 [`scripts/uninstall.sh`](../scripts/uninstall.sh).
+
+Runnable components follow the registry contract in
+[`scripts/install.sh`](../scripts/install.sh): an isolated install hook,
+explicit dependencies, target-scoped validation and interaction, dry-run
+and receipt output, health-before-manifest ordering, lifecycle hooks, and
+selective uninstall. Environment selectors remain an additive
+compatibility surface rather than the execution model.
 
 The premise, argued in [`brainstorm.md`](brainstorm.md) and
 [`docs/VISION.md`](../docs/VISION.md), is simple: once a machine carries

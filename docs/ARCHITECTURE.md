@@ -123,6 +123,15 @@ gate classifies forge administration (`forgejo`, `forgejo-runner`,
 `psql`, `createdb`) as `system_change` and database drops
 (`dropdb`/`dropuser`/`DROP DATABASE`) as `destructive`.
 
+The installer core owns parsing, target ordering, selected configuration
+validation, host preflight, apt/download helpers, logging, receipts,
+progress, and manifest writes. Component hooks own their mutations.
+`install_zombie` converges the account, runtimes, policy, and chat stack;
+`install_forgejo` converges PostgreSQL, Forgejo, and its optional runner.
+The Forgejo hook has an explicit package set (`git`, `git-lfs`,
+`postgresql`, `postgresql-contrib`, `openssl`, and `xz-utils`, plus
+`docker.io` for the runner) and does not depend on zombie-owned state.
+
 ## Installer command grammar
 
 ```text
@@ -137,9 +146,10 @@ scripts/install.sh <verb> [component ...] [flags]
 | `repair` | Re-assert permissions, re-render runtime config, redeploy skills, restart chat. |
 | `uninstall` | Delegate to `scripts/uninstall.sh`; `uninstall zombie` / `uninstall forgejo` remove only that component, and no target removes all managed components. |
 
-`install forgejo` is accepted for parser and dry-run compatibility, but
-standalone non-dry-run Forgejo install is gated until Phase 3, when the
-Forgejo component is extracted from the zombie baseline flow.
+`install forgejo` is a standalone path: it creates neither the zombie
+account nor `/opt/ai-zombie`, and it does not deploy Node, the Python
+agent runtime, policy, audit, chat, or desktop-availability settings.
+Installer-owned transcript and receipt records remain under `/var/log/`.
 
 ## Component manifest
 
