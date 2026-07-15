@@ -2398,30 +2398,30 @@ run_standards() {
     install_function forgejo_release_api_origins
     install_function forgejo_release_download_bases
     install_function forgejo_release_tag_from_json
-    install_function codeberg_latest_release
+    install_function forgejo_latest_release
     install_function forgejo_fetch_release_asset
   )"
   bash -c "${forgejo_release_helpers}
     warn() { :; }
     curl() {
-      # codeberg_latest_release appends the metadata URL after all curl flags.
+      # forgejo_latest_release appends the metadata URL after all curl flags.
       local url=\"\${*: -1}\"
       [[ \"\${url}\" == 'https://data.forgejo.org/api/v1/repos/forgejo/runner/releases/latest' ]] \
         || return 22
       printf '%s\n' '{\"name\":\"v12.7.3\"}'
     }
-    [[ \"\$(codeberg_latest_release forgejo/runner)\" == '12.7.3' ]]" \
+    [[ \"\$(forgejo_latest_release forgejo/runner)\" == '12.7.3' ]]" \
     || { echo "forgejo-runner latest release must use data.forgejo.org first" >&2; exit 1; }
   bash -c "${forgejo_release_helpers}
     warn() { :; }
     curl() {
-      # codeberg_latest_release appends the metadata URL after all curl flags.
+      # forgejo_latest_release appends the metadata URL after all curl flags.
       local url=\"\${*: -1}\"
       [[ \"\${url}\" == 'https://code.forgejo.org/api/v1/repos/forgejo/runner/releases/latest' ]] \
         || return 22
       printf '%s\n' '{\"tag_name\":\"v12.0.1\"}'
     }
-    [[ \"\$(codeberg_latest_release forgejo/runner)\" == '12.0.1' ]]" \
+    [[ \"\$(forgejo_latest_release forgejo/runner)\" == '12.0.1' ]]" \
     || { echo "forgejo-runner latest release must fall back to code.forgejo.org" >&2; exit 1; }
   bash -c "${forgejo_release_helpers}
     warn() { :; }

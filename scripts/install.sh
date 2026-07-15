@@ -3104,7 +3104,7 @@ forgejo_release_api_origins() {
 }
 
 # Candidate release download origins. Prefer Forgejo's canonical host, but keep
-# Codeberg as a fallback for pinned versions still mirrored there.
+# Codeberg as a fallback for pinned versions still hosted there.
 forgejo_release_download_bases() {
   case "$1" in
     forgejo/forgejo|forgejo/runner)
@@ -3136,30 +3136,30 @@ print(tag)
 }
 
 # Resolve the latest release tag (e.g. "11.0.3") of a Forgejo repository.
-codeberg_latest_release() {
+forgejo_latest_release() {
   local repo="$1" origin json tag
   # Two short endpoint-local retries cover brief network flakes without
   # spending curl_get's full outer retry budget on an obsolete release host.
   local metadata_retry_count=2 metadata_retry_delay=2 metadata_max_time=15
   for origin in $(forgejo_release_api_origins "${repo}"); do
-    # Use a bounded direct curl instead of curl_get here so a stale mirror
+    # Use a bounded direct curl instead of curl_get here so a stale origin
     # fails over quickly. This trades curl_get's five outer attempts/logging for
     # one endpoint-local retry window before moving to the next origin. Forgejo
-    # metadata mirrors have exposed the release version as either tag_name or
+    # metadata origins have exposed the release version as either tag_name or
     # name, so accept both.
     json="$(curl -fsSL --retry "${metadata_retry_count}" \
               --retry-delay "${metadata_retry_delay}" \
               --max-time "${metadata_max_time}" \
               "${origin}/api/v1/repos/${repo}/releases/latest")" \
-      || { warn "Release metadata unavailable from ${origin}; trying the next Forgejo mirror."; continue; }
+      || { warn "Release metadata unavailable from ${origin}; trying the next release origin."; continue; }
     tag="$(forgejo_release_tag_from_json <<<"${json}")" \
-      || { warn "Release metadata malformed from ${origin}; trying the next Forgejo mirror."; continue; }
+      || { warn "Release metadata malformed from ${origin}; trying the next release origin."; continue; }
     tag="${tag#v}"
     if [[ "${tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
       printf '%s' "${tag}"
       return 0
     fi
-    warn "Release metadata from ${origin} did not contain a valid semver tag; trying the next Forgejo mirror."
+    warn "Release metadata from ${origin} did not contain a valid semver tag; trying the next release origin."
   done
   return 1
 }
@@ -3196,7 +3196,7 @@ forgejo_fetch_release_asset() {
     if codeberg_fetch_verified "${url}" "${dest}"; then
       return 0
     fi
-    warn "Release asset unavailable from ${base}; trying the next Forgejo mirror."
+    warn "Release asset unavailable from ${base}; trying the next release origin."
   done
   return 1
 }
@@ -3245,7 +3245,7 @@ install_forgejo() {
     FORGEJO_RESOLVED_VERSION="${FORGEJO_VERSION}"
     info "Forgejo release pinned to ${FORGEJO_RESOLVED_VERSION}."
   else
-    FORGEJO_RESOLVED_VERSION="$(codeberg_latest_release forgejo/forgejo)" \
+    FORGEJO_RESOLVED_VERSION="$(forgejo_latest_release forgejo/forgejo)" \
       || die "Could not resolve the latest Forgejo release from codeberg.org (pin FORGEJO_VERSION to proceed)." 66
     info "Latest Forgejo release: ${FORGEJO_RESOLVED_VERSION}."
   fi
@@ -3506,7 +3506,7 @@ EOF
       _runner_version="${FORGEJO_RUNNER_VERSION}"
       info "Forgejo runner release pinned to ${_runner_version}."
     else
-      _runner_version="$(codeberg_latest_release forgejo/runner)" \
+      _runner_version="$(forgejo_latest_release forgejo/runner)" \
         || die "Could not resolve the latest forgejo-runner release from codeberg.org (pin FORGEJO_RUNNER_VERSION to proceed)." 66
       info "Latest forgejo-runner release: ${_runner_version}."
     fi
