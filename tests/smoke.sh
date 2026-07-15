@@ -597,7 +597,7 @@ if "error" not in bad:
     raise SystemExit(f"App.set_model bad payload should carry error: {bad!r}")
 original_scan = _pr.scan_lmstudio
 try:
-    _pr.scan_lmstudio = lambda: discovered
+    _pr.scan_lmstudio = lambda *_args, **_kwargs: discovered
     selected = app.discover_lmstudio()
 finally:
     _pr.scan_lmstudio = original_scan

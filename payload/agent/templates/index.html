@@ -1904,23 +1904,6 @@ async function handleSlashCommand(input) {
             addMessage("system", data.error, { error: true });
             return true;
           }
-          case "/lmstudio": {
-            addMessage("user", input);
-            addMessage("system", "Scanning the local /24 for LM Studio servers...");
-            try {
-              const data = await uzPostJson("/api/lmstudio", {});
-              addMessage("system",
-                `LM Studio selected at ${data.address} with model ${data.model}.` +
-                (data.servers && data.servers.length > 1
-                  ? ` Found ${data.servers.length} servers; using the first.` : ""));
-              const banner = document.querySelector("header .status");
-              if (banner) {
-                banner.textContent =
-                  `Provider: connected (lmstudio - ${data.model} at ${data.address})`;
-              }
-            } catch (err) { addMessage("system", String(err), { error: true }); }
-            return true;
-          }
           if (!models.length) {
             addMessage("system",
               `Provider ${data.provider || "?"} exposes no model catalogue` +
@@ -1949,6 +1932,23 @@ async function handleSlashCommand(input) {
         const banner = document.querySelector("header .status");
         if (banner && data.provider && data.model) {
           banner.textContent = `Provider: connected (${data.provider} - ${data.model})`;
+        }
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/lmstudio": {
+      addMessage("user", input);
+      addMessage("system", "Scanning the local /24 for LM Studio servers...");
+      try {
+        const data = await uzPostJson("/api/lmstudio", {});
+        addMessage("system",
+          `LM Studio selected at ${data.address} with model ${data.model}.` +
+          (data.servers && data.servers.length > 1
+            ? ` Found ${data.servers.length} servers; using the first.` : ""));
+        const banner = document.querySelector("header .status");
+        if (banner) {
+          banner.textContent =
+            `Provider: connected (lmstudio - ${data.model} at ${data.address})`;
         }
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
