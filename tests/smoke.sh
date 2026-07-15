@@ -2402,6 +2402,7 @@ run_standards() {
   bash -c "${forgejo_release_helpers}
     warn() { :; }
     curl() {
+      # codeberg_latest_release appends the metadata URL after all curl flags.
       local url=\"\${*: -1}\"
       [[ \"\${url}\" == 'https://data.forgejo.org/api/v1/repos/forgejo/runner/releases/latest' ]] \
         || return 22
@@ -2412,6 +2413,7 @@ run_standards() {
   bash -c "${forgejo_release_helpers}
     warn() { :; }
     curl() {
+      # codeberg_latest_release appends the metadata URL after all curl flags.
       local url=\"\${*: -1}\"
       [[ \"\${url}\" == 'https://code.forgejo.org/api/v1/repos/forgejo/runner/releases/latest' ]] \
         || return 22
