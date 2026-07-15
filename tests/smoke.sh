@@ -1579,6 +1579,14 @@ run_subcommands() {
     || { echo "FAIL: install_forgejo references zombie-owned state" >&2; exit 1; }
   grep -q 'api/healthz' <<<"${forgejo_hook}" \
     || { echo "FAIL: install_forgejo must require the Forgejo health check" >&2; exit 1; }
+  local forgejo_host_helper
+  forgejo_host_helper="$(sed -n '/^forgejo_url_host() {/,/^}/p' scripts/install.sh)"
+  grep -q "tr '\\[:upper:]' '\\[:lower:]'" <<<"${forgejo_host_helper}" \
+    || { echo "FAIL: Forgejo URL host helper must normalize hostname case" >&2; exit 1; }
+  grep -q '_fj_domain="$(forgejo_url_host)"' <<<"${forgejo_hook}" \
+    || { echo "FAIL: Forgejo ROOT_URL generation must use the normalized URL host" >&2; exit 1; }
+  grep -q 'FORGEJO_URL_HOST="${FORGEJO_URL_HOST:-$(forgejo_url_host)}"' scripts/install.sh \
+    || { echo "FAIL: Forgejo summaries must use the normalized URL host" >&2; exit 1; }
   grep -q 'install=component_install_forgejo' scripts/install.sh \
     && grep -q 'manifest=component_manifest_forgejo' scripts/install.sh \
     || { echo "FAIL: Forgejo install and manifest hooks must be registered" >&2; exit 1; }
