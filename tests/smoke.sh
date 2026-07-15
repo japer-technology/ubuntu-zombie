@@ -1576,6 +1576,8 @@ run_subcommands() {
     '/^# component-hook: forgejo begin$/,/^# component-hook: forgejo end$/p' \
     scripts/install.sh)"
   [[ -n "${forgejo_hook}" ]] \
+    || { echo "could not extract the Forgejo install hook" >&2; exit 1; }
+  [[ -n "${forgejo_hook}" ]] \
     || { echo "FAIL: could not locate the install_forgejo hook" >&2; exit 1; }
   grep -q 'PostgreSQL' <<<"${forgejo_hook}" \
     || { echo "FAIL: extracted install_forgejo hook is incomplete" >&2; exit 1; }
