@@ -3112,6 +3112,23 @@ codeberg_fetch_verified() {
     || die "Checksum mismatch for ${url}." 1
 }
 
+ensure_forgejo_runner_docker_package() {
+  local docker_cli="${1:-/usr/bin/docker}" containerd_status
+
+  if [[ -x "${docker_cli}" ]]; then
+    info "Docker CLI already installed; reusing the existing Docker Engine."
+    note_satisfied
+    return 0
+  fi
+
+  containerd_status="$(dpkg-query -W -f='${Status}' containerd.io 2>/dev/null || true)"
+  if [[ "${containerd_status}" == "install ok installed" ]]; then
+    die "Cannot install docker.io because containerd.io is installed. Existing packages were left unchanged; install a Docker Engine compatible with containerd.io or remove containerd.io, then re-run." 1
+  fi
+
+  apt_install docker.io
+}
+
 # component-hook: forgejo begin
 install_forgejo() {
   # option-sections: forgejo begin
@@ -3382,7 +3399,7 @@ EOF
     section "Install Forgejo runner"
 
     warn "Co-locating the Actions runner with the forge is contrary to upstream guidance; enabled deliberately."
-    apt_install docker.io
+    ensure_forgejo_runner_docker_package
     systemctl enable --now docker >/dev/null 2>&1 \
       || die "Docker Engine failed to start; see journalctl -u docker." 1
     if id forgejo-runner >/dev/null 2>&1; then

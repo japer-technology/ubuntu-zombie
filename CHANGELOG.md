@@ -33,6 +33,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Phase 3 — Standalone Forgejo
 
+- **Runner Docker compatibility:** Forgejo runner installation now reuses an
+  existing Docker Engine instead of forcing Ubuntu's `docker.io` package, and
+  fails without changing packages when an orphaned `containerd.io` installation
+  would conflict.
 - **Standalone Forgejo install:** `install forgejo` now installs
   PostgreSQL, Forgejo, and the optional runner without creating the zombie
   account or deploying its Node/Python runtime, policy, audit, chat, or
