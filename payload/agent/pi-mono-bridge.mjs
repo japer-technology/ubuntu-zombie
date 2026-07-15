@@ -64,6 +64,29 @@ function flushTokenBuffer() {
   }
 }
 
+function asExitCode(value) {
+  if (typeof value === "number" && Number.isInteger(value)) return value;
+  if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
+    return Number.parseInt(value.trim(), 10);
+  }
+  return null;
+}
+
+function extractExitCode(evt, outputText) {
+  for (const key of ["exitCode", "exit_code", "status"]) {
+    const code = asExitCode(evt[key]);
+    if (code !== null) return code;
+  }
+  if (evt.result && typeof evt.result === "object") {
+    for (const key of ["exitCode", "exit_code", "status"]) {
+      const code = asExitCode(evt.result[key]);
+      if (code !== null) return code;
+    }
+  }
+  const match = String(outputText || "").match(/\bexit(?:\s+code)?\s*[:=]?\s*(-?\d+)\b/i);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
 function sendTokenDelta(delta) {
   if (!delta) return;
   tokenBuffer += delta;
@@ -396,6 +419,8 @@ async function run() {
           ? evt.result
           : extractText(evt.result && evt.result.content);
         progress.output_bytes = Buffer.byteLength(outText || "", "utf8");
+        const exitCode = extractExitCode(evt, outText);
+        if (exitCode !== null) progress.exit_code = exitCode;
         send(progress);
       }
     } else if (kind === "agent_end") {
