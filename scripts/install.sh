@@ -881,6 +881,12 @@ is_valid_forgejo_jwt_secret() {
   [[ "$1" =~ ^[A-Za-z0-9_-]{43}$ ]]
 }
 
+forgejo_url_host() {
+  local host
+  host="$(hostname -f 2>/dev/null || hostname)"
+  printf '%s\n' "${host}" | tr '[:upper:]' '[:lower:]'
+}
+
 # An optional operator-supplied password (empty means "generate randomly").
 # Conservative because the value is interpolated into psql literals, app.ini
 # lines, and CLI arguments: 8-256 printable characters, no control characters
@@ -3268,7 +3274,7 @@ PSQL
   [[ -n "${_fj_internal_token}" ]] || _fj_internal_token="$(/usr/local/bin/forgejo generate secret INTERNAL_TOKEN)"
   [[ -n "${_fj_jwt_secret}" ]]     || _fj_jwt_secret="$(/usr/local/bin/forgejo generate secret JWT_SECRET)"
   [[ -n "${_fj_lfs_jwt_secret}" ]] || _fj_lfs_jwt_secret="$(/usr/local/bin/forgejo generate secret JWT_SECRET)"
-  _fj_domain="$(hostname -f 2>/dev/null || hostname)"
+  _fj_domain="$(forgejo_url_host)"
   FORGEJO_URL_HOST="${_fj_domain}"
   _fj_tmp="$(mktemp)"
   cat > "${_fj_tmp}" <<EOF
@@ -3820,7 +3826,7 @@ write_zombie_manifest() {
 }
 
 write_forgejo_manifest() {
-  FORGEJO_URL_HOST="${FORGEJO_URL_HOST:-$(hostname -f 2>/dev/null || hostname)}"
+  FORGEJO_URL_HOST="${FORGEJO_URL_HOST:-$(forgejo_url_host)}"
   FORGEJO_OK=0
   systemctl is-active --quiet forgejo.service && FORGEJO_OK=1
   if (( FORGEJO_OK )); then
