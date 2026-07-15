@@ -860,6 +860,8 @@ validate_config() {
   if ! is_safe_absolute_path "${LOG_FILE}"; then
     die "LOG_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
+  # Receipt is a core setting and is validated for every selected component,
+  # even when Forgejo credentials make it mandatory rather than optional.
   if ! is_valid_option_flag "${ZOMBIE_RECEIPT}"; then
     die "ZOMBIE_RECEIPT must be 0 or 1." 2
   fi
@@ -2471,6 +2473,8 @@ ZOMBIE_PHASE_TOTAL="$(awk '/^# install — the rest of the file/{f=1} f && /^sec
 # result (e.g. if the marker comment is ever moved) — fall back to an
 # un-totalled "[n]" counter rather than printing a confusing "[n/0]".
 [[ "${ZOMBIE_PHASE_TOTAL}" =~ ^[0-9]+$ ]] || ZOMBIE_PHASE_TOTAL=0
+# Drop the baseline count for Forgejo-only runs; its guarded section count is
+# added below, so progress still renders [n/total] without zombie phases.
 (( COMPONENT_ZOMBIE_SELECTED )) || ZOMBIE_PHASE_TOTAL=0
 
 # Optional components add indented `  section "..."` calls inside guarded
@@ -3782,6 +3786,7 @@ fi
 
 if (( COMPONENT_FORGEJO_SELECTED )); then
   install_forgejo
+  FORGEJO_URL_HOST="${_fj_domain:-$(hostname -f 2>/dev/null || hostname)}"
   FORGEJO_OK=0
   systemctl is-active --quiet forgejo.service && FORGEJO_OK=1
   if (( FORGEJO_OK )); then
@@ -3813,7 +3818,7 @@ elif (( COMPONENT_ZOMBIE_SELECTED )) && [[ "${CHAT_OK}" != "1" ]]; then
 elif (( COMPONENT_ZOMBIE_SELECTED )); then
   NEXT_STEP="sudo reboot"
 else
-  NEXT_STEP="http://<host>:${FORGEJO_HTTP_PORT}/"
+  NEXT_STEP="http://${FORGEJO_URL_HOST}:${FORGEJO_HTTP_PORT}/"
 fi
 
 INSTALL_DURATION="$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
@@ -3834,7 +3839,7 @@ else
 
 ${C_GREEN}${C_BOLD}Install complete in ${INSTALL_DURATION}.${C_RESET}
 Next:    ${C_BOLD}${NEXT_STEP}${C_RESET}
-Forgejo: http://<host>:${FORGEJO_HTTP_PORT}/ (all interfaces$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled'))
+Forgejo: http://${FORGEJO_URL_HOST}:${FORGEJO_HTTP_PORT}/ (all interfaces$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled'))
 Records: ${LOG_FILE}
          $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "receipt disabled")
 Remove:  sudo ${SCRIPT_DIR}/uninstall.sh forgejo --dry-run

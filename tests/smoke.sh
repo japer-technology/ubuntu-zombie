@@ -1570,7 +1570,8 @@ run_subcommands() {
   grep -q 'api/healthz' <<<"${forgejo_hook}" \
     || { echo "FAIL: install_forgejo must require the Forgejo health check" >&2; exit 1; }
   local hook_call_line manifest_write_line
-  hook_call_line="$(grep -n '^  install_forgejo$' scripts/install.sh | tail -n1 | cut -d: -f1)"
+  hook_call_line="$(grep -n '^[[:space:]]*install_forgejo[[:space:]]*$' \
+    scripts/install.sh | tail -n1 | cut -d: -f1)"
   manifest_write_line="$(grep -n 'write_component_manifest "${COMPONENT_FORGEJO}"' \
     scripts/install.sh | tail -n1 | cut -d: -f1)"
   [[ -n "${hook_call_line}" && -n "${manifest_write_line}" \
