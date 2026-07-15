@@ -3121,6 +3121,9 @@ forgejo_release_download_bases() {
 codeberg_latest_release() {
   local repo="$1" origin tag
   for origin in $(forgejo_release_api_origins "${repo}"); do
+    # Use a bounded direct curl instead of curl_get here so a stale mirror
+    # fails over quickly; Forgejo metadata mirrors have exposed the release
+    # version as either tag_name or name, so accept both.
     tag="$(curl -fsSL --retry 2 --retry-delay 2 --max-time 15 \
              "${origin}/api/v1/repos/${repo}/releases/latest" \
              | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("tag_name") or data.get("name") or "")' 2>/dev/null)" \
