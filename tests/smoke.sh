@@ -2366,7 +2366,10 @@ run_standards() {
     || { echo "Forgejo config directory must be locked after migration" >&2; exit 1; }
   grep -q '/api/healthz' scripts/install.sh \
     || { echo "Forgejo install must verify application health" >&2; exit 1; }
-  local confirmation_helper confirmation_out
+  local confirmation_helper confirmation_out forgejo_hook
+  forgejo_hook="$(sed -n \
+    '/^# component-hook: forgejo begin$/,/^# component-hook: forgejo end$/p' \
+    scripts/install.sh)"
   confirmation_helper="$(install_function require_capitalized_yes)"
   bash -c "${confirmation_helper}
     info() { :; }
