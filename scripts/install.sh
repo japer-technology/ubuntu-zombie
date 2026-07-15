@@ -782,7 +782,7 @@ require_root() {
 }
 
 # Existing service and database state needs a stronger acknowledgement than
-# the general install confirmation. Only an exact, capitalised YES is accepted;
+# the general install confirmation. Only an exact, capitalized YES is accepted;
 # --yes deliberately does not bypass this gate.
 require_capitalized_yes() {
   local variable="$1" prompt="$2" answer="${!1:-}"
@@ -791,7 +791,7 @@ require_capitalized_yes() {
     return 0
   fi
   if [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] || (( ASSUME_YES )) || [[ ! -t 0 ]]; then
-    die "${prompt} Set ${variable}=YES (capitalised exactly) to continue." 64
+    die "${prompt} Set ${variable}=YES (capitalized exactly) to continue." 64
   fi
   if ! read -r -p "${prompt} Type YES to continue: " answer; then
     info "No input (EOF); cancelled."
