@@ -97,17 +97,30 @@ CI runs the same script on every push and pull request, plus
 
 ## Adding an installer component
 
-1. Add the public name to the ordered component registry in
-   `scripts/install.sh`.
-2. Keep parsing and selection separate from the component install hook.
-3. Give the hook an explicit dependency list and do not reference state
-   owned by another component.
-4. Add target-scoped validation, review, dry-run, receipt, health,
-   manifest, verify, doctor, repair, and uninstall behaviour.
-5. Preserve the matching `ZOMBIE_INSTALL_<COMPONENT>` selector for
-   automation, where applicable.
-6. Add static and hermetic smoke coverage for isolation and ordering,
-   then update the user and architecture documentation.
+All packaging targets use the registry helpers in
+`scripts/component-registry.sh`. Registry entries contain data and trusted
+function names, never executable command strings. Every registered hook is
+validated with Bash function lookup before dispatch.
+
+1. Define the component configuration and validators.
+2. Implement isolated install, verify, doctor, repair, and uninstall
+   lifecycle hooks.
+3. Register its metadata, hooks, and explicit dependencies in registry
+   order. Do not add parser or dispatcher conditionals.
+4. Add manifest version data and component-owned receipt fields. Write the
+   manifest only after the install and health hook succeeds.
+5. Add target-scoped interactive review and dry-run rendering. An
+   unselected component must never prompt or render.
+6. Add policy and audit handling only when the agent can drive a new
+   privileged action.
+7. Add uninstall reversal plus static and hermetic tests for isolation,
+   dependency validation, ordering, and sample dispatch.
+8. Update operator and architecture documentation, `CHANGELOG.md`, and
+   `VERSION`.
+
+Environment selectors such as `ZOMBIE_INSTALL_FORGEJO` are compatibility
+inputs that add a registry target; they are not an alternative execution
+path.
 
 ## Filing an issue
 

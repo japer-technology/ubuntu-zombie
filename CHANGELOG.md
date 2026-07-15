@@ -8,6 +8,18 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Phase 4 — Registry generalisation
+
+- **Validated component registry:** shared selection, validation, review,
+  dry-run, receipt, phase counting, install, manifest, final-summary, and
+  uninstall paths dispatch trusted component hooks from one ordered
+  registry. Missing hooks and invalid dependencies fail before mutation.
+- **Extension contract:** a hermetic sample component proves registration
+  and dispatch require no parser changes, and contributor documentation
+  now defines one lifecycle contract for future packaging targets.
+- **Target-scoped review:** `install zombie` no longer asks about optional
+  components; only explicitly selected component pages are shown.
+
 ### Phase 3 — Standalone Forgejo
 
 - **Standalone Forgejo install:** `install forgejo` now installs

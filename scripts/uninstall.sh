@@ -58,7 +58,6 @@ KEEP_AGENT=0
 TARGET_ARGS=()
 readonly COMPONENT_ZOMBIE="zombie"
 readonly COMPONENT_FORGEJO="forgejo"
-readonly PUBLIC_COMPONENTS=("${COMPONENT_ZOMBIE}" "${COMPONENT_FORGEJO}")
 COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
@@ -76,6 +75,13 @@ if [[ -f "${REPO_ROOT}/VERSION" ]]; then
 else
   SCRIPT_VERSION="0000.00.00.00.00.00"
 fi
+
+# shellcheck source=scripts/component-registry.sh
+. "${SCRIPT_DIR}/component-registry.sh"
+component_remove_zombie() { remove_component_zombie; }
+component_remove_forgejo() { remove_component_forgejo; }
+register_component "${COMPONENT_ZOMBIE}" "" remove=component_remove_zombie
+register_component "${COMPONENT_FORGEJO}" "" remove=component_remove_forgejo
 
 component_names() {
   printf '%s' "${PUBLIC_COMPONENTS[*]}"
@@ -641,14 +647,14 @@ else
   info "Selected components: ${PUBLIC_COMPONENTS[*]}"
 fi
 
-# Execute component removal in dependency order (dependants before dependencies).
-# No-target: remove all discovered/all artefacts (forgejo before zombie).
-if is_target_selected "${COMPONENT_FORGEJO}"; then
-  remove_component_forgejo
-fi
-if is_target_selected "${COMPONENT_ZOMBIE}"; then
-  remove_component_zombie
-fi
+# Execute component removal in reverse registry order so future dependants are
+# removed before the components they may rely on.
+validate_component_registry "remove"
+for (( component_index = ${#PUBLIC_COMPONENTS[@]} - 1; component_index >= 0; component_index-- )); do
+  component="${PUBLIC_COMPONENTS[component_index]}"
+  is_target_selected "${component}" || continue
+  component_dispatch_hook "${component}" remove
+done
 
 echo
 if (( UNINSTALL_EXIT != 0 )); then
