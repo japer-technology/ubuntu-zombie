@@ -367,20 +367,46 @@ _read_manifest_value() {
 }
 
 valid_component_manifest_entry() {
-  local file="$1" component="$2" seen_format=0 seen_component=0 key
+  local file="$1" component="$2"
+  local -A seen=()
+  local key value line
   [[ -f "${file}" ]] || return 1
-  while IFS='=' read -r key _value; do
-    [[ -n "${key}" ]] || continue
+  while IFS= read -r line; do
+    # Skip blank lines
+    [[ -n "${line}" ]] || continue
+    # A valid line must contain '=' and have a non-empty key before it.
+    # Lines without '=' (key == whole line) are malformed.
+    key="${line%%=*}"
+    value="${line#*=}"
+    [[ -n "${key}" && "${key}" != "${line}" ]] || return 1
+    # Keys must use only lowercase letters and underscores.
+    [[ "${key}" =~ ^[a-z_]+$ ]] || return 1
+    # Values must not contain carriage returns (guard against CRLF files).
+    # Null bytes cannot be stored in bash variables; skip that check.
+    [[ "${value}" =~ $'\r' ]] && return 1
     case "${key}" in
-      format) seen_format=$((seen_format + 1)) ;;
-      component) seen_component=$((seen_component + 1)) ;;
-      ubuntu_zombie_version|converged_utc|component_version|suboptions) ;;
+      format|component|ubuntu_zombie_version|converged_utc|component_version|suboptions)
+        # Reject any duplicate key.
+        [[ -n "${seen[${key}]+x}" ]] && return 1
+        seen["${key}"]=1
+        ;;
       *) return 1 ;;
     esac
   done < "${file}"
-  (( seen_format == 1 && seen_component == 1 )) || return 1
+  # Require exactly one occurrence of every one of the six defined keys.
+  for key in format component ubuntu_zombie_version converged_utc component_version suboptions; do
+    [[ -n "${seen[${key}]+x}" ]] || return 1
+  done
+  # Validate format version, component name, and component/path match.
   [[ "$(_read_manifest_value "${file}" format)" == "${COMPONENT_MANIFEST_FORMAT_VERSION}" ]] || return 1
-  [[ "$(_read_manifest_value "${file}" component)" == "${component}" ]] || return 1
+  local file_component
+  file_component="$(_read_manifest_value "${file}" component)"
+  [[ "${file_component}" == "${component}" ]] || return 1
+  # Ensure the stored component name is itself a known safe value so a
+  # crafted manifest cannot inject an arbitrary string into the component
+  # path even if component_manifest_path is called again later.
+  is_public_component "${file_component}" || return 1
+  return 0
 }
 
 list_manifest_components() {
@@ -408,7 +434,12 @@ list_manifest_components() {
 legacy_component_present() {
   case "$1" in
     "${COMPONENT_ZOMBIE}") [[ -d "${ZOMBIE_DIR}" || -f "/etc/systemd/system/ubuntu-zombie-chat.service" || -d "${ZOMBIE_ETC}" ]] ;;
-    "${COMPONENT_FORGEJO}") [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo || -x /usr/local/bin/forgejo ]] ;;
+    "${COMPONENT_FORGEJO}") [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
+      || -x /usr/local/bin/forgejo \
+      || -f /etc/systemd/system/forgejo-runner.service \
+      || -x /usr/local/bin/forgejo-runner \
+      || -d /var/lib/forgejo || -d /var/lib/forgejo-runner \
+      || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]] ;;
     *) return 1 ;;
   esac
 }
@@ -741,6 +772,9 @@ is_supported_agent_username() {
 is_safe_absolute_path() {
   [[ "$1" == /* ]] || return 1
   [[ "$1" =~ ^/[A-Za-z0-9._/+:-]+$ ]] || return 1
+  # Reject path traversal: no '..' component anywhere in the path.
+  [[ "$1" == */../* || "$1" == *"/.." ]] && return 1
+  return 0
 }
 
 is_valid_tcp_port() {
@@ -1033,9 +1067,25 @@ cmd_verify() {
     vr fail none manifest "No managed components found."
   fi
   if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}"; then
+    # In mixed-component verification the deployed verifier cannot be exec'd
+    # (its output would not integrate with the component-keyed JSON/text
+    # aggregator below).  Perform the key structural checks inline instead,
+    # preserving the same signal while keeping the output coherent.
+    id "${AGENT_USER}" >/dev/null 2>&1 \
+      && vr ok zombie user "User ${AGENT_USER} exists." \
+      || vr fail zombie user "User ${AGENT_USER} missing. Run 'sudo ./${SCRIPT_NAME} install zombie' first."
+    [[ -f "/etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie" ]] \
+      && vr ok zombie sudoers "Sudoers drop-in present." \
+      || vr fail zombie sudoers "Sudoers drop-in missing. Run 'sudo ./${SCRIPT_NAME} repair zombie'."
+    [[ -d "${ZOMBIE_DIR}" ]] \
+      && vr ok zombie install_root "${ZOMBIE_DIR} present." \
+      || vr fail zombie install_root "${ZOMBIE_DIR} missing. Run 'sudo ./${SCRIPT_NAME} install zombie' first."
     [[ -x "${ZOMBIE_DIR}/bin/verify" ]] \
       && vr ok zombie verify_script "${ZOMBIE_DIR}/bin/verify present." \
       || vr fail zombie verify_script "${ZOMBIE_DIR}/bin/verify not found. Run 'sudo ./${SCRIPT_NAME} install zombie' first."
+    systemctl is-active --quiet ubuntu-zombie-chat.service 2>/dev/null \
+      && vr ok zombie chat_service "Chat service active." \
+      || vr fail zombie chat_service "Chat service not active. Run: sudo systemctl start ubuntu-zombie-chat"
   fi
   if component_selected_for_lifecycle "${COMPONENT_FORGEJO}"; then
     [[ -x /usr/local/bin/forgejo ]] \
@@ -1044,12 +1094,43 @@ cmd_verify() {
     [[ -f /etc/systemd/system/forgejo.service ]] \
       && vr ok forgejo service_unit "Forgejo service unit present." \
       || vr fail forgejo service_unit "Forgejo service unit missing."
+    local _fj_svc_active=0
     systemctl is-active --quiet forgejo.service 2>/dev/null \
-      && vr ok forgejo service_active "Forgejo service active." \
+      && { vr ok forgejo service_active "Forgejo service active."; _fj_svc_active=1; } \
       || vr fail forgejo service_active "Forgejo service not active."
     [[ -f /etc/forgejo/app.ini ]] \
       && vr ok forgejo config "Forgejo config present." \
       || vr fail forgejo config "Forgejo config missing."
+    # Config permissions: /etc/forgejo must be root:git 750 and app.ini root:git 640.
+    local _fj_dir_perms _fj_cfg_perms
+    _fj_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
+    _fj_cfg_perms="$(stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null || true)"
+    if [[ "${_fj_dir_perms}" == "root:git 750" && "${_fj_cfg_perms}" == "root:git 640" ]]; then
+      vr ok forgejo config_perms "Forgejo config permissions correct (root:git 750/640)."
+    elif [[ -n "${_fj_dir_perms}${_fj_cfg_perms}" ]]; then
+      vr fail forgejo config_perms "Forgejo config permissions incorrect (${_fj_dir_perms:-?}/${_fj_cfg_perms:-?}). Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    fi
+    # PostgreSQL must be running for Forgejo to function.
+    systemctl is-active --quiet postgresql 2>/dev/null \
+      && vr ok forgejo db "PostgreSQL active." \
+      || vr fail forgejo db "PostgreSQL not running (Forgejo needs it). Run: sudo systemctl start postgresql"
+    # Health endpoint: only checked when the service is active.
+    if (( _fj_svc_active )); then
+      local _fj_port _fj_health
+      _fj_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || echo 3000)"
+      _fj_health="$(curl -sf --max-time 5 "http://127.0.0.1:${_fj_port}/api/healthz" 2>/dev/null || true)"
+      if printf '%s' "${_fj_health}" | grep -q '"healthy"'; then
+        vr ok forgejo healthz "Forgejo /api/healthz reports healthy."
+      else
+        vr fail forgejo healthz "Forgejo /api/healthz did not return healthy. Check journalctl -u forgejo."
+      fi
+    fi
+    # Runner: check only when a runner unit is installed.
+    if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+      systemctl is-active --quiet forgejo-runner.service 2>/dev/null \
+        && vr ok forgejo runner "Forgejo Actions runner active." \
+        || vr fail forgejo runner "Forgejo runner unit installed but not active. Run: sudo systemctl restart forgejo-runner"
+    fi
   fi
 
   local n="${#v_status[@]}" i failed=0 passed=0
@@ -1228,6 +1309,24 @@ cmd_doctor() {
 
 cmd_repair() {
   section "Repair"
+
+  # When a component is explicitly targeted for repair but none of its
+  # primary artefacts are present, warn the operator clearly.  Repair
+  # is a convergence operation, not an installer; missing components
+  # should be created with `install`, not `repair`.
+  if (( EXPLICIT_TARGETS )); then
+    if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}" \
+        && ! id "${AGENT_USER}" >/dev/null 2>&1 \
+        && [[ ! -d "${ZOMBIE_DIR}" ]]; then
+      warn "Component 'zombie' does not appear to be installed (user ${AGENT_USER} and ${ZOMBIE_DIR} absent)."
+      warn "  To install: sudo ./${SCRIPT_NAME} install zombie"
+    fi
+    if component_selected_for_lifecycle "${COMPONENT_FORGEJO}" \
+        && [[ ! -d /etc/forgejo && ! -d /var/lib/forgejo && ! -x /usr/local/bin/forgejo ]]; then
+      warn "Component 'forgejo' does not appear to be installed (no /etc/forgejo, /var/lib/forgejo, or /usr/local/bin/forgejo)."
+      warn "  To install: sudo ZOMBIE_INSTALL_FORGEJO=1 ./${SCRIPT_NAME} install"
+    fi
+  fi
 
   if component_selected_for_lifecycle "${COMPONENT_ZOMBIE}" && id "${AGENT_USER}" >/dev/null 2>&1; then
     if [[ -f "${ZOMBIE_DIR}/secrets/env" ]]; then

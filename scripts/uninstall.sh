@@ -63,6 +63,9 @@ COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
 UNINSTALL_EXIT=0
+# Count of cleanup failures: used for per-component manifest-retention checks
+# so that failures from one component cannot mask failures in a subsequent one.
+UNINSTALL_FAIL_COUNT=0
 
 # Shared colours/logging come from lib.sh. Keep the legacy C_YEL alias so the
 # inline printf calls below (e.g. the [dry] glyph) need no churn.
@@ -225,6 +228,9 @@ is_supported_agent_username() {
 is_safe_absolute_path() {
   [[ "$1" == /* ]] || return 1
   [[ "$1" =~ ^/[A-Za-z0-9._/+:-]+$ ]] || return 1
+  # Reject path traversal: no '..' component anywhere in the path.
+  [[ "$1" == */../* || "$1" == *"/.." ]] && return 1
+  return 0
 }
 
 validate_config() {
@@ -241,6 +247,11 @@ validate_config() {
   if ! is_safe_absolute_path "${BACKUP_DIR}"; then
     printf '%s[x]%s BACKUP_DIR must be an absolute path using only safe path characters; got %q\n' \
       "${C_RED}" "${C_RESET}" "${BACKUP_DIR}" >&2
+    exit 2
+  fi
+  if ! is_safe_absolute_path "${COMPONENT_MANIFEST_DIR}"; then
+    printf '%s[x]%s ZOMBIE_COMPONENT_MANIFEST_DIR must be an absolute safe path without path traversal; got %q\n' \
+      "${C_RED}" "${C_RESET}" "${COMPONENT_MANIFEST_DIR}" >&2
     exit 2
   fi
 }
@@ -296,6 +307,7 @@ run_or_warn() {
   set -e
   if (( rc != 0 )); then
     warn "${description} failed (exit ${rc}); continuing cleanup."
+    UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
     UNINSTALL_EXIT=1
   fi
   return 0
@@ -319,11 +331,13 @@ remove_tree_checked() {
   set -e
   if (( rc != 0 )); then
     warn "Failed to remove ${label} (exit ${rc}); continuing cleanup."
+    UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
     UNINSTALL_EXIT=1
     return 0
   fi
   if [[ -e "${path}" ]]; then
     warn "Failed to remove ${label}; path still exists: ${path}"
+    UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
     UNINSTALL_EXIT=1
     return 0
   fi
@@ -339,11 +353,15 @@ confirm() {
 }
 
 remove_component_forgejo() {
-  local exit_before="${UNINSTALL_EXIT}"
+  local fail_count_before="${UNINSTALL_FAIL_COUNT}"
   local _fj_db _fj_role _fj_user
 
   if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
-      || -x /usr/local/bin/forgejo ]]; then
+      || -x /usr/local/bin/forgejo \
+      || -f /etc/systemd/system/forgejo-runner.service \
+      || -x /usr/local/bin/forgejo-runner \
+      || -d /var/lib/forgejo || -d /var/lib/forgejo-runner \
+      || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]; then
     info "Removing optional Forgejo component"
     # Capture the database/role names from app.ini before the config is
     # removed (the operator may have customised FORGEJO_DB_NAME/USER).
@@ -372,7 +390,11 @@ remove_component_forgejo() {
     if [[ -d /var/lib/forgejo-runner ]]; then
       remove_tree_checked "/var/lib/forgejo-runner" "/var/lib/forgejo-runner (runner state)"
     fi
-    if command -v psql >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
+    # Only prompt for the PostgreSQL database and role when PostgreSQL is
+    # present; this prevents spurious prompts on hosts where only runner
+    # artefacts exist without a database.
+    if [[ -f /etc/forgejo/app.ini || -d /var/lib/forgejo ]] \
+        && command -v psql >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
       if confirm "Drop the Forgejo PostgreSQL database and role (destructive)?"; then
         run_or_warn "Drop Forgejo database" \
           "runuser -u postgres -- dropdb --if-exists -- $(shell_quote "${FORGEJO_DB_NAME}")"
@@ -393,7 +415,7 @@ remove_component_forgejo() {
     ok "Forgejo component removal finished."
   fi
 
-  if (( UNINSTALL_EXIT == exit_before )); then
+  if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
     remove_component_manifest "${COMPONENT_FORGEJO}"
   else
     warn "Keeping Forgejo manifest because removal finished with errors."
@@ -402,7 +424,7 @@ remove_component_forgejo() {
 }
 
 remove_component_zombie() {
-  local exit_before="${UNINSTALL_EXIT}"
+  local fail_count_before="${UNINSTALL_FAIL_COUNT}"
   local unit f orphan_name STAMP _pkg _shim _path _target _literal rc
 
   # -------------------------------------------------------------------
@@ -594,6 +616,7 @@ remove_component_zombie() {
         else
           warn "Failed to remove user ${AGENT_USER}; see 'who', 'loginctl list-sessions',"
           warn "  'lsof +D ${AGENT_HOME}' and re-run after the processes are gone."
+          UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
           UNINSTALL_EXIT=1
         fi
       fi
@@ -602,7 +625,7 @@ remove_component_zombie() {
     fi
   fi
 
-  if (( UNINSTALL_EXIT == exit_before )); then
+  if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
     remove_component_manifest "${COMPONENT_ZOMBIE}"
   else
     warn "Keeping zombie manifest because removal finished with errors."

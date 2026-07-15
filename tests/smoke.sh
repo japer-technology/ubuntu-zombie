@@ -1702,6 +1702,148 @@ EOF_MANIFEST
   grep -Eq '"component"[[:space:]]*:[[:space:]]*"forgejo"' <<<"${out}" \
     || { echo "FAIL: verify --json did not discover forgejo manifest" >&2; exit 1; }
 
+  # --- Manifest with a missing required key should be rejected ---------
+  manifest_dir="${scratch_root}/missing-key"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
+format=1
+component=zombie
+ubuntu_zombie_version=test
+component_version=
+suboptions=
+EOF_MANIFEST
+  # converged_utc is absent; the manifest must be treated as malformed.
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh doctor --json 2>/dev/null)"
+  ! grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
+    || { echo "FAIL: manifest missing converged_utc should be rejected" >&2; exit 1; }
+
+  # --- Manifest with duplicate value for any key should be rejected -----
+  manifest_dir="${scratch_root}/duplicate-any-key"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
+format=1
+component=zombie
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+converged_utc=2026-02-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh doctor --json 2>/dev/null)"
+  ! grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
+    || { echo "FAIL: manifest with duplicate converged_utc should be rejected" >&2; exit 1; }
+
+  # --- Manifest with mismatched component name should be rejected -------
+  manifest_dir="${scratch_root}/component-mismatch"
+  mkdir -p "${manifest_dir}"
+  # File named 'zombie' but declares component=forgejo
+  cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
+format=1
+component=forgejo
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh doctor --json 2>/dev/null)"
+  ! grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
+    || { echo "FAIL: manifest with component/path mismatch should be rejected" >&2; exit 1; }
+
+  # --- Manifest line without '=' separator should be rejected ----------
+  manifest_dir="${scratch_root}/no-equals"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
+format=1
+component=zombie
+ubuntu_zombie_version=test
+converged_utcNOEQUALS
+component_version=
+suboptions=
+EOF_MANIFEST
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh doctor --json 2>/dev/null)"
+  ! grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
+    || { echo "FAIL: manifest with line missing '=' should be rejected" >&2; exit 1; }
+
+  # --- Path-traversal in ZOMBIE_COMPONENT_MANIFEST_DIR (install.sh) ----
+  local _rc_inst _rc_uninst
+  set +e
+  ZOMBIE_COMPONENT_MANIFEST_DIR='/var/lib/../etc' \
+    ./scripts/install.sh doctor >/dev/null 2>&1
+  _rc_inst=$?
+  ZOMBIE_COMPONENT_MANIFEST_DIR='/var/lib/../etc' \
+    ./scripts/uninstall.sh --dry-run >/dev/null 2>&1
+  _rc_uninst=$?
+  set -e
+  [[ "${_rc_inst}" -eq 2 ]] \
+    || { echo "FAIL: install.sh should reject ZOMBIE_COMPONENT_MANIFEST_DIR with traversal (exit 2, got ${_rc_inst})" >&2; exit 1; }
+  [[ "${_rc_uninst}" -eq 2 ]] \
+    || { echo "FAIL: uninstall.sh should reject ZOMBIE_COMPONENT_MANIFEST_DIR with traversal (exit 2, got ${_rc_uninst})" >&2; exit 1; }
+
+  # --- verify in mixed mode includes zombie component identity ----------
+  manifest_dir="${scratch_root}/verify-mixed-zombie-forgejo"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
+format=1
+component=zombie
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  cat > "${manifest_dir}/forgejo" <<'EOF_MANIFEST'
+format=1
+component=forgejo
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh verify --json 2>/dev/null || true)"
+  # Mixed verify must report both components in the JSON output.
+  grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
+    || { echo "FAIL: mixed verify --json must include zombie component checks" >&2; exit 1; }
+  grep -Eq '"component"[[:space:]]*:[[:space:]]*"forgejo"' <<<"${out}" \
+    || { echo "FAIL: mixed verify --json must include forgejo component checks" >&2; exit 1; }
+  # Mixed zombie checks should include more than just the verifier script:
+  # at minimum user and install_root checks must be present.
+  grep -Eq '"id"[[:space:]]*:[[:space:]]*"user"' <<<"${out}" \
+    || { echo "FAIL: mixed verify --json must include a 'user' check for zombie" >&2; exit 1; }
+
+  # --- Lifecycle isolation: forgejo-only uninstall leaves zombie manifest
+  manifest_dir="${scratch_root}/lifecycle-isolation"
+  mkdir -p "${manifest_dir}"
+  cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
+format=1
+component=zombie
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  cat > "${manifest_dir}/forgejo" <<'EOF_MANIFEST'
+format=1
+component=forgejo
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+  ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ./scripts/uninstall.sh forgejo --dry-run >/dev/null 2>&1 || true
+  [[ -f "${manifest_dir}/zombie" ]] \
+    || { echo "FAIL: forgejo-only dry-run must not remove zombie manifest" >&2; exit 1; }
+
+  # --- zombie-only uninstall leaves forgejo manifest --------------------
+  ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ./scripts/uninstall.sh zombie --dry-run >/dev/null 2>&1 || true
+  [[ -f "${manifest_dir}/forgejo" ]] \
+    || { echo "FAIL: zombie-only dry-run must not remove forgejo manifest" >&2; exit 1; }
+
   rm -rf -- "${scratch_root}"
   trap - RETURN
 }
