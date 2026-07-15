@@ -14,6 +14,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   dry-run, receipt, phase counting, install, manifest, final-summary, and
   uninstall paths dispatch trusted component hooks from one ordered
   registry. Missing hooks and invalid dependencies fail before mutation.
+- **Registry hardening:** dependencies must be registered before their
+  dependants (making dependency cycles unrepresentable), duplicate hook
+  fields are rejected instead of silently overwritten, and installing a
+  component automatically selects its registered dependencies in registry
+  order.
 - **Extension contract:** a hermetic sample component proves registration
   and dispatch require no parser changes, and contributor documentation
   now defines one lifecycle contract for future packaging targets.

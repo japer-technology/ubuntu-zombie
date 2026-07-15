@@ -1619,6 +1619,15 @@ for component in "${PUBLIC_COMPONENTS[@]}"; do
   component_dispatch_hook "${component}" install
 done
 [[ "${trace}" == "alpha sample " ]]
+# Dependency resolution: selecting a dependant pulls in its dependency,
+# duplicates collapse, and output follows registry order regardless of the
+# order targets were requested.
+resolved="$(resolve_component_targets sample | tr '\n' ' ')"
+[[ "${resolved}" == "alpha sample " ]]
+resolved="$(resolve_component_targets sample alpha sample | tr '\n' ' ')"
+[[ "${resolved}" == "alpha sample " ]]
+resolved="$(resolve_component_targets alpha | tr '\n' ' ')"
+[[ "${resolved}" == "alpha " ]]
 BASH
 
   expect_exit_code 2 bash -c '
@@ -1635,6 +1644,41 @@ BASH
     ok() { :; }
     register_component broken absent install=ok
     validate_component_registry "install"
+  '
+  # Dependencies must be registered before their dependants, so forward
+  # references (and therefore dependency cycles) fail at registration time.
+  expect_exit_code 2 bash -c '
+    set -Eeuo pipefail
+    die() { exit "${2:-1}"; }
+    . scripts/component-registry.sh
+    ok() { :; }
+    register_component first second install=ok
+    register_component second first install=ok
+  '
+  # Self-dependencies fail at registration time.
+  expect_exit_code 2 bash -c '
+    set -Eeuo pipefail
+    die() { exit "${2:-1}"; }
+    . scripts/component-registry.sh
+    ok() { :; }
+    register_component selfish selfish install=ok
+  '
+  # Duplicate hook fields in one registration are rejected, not overwritten.
+  expect_exit_code 2 bash -c '
+    set -Eeuo pipefail
+    die() { exit "${2:-1}"; }
+    . scripts/component-registry.sh
+    ok() { :; }
+    register_component doubled "" install=ok install=ok
+  '
+  # Resolving an unregistered target fails closed.
+  expect_exit_code 2 bash -c '
+    set -Eeuo pipefail
+    die() { exit "${2:-1}"; }
+    . scripts/component-registry.sh
+    ok() { :; }
+    register_component alpha "" install=ok
+    resolve_component_targets alpha ghost
   '
 }
 

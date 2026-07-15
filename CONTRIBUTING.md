@@ -106,7 +106,10 @@ validated with Bash function lookup before dispatch.
 2. Implement isolated install, verify, doctor, repair, and uninstall
    lifecycle hooks.
 3. Register its metadata, hooks, and explicit dependencies in registry
-   order. Do not add parser or dispatcher conditionals.
+   order. Dependencies must already be registered — registration order is
+   dispatch order, which keeps cycles unrepresentable — and installing a
+   component automatically selects its registered dependencies. Do not
+   add parser or dispatcher conditionals.
 4. Add manifest version data and component-owned receipt fields. Write the
    manifest only after the install and health hook succeeds.
 5. Add target-scoped interactive review and dry-run rendering. An
