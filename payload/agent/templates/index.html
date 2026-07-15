@@ -938,7 +938,9 @@ const SLASH_COMMANDS = [
   ["/help", "List available commands.", "Help"],
   ["/load <id>", "Load a past conversation (alias: /resume <id>).", "Conversation"],
   ["/logout", "Log out and ask for the chat password again.", "Session"],
+  ["/lmstudio", "Rescan the LAN and use a discovered LM Studio server.", "Configuration"],
   ["/model [id]", "List or switch the active model.", "Configuration"],
+  ["/models", "List models available from the active provider.", "Configuration"],
   ["/new", "Start a new conversation (alias: /reset).", "Conversation"],
   ["/password [new password]", "Set or remove the chat password after confirmation.", "Session"],
   ["/policy", "Show policy classes and rule counts.", "Configuration"],
@@ -1811,10 +1813,14 @@ async function handleSlashCommand(input) {
     case "/status": {
       addMessage("user", input);
       try {
-        const data = await uzFetchJson("/api/health");
-        const f = data.facts || {};
-        const provider = document.querySelector("header .status");
-        const providerText = provider ? provider.textContent : "";
+        const [health, provider] = await Promise.all([
+          uzFetchJson("/api/health"),
+          uzFetchJson("/api/status")
+        ]);
+        const f = health.facts || {};
+        const providerText = provider.provider && provider.provider !== "none"
+          ? `${provider.provider}: ${provider.status}`
+          : provider.status;
         addMessage("system",
           `${f.hostname || "?"} - ${f.os || "Ubuntu"} - ${f.kernel || "?"} ` +
           `(${f.arch || "?"})` + (providerText ? ` - ${providerText}` : ""));
@@ -1887,14 +1893,32 @@ async function handleSlashCommand(input) {
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
+    case "/models":
     case "/model": {
       addMessage("user", input);
-      if (!arg) {
+      if (cmd === "/models" || !arg) {
         try {
           const data = await uzFetchJson("/api/models");
           const models = data.models || [];
           if (data.error && !models.length) {
             addMessage("system", data.error, { error: true });
+            return true;
+          }
+          case "/lmstudio": {
+            addMessage("user", input);
+            addMessage("system", "Scanning the local /24 for LM Studio servers...");
+            try {
+              const data = await uzPostJson("/api/lmstudio", {});
+              addMessage("system",
+                `LM Studio selected at ${data.address} with model ${data.model}.` +
+                (data.servers && data.servers.length > 1
+                  ? ` Found ${data.servers.length} servers; using the first.` : ""));
+              const banner = document.querySelector("header .status");
+              if (banner) {
+                banner.textContent =
+                  `Provider: connected (lmstudio - ${data.model} at ${data.address})`;
+              }
+            } catch (err) { addMessage("system", String(err), { error: true }); }
             return true;
           }
           if (!models.length) {
