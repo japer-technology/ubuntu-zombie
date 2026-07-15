@@ -2397,7 +2397,7 @@ if [[ "${SUBCOMMAND}" == "uninstall" ]] && (( EXPLICIT_TARGETS )) \
 fi
 
 case "${SUBCOMMAND}" in
-  verify)    if cmd_verify; then exit 0; else exit 1; fi ;;
+  verify)    cmd_verify || exit 1; exit 0 ;;
   doctor)    cmd_doctor; exit $? ;;
   repair)    require_root; cmd_repair; exit $? ;;
   uninstall) (( DRY_RUN )) || require_root; cmd_uninstall; exit $? ;;

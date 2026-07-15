@@ -1785,7 +1785,7 @@ exit 0
 EOF_FAKE_PSQL
   cat > "${fake_bin}/id" <<'EOF_FAKE_ID'
 #!/usr/bin/env bash
-[[ "$1" == "postgres" ]] && exit 0
+[[ "${1:-}" == "postgres" ]] && exit 0
 exec /usr/bin/id "$@"
 EOF_FAKE_ID
   chmod +x "${fake_bin}/psql" "${fake_bin}/id"
