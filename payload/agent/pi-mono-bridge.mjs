@@ -68,7 +68,7 @@ function asExitCode(value) {
   const code = (typeof value === "number" && Number.isInteger(value))
     ? value
     : (typeof value === "string" && /^\d+$/.test(value.trim()))
-      ? Number.parseInt(value.trim(), 10)
+      ? parseInt(value.trim(), 10)
       : null;
   if (code !== null && code >= 0 && code <= 255) {
     return code;
@@ -91,7 +91,7 @@ function extractExitCode(evt) {
 }
 
 function isCommandTool(name) {
-  return ["bash", "shell", "shell.run"].includes(String(name || "").toLowerCase());
+  return ["bash", "shell", "shell.run"].includes((name || "").toLowerCase());
 }
 
 function sendTokenDelta(delta) {

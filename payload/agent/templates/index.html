@@ -1477,7 +1477,8 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const stack = toolLineStacks.get(name);
       const line = stack?.shift() || startToolLine(name, note, false);
       const state = stateOverride || (ok === false ? "failed" : "done");
-      const icon = state === "failed" ? "✗" : (state === "warning" ? "!" : "✓");
+      const icons = { failed: "✗", warning: "!", done: "✓" };
+      const icon = icons[state] || "✓";
       line.className = `act ${state}`;
       line.replaceChildren(
         el("span", { class: "icon", text: icon }),
