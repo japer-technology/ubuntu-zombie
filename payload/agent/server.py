@@ -261,6 +261,7 @@ class App:
         # EventSource can receive a terminal event instead of hanging.
         self.turns: dict[str, TurnStream] = {}
         self._lock = threading.Lock()
+        self._lmstudio_lock = threading.Lock()
 
     # ---- authentication + lifecycle ----
     def login(self, password: str) -> dict[str, Any] | None:
@@ -1143,6 +1144,45 @@ class App:
         log_event("model_selected", provider=provider, model=chosen)
         return {"ok": True, "provider": provider, "model": chosen}
 
+    def provider_info(self) -> dict[str, Any]:
+        """Return cheap provider status for the chat ``/status`` command."""
+        name, status = providers.provider_status()
+        return {
+            "provider": name,
+            "status": status,
+            "lmstudio_address": (
+                providers.lmstudio_address() if name == "lmstudio" else None
+            ),
+        }
+
+    def discover_lmstudio(self) -> dict[str, Any]:
+        """Rescan the LAN and activate the first discovered LM Studio server."""
+        try:
+            with self._lmstudio_lock:
+                servers = providers.scan_lmstudio()
+                if not servers:
+                    log_event("lmstudio_scan", servers_found=0)
+                    return {
+                        "error": (
+                            "No LM Studio servers were found on the local /24."
+                        )
+                    }
+                provider, model, address = providers.activate_lmstudio(servers[0])
+        except providers.ProviderError as exc:
+            log_event("lmstudio_scan_failed", error=str(exc))
+            return {"error": str(exc)}
+        log_event(
+            "lmstudio_selected", provider=provider, model=model,
+            address=address, servers_found=len(servers),
+        )
+        return {
+            "ok": True,
+            "provider": provider,
+            "model": model,
+            "address": address,
+            "servers": servers,
+        }
+
 
 def _summarize(args: Any) -> dict[str, Any]:
     """Return a small, audit-safe summary of tool args."""
@@ -1435,7 +1475,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.app.ttl_status())
             return
         if self.path == "/api/health":
-            self._send_json({"ok": True, "facts": machine_facts()})
+            self._send_json({
+                "ok": True,
+                "facts": machine_facts(),
+                "provider": self.app.provider_info(),
+            })
             return
         if self.path == "/api/version":
             self._send_json(version_info())
@@ -1466,6 +1510,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/models":
             self._send_json(self.app.models_info())
+            return
+        if self.path == "/api/status":
+            self._send_json(self.app.provider_info())
             return
         if self.path == "/api/config":
             self._send_json(self.app.config_info())
@@ -1575,6 +1622,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "missing model"}, 400)
                 return
             self._send_json(self.app.set_model(model))
+            return
+        if self.path == "/api/lmstudio":
+            self._send_json(self.app.discover_lmstudio())
             return
         if len(parts) == 4 and parts[:2] == ["api", "conversation"]:
             try:

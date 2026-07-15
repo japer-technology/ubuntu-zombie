@@ -8,6 +8,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Chat provider discovery
+
+- **Runtime LM Studio discovery:** `/lmstudio` rescans the local network and
+  activates a discovered server and model, `/models` lists the active
+  provider's available models, and `/status` includes the LM Studio address.
+
 ### Phase 4 — Registry generalisation
 
 - **Chat command status UX:** live `bash`/shell tool progress now

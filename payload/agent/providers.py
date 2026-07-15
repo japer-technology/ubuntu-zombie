@@ -53,12 +53,19 @@ UI banner.
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
+import re
 import shutil
+import socket
 import subprocess
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 
 class ProviderError(RuntimeError):
@@ -138,6 +145,8 @@ _PROVIDER_BY_NAME: dict[str, _ProviderSpec] = {
 }
 
 SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(spec.name for spec in _PI_AI_PROVIDERS)
+_SAFE_MODEL_ID = re.compile(r"\A[A-Za-z0-9._:/+@-]{1,200}\Z")
+_MAX_MODELS_RESPONSE_SIZE = 1024 * 1024
 
 # Every provider key env var, in registry order. Used by the pi-mono
 # bridge driver to strip non-active provider keys before spawning the
@@ -343,7 +352,8 @@ def provider_status() -> tuple[str, str]:
         model = _resolve_model(spec)
         if not model:
             return (spec.name, "model not set (set ZOMBIE_MODEL" + (f" or {spec.model_env}" if spec.model_env else "") + ")")
-        return (spec.name, f"model {model}")
+        address = lmstudio_address() if spec.name == "lmstudio" else None
+        return (spec.name, f"model {model}" + (f" at {address}" if address else ""))
 
     explicit = (os.environ.get("ZOMBIE_PROVIDER") or "").strip().lower()
     if explicit:
@@ -487,6 +497,167 @@ def list_models(name: str | None = None) -> list[dict]:
             "context_window": m.get("contextWindow"),
         })
     return out
+
+
+def _models_json_path() -> Path:
+    explicit = os.environ.get("ZOMBIE_PI_MODELS_JSON")
+    if explicit:
+        return Path(explicit)
+    return Path(os.environ.get("HOME", "/tmp")) / ".pi" / "agent" / "models.json"
+
+
+def lmstudio_address() -> str | None:
+    """Return the configured LM Studio host and port, if available."""
+    try:
+        data = json.loads(_models_json_path().read_text(encoding="utf-8"))
+        base_url = data["providers"]["lmstudio"]["baseUrl"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    if not isinstance(base_url, str):
+        return None
+    from urllib.parse import urlparse
+    try:
+        parsed = urlparse(base_url)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return None
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return None
+    return f"{parsed.hostname}:{port}"
+
+
+def _local_scan_network() -> ipaddress.IPv4Network:
+    """Resolve the primary IPv4 interface and return its /24 scan network."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # A UDP connect selects the primary outbound interface without
+        # transmitting a packet; RFC 5737 reserves TEST-NET-1 for examples.
+        sock.connect(("192.0.2.1", 9))
+        address = sock.getsockname()[0]
+    except OSError as exc:
+        raise ProviderError(
+            "Could not determine the local IPv4 network for LM Studio "
+            f"discovery: {exc}"
+        ) from exc
+    finally:
+        sock.close()
+    return ipaddress.ip_network(f"{address}/24", strict=False)
+
+
+def _probe_lmstudio(address: str, port: int) -> dict | None:
+    url = f"http://{address}:{port}/v1/models"
+    request = Request(url, headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=1.5) as response:
+            raw = response.read(_MAX_MODELS_RESPONSE_SIZE + 1)
+    except (HTTPError, URLError, OSError, TimeoutError):
+        return None
+    if len(raw) > _MAX_MODELS_RESPONSE_SIZE:
+        return None
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, ValueError):
+        return None
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return None
+    models: list[str] = []
+    for row in rows:
+        model = row.get("id") if isinstance(row, dict) else None
+        if isinstance(model, str):
+            model = model.strip()
+            if _SAFE_MODEL_ID.fullmatch(model) and model not in models:
+                models.append(model)
+    if not models:
+        return None
+    return {
+        "address": f"{address}:{port}",
+        "base_url": f"http://{address}:{port}/v1",
+        "models": models,
+    }
+
+
+def scan_lmstudio(
+    network: str | ipaddress.IPv4Network | None = None,
+    port: int | None = None,
+) -> list[dict]:
+    """Scan the local /24 for OpenAI-compatible LM Studio servers."""
+    try:
+        scan_port = int(port if port is not None
+                        else os.environ.get("ZOMBIE_LLM_SCAN_PORT", "1234"))
+    except (TypeError, ValueError) as exc:
+        raise ProviderError("ZOMBIE_LLM_SCAN_PORT must be a TCP port.") from exc
+    if not (1 <= scan_port <= 65535):
+        raise ProviderError("ZOMBIE_LLM_SCAN_PORT must be between 1 and 65535.")
+    try:
+        subnet = (
+            ipaddress.ip_network(network, strict=False)
+            if network is not None else _local_scan_network()
+        )
+    except ValueError as exc:
+        raise ProviderError("The LM Studio scan network is not valid.") from exc
+    if not isinstance(subnet, ipaddress.IPv4Network):
+        raise ProviderError("LM Studio discovery requires an IPv4 network.")
+    addresses = [str(address) for address in subnet]
+    with ThreadPoolExecutor(max_workers=min(32, len(addresses))) as pool:
+        found = list(pool.map(
+            lambda address: _probe_lmstudio(address, scan_port), addresses
+        ))
+    return [entry for entry in found if entry is not None]
+
+
+def activate_lmstudio(server: dict) -> tuple[str, str, str]:
+    """Persist a discovered server and activate its first advertised model."""
+    base_url = str(server.get("base_url") or "")
+    address = str(server.get("address") or "")
+    models = server.get("models")
+    if (
+        not address
+        or not base_url.startswith("http://")
+        or not isinstance(models, list)
+        or not models
+        or any(not isinstance(model, str)
+               or not _SAFE_MODEL_ID.fullmatch(model) for model in models)
+    ):
+        raise ProviderError("LM Studio discovery returned an invalid server.")
+    current = os.environ.get("ZOMBIE_MODEL", "")
+    chosen = current if current in models else models[0]
+    path = _models_json_path()
+    try:
+        if path.exists():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("root is not a dictionary")
+        else:
+            data = {}
+        provider_map = data.setdefault("providers", {})
+        if not isinstance(provider_map, dict):
+            raise ValueError("providers is not a dictionary")
+        provider_map["lmstudio"] = {
+            "baseUrl": base_url,
+            "api": "openai-completions",
+            "apiKey": "LMSTUDIO_API_KEY",
+            "compat": {
+                "supportsDeveloperRole": False,
+                "supportsReasoningEffort": False,
+            },
+            "models": [{"id": model} for model in models],
+        }
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, delete=False
+        ) as handle:
+            json.dump(data, handle, indent=2)
+            handle.write("\n")
+            temp_path = Path(handle.name)
+        temp_path.chmod(0o600)
+        temp_path.replace(path)
+    except (OSError, ValueError, TypeError) as exc:
+        raise ProviderError(f"Could not update {path}: {exc}") from exc
+    os.environ["ZOMBIE_PROVIDER"] = "lmstudio"
+    os.environ["ZOMBIE_MODEL"] = chosen
+    os.environ.setdefault("LMSTUDIO_API_KEY", "local")
+    return ("lmstudio", chosen, address)
 
 
 def set_active_model(model: str, name: str | None = None) -> tuple[str, str]:
