@@ -9,11 +9,15 @@ idempotent, non-interactive-capable, audited, and reversible by
 [`scripts/uninstall.sh`](../scripts/uninstall.sh).
 
 Runnable components follow the registry contract in
-[`scripts/install.sh`](../scripts/install.sh): an isolated install hook,
-explicit dependencies, target-scoped validation and interaction, dry-run
-and receipt output, health-before-manifest ordering, lifecycle hooks, and
-selective uninstall. Environment selectors remain an additive
-compatibility surface rather than the execution model.
+[`scripts/component-registry.sh`](../scripts/component-registry.sh):
+isolated configuration and validators; install, verify, doctor, repair,
+and uninstall hooks; explicit dependencies; target-scoped review and
+dry-run rendering; component-owned receipt and manifest data; and
+health-before-manifest ordering. Shared code validates dependency names
+and trusted hook functions, then dispatches in registry order (reversed
+for uninstall). Adding a component must not change parser or dispatcher
+conditionals. Environment selectors remain an additive compatibility
+surface rather than the execution model.
 
 The premise, argued in [`brainstorm.md`](brainstorm.md) and
 [`docs/VISION.md`](../docs/VISION.md), is simple: once a machine carries

@@ -1517,6 +1517,10 @@ run_subcommands() {
   zombie_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run install zombie)"
   [[ "${default_out}" == "${zombie_out}" ]] \
     || { echo "FAIL: explicit zombie dry-run must match default install" >&2; exit 1; }
+  local zombie_review
+  zombie_review="$(sed -n '/^print_parameter_table() {$/,/^}$/p' scripts/install.sh)"
+  ! grep -Eq 'Options|review_options' <<<"${zombie_review}" \
+    || { echo "FAIL: zombie parameter review must not ask about options" >&2; exit 1; }
 
   forgejo_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run install -- forgejo)"
   grep -q "Components:     forgejo" <<<"${forgejo_out}" \
@@ -1575,14 +1579,11 @@ run_subcommands() {
     || { echo "FAIL: install_forgejo references zombie-owned state" >&2; exit 1; }
   grep -q 'api/healthz' <<<"${forgejo_hook}" \
     || { echo "FAIL: install_forgejo must require the Forgejo health check" >&2; exit 1; }
-  local hook_call_line manifest_write_line
-  hook_call_line="$(grep -n '^[[:space:]]*install_forgejo[[:space:]]*$' \
-    scripts/install.sh | tail -n1 | cut -d: -f1)"
-  manifest_write_line="$(grep -n 'write_component_manifest "${COMPONENT_FORGEJO}"' \
-    scripts/install.sh | tail -n1 | cut -d: -f1)"
-  [[ -n "${hook_call_line}" && -n "${manifest_write_line}" \
-    && "${manifest_write_line}" -gt "${hook_call_line}" ]] \
-    || { echo "FAIL: Forgejo manifest must be written after the install/health hook" >&2; exit 1; }
+  grep -q 'install=component_install_forgejo' scripts/install.sh \
+    && grep -q 'manifest=component_manifest_forgejo' scripts/install.sh \
+    || { echo "FAIL: Forgejo install and manifest hooks must be registered" >&2; exit 1; }
+  grep -q 'component_dispatch_hook "${component}" install' scripts/install.sh \
+    || { echo "FAIL: selected components must use generic install dispatch" >&2; exit 1; }
 
   # Single valid component targets are exercised above and by dry-run checks;
   # the loop below verifies all public duplicate/invalid target failures.
@@ -1599,6 +1600,42 @@ run_subcommands() {
   expect_exit_code 2 ./scripts/install.sh uninstall forgejo --archive --dry-run
   expect_exit_code 0 ./scripts/install.sh uninstall forgejo --dry-run
   expect_exit_code 0 ./scripts/install.sh uninstall zombie --archive --keep-agent --dry-run
+}
+
+run_component_registry() {
+  echo "[smoke] component registry validation + sample dispatch"
+  bash <<'BASH'
+set -Eeuo pipefail
+die() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
+# shellcheck source=scripts/component-registry.sh
+. scripts/component-registry.sh
+trace=""
+alpha_install() { trace="${trace}alpha "; }
+sample_install() { trace="${trace}sample "; }
+register_component alpha "" install=alpha_install
+register_component sample "alpha" install=sample_install
+validate_component_registry "install"
+for component in "${PUBLIC_COMPONENTS[@]}"; do
+  component_dispatch_hook "${component}" install
+done
+[[ "${trace}" == "alpha sample " ]]
+BASH
+
+  expect_exit_code 2 bash -c '
+    set -Eeuo pipefail
+    die() { exit "${2:-1}"; }
+    . scripts/component-registry.sh
+    register_component broken "" install=missing_hook
+    validate_component_registry "install"
+  '
+  expect_exit_code 2 bash -c '
+    set -Eeuo pipefail
+    die() { exit "${2:-1}"; }
+    . scripts/component-registry.sh
+    ok() { :; }
+    register_component broken absent install=ok
+    validate_component_registry "install"
+  '
 }
 
 expect_exit_code() {
@@ -2449,6 +2486,7 @@ case "${cmd}" in
   python)         run_python ;;
   branding) run_branding ;;
   subcommands) run_subcommands ;;
+  registry)       run_component_registry ;;
   manifest)       run_manifest ;;
   bad-usage)      run_bad_usage ;;
   flags)          run_flags ;;
@@ -2460,6 +2498,7 @@ case "${cmd}" in
     run_python
     run_branding
     run_subcommands
+    run_component_registry
     run_manifest
     run_bad_usage
     run_flags
