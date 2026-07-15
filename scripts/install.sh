@@ -943,6 +943,10 @@ preflight() {
     required_disk_label="3 GB"
     memory_context="agent runtime"
   fi
+  if (( COMPONENT_ZOMBIE_SELECTED && COMPONENT_FORGEJO_SELECTED )); then
+    required_disk_kb=4000000
+    required_disk_label="4 GB"
+  fi
 
   # Compact result table: parallel arrays of status (ok|warn|fail|info) and
   # a short label, rendered as a glance-able summary before the YES prompt.
@@ -2474,7 +2478,8 @@ ZOMBIE_PHASE_TOTAL="$(awk '/^# install — the rest of the file/{f=1} f && /^sec
 # un-totalled "[n]" counter rather than printing a confusing "[n/0]".
 [[ "${ZOMBIE_PHASE_TOTAL}" =~ ^[0-9]+$ ]] || ZOMBIE_PHASE_TOTAL=0
 # Drop the baseline count for Forgejo-only runs; its guarded section count is
-# added below, so progress still renders [n/total] without zombie phases.
+# added by the option-section counter immediately below, so progress still
+# renders [n/total] without zombie phases.
 (( COMPONENT_ZOMBIE_SELECTED )) || ZOMBIE_PHASE_TOTAL=0
 
 # Optional components add indented `  section "..."` calls inside guarded
@@ -3097,6 +3102,7 @@ codeberg_fetch_verified() {
     || die "Checksum mismatch for ${url}." 1
 }
 
+# component-hook: forgejo begin
 install_forgejo() {
   # option-sections: forgejo begin
   section "Install Forgejo prerequisites"
@@ -3235,6 +3241,7 @@ PSQL
   [[ -n "${_fj_jwt_secret}" ]]     || _fj_jwt_secret="$(/usr/local/bin/forgejo generate secret JWT_SECRET)"
   [[ -n "${_fj_lfs_jwt_secret}" ]] || _fj_lfs_jwt_secret="$(/usr/local/bin/forgejo generate secret JWT_SECRET)"
   _fj_domain="$(hostname -f 2>/dev/null || hostname)"
+  FORGEJO_URL_HOST="${_fj_domain}"
   _fj_tmp="$(mktemp)"
   cat > "${_fj_tmp}" <<EOF
 ; Managed by ${SCRIPT_NAME} (Ubuntu Zombie optional component).
@@ -3435,6 +3442,7 @@ EOF
     # option-sections: forgejo-runner end
   fi
 }
+# component-hook: forgejo end
 
 # ---------------------------------------------------------------------------
 # Deploy payload: chat service, helpers, policy, systemd, logrotate.
@@ -3786,7 +3794,7 @@ fi
 
 if (( COMPONENT_FORGEJO_SELECTED )); then
   install_forgejo
-  FORGEJO_URL_HOST="${_fj_domain:-$(hostname -f 2>/dev/null || hostname)}"
+  FORGEJO_URL_HOST="${FORGEJO_URL_HOST:-$(hostname -f 2>/dev/null || hostname)}"
   FORGEJO_OK=0
   systemctl is-active --quiet forgejo.service && FORGEJO_OK=1
   if (( FORGEJO_OK )); then

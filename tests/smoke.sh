@@ -1559,11 +1559,17 @@ run_subcommands() {
 
   # The extracted Forgejo hook must not depend on zombie runtime state.
   local forgejo_hook
-  forgejo_hook="$(sed -n '/^install_forgejo() {$/,/^}$/p' scripts/install.sh)"
+  forgejo_hook="$(sed -n \
+    '/^# component-hook: forgejo begin$/,/^# component-hook: forgejo end$/p' \
+    scripts/install.sh)"
   [[ -n "${forgejo_hook}" ]] \
     || { echo "FAIL: could not locate the install_forgejo hook" >&2; exit 1; }
   grep -q 'PostgreSQL' <<<"${forgejo_hook}" \
     || { echo "FAIL: extracted install_forgejo hook is incomplete" >&2; exit 1; }
+  grep -q 'FORGEJO_HTTP_PORT' <<<"${forgejo_hook}" \
+    && grep -q 'FORGEJO_ADMIN_USER' <<<"${forgejo_hook}" \
+    && grep -q 'FORGEJO_DB_NAME' <<<"${forgejo_hook}" \
+    || { echo "FAIL: install_forgejo is missing required Forgejo state" >&2; exit 1; }
   ! grep -Eq 'AGENT_USER|AGENT_HOME|CHAT_PORT|TTL_DAYS|LOCAL_LLM|ZOMBIE_ETC|/opt/ai-zombie' \
     <<<"${forgejo_hook}" \
     || { echo "FAIL: install_forgejo references zombie-owned state" >&2; exit 1; }
