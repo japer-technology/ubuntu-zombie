@@ -1154,24 +1154,8 @@ validate_noninteractive() {
 # ---------------------------------------------------------------------------
 
 verify_zombie() {
-  # Preserve the deployed verifier for zombie-only runs: it contains the
-  # richest runtime checks and the root-to-agent re-exec behaviour operators
-  # already rely on. If the legacy detector only found a partial install,
-  # fall through to the component-aware checks so verify can report every
-  # missing piece (and still honour --json) instead of aborting early.
-  if (( ${#SELECTED_COMPONENTS[@]} == 1 )) && [[ -x "${ZOMBIE_DIR}/bin/verify" ]]; then
-    if (( JSON_OUTPUT )); then
-      export ZOMBIE_JSON=1
-    fi
-    if [[ ${EUID} -eq 0 ]] && [[ "$(id -un)" != "${AGENT_USER}" ]]; then
-      if id "${AGENT_USER}" >/dev/null 2>&1; then
-        local verify_cmd
-        printf -v verify_cmd 'ZOMBIE_JSON=%q %q' "${ZOMBIE_JSON:-0}" "${ZOMBIE_DIR}/bin/verify"
-        exec runuser -l "${AGENT_USER}" -c "${verify_cmd}"
-      fi
-    fi
-    exec "${ZOMBIE_DIR}/bin/verify"
-  fi
+  # Keep lifecycle verification in this script. A deployed verifier may come
+  # from an older release and must not be able to break current verify output.
   id "${AGENT_USER}" >/dev/null 2>&1 \
     && vr ok zombie user "User ${AGENT_USER} exists." \
     || vr fail zombie user "User ${AGENT_USER} missing. Run 'sudo ./${SCRIPT_NAME} install zombie' first."
@@ -3977,13 +3961,6 @@ check() {
     [[ "\${JSON}" == "1" ]] || printf '  %s[x]%s  %s\\n' "\${C_RED}" "\${C_RESET}" "\${label}"
   fi
 }
-
-if [[ -f \${ZOMBIE_DIR}/secrets/env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source \${ZOMBIE_DIR}/secrets/env
-  set +a
-fi
 
 [[ "\${JSON}" == "1" ]] || printf '\\n%s== ubuntu-zombie verify ==%s\\n' "\${C_BOLD}" "\${C_RESET}"
 [[ "\${JSON}" == "1" ]] || echo

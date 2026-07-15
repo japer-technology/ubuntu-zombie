@@ -1806,12 +1806,13 @@ expect_exit_code() {
 run_manifest() {
   echo "[smoke] component manifest + selective uninstall"
 
-  local scratch_root bogus_zombie_dir out manifest_dir
+  local scratch_root bogus_zombie_dir verify_zombie_dir out manifest_dir
   scratch_root="$(pwd)/tests/.smoke-manifest.$$"
   rm -rf -- "${scratch_root}"
   mkdir -p "${scratch_root}"
   trap 'rm -rf -- "'"${scratch_root}"'"' RETURN
   bogus_zombie_dir="${scratch_root}/missing-zombie-root"
+  verify_zombie_dir="${scratch_root}/verify-zombie-root"
 
   manifest_dir="${scratch_root}/valid-zombie"
   mkdir -p "${manifest_dir}"
@@ -1827,6 +1828,44 @@ EOF_MANIFEST
     ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh doctor --json)"
   grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
     || { echo "FAIL: doctor --json did not discover zombie manifest" >&2; exit 1; }
+
+  # verify must not delegate to a stale deployed verifier. Older generated
+  # verifiers sourced secrets/env under nounset, so password hashes containing
+  # '$' could abort with an unbound-variable error before checks were reported.
+  mkdir -p "${verify_zombie_dir}/bin" "${verify_zombie_dir}/secrets"
+  cat > "${verify_zombie_dir}/bin/verify" <<'EOF_VERIFY'
+#!/usr/bin/env bash
+echo "STALE VERIFIER RAN" >&2
+exit 99
+EOF_VERIFY
+  chmod +x "${verify_zombie_dir}/bin/verify"
+  printf '%s\n' 'ZOMBIE_ADMIN_PASSWORD_HASH=pbkdf2_sha256$600000$salt$digest' \
+    > "${verify_zombie_dir}/secrets/env"
+  chmod 600 "${verify_zombie_dir}/secrets/env"
+
+  set +e
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_USER="verify-missing" ZOMBIE_DIR="${verify_zombie_dir}" \
+    ./scripts/install.sh verify --json 2>&1)"
+  local verify_rc=$?
+  set -e
+  [[ "${verify_rc}" -eq 1 ]] \
+    || { echo "FAIL: verify should report failed checks (exit 1), got ${verify_rc}" >&2; exit 1; }
+  ! grep -q 'STALE VERIFIER RAN\|unbound variable' <<<"${out}" \
+    || { echo "FAIL: verify delegated to a stale verifier or sourced secrets" >&2; exit 1; }
+  printf '%s' "${out}" | python3 -c 'import sys,json; json.load(sys.stdin)' \
+    || { echo "FAIL: verify did not produce valid JSON with shell-sensitive secrets" >&2; exit 1; }
+
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ZOMBIE_USER="verify-missing" ZOMBIE_DIR="${verify_zombie_dir}" \
+    ./scripts/install.sh doctor --json 2>&1)"
+  ! grep -q 'unbound variable' <<<"${out}" \
+    || { echo "FAIL: doctor failed with shell-sensitive secrets" >&2; exit 1; }
+  printf '%s' "${out}" | python3 -c 'import sys,json; json.load(sys.stdin)' \
+    || { echo "FAIL: doctor did not produce valid JSON with shell-sensitive secrets" >&2; exit 1; }
+
+  ! grep -Fq 'source \${ZOMBIE_DIR}/secrets/env' scripts/install.sh \
+    || { echo "FAIL: generated verifier must not source secrets/env" >&2; exit 1; }
 
   manifest_dir="${scratch_root}/duplicate-key"
   mkdir -p "${manifest_dir}"
