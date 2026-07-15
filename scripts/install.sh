@@ -3123,8 +3123,15 @@ forgejo_release_tag_from_json() {
 import json
 import sys
 
-data = json.load(sys.stdin)
-print(data.get("tag_name") or data.get("name") or "")
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+tag = data.get("tag_name") or data.get("name") or ""
+if not tag:
+    sys.exit(1)
+print(tag)
 '
 }
 
@@ -3139,8 +3146,8 @@ codeberg_latest_release() {
     # name, so accept both.
     tag="$(curl -fsSL --retry 2 --retry-delay 2 --max-time 15 \
              "${origin}/api/v1/repos/${repo}/releases/latest" \
-             | forgejo_release_tag_from_json 2>/dev/null)" \
-      || { warn "Release metadata unavailable from ${origin}; trying the next Forgejo mirror."; continue; }
+             | forgejo_release_tag_from_json)" \
+      || { warn "Release metadata unavailable or malformed from ${origin}; trying the next Forgejo mirror."; continue; }
     tag="${tag#v}"
     if [[ "${tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
       printf '%s' "${tag}"
