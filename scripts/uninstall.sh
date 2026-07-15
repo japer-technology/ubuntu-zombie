@@ -364,6 +364,8 @@ remove_component_forgejo() {
 
   if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
       || -x /usr/local/bin/forgejo \
+      || -f /etc/caddy/conf.d/forgejo.caddy \
+      || -f /etc/avahi/services/forgejo.service \
       || -f /etc/systemd/system/forgejo-runner.service \
       || -x /usr/local/bin/forgejo-runner \
       || -d /var/lib/forgejo || -d /var/lib/forgejo-runner \
@@ -387,6 +389,16 @@ remove_component_forgejo() {
     run "rm -f /etc/systemd/system/forgejo.service /etc/systemd/system/forgejo-runner.service"
     run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
     run "rm -f /usr/local/bin/forgejo /usr/local/bin/forgejo-runner"
+    run "rm -f /etc/caddy/conf.d/forgejo.caddy /etc/avahi/services/forgejo.service"
+    if [[ -f /etc/systemd/system/caddy.service || -f /lib/systemd/system/caddy.service ]]; then
+      run_or_warn "Reload Caddy after removing Forgejo route" \
+        "systemctl reload-or-restart caddy.service"
+    fi
+    if [[ -f /etc/systemd/system/avahi-daemon.service \
+        || -f /lib/systemd/system/avahi-daemon.service ]]; then
+      run_or_warn "Reload Avahi after removing Forgejo advertisement" \
+        "systemctl reload-or-restart avahi-daemon.service"
+    fi
     if [[ -d /etc/forgejo ]]; then
       remove_tree_checked "/etc/forgejo" "/etc/forgejo (Forgejo config + secrets)"
     fi
