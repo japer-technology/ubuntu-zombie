@@ -1781,6 +1781,7 @@ EOF_MANIFEST
   mkdir -p "${fake_bin}"
   cat > "${fake_bin}/psql" <<'EOF_FAKE_PSQL'
 #!/usr/bin/env bash
+set -Eeuo pipefail
 echo "fake psql should not execute during dry-run" >&2
 exit 99
 EOF_FAKE_PSQL

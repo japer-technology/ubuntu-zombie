@@ -360,7 +360,7 @@ confirm() {
 
 remove_component_forgejo() {
   local fail_count_before="${UNINSTALL_FAIL_COUNT}"
-  local _fj_db _fj_role _fj_user _fj_has_db_state=0
+  local _fj_db _fj_role _fj_user _fj_has_db_state=0 _fj_postgres_ready=0
 
   if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
       || -x /usr/local/bin/forgejo \
@@ -406,9 +406,12 @@ remove_component_forgejo() {
     # testing slate while avoiding prompts on hosts with only runner artifacts.
     # Dry-run only needs the client binary to render the planned drop commands;
     # real uninstalls also require the postgres system account before runuser.
-    if (( _fj_has_db_state )) \
-        && command -v psql >/dev/null 2>&1 \
-        && { (( DRY_RUN )) || id postgres >/dev/null 2>&1; }; then
+    if command -v psql >/dev/null 2>&1; then
+      if (( DRY_RUN )) || id postgres >/dev/null 2>&1; then
+        _fj_postgres_ready=1
+      fi
+    fi
+    if (( _fj_has_db_state && _fj_postgres_ready )); then
       if confirm "Drop the Forgejo PostgreSQL database and role (destructive)?"; then
         run_or_warn "Drop Forgejo database" \
           "runuser -u postgres -- dropdb --if-exists -- $(shell_quote "${FORGEJO_DB_NAME}")"
