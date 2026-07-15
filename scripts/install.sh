@@ -3086,14 +3086,82 @@ forgejo_release_arch() {
   esac
 }
 
-# Resolve the latest release tag (e.g. "11.0.3") of a Codeberg repository.
-codeberg_latest_release() {
-  local repo="$1" tag
-  tag="$(curl_get "https://codeberg.org/api/v1/repos/${repo}/releases/latest" \
-           | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name",""))' 2>/dev/null)" || return 1
-  tag="${tag#v}"
-  [[ "${tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]] || return 1
-  printf '%s' "${tag}"
+# Candidate API origins for Forgejo release metadata. Forgejo's runner
+# metadata moved off Codeberg; keep the legacy origin last for compatibility
+# with older pinned releases that may still only be available there.
+forgejo_release_api_origins() {
+  case "$1" in
+    forgejo/forgejo|forgejo/runner)
+      printf '%s\n' \
+        "https://data.forgejo.org" \
+        "https://code.forgejo.org" \
+        "https://codeberg.org"
+      ;;
+    *)
+      printf '%s\n' "https://codeberg.org"
+      ;;
+  esac
+}
+
+# Candidate release download origins. Prefer Forgejo's canonical host, but keep
+# Codeberg as a fallback for pinned versions still hosted there.
+forgejo_release_download_bases() {
+  case "$1" in
+    forgejo/forgejo|forgejo/runner)
+      printf '%s\n' \
+        "https://code.forgejo.org" \
+        "https://codeberg.org"
+      ;;
+    *)
+      printf '%s\n' "https://codeberg.org"
+      ;;
+  esac
+}
+
+forgejo_release_tag_from_json() {
+  python3 -c '
+import json
+import sys
+
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+
+tag = data.get("tag_name") or data.get("name") or ""
+if not tag:
+    sys.exit(1)
+print(tag)
+'
+}
+
+# Resolve the latest release tag (e.g. "11.0.3") of a Forgejo repository.
+forgejo_latest_release() {
+  local repo="$1" origin json tag
+  # Two short endpoint-local retries cover brief network flakes without
+  # spending curl_get's full outer retry budget on an obsolete release host.
+  local metadata_retry_count=2 metadata_retry_delay=2 metadata_max_time=15
+  for origin in $(forgejo_release_api_origins "${repo}"); do
+    # Use a bounded direct curl instead of curl_get here so a stale origin
+    # fails over quickly. This trades curl_get's five outer attempts/logging for
+    # one endpoint-local retry window before moving to the next origin. Forgejo
+    # metadata origins have exposed the release version as either tag_name or
+    # name, so accept both.
+    json="$(curl -fsSL --retry "${metadata_retry_count}" \
+              --retry-delay "${metadata_retry_delay}" \
+              --max-time "${metadata_max_time}" \
+              "${origin}/api/v1/repos/${repo}/releases/latest")" \
+      || { warn "Release metadata unavailable from ${origin}; trying the next release origin."; continue; }
+    tag="$(forgejo_release_tag_from_json <<<"${json}")" \
+      || { warn "Release metadata malformed from ${origin}; trying the next release origin."; continue; }
+    tag="${tag#v}"
+    if [[ "${tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+      printf '%s' "${tag}"
+      return 0
+    fi
+    warn "Release metadata from ${origin} did not contain a valid semver tag; trying the next release origin."
+  done
+  return 1
 }
 
 # Read one key from one section of an ini file (first match wins), so
@@ -3117,6 +3185,20 @@ codeberg_fetch_verified() {
     || die "Could not fetch a valid checksum for ${url}." 1
   printf '%s  %s\n' "${sum}" "${dest}" | sha256sum -c - >/dev/null \
     || die "Checksum mismatch for ${url}." 1
+}
+
+# Download a Forgejo release asset from the canonical host with a legacy
+# Codeberg fallback, verifying the adjacent .sha256 file from the same origin.
+forgejo_fetch_release_asset() {
+  local repo="$1" version="$2" asset="$3" dest="$4" base url
+  for base in $(forgejo_release_download_bases "${repo}"); do
+    url="${base}/${repo}/releases/download/v${version}/${asset}"
+    if codeberg_fetch_verified "${url}" "${dest}"; then
+      return 0
+    fi
+    warn "Release asset unavailable from ${base}; trying the next release origin."
+  done
+  return 1
 }
 
 ensure_forgejo_runner_docker_package() {
@@ -3163,7 +3245,7 @@ install_forgejo() {
     FORGEJO_RESOLVED_VERSION="${FORGEJO_VERSION}"
     info "Forgejo release pinned to ${FORGEJO_RESOLVED_VERSION}."
   else
-    FORGEJO_RESOLVED_VERSION="$(codeberg_latest_release forgejo/forgejo)" \
+    FORGEJO_RESOLVED_VERSION="$(forgejo_latest_release forgejo/forgejo)" \
       || die "Could not resolve the latest Forgejo release from codeberg.org (pin FORGEJO_VERSION to proceed)." 66
     info "Latest Forgejo release: ${FORGEJO_RESOLVED_VERSION}."
   fi
@@ -3176,9 +3258,9 @@ install_forgejo() {
     info "Forgejo ${FORGEJO_RESOLVED_VERSION} already installed."
     note_satisfied
   else
-    _forgejo_url="https://codeberg.org/forgejo/forgejo/releases/download/v${FORGEJO_RESOLVED_VERSION}/forgejo-${FORGEJO_RESOLVED_VERSION}-linux-${FORGEJO_ARCH}"
     _forgejo_tmp="$(mktemp)"
-    codeberg_fetch_verified "${_forgejo_url}" "${_forgejo_tmp}" \
+    forgejo_fetch_release_asset forgejo/forgejo "${FORGEJO_RESOLVED_VERSION}" \
+      "forgejo-${FORGEJO_RESOLVED_VERSION}-linux-${FORGEJO_ARCH}" "${_forgejo_tmp}" \
       || { rm -f "${_forgejo_tmp}"; die "Failed to download Forgejo ${FORGEJO_RESOLVED_VERSION}." 66; }
     install -m 0755 -o root -g root "${_forgejo_tmp}" /usr/local/bin/forgejo
     rm -f "${_forgejo_tmp}"
@@ -3424,7 +3506,7 @@ EOF
       _runner_version="${FORGEJO_RUNNER_VERSION}"
       info "Forgejo runner release pinned to ${_runner_version}."
     else
-      _runner_version="$(codeberg_latest_release forgejo/runner)" \
+      _runner_version="$(forgejo_latest_release forgejo/runner)" \
         || die "Could not resolve the latest forgejo-runner release from codeberg.org (pin FORGEJO_RUNNER_VERSION to proceed)." 66
       info "Latest forgejo-runner release: ${_runner_version}."
     fi
@@ -3437,9 +3519,9 @@ EOF
       info "forgejo-runner ${_runner_version} already installed."
       note_satisfied
     else
-      _runner_url="https://codeberg.org/forgejo/runner/releases/download/v${_runner_version}/forgejo-runner-${_runner_version}-linux-${FORGEJO_ARCH}"
       _runner_tmp="$(mktemp)"
-      codeberg_fetch_verified "${_runner_url}" "${_runner_tmp}" \
+      forgejo_fetch_release_asset forgejo/runner "${_runner_version}" \
+        "forgejo-runner-${_runner_version}-linux-${FORGEJO_ARCH}" "${_runner_tmp}" \
         || { rm -f "${_runner_tmp}"; die "Failed to download forgejo-runner ${_runner_version}." 66; }
       install -m 0755 -o root -g root "${_runner_tmp}" /usr/local/bin/forgejo-runner
       rm -f "${_runner_tmp}"

@@ -30,6 +30,15 @@ shell_files() {
   done | sort -u
 }
 
+# Extract one install.sh function so standards checks can exercise helpers in
+# isolation without running the mutating installer.
+install_function() {
+  local name="$1"
+  [[ "${name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+    || { echo "unsafe install.sh function name: ${name}" >&2; exit 1; }
+  sed -n "/^${name}() {/,/^}$/p" scripts/install.sh
+}
+
 run_syntax() {
   echo "[smoke] bash -n syntax check"
   shell_files | while read -r f; do
@@ -2358,8 +2367,7 @@ run_standards() {
   grep -q '/api/healthz' scripts/install.sh \
     || { echo "Forgejo install must verify application health" >&2; exit 1; }
   local docker_conflict_out forgejo_docker_helper docker_stub
-  forgejo_docker_helper="$(sed -n \
-    '/^ensure_forgejo_runner_docker_package() {/,/^}$/p' scripts/install.sh)"
+  forgejo_docker_helper="$(install_function ensure_forgejo_runner_docker_package)"
   docker_stub="$(mktemp)"
   chmod +x "${docker_stub}"
   bash -c "${forgejo_docker_helper}
@@ -2385,8 +2393,46 @@ run_standards() {
     dpkg-query() { return 1; }
     ensure_forgejo_runner_docker_package /missing/docker" \
     || { echo "docker.io must be installed when no Docker engine conflicts" >&2; exit 1; }
+  local forgejo_release_helpers
+  forgejo_release_helpers="$(
+    install_function forgejo_release_api_origins
+    install_function forgejo_release_download_bases
+    install_function forgejo_release_tag_from_json
+    install_function forgejo_latest_release
+    install_function forgejo_fetch_release_asset
+  )"
+  bash -c "${forgejo_release_helpers}
+    warn() { :; }
+    curl() {
+      # forgejo_latest_release appends the metadata URL after all curl flags.
+      local url=\"\${*: -1}\"
+      [[ \"\${url}\" == 'https://data.forgejo.org/api/v1/repos/forgejo/runner/releases/latest' ]] \
+        || return 22
+      printf '%s\n' '{\"name\":\"v12.7.3\"}'
+    }
+    [[ \"\$(forgejo_latest_release forgejo/runner)\" == '12.7.3' ]]" \
+    || { echo "forgejo-runner latest release must use data.forgejo.org first" >&2; exit 1; }
+  bash -c "${forgejo_release_helpers}
+    warn() { :; }
+    curl() {
+      # forgejo_latest_release appends the metadata URL after all curl flags.
+      local url=\"\${*: -1}\"
+      [[ \"\${url}\" == 'https://code.forgejo.org/api/v1/repos/forgejo/runner/releases/latest' ]] \
+        || return 22
+      printf '%s\n' '{\"tag_name\":\"v12.0.1\"}'
+    }
+    [[ \"\$(forgejo_latest_release forgejo/runner)\" == '12.0.1' ]]" \
+    || { echo "forgejo-runner latest release must fall back to code.forgejo.org" >&2; exit 1; }
+  bash -c "${forgejo_release_helpers}
+    warn() { :; }
+    codeberg_fetch_verified() {
+      [[ \"\$1\" == 'https://code.forgejo.org/forgejo/runner/releases/download/v12.7.3/forgejo-runner-12.7.3-linux-amd64' ]]
+    }
+    forgejo_fetch_release_asset forgejo/runner 12.7.3 \
+      forgejo-runner-12.7.3-linux-amd64 /tmp/forgejo-runner-smoke" \
+    || { echo "forgejo-runner downloads must prefer code.forgejo.org" >&2; exit 1; }
   local forgejo_jwt_validator
-  forgejo_jwt_validator="$(sed -n '/^is_valid_forgejo_jwt_secret() {/,/^}/p' scripts/install.sh)"
+  forgejo_jwt_validator="$(install_function is_valid_forgejo_jwt_secret)"
   bash -c "${forgejo_jwt_validator}
     is_valid_forgejo_jwt_secret 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
     ! is_valid_forgejo_jwt_secret ''
