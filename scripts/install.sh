@@ -3126,7 +3126,13 @@ codeberg_latest_release() {
     # version as either tag_name or name, so accept both.
     tag="$(curl -fsSL --retry 2 --retry-delay 2 --max-time 15 \
              "${origin}/api/v1/repos/${repo}/releases/latest" \
-             | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data.get("tag_name") or data.get("name") or "")' 2>/dev/null)" \
+             | python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+print(data.get("tag_name") or data.get("name") or "")
+' 2>/dev/null)" \
       || { warn "Release metadata unavailable from ${origin}; trying the next Forgejo mirror."; continue; }
     tag="${tag#v}"
     if [[ "${tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then

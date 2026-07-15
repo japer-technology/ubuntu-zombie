@@ -30,6 +30,11 @@ shell_files() {
   done | sort -u
 }
 
+install_function() {
+  local name="$1"
+  sed -n "/^${name}() {/,/^}$/p" scripts/install.sh
+}
+
 run_syntax() {
   echo "[smoke] bash -n syntax check"
   shell_files | while read -r f; do
@@ -2358,8 +2363,7 @@ run_standards() {
   grep -q '/api/healthz' scripts/install.sh \
     || { echo "Forgejo install must verify application health" >&2; exit 1; }
   local docker_conflict_out forgejo_docker_helper docker_stub
-  forgejo_docker_helper="$(sed -n \
-    '/^ensure_forgejo_runner_docker_package() {/,/^}$/p' scripts/install.sh)"
+  forgejo_docker_helper="$(install_function ensure_forgejo_runner_docker_package)"
   docker_stub="$(mktemp)"
   chmod +x "${docker_stub}"
   bash -c "${forgejo_docker_helper}
@@ -2386,11 +2390,10 @@ run_standards() {
     ensure_forgejo_runner_docker_package /missing/docker" \
     || { echo "docker.io must be installed when no Docker engine conflicts" >&2; exit 1; }
   local forgejo_release_helpers
-  forgejo_release_helpers="$(sed -n \
-    '/^forgejo_release_api_origins() {/,/^}$/p' scripts/install.sh)
-$(sed -n '/^forgejo_release_download_bases() {/,/^}$/p' scripts/install.sh)
-$(sed -n '/^codeberg_latest_release() {/,/^}$/p' scripts/install.sh)
-$(sed -n '/^forgejo_fetch_release_asset() {/,/^}$/p' scripts/install.sh)"
+  forgejo_release_helpers="$(install_function forgejo_release_api_origins)
+$(install_function forgejo_release_download_bases)
+$(install_function codeberg_latest_release)
+$(install_function forgejo_fetch_release_asset)"
   bash -c "${forgejo_release_helpers}
     warn() { :; }
     curl() {
@@ -2420,7 +2423,7 @@ $(sed -n '/^forgejo_fetch_release_asset() {/,/^}$/p' scripts/install.sh)"
       forgejo-runner-12.7.3-linux-amd64 /tmp/forgejo-runner-smoke" \
     || { echo "forgejo-runner downloads must prefer code.forgejo.org" >&2; exit 1; }
   local forgejo_jwt_validator
-  forgejo_jwt_validator="$(sed -n '/^is_valid_forgejo_jwt_secret() {/,/^}/p' scripts/install.sh)"
+  forgejo_jwt_validator="$(install_function is_valid_forgejo_jwt_secret)"
   bash -c "${forgejo_jwt_validator}
     is_valid_forgejo_jwt_secret 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
     ! is_valid_forgejo_jwt_secret ''
