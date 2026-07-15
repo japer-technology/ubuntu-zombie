@@ -405,7 +405,8 @@ remove_component_forgejo() {
     # This makes `uninstall forgejo --yes` reliably return the host to a clean
     # testing slate while avoiding prompts on hosts with only runner artefacts.
     if (( _fj_has_db_state )) \
-        && command -v psql >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
+        && command -v psql >/dev/null 2>&1 \
+        && { (( DRY_RUN )) || id postgres >/dev/null 2>&1; }; then
       if confirm "Drop the Forgejo PostgreSQL database and role (destructive)?"; then
         run_or_warn "Drop Forgejo database" \
           "runuser -u postgres -- dropdb --if-exists -- $(shell_quote "${FORGEJO_DB_NAME}")"

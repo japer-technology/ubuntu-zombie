@@ -1783,12 +1783,7 @@ EOF_MANIFEST
 #!/usr/bin/env bash
 exit 0
 EOF_FAKE_PSQL
-  cat > "${fake_bin}/id" <<'EOF_FAKE_ID'
-#!/usr/bin/env bash
-[[ "${1:-}" == "postgres" ]] && exit 0
-exec /usr/bin/id "$@"
-EOF_FAKE_ID
-  chmod +x "${fake_bin}/psql" "${fake_bin}/id"
+  chmod +x "${fake_bin}/psql"
   out="$(ZOMBIE_COLOR=never ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
     PATH="${fake_bin}:${PATH}" ./scripts/uninstall.sh forgejo --yes --dry-run 2>&1 || true)"
   grep -q "dropdb --if-exists -- forgejo" <<<"${out}" \
