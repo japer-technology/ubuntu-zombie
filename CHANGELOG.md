@@ -42,6 +42,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Verify fallback:** partial legacy zombie installs now report component-aware
   verify failures (including JSON output) instead of aborting when the deployed
   verifier script is missing.
+- **Verify and doctor reliability:** lifecycle checks no longer delegate to a
+  stale deployed verifier or source shell-sensitive password hashes, preventing
+  unbound-variable aborts while preserving text and JSON diagnostics.
 - **Validated component registry:** shared selection, validation, review,
   dry-run, receipt, phase counting, install, manifest, final-summary, and
   uninstall paths dispatch trusted component hooks from one ordered
