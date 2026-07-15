@@ -565,8 +565,11 @@ try:
     discovered = _pr.scan_lmstudio("127.0.0.0/30", 1234)
 finally:
     _pr._probe_lmstudio = original_probe
-if "127.0.0.2" not in probed_addresses:
-    raise SystemExit("scan_lmstudio must scan the selected subnet")
+if (
+    "127.0.0.2" not in probed_addresses
+    or probed_addresses.index("127.0.0.1") > probed_addresses.index("127.0.0.2")
+):
+    raise SystemExit("scan_lmstudio must probe loopback before the selected subnet")
 if len(discovered) != 1 or discovered[0]["address"] != "127.0.0.1:1234":
     raise SystemExit(f"scan_lmstudio wrong: {discovered!r}")
 
