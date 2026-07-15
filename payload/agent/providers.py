@@ -536,7 +536,8 @@ def _local_scan_network() -> ipaddress.IPv4Network:
         address = sock.getsockname()[0]
     except OSError as exc:
         raise ProviderError(
-            "Could not determine the local IPv4 network for LM Studio discovery."
+            "Could not determine the local IPv4 network for LM Studio "
+            f"discovery: {exc}"
         ) from exc
     finally:
         sock.close()
@@ -586,7 +587,7 @@ def scan_lmstudio(
                         else os.environ.get("ZOMBIE_LLM_SCAN_PORT", "1234"))
     except (TypeError, ValueError) as exc:
         raise ProviderError("ZOMBIE_LLM_SCAN_PORT must be a TCP port.") from exc
-    if not 1 <= scan_port <= 65535:
+    if not (1 <= scan_port <= 65535):
         raise ProviderError("ZOMBIE_LLM_SCAN_PORT must be between 1 and 65535.")
     try:
         subnet = (

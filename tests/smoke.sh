@@ -549,12 +549,17 @@ if (prov, chosen) != ("lmstudio", "qwen/qwen3-coder"):
 # Runtime LM Studio discovery scans a bounded network, preserves the full
 # advertised catalogue in pi's provider file, and activates the provider.
 original_probe = _pr._probe_lmstudio
-try:
-    _pr._probe_lmstudio = lambda address, port: ({
+def fake_probe(address, port):
+    if address != "127.0.0.2":
+        return None
+    return {
         "address": f"{address}:{port}",
         "base_url": f"http://{address}:{port}/v1",
         "models": ["qwen/qwen3-coder", "llama-3.1-8b"],
-    } if address == "127.0.0.2" else None)
+    }
+
+try:
+    _pr._probe_lmstudio = fake_probe
     discovered = _pr.scan_lmstudio("127.0.0.0/30", 1234)
 finally:
     _pr._probe_lmstudio = original_probe

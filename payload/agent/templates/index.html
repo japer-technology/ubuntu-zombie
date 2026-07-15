@@ -1814,11 +1814,12 @@ async function handleSlashCommand(input) {
       addMessage("user", input);
       try {
         const health = await uzFetchJson("/api/health");
-        const provider = health.provider || {};
+        const providerInfo = health.provider || {};
         const f = health.facts || {};
-        const providerText = provider.provider && provider.provider !== "none"
-          ? `${provider.provider}: ${provider.status}`
-          : provider.status;
+        const providerText =
+          providerInfo.provider && providerInfo.provider !== "none"
+            ? `${providerInfo.provider}: ${providerInfo.status}`
+            : providerInfo.status;
         addMessage("system",
           `${f.hostname || "?"} - ${f.os || "Ubuntu"} - ${f.kernel || "?"} ` +
           `(${f.arch || "?"})` + (providerText ? ` - ${providerText}` : ""));
