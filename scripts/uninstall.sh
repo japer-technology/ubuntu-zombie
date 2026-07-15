@@ -12,7 +12,9 @@
 # deletion.
 #
 # Usage:
-#   sudo ./uninstall.sh                # interactive
+#   sudo ./uninstall.sh                # interactive (remove all managed components)
+#   sudo ./uninstall.sh zombie         # remove only the zombie component
+#   sudo ./uninstall.sh forgejo        # remove only the Forgejo component
 #   sudo ./uninstall.sh -n|--dry-run   # preview
 #   sudo ./uninstall.sh --archive      # archive then remove
 #   sudo ./uninstall.sh -y|--yes       # skip confirmations
@@ -61,6 +63,9 @@ COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
 UNINSTALL_EXIT=0
+# Count of cleanup failures: used for per-component manifest-retention checks
+# so that failures from one component cannot mask failures in a subsequent one.
+UNINSTALL_FAIL_COUNT=0
 
 # Shared colours/logging come from lib.sh. Keep the legacy C_YEL alias so the
 # inline printf calls below (e.g. the [dry] glyph) need no churn.
@@ -154,8 +159,9 @@ Usage:
   sudo ./uninstall.sh [component ...] # interactive
   sudo ./uninstall.sh -n|--dry-run    # preview
   sudo ./uninstall.sh forgejo --dry-run
-                                      # accepted target syntax; selective
-                                      # removal is gated until manifest phase
+                                      # remove only the Forgejo component
+  sudo ./uninstall.sh zombie
+                                      # remove only the zombie component
   sudo ./uninstall.sh --archive       # archive then remove
   sudo ./uninstall.sh -y|--yes       # skip confirmations
   sudo ./uninstall.sh --keep-agent   # do not remove user
@@ -169,6 +175,10 @@ Environment:
                        alias so older installs can still be reversed.
   ZOMBIE_COLOR=auto|always|never   colour policy (default auto;
                        NO_COLOR is also honoured).
+
+Notes:
+  --archive and --keep-agent are only valid when the `zombie`
+  component is being removed.
 
 This script intentionally does NOT remove Node, Python, or other base
 packages — those are normal Ubuntu software
@@ -193,14 +203,11 @@ while [[ $# -gt 0 ]]; do
 done
 validate_targets
 
-if (( ${#TARGET_ARGS[@]} > 0 )); then
-  if (( DRY_RUN )); then
-    printf 'uninstall.sh %s  --  dry-run\n\n' "${SCRIPT_VERSION}"
-    printf 'Component target(s): %s\n' "${TARGET_ARGS[*]}"
-    printf 'Selective uninstall syntax is accepted, but non-dry-run targeted removal is gated until the component manifest phase lands.\n'
-    exit 0
+if (( ARCHIVE || KEEP_AGENT )); then
+  if (( ${#TARGET_ARGS[@]} > 0 )) && ! is_target_selected "${COMPONENT_ZOMBIE}"; then
+    (( ARCHIVE ))    && die "--archive is only valid when the zombie component is being removed." 2
+    (( KEEP_AGENT )) && die "--keep-agent is only valid when the zombie component is being removed." 2
   fi
-  die "Selective uninstall targets are accepted but gated until the component manifest phase lands. Use no target for the current all-managed-artefacts uninstall." 2
 fi
 
 # The splash is printed only for a real uninstall run: after argument
@@ -221,6 +228,9 @@ is_supported_agent_username() {
 is_safe_absolute_path() {
   [[ "$1" == /* ]] || return 1
   [[ "$1" =~ ^/[A-Za-z0-9._/+:-]+$ ]] || return 1
+  # Reject path traversal: no '..' component anywhere in the path.
+  [[ "$1" == */../* || "$1" == *"/.." ]] && return 1
+  return 0
 }
 
 validate_config() {
@@ -237,6 +247,11 @@ validate_config() {
   if ! is_safe_absolute_path "${BACKUP_DIR}"; then
     printf '%s[x]%s BACKUP_DIR must be an absolute path using only safe path characters; got %q\n' \
       "${C_RED}" "${C_RESET}" "${BACKUP_DIR}" >&2
+    exit 2
+  fi
+  if ! is_safe_absolute_path "${COMPONENT_MANIFEST_DIR}"; then
+    printf '%s[x]%s ZOMBIE_COMPONENT_MANIFEST_DIR must be an absolute safe path without path traversal; got %q\n' \
+      "${C_RED}" "${C_RESET}" "${COMPONENT_MANIFEST_DIR}" >&2
     exit 2
   fi
 }
@@ -292,6 +307,7 @@ run_or_warn() {
   set -e
   if (( rc != 0 )); then
     warn "${description} failed (exit ${rc}); continuing cleanup."
+    UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
     UNINSTALL_EXIT=1
   fi
   return 0
@@ -315,11 +331,13 @@ remove_tree_checked() {
   set -e
   if (( rc != 0 )); then
     warn "Failed to remove ${label} (exit ${rc}); continuing cleanup."
+    UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
     UNINSTALL_EXIT=1
     return 0
   fi
   if [[ -e "${path}" ]]; then
     warn "Failed to remove ${label}; path still exists: ${path}"
+    UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
     UNINSTALL_EXIT=1
     return 0
   fi
@@ -334,230 +352,230 @@ confirm() {
   [[ "${ans}" == "YES" ]]
 }
 
-(( ZOMBIE_QUIET )) || printf '%s== ubuntu-zombie uninstall ==%s\n\n' "${C_BOLD}" "${C_RESET}"
-[[ "${DRY_RUN}" == "1" ]] && warn "Dry-run mode: nothing will be changed."
+remove_component_forgejo() {
+  local fail_count_before="${UNINSTALL_FAIL_COUNT}"
+  local _fj_db _fj_role _fj_user
 
-# -------------------------------------------------------------------
-# 1. Stop and disable the chat service + health timer.
-# -------------------------------------------------------------------
-if is_target_selected "${COMPONENT_ZOMBIE}"; then
-  info "Stopping ubuntu-zombie services"
-  run "systemctl disable --now ubuntu-zombie-health.timer 2>/dev/null || true"
-  run "systemctl disable --now ubuntu-zombie-health.service 2>/dev/null || true"
-  run "systemctl disable --now ubuntu-zombie-chat.service   2>/dev/null || true"
-fi
-
-# -------------------------------------------------------------------
-# 1b. Optional component: Forgejo server + Actions runner.
-# -------------------------------------------------------------------
-# Only runs when Forgejo artefacts are present, so a baseline-only
-# install is untouched. Dropping the database and removing the data
-# directory are destructive and sit behind their own confirmations.
-if is_target_selected "${COMPONENT_FORGEJO}" \
-    && [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
-      || -x /usr/local/bin/forgejo ]]; then
-  info "Removing optional Forgejo component"
-  # Capture the database/role names from app.ini before the config is
-  # removed (the operator may have customised FORGEJO_DB_NAME/USER).
-  FORGEJO_DB_NAME="forgejo"; FORGEJO_DB_USER="forgejo"
-  if [[ -r /etc/forgejo/app.ini ]]; then
-    _fj_db="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="NAME"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-    _fj_role="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="USER"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-    [[ "${_fj_db}"   =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_NAME="${_fj_db}"
-    [[ "${_fj_role}" =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_USER="${_fj_role}"
-  fi
-  run "systemctl disable --now forgejo-runner.service 2>/dev/null || true"
-  run "systemctl disable --now forgejo.service        2>/dev/null || true"
-  run "rm -f /etc/systemd/system/forgejo.service /etc/systemd/system/forgejo-runner.service"
-  run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
-  run "rm -f /usr/local/bin/forgejo /usr/local/bin/forgejo-runner"
-  if [[ -d /etc/forgejo ]]; then
-    remove_tree_checked "/etc/forgejo" "/etc/forgejo (Forgejo config + secrets)"
-  fi
-  if [[ -d /var/lib/forgejo ]]; then
-    if confirm "Remove /var/lib/forgejo (ALL repositories and LFS data)?"; then
-      remove_tree_checked "/var/lib/forgejo" "/var/lib/forgejo (Forgejo data)"
-    else
-      warn "Keeping /var/lib/forgejo. Repository data remains on disk."
+  if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
+      || -x /usr/local/bin/forgejo \
+      || -f /etc/systemd/system/forgejo-runner.service \
+      || -x /usr/local/bin/forgejo-runner \
+      || -d /var/lib/forgejo || -d /var/lib/forgejo-runner \
+      || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]; then
+    info "Removing optional Forgejo component"
+    # Capture the database/role names from app.ini before the config is
+    # removed (the operator may have customised FORGEJO_DB_NAME/USER).
+    FORGEJO_DB_NAME="forgejo"; FORGEJO_DB_USER="forgejo"
+    if [[ -r /etc/forgejo/app.ini ]]; then
+      _fj_db="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="NAME"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+      _fj_role="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="USER"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+      [[ "${_fj_db}"   =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_NAME="${_fj_db}"
+      [[ "${_fj_role}" =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_USER="${_fj_role}"
     fi
-  fi
-  if [[ -d /var/lib/forgejo-runner ]]; then
-    remove_tree_checked "/var/lib/forgejo-runner" "/var/lib/forgejo-runner (runner state)"
-  fi
-  if command -v psql >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
-    if confirm "Drop the Forgejo PostgreSQL database and role (destructive)?"; then
-      run_or_warn "Drop Forgejo database" \
-        "runuser -u postgres -- dropdb --if-exists -- $(shell_quote "${FORGEJO_DB_NAME}")"
-      run_or_warn "Drop Forgejo role" \
-        "runuser -u postgres -- dropuser --if-exists -- $(shell_quote "${FORGEJO_DB_USER}")"
-    else
-      warn "Keeping the Forgejo PostgreSQL database and role."
+    run "systemctl disable --now forgejo-runner.service 2>/dev/null || true"
+    run "systemctl disable --now forgejo.service        2>/dev/null || true"
+    run "rm -f /etc/systemd/system/forgejo.service /etc/systemd/system/forgejo-runner.service"
+    run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
+    run "rm -f /usr/local/bin/forgejo /usr/local/bin/forgejo-runner"
+    if [[ -d /etc/forgejo ]]; then
+      remove_tree_checked "/etc/forgejo" "/etc/forgejo (Forgejo config + secrets)"
     fi
-  fi
-  for _fj_user in forgejo-runner git; do
-    if id "${_fj_user}" >/dev/null 2>&1; then
-      if confirm "Remove the ${_fj_user} system user (created for Forgejo)?"; then
-        run_or_warn "Remove user ${_fj_user}" \
-          "deluser ${_fj_user} >/dev/null 2>&1 || userdel ${_fj_user}"
+    if [[ -d /var/lib/forgejo ]]; then
+      if confirm "Remove /var/lib/forgejo (ALL repositories and LFS data)?"; then
+        remove_tree_checked "/var/lib/forgejo" "/var/lib/forgejo (Forgejo data)"
+      else
+        warn "Keeping /var/lib/forgejo. Repository data remains on disk."
       fi
     fi
-  done
-  if (( UNINSTALL_EXIT == 0 )); then
+    if [[ -d /var/lib/forgejo-runner ]]; then
+      remove_tree_checked "/var/lib/forgejo-runner" "/var/lib/forgejo-runner (runner state)"
+    fi
+    # Only prompt for the PostgreSQL database and role when PostgreSQL is
+    # present; this prevents spurious prompts on hosts where only runner
+    # artefacts exist without a database.
+    if [[ -f /etc/forgejo/app.ini || -d /var/lib/forgejo ]] \
+        && command -v psql >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
+      if confirm "Drop the Forgejo PostgreSQL database and role (destructive)?"; then
+        run_or_warn "Drop Forgejo database" \
+          "runuser -u postgres -- dropdb --if-exists -- $(shell_quote "${FORGEJO_DB_NAME}")"
+        run_or_warn "Drop Forgejo role" \
+          "runuser -u postgres -- dropuser --if-exists -- $(shell_quote "${FORGEJO_DB_USER}")"
+      else
+        warn "Keeping the Forgejo PostgreSQL database and role."
+      fi
+    fi
+    for _fj_user in forgejo-runner git; do
+      if id "${_fj_user}" >/dev/null 2>&1; then
+        if confirm "Remove the ${_fj_user} system user (created for Forgejo)?"; then
+          run_or_warn "Remove user ${_fj_user}" \
+            "deluser ${_fj_user} >/dev/null 2>&1 || userdel ${_fj_user}"
+        fi
+      fi
+    done
+    ok "Forgejo component removal finished."
+  fi
+
+  if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
     remove_component_manifest "${COMPONENT_FORGEJO}"
   else
     warn "Keeping Forgejo manifest because removal finished with errors."
   fi
-  ok "Forgejo component removal finished."
-fi
+  warn_remaining_components
+}
 
-# -------------------------------------------------------------------
-# 2. Remove systemd units and sudoers drop-ins.
-# -------------------------------------------------------------------
-if is_target_selected "${COMPONENT_ZOMBIE}"; then
+remove_component_zombie() {
+  local fail_count_before="${UNINSTALL_FAIL_COUNT}"
+  local unit f orphan_name STAMP _pkg _shim _path _target _literal rc
+
+  # -------------------------------------------------------------------
+  # 1. Stop and disable the chat service + health timer.
+  # -------------------------------------------------------------------
+  info "Stopping ubuntu-zombie services"
+  run "systemctl disable --now ubuntu-zombie-health.timer 2>/dev/null || true"
+  run "systemctl disable --now ubuntu-zombie-health.service 2>/dev/null || true"
+  run "systemctl disable --now ubuntu-zombie-chat.service   2>/dev/null || true"
+
+  # -------------------------------------------------------------------
+  # 2. Remove systemd units and sudoers drop-ins.
+  # -------------------------------------------------------------------
   info "Removing systemd units and sudoers drop-ins"
   for unit in ubuntu-zombie-chat.service ubuntu-zombie-health.service ubuntu-zombie-health.timer; do
-  run "rm -f /etc/systemd/system/${unit}"
-done
-run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
+    run "rm -f /etc/systemd/system/${unit}"
+  done
+  run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
 
-run "rm -f /etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie"
-# Also remove drop-ins from any previous install that used a different
-# ZOMBIE_USER, so a stale NOPASSWD:ALL entry cannot be left behind.
-# See FIX-2-04. The shell does the glob expansion locally; the only
-# metacharacters in $f come from the kernel's directory listing, and
-# FIX-2-01 guarantees AGENT_USER is safe so we cannot accidentally
-# delete the current-account drop-in twice via an odd glob expansion.
-shopt -s nullglob
-for f in /etc/sudoers.d/90-*-ubuntu-zombie; do
-  case "$f" in
-    /etc/sudoers.d/90-"${AGENT_USER}"-ubuntu-zombie) continue ;;
-  esac
-  orphan_name="${f#/etc/sudoers.d/90-}"
-  orphan_name="${orphan_name%-ubuntu-zombie}"
-  warn "Removing orphaned sudoers drop-in for user '${orphan_name}': ${f}"
-  if id "${orphan_name}" >/dev/null 2>&1; then
-    warn "  account '${orphan_name}' still exists; remove it manually if no longer wanted."
-  fi
-  run "rm -f -- $(shell_quote "${f}")"
-done
+  run "rm -f /etc/sudoers.d/90-${AGENT_USER}-ubuntu-zombie"
+  # Also remove drop-ins from any previous install that used a different
+  # ZOMBIE_USER, so a stale NOPASSWD:ALL entry cannot be left behind.
+  # See FIX-2-04. The shell does the glob expansion locally; the only
+  # metacharacters in $f come from the kernel's directory listing, and
+  # FIX-2-01 guarantees AGENT_USER is safe so we cannot accidentally
+  # delete the current-account drop-in twice via an odd glob expansion.
+  shopt -s nullglob
+  for f in /etc/sudoers.d/90-*-ubuntu-zombie; do
+    case "$f" in
+      /etc/sudoers.d/90-"${AGENT_USER}"-ubuntu-zombie) continue ;;
+    esac
+    orphan_name="${f#/etc/sudoers.d/90-}"
+    orphan_name="${orphan_name%-ubuntu-zombie}"
+    warn "Removing orphaned sudoers drop-in for user '${orphan_name}': ${f}"
+    if id "${orphan_name}" >/dev/null 2>&1; then
+      warn "  account '${orphan_name}' still exists; remove it manually if no longer wanted."
+    fi
+    run "rm -f -- $(shell_quote "${f}")"
+  done
   shopt -u nullglob
-fi
 
-# -------------------------------------------------------------------
-# 3. Remove policy/logrotate and legacy desktop artefacts.
-# -------------------------------------------------------------------
-if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  # -------------------------------------------------------------------
+  # 3. Remove policy/logrotate and legacy desktop artefacts.
+  # -------------------------------------------------------------------
   info "Removing policy, logrotate rule, and legacy desktop artefacts"
   run "rm -f /etc/logrotate.d/ubuntu-zombie"
 
-# Reverse the installer's "Prevent sleep, suspend, and screen lock"
-# masking so the desktop can sleep again after the product is gone.
-info "Unmasking sleep/suspend targets"
-run "systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true"
+  # Reverse the installer's "Prevent sleep, suspend, and screen lock"
+  # masking so the desktop can sleep again after the product is gone.
+  info "Unmasking sleep/suspend targets"
+  run "systemctl unmask sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true"
 
-# Remove the installer-specific unattended-upgrades reboot policy so
-# the machine no longer auto-reboots at 04:00 after uninstall. The
-# stock 20auto-upgrades file is left as-is: unattended upgrades are a
-# sensible default and other software may rely on them.
+  # Remove the installer-specific unattended-upgrades reboot policy so
+  # the machine no longer auto-reboots at 04:00 after uninstall. The
+  # stock 20auto-upgrades file is left as-is: unattended upgrades are a
+  # sensible default and other software may rely on them.
   if [[ -f /etc/apt/apt.conf.d/52unattended-upgrades-local ]]; then
     info "Removing installer unattended-upgrades auto-reboot policy"
     run "rm -f /etc/apt/apt.conf.d/52unattended-upgrades-local"
   fi
-fi
 
-# -------------------------------------------------------------------
-# 4. Archive user data if requested.
-# -------------------------------------------------------------------
-STAMP="$(date -u +%Y%m%d-%H%M%S)"
-if is_target_selected "${COMPONENT_ZOMBIE}" && [[ "${ARCHIVE}" == "1" ]]; then
-  info "Archiving ${AGENT_HOME} and ${ZOMBIE_DIR}/state to ${BACKUP_DIR}"
-  # Only assert mode when creating the directory new; otherwise leave the
-  # existing mode/ownership alone (e.g. /var/backups must stay 0755 so dpkg,
-  # cracklib, and audit collectors keep working). See FIX-1-04.
-  if [[ ! -d "${BACKUP_DIR}" ]]; then
-    run "install -d -m 700 ${BACKUP_DIR}"
-  fi
-  # Create the tarballs with mode 0600 so provider tokens and other
-  # secrets are not world-readable when BACKUP_DIR itself
-  # is 0755 (the Ubuntu default for /var/backups). See FIX-2-02.
-  if [[ -d "${AGENT_HOME}" ]]; then
-    run "(umask 077 && tar -czf ${BACKUP_DIR}/ubuntu-zombie-home-${STAMP}.tar.gz -C / home/${AGENT_USER})"
-  fi
-  if [[ -d "${ZOMBIE_DIR}/state" ]]; then
-    run "(umask 077 && tar -czf ${BACKUP_DIR}/ubuntu-zombie-state-${STAMP}.tar.gz -C ${ZOMBIE_DIR} state)"
-  fi
-fi
-
-# -------------------------------------------------------------------
-# 5. Remove /opt/ai-zombie (state/secrets only with confirmation).
-# -------------------------------------------------------------------
-if is_target_selected "${COMPONENT_ZOMBIE}" && [[ -d "${ZOMBIE_DIR}" ]]; then
-  if confirm "Remove ${ZOMBIE_DIR} (includes secrets, state, and chat history)?"; then
-    remove_tree_checked "${ZOMBIE_DIR}" "${ZOMBIE_DIR}"
-  else
-    warn "Keeping ${ZOMBIE_DIR}. Privileged code under it is still on disk."
-  fi
-fi
-
-# -------------------------------------------------------------------
-# 5b. Remove globally-installed npm packages we own.
-# -------------------------------------------------------------------
-# The installer pulls @earendil-works/pi-ai and
-# @earendil-works/pi-coding-agent via ``npm install -g``.
-# ``rm -rf /opt/ai-zombie`` removes our source tree but leaves the
-# Node packages installed system-wide. Uninstall them explicitly so
-# the host is left clean.
-if is_target_selected "${COMPONENT_ZOMBIE}" && command -v npm >/dev/null 2>&1; then
-  for _pkg in @earendil-works/pi-coding-agent @earendil-works/pi-ai; do
-    if npm ls -g --depth=0 "${_pkg}" >/dev/null 2>&1; then
-      if confirm "Remove global npm package ${_pkg}?"; then
-        run_or_warn "Remove global npm package ${_pkg}" \
-          "npm uninstall -g $(shell_quote "${_pkg}")"
-      fi
+  # -------------------------------------------------------------------
+  # 4. Archive user data if requested.
+  # -------------------------------------------------------------------
+  STAMP="$(date -u +%Y%m%d-%H%M%S)"
+  if [[ "${ARCHIVE}" == "1" ]]; then
+    info "Archiving ${AGENT_HOME} and ${ZOMBIE_DIR}/state to ${BACKUP_DIR}"
+    # Only assert mode when creating the directory new; otherwise leave the
+    # existing mode/ownership alone (e.g. /var/backups must stay 0755 so dpkg,
+    # cracklib, and audit collectors keep working). See FIX-1-04.
+    if [[ ! -d "${BACKUP_DIR}" ]]; then
+      run "install -d -m 700 ${BACKUP_DIR}"
     fi
-  done
-fi
+    # Create the tarballs with mode 0600 so provider tokens and other
+    # secrets are not world-readable when BACKUP_DIR itself
+    # is 0755 (the Ubuntu default for /var/backups). See FIX-2-02.
+    if [[ -d "${AGENT_HOME}" ]]; then
+      run "(umask 077 && tar -czf ${BACKUP_DIR}/ubuntu-zombie-home-${STAMP}.tar.gz -C / home/${AGENT_USER})"
+    fi
+    if [[ -d "${ZOMBIE_DIR}/state" ]]; then
+      run "(umask 077 && tar -czf ${BACKUP_DIR}/ubuntu-zombie-state-${STAMP}.tar.gz -C ${ZOMBIE_DIR} state)"
+    fi
+  fi
 
-# -------------------------------------------------------------------
-# 5c. Remove /usr/local/bin symlinks installed by install.sh.
-# -------------------------------------------------------------------
-# install.sh adds these as `ln -sf ${ZOMBIE_DIR}/bin/...` shims so the
-# CLI is on PATH for the operator. Without explicit cleanup they become
-# dangling symlinks after step 5 removes ${ZOMBIE_DIR}. Only remove a
-# link if it is a symlink whose target lives under ${ZOMBIE_DIR}, so we
-# never delete an operator-owned binary of the same name.
-if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  # -------------------------------------------------------------------
+  # 5. Remove /opt/ai-zombie (state/secrets only with confirmation).
+  # -------------------------------------------------------------------
+  if [[ -d "${ZOMBIE_DIR}" ]]; then
+    if confirm "Remove ${ZOMBIE_DIR} (includes secrets, state, and chat history)?"; then
+      remove_tree_checked "${ZOMBIE_DIR}" "${ZOMBIE_DIR}"
+    else
+      warn "Keeping ${ZOMBIE_DIR}. Privileged code under it is still on disk."
+    fi
+  fi
+
+  # -------------------------------------------------------------------
+  # 5b. Remove globally-installed npm packages we own.
+  # -------------------------------------------------------------------
+  # The installer pulls @earendil-works/pi-ai and
+  # @earendil-works/pi-coding-agent via ``npm install -g``.
+  # ``rm -rf /opt/ai-zombie`` removes our source tree but leaves the
+  # Node packages installed system-wide. Uninstall them explicitly so
+  # the host is left clean.
+  if command -v npm >/dev/null 2>&1; then
+    for _pkg in @earendil-works/pi-coding-agent @earendil-works/pi-ai; do
+      if npm ls -g --depth=0 "${_pkg}" >/dev/null 2>&1; then
+        if confirm "Remove global npm package ${_pkg}?"; then
+          run_or_warn "Remove global npm package ${_pkg}" \
+            "npm uninstall -g $(shell_quote "${_pkg}")"
+        fi
+      fi
+    done
+  fi
+
+  # -------------------------------------------------------------------
+  # 5c. Remove /usr/local/bin symlinks installed by install.sh.
+  # -------------------------------------------------------------------
+  # install.sh adds these as `ln -sf ${ZOMBIE_DIR}/bin/...` shims so the
+  # CLI is on PATH for the operator. Without explicit cleanup they become
+  # dangling symlinks after step 5 removes ${ZOMBIE_DIR}. Only remove a
+  # link if it is a symlink whose target lives under ${ZOMBIE_DIR}, so we
+  # never delete an operator-owned binary of the same name.
   info "Removing /usr/local/bin shims that point into ${ZOMBIE_DIR}"
   for _shim in zombie-chat audit-recent secrets-edit zombie-health zombie-diagnostics zombie-verify; do
-  _path="/usr/local/bin/${_shim}"
-  if [[ -L "${_path}" ]]; then
-    _target="$(readlink -f "${_path}" 2>/dev/null || true)"
-    case "${_target}" in
-      "${ZOMBIE_DIR}"/*) run "rm -f -- $(shell_quote "${_path}")" ;;
-      "") # broken symlink; check the literal target instead.
-        _literal="$(readlink "${_path}" 2>/dev/null || true)"
-        case "${_literal}" in
-          "${ZOMBIE_DIR}"/*) run "rm -f -- $(shell_quote "${_path}")" ;;
-        esac
-        ;;
-    esac
-  fi
+    _path="/usr/local/bin/${_shim}"
+    if [[ -L "${_path}" ]]; then
+      _target="$(readlink -f "${_path}" 2>/dev/null || true)"
+      case "${_target}" in
+        "${ZOMBIE_DIR}"/*) run "rm -f -- $(shell_quote "${_path}")" ;;
+        "") # broken symlink; check the literal target instead.
+          _literal="$(readlink "${_path}" 2>/dev/null || true)"
+          case "${_literal}" in
+            "${ZOMBIE_DIR}"/*) run "rm -f -- $(shell_quote "${_path}")" ;;
+          esac
+          ;;
+      esac
+    fi
   done
-fi
 
-# -------------------------------------------------------------------
-# 6. Remove /etc/ubuntu-zombie policy config.
-# -------------------------------------------------------------------
-if is_target_selected "${COMPONENT_ZOMBIE}" && [[ -d /etc/ubuntu-zombie ]]; then
-  if confirm "Remove /etc/ubuntu-zombie (policy.yaml)?"; then
-    remove_tree_checked "/etc/ubuntu-zombie" "/etc/ubuntu-zombie"
+  # -------------------------------------------------------------------
+  # 6. Remove /etc/ubuntu-zombie policy config.
+  # -------------------------------------------------------------------
+  if [[ -d /etc/ubuntu-zombie ]]; then
+    if confirm "Remove /etc/ubuntu-zombie (policy.yaml)?"; then
+      remove_tree_checked "/etc/ubuntu-zombie" "/etc/ubuntu-zombie"
+    fi
   fi
-fi
 
-# -------------------------------------------------------------------
-# 7. Remove the agent user (last, so its home is still owned).
-# -------------------------------------------------------------------
-if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  # -------------------------------------------------------------------
+  # 7. Remove the agent user (last, so its home is still owned).
+  # -------------------------------------------------------------------
   if [[ "${KEEP_AGENT}" == "1" ]]; then
     info "Keeping user ${AGENT_USER} (--keep-agent)."
   elif id "${AGENT_USER}" >/dev/null 2>&1; then
@@ -598,6 +616,7 @@ if is_target_selected "${COMPONENT_ZOMBIE}"; then
         else
           warn "Failed to remove user ${AGENT_USER}; see 'who', 'loginctl list-sessions',"
           warn "  'lsof +D ${AGENT_HOME}' and re-run after the processes are gone."
+          UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
           UNINSTALL_EXIT=1
         fi
       fi
@@ -605,15 +624,30 @@ if is_target_selected "${COMPONENT_ZOMBIE}"; then
       warn "Keeping user ${AGENT_USER}. Its home and authorized_keys remain."
     fi
   fi
-fi
 
-if is_target_selected "${COMPONENT_ZOMBIE}"; then
-  if (( UNINSTALL_EXIT == 0 )); then
+  if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
     remove_component_manifest "${COMPONENT_ZOMBIE}"
   else
     warn "Keeping zombie manifest because removal finished with errors."
   fi
   warn_remaining_components
+}
+
+(( ZOMBIE_QUIET )) || printf '%s== ubuntu-zombie uninstall ==%s\n\n' "${C_BOLD}" "${C_RESET}"
+[[ "${DRY_RUN}" == "1" ]] && warn "Dry-run mode: nothing will be changed."
+if (( ${#TARGET_ARGS[@]} > 0 )); then
+  info "Selected components: ${TARGET_ARGS[*]}"
+else
+  info "Selected components: ${PUBLIC_COMPONENTS[*]}"
+fi
+
+# Execute component removal in dependency order (dependants before dependencies).
+# No-target: remove all discovered/all artefacts (forgejo before zombie).
+if is_target_selected "${COMPONENT_FORGEJO}"; then
+  remove_component_forgejo
+fi
+if is_target_selected "${COMPONENT_ZOMBIE}"; then
+  remove_component_zombie
 fi
 
 echo

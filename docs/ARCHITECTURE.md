@@ -135,11 +135,29 @@ scripts/install.sh <verb> [component ...] [flags]
 | `verify` | Read-only state check. |
 | `doctor` | Explain failures and likely fixes. |
 | `repair` | Re-assert permissions, re-render runtime config, redeploy skills, restart chat. |
-| `uninstall` | Delegate to `scripts/uninstall.sh`; no target keeps all-managed-artefacts removal. |
+| `uninstall` | Delegate to `scripts/uninstall.sh`; `uninstall zombie` / `uninstall forgejo` remove only that component, and no target removes all managed components. |
 
 `install forgejo` is accepted for parser and dry-run compatibility, but
-standalone non-dry-run Forgejo install is gated until the Forgejo
-component is extracted from the zombie baseline flow.
+standalone non-dry-run Forgejo install is gated until Phase 3, when the
+Forgejo component is extracted from the zombie baseline flow.
+
+## Component manifest
+
+Installed components are tracked independently under
+`/var/lib/ubuntu-zombie/components/`. This directory is intentionally
+outside `/opt/ai-zombie`, so selective zombie removal does not erase the
+manifest entry for a remaining component such as Forgejo.
+
+Manifest files use a fixed format-version-`1` key/value layout:
+`format=`, `component=`, `ubuntu_zombie_version=`, `converged_utc=`,
+`component_version=`, and `suboptions=`. They are parsed as data, never
+sourced. Malformed or unknown entries are skipped.
+
+A component entry is written only after that component's install has
+completed successfully and passed its health checks. It is removed only
+after that component's uninstall completes successfully; if cleanup for a
+component fails, its manifest entry is retained so later lifecycle
+commands can see that the component still needs attention.
 
 ## Logs and state
 

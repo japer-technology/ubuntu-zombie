@@ -119,14 +119,21 @@ sudo ./scripts/install.sh install zombie      # same, explicit target
 sudo ./scripts/install.sh install zombie forgejo --dry-run
 sudo ./scripts/install.sh verify zombie
 sudo ./scripts/install.sh doctor forgejo
-sudo ./scripts/install.sh uninstall           # current all-components removal
+
+# Remove only the Forgejo component, leave zombie running:
+sudo ./scripts/install.sh uninstall forgejo
+
+# Remove only the zombie account and runtime, leave Forgejo running:
+sudo ./scripts/install.sh uninstall zombie
+
+# Remove everything (default):
+sudo ./scripts/install.sh uninstall
 ```
 
 The `install forgejo` target is accepted for parser and dry-run
 planning, but standalone non-dry-run Forgejo install remains gated until
-the component extraction work lands. Use `ZOMBIE_INSTALL_FORGEJO=1` with
-`install` for the current supported combined Ubuntu Zombie + Forgejo
-path.
+Phase 3. Use `ZOMBIE_INSTALL_FORGEJO=1` with `install` for the current
+supported combined Ubuntu Zombie + Forgejo path.
 
 To upgrade an existing host (or refresh after fixing a bug upstream),
 pull the latest source and re-run `install`:
