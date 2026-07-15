@@ -1781,7 +1781,8 @@ EOF_MANIFEST
   mkdir -p "${fake_bin}"
   cat > "${fake_bin}/psql" <<'EOF_FAKE_PSQL'
 #!/usr/bin/env bash
-exit 0
+echo "fake psql should not execute during dry-run" >&2
+exit 99
 EOF_FAKE_PSQL
   chmod +x "${fake_bin}/psql"
   out="$(ZOMBIE_COLOR=never ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
