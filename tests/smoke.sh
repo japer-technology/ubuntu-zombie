@@ -1777,6 +1777,25 @@ EOF_MANIFEST
   ! grep -q "ubuntu-zombie-chat" <<<"${out}" \
     || { echo "FAIL: forgejo-only dry-run should not include zombie service cleanup" >&2; exit 1; }
 
+  local fake_bin="${scratch_root}/fake-postgres-bin"
+  mkdir -p "${fake_bin}"
+  cat > "${fake_bin}/psql" <<'EOF_FAKE_PSQL'
+#!/usr/bin/env bash
+exit 0
+EOF_FAKE_PSQL
+  cat > "${fake_bin}/id" <<'EOF_FAKE_ID'
+#!/usr/bin/env bash
+[[ "$1" == "postgres" ]] && exit 0
+exec /usr/bin/id "$@"
+EOF_FAKE_ID
+  chmod +x "${fake_bin}/psql" "${fake_bin}/id"
+  out="$(ZOMBIE_COLOR=never ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    PATH="${fake_bin}:${PATH}" ./scripts/uninstall.sh forgejo --yes --dry-run 2>&1 || true)"
+  grep -q "dropdb --if-exists -- forgejo" <<<"${out}" \
+    || { echo "FAIL: forgejo uninstall should include PostgreSQL database cleanup" >&2; exit 1; }
+  grep -q "dropuser --if-exists -- forgejo" <<<"${out}" \
+    || { echo "FAIL: forgejo uninstall should include PostgreSQL role cleanup" >&2; exit 1; }
+
   out="$(ZOMBIE_COLOR=never ./scripts/uninstall.sh zombie --dry-run 2>&1 || true)"
   grep -q "ubuntu-zombie" <<<"${out}" \
     || { echo "FAIL: zombie-only dry-run should mention zombie cleanup" >&2; exit 1; }
@@ -1838,6 +1857,19 @@ EOF_MANIFEST
     ZOMBIE_DIR="${bogus_zombie_dir}" ./scripts/install.sh verify --json 2>/dev/null || true)"
   grep -Eq '"component"[[:space:]]*:[[:space:]]*"forgejo"' <<<"${out}" \
     || { echo "FAIL: verify --json did not discover forgejo manifest" >&2; exit 1; }
+
+  rm -rf -- "${bogus_zombie_dir}"
+  mkdir -p "${bogus_zombie_dir}"
+  out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${scratch_root}/no-manifests" \
+    ZOMBIE_USER="verify-missing" ZOMBIE_DIR="${bogus_zombie_dir}" \
+    ./scripts/install.sh verify --json 2>&1 || true)"
+  grep -Eq '"component"[[:space:]]*:[[:space:]]*"zombie"' <<<"${out}" \
+    || { echo "FAIL: verify --json should report partial legacy zombie installs" >&2; exit 1; }
+  grep -Eq '"id"[[:space:]]*:[[:space:]]*"verify_script"' <<<"${out}" \
+    || { echo "FAIL: verify --json should include missing verifier check" >&2; exit 1; }
+  ! grep -q "failed on line" <<<"${out}" \
+    || { echo "FAIL: verify --json should not emit the generic install error trap" >&2; exit 1; }
+  rm -rf -- "${bogus_zombie_dir}"
 
   # --- Manifest with a missing required key should be rejected ---------
   manifest_dir="${scratch_root}/missing-key"

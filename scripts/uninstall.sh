@@ -360,7 +360,7 @@ confirm() {
 
 remove_component_forgejo() {
   local fail_count_before="${UNINSTALL_FAIL_COUNT}"
-  local _fj_db _fj_role _fj_user
+  local _fj_db _fj_role _fj_user _fj_has_db_state=0
 
   if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
       || -x /usr/local/bin/forgejo \
@@ -372,6 +372,10 @@ remove_component_forgejo() {
     # Capture the database/role names from app.ini before the config is
     # removed (the operator may have customised FORGEJO_DB_NAME/USER).
     FORGEJO_DB_NAME="forgejo"; FORGEJO_DB_USER="forgejo"
+    if [[ -f /etc/forgejo/app.ini || -d /var/lib/forgejo \
+        || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]; then
+      _fj_has_db_state=1
+    fi
     if [[ -r /etc/forgejo/app.ini ]]; then
       _fj_db="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="NAME"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
       _fj_role="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="USER"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
@@ -397,9 +401,10 @@ remove_component_forgejo() {
       remove_tree_checked "/var/lib/forgejo-runner" "/var/lib/forgejo-runner (runner state)"
     fi
     # Only prompt for the PostgreSQL database and role when PostgreSQL is
-    # present; this prevents spurious prompts on hosts where only runner
-    # artefacts exist without a database.
-    if [[ -f /etc/forgejo/app.ini || -d /var/lib/forgejo ]] \
+    # present and Forgejo database state was discovered before file cleanup.
+    # This makes `uninstall forgejo --yes` reliably return the host to a clean
+    # testing slate while avoiding prompts on hosts with only runner artefacts.
+    if (( _fj_has_db_state )) \
         && command -v psql >/dev/null 2>&1 && id postgres >/dev/null 2>&1; then
       if confirm "Drop the Forgejo PostgreSQL database and role (destructive)?"; then
         run_or_warn "Drop Forgejo database" \

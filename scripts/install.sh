@@ -1125,12 +1125,10 @@ validate_noninteractive() {
 verify_zombie() {
   # Preserve the deployed verifier for zombie-only runs: it contains the
   # richest runtime checks and the root-to-agent re-exec behaviour operators
-  # already rely on. Mixed or non-zombie verification uses the component-aware
-  # checks below so one component cannot hide another component's result.
-  if (( ${#SELECTED_COMPONENTS[@]} == 1 )); then
-    if [[ ! -x "${ZOMBIE_DIR}/bin/verify" ]]; then
-      die "${ZOMBIE_DIR}/bin/verify not found. Run 'sudo ./${SCRIPT_NAME} install zombie' first." 1
-    fi
+  # already rely on. If the legacy detector only found a partial install,
+  # fall through to the component-aware checks so verify can report every
+  # missing piece (and still honour --json) instead of aborting early.
+  if (( ${#SELECTED_COMPONENTS[@]} == 1 )) && [[ -x "${ZOMBIE_DIR}/bin/verify" ]]; then
     if (( JSON_OUTPUT )); then
       export ZOMBIE_JSON=1
     fi
@@ -2399,7 +2397,7 @@ if [[ "${SUBCOMMAND}" == "uninstall" ]] && (( EXPLICIT_TARGETS )) \
 fi
 
 case "${SUBCOMMAND}" in
-  verify)    cmd_verify; exit $? ;;
+  verify)    if cmd_verify; then exit 0; else exit 1; fi ;;
   doctor)    cmd_doctor; exit $? ;;
   repair)    require_root; cmd_repair; exit $? ;;
   uninstall) (( DRY_RUN )) || require_root; cmd_uninstall; exit $? ;;

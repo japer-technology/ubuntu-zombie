@@ -10,6 +10,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Phase 4 — Registry generalisation
 
+- **Uninstall hardening:** `uninstall forgejo --yes` now reliably removes the
+  Forgejo PostgreSQL database and role when PostgreSQL is present, even after
+  Forgejo files are cleaned up, so test hosts can be reset to a clean slate.
+- **Verify fallback:** partial legacy zombie installs now report component-aware
+  verify failures (including JSON output) instead of aborting when the deployed
+  verifier script is missing.
 - **Validated component registry:** shared selection, validation, review,
   dry-run, receipt, phase counting, install, manifest, final-summary, and
   uninstall paths dispatch trusted component hooks from one ordered
