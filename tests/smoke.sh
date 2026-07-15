@@ -1558,6 +1558,8 @@ run_subcommands() {
   # The extracted Forgejo hook must not depend on zombie runtime state.
   local forgejo_hook
   forgejo_hook="$(sed -n '/^install_forgejo() {$/,/^}$/p' scripts/install.sh)"
+  [[ -n "${forgejo_hook}" ]] \
+    || { echo "FAIL: could not locate the install_forgejo hook" >&2; exit 1; }
   ! grep -Eq 'AGENT_USER|AGENT_HOME|CHAT_PORT|TTL_DAYS|LOCAL_LLM|ZOMBIE_ETC|/opt/ai-zombie' \
     <<<"${forgejo_hook}" \
     || { echo "FAIL: install_forgejo references zombie-owned state" >&2; exit 1; }

@@ -905,7 +905,7 @@ validate_config() {
     fi
     if [[ "${ZOMBIE_RECEIPT}" != "1" ]] \
       && { [[ -z "${FORGEJO_ADMIN_PASSWORD}" ]] || [[ -z "${FORGEJO_DB_PASSWORD}" ]]; }; then
-      die "Forgejo password generation requires ZOMBIE_RECEIPT=1. Enable the root-only receipt or set both Forgejo passwords." 64
+      die "Forgejo password generation requires a receipt. Set ZOMBIE_RECEIPT=1, or explicitly set both FORGEJO_ADMIN_PASSWORD and FORGEJO_DB_PASSWORD." 64
     fi
     if ! is_valid_forgejo_version "${FORGEJO_VERSION}"; then
       die "FORGEJO_VERSION must be a release like 11.0.3 (or empty for latest)." 2
@@ -3812,7 +3812,7 @@ elif (( COMPONENT_ZOMBIE_SELECTED )) && [[ "${CHAT_OK}" != "1" ]]; then
 elif (( COMPONENT_ZOMBIE_SELECTED )); then
   NEXT_STEP="sudo reboot"
 else
-  NEXT_STEP="open http://<host>:${FORGEJO_HTTP_PORT}/"
+  NEXT_STEP="http://<host>:${FORGEJO_HTTP_PORT}/"
 fi
 
 INSTALL_DURATION="$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
