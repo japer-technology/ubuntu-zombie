@@ -2366,6 +2366,38 @@ run_standards() {
     || { echo "Forgejo config directory must be locked after migration" >&2; exit 1; }
   grep -q '/api/healthz' scripts/install.sh \
     || { echo "Forgejo install must verify application health" >&2; exit 1; }
+  local confirmation_helper confirmation_out
+  confirmation_helper="$(install_function require_capitalized_yes)"
+  bash -c "${confirmation_helper}
+    info() { :; }
+    die() { printf '%s\n' \"\$1\" >&2; exit \"\${2:-1}\"; }
+    ZOMBIE_NONINTERACTIVE=1
+    ASSUME_YES=1
+    FORGEJO_CONFIRM_UPDATE=YES
+    require_capitalized_yes FORGEJO_CONFIRM_UPDATE 'confirm update'" \
+    || { echo "exact YES must allow an unattended Forgejo update" >&2; exit 1; }
+  if confirmation_out="$(bash -c "${confirmation_helper}
+    info() { :; }
+    die() { printf '%s\n' \"\$1\" >&2; exit \"\${2:-1}\"; }
+    ZOMBIE_NONINTERACTIVE=1
+    ASSUME_YES=1
+    FORGEJO_CONFIRM_UPDATE=yes
+    require_capitalized_yes FORGEJO_CONFIRM_UPDATE 'confirm update'" 2>&1)"; then
+    echo "lowercase yes must not approve an existing Forgejo update" >&2
+    exit 1
+  fi
+  grep -q 'FORGEJO_CONFIRM_UPDATE=YES' <<<"${confirmation_out}" \
+    || { echo "Forgejo update refusal must explain the exact YES override" >&2; exit 1; }
+  grep -q 'require_capitalized_yes FORGEJO_CONFIRM_UPDATE' scripts/install.sh \
+    || { echo "existing Forgejo installs must require explicit update approval" >&2; exit 1; }
+  grep -q 'require_capitalized_yes FORGEJO_CONFIRM_DATABASE_REUSE' <<<"${forgejo_hook}" \
+    || { echo "existing Forgejo databases must require explicit reuse approval" >&2; exit 1; }
+  awk '
+    /require_capitalized_yes FORGEJO_CONFIRM_DATABASE_REUSE/ { gate=NR }
+    /ALTER ROLE/ { alter=NR }
+    END { exit !(gate && alter && gate < alter) }
+  ' <<<"${forgejo_hook}" \
+    || { echo "database reuse approval must precede role mutation" >&2; exit 1; }
   local docker_conflict_out forgejo_docker_helper docker_stub
   forgejo_docker_helper="$(install_function ensure_forgejo_runner_docker_package)"
   docker_stub="$(mktemp)"

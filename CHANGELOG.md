@@ -10,6 +10,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Phase 4 — Registry generalisation
 
+- **Forgejo update safety:** re-runs now detect existing Forgejo and matching
+  PostgreSQL state before mutation, require separate exact, capitalised `YES`
+  approvals (including explicit environment acknowledgements for unattended
+  updates), and state that repositories and database data are preserved.
 - **Uninstall hardening:** `uninstall forgejo --yes` now reliably removes the
   Forgejo PostgreSQL database and role when PostgreSQL is present, even after
   Forgejo files are cleaned up, so test hosts can be reset to a clean slate.

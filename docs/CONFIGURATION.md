@@ -449,6 +449,8 @@ it at `http://<host>:<port>/`.
 | `FORGEJO_VERSION`               | *(empty — latest release)*               | Pin a Forgejo release (e.g. `11.0.3`); the resolved value is recorded in the receipt. |
 | `FORGEJO_RUNNER_VERSION`        | *(empty — latest release)*               | Pin a forgejo-runner release. |
 | `FORGEJO_RUNNER_LABELS`         | `ubuntu-latest:docker://node:20-bookworm`| Runner labels; the default maps `ubuntu-latest` jobs to a Docker container. |
+| `FORGEJO_CONFIRM_UPDATE`        | *(empty)*                                | Set to capitalised `YES` to approve updating an existing Forgejo installation without an interactive prompt. |
+| `FORGEJO_CONFIRM_DATABASE_REUSE`| *(empty)*                                | Set to capitalised `YES` to approve reusing an existing Forgejo PostgreSQL database/role without an interactive prompt. |
 
 Every one of these decision parameters can also be set interactively:
 the review's `9) Options` sub-menu lets you toggle the server and
@@ -476,6 +478,12 @@ cannot rewrite it. During an install or upgrade, the installer stops Forgejo,
 temporarily grants the `git` account write access for the one-shot database
 migration, and restores the directory/file to `750`/`640` even if migration
 fails. Startup is considered successful only after `/api/healthz` responds.
+If an existing Forgejo installation or matching PostgreSQL database/role is
+detected, each is reported and protected by a separate exact, capitalised
+`YES` confirmation. `--yes` does not bypass these data-safety gates. For
+unattended updates, set `FORGEJO_CONFIRM_UPDATE=YES` and
+`FORGEJO_CONFIRM_DATABASE_REUSE=YES`. The update path never drops the database
+or repository data.
 
 Caveats:
 
