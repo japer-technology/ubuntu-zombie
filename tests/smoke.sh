@@ -475,7 +475,9 @@ PY
     ZOMBIE_AUDIT_LOG="$(mktemp -d)/audit.log" \
     PYTHONPATH=payload/agent \
       python3 - <<'PY'
+import json
 import os
+import tempfile
 import providers as _pr
 import server
 
@@ -544,6 +546,40 @@ prov, chosen = _pr.set_active_model("qwen/qwen3-coder")
 if (prov, chosen) != ("lmstudio", "qwen/qwen3-coder"):
     raise SystemExit(f"lmstudio free-form selection wrong: {(prov, chosen)!r}")
 
+# Runtime LM Studio discovery scans a bounded network, preserves the full
+# advertised catalogue in pi's provider file, and activates the provider.
+original_probe = _pr._probe_lmstudio
+try:
+    _pr._probe_lmstudio = lambda address, port: ({
+        "address": f"{address}:{port}",
+        "base_url": f"http://{address}:{port}/v1",
+        "models": ["qwen/qwen3-coder", "llama-3.1-8b"],
+    } if address == "127.0.0.2" else None)
+    discovered = _pr.scan_lmstudio("127.0.0.0/30", 1234)
+finally:
+    _pr._probe_lmstudio = original_probe
+if len(discovered) != 1 or discovered[0]["address"] != "127.0.0.2:1234":
+    raise SystemExit(f"scan_lmstudio wrong: {discovered!r}")
+
+models_dir = tempfile.mkdtemp()
+models_path = os.path.join(models_dir, "models.json")
+os.environ["ZOMBIE_PI_MODELS_JSON"] = models_path
+provider, chosen, address = _pr.activate_lmstudio(discovered[0])
+if (provider, chosen, address) != (
+    "lmstudio", "qwen/qwen3-coder", "127.0.0.2:1234"
+):
+    raise SystemExit(f"activate_lmstudio wrong: {(provider, chosen, address)!r}")
+saved = json.load(open(models_path))
+saved_models = [m["id"] for m in saved["providers"]["lmstudio"]["models"]]
+if saved_models != ["qwen/qwen3-coder", "llama-3.1-8b"]:
+    raise SystemExit(f"activate_lmstudio models wrong: {saved_models!r}")
+if _pr.lmstudio_address() != "127.0.0.2:1234":
+    raise SystemExit("lmstudio_address must expose the configured host and port")
+if _pr.provider_status() != (
+    "lmstudio", "model qwen/qwen3-coder at 127.0.0.2:1234"
+):
+    raise SystemExit(f"lmstudio provider status wrong: {_pr.provider_status()!r}")
+
 # Server App wrappers: GET /api/models and POST /api/model payloads.
 os.environ["ZOMBIE_PROVIDER"] = "openai"
 os.environ.pop("ZOMBIE_MODEL", None)
@@ -559,6 +595,17 @@ if ok != {"ok": True, "provider": "openai", "model": "gpt-4o"}:
 bad = app.set_model("nope")
 if "error" not in bad:
     raise SystemExit(f"App.set_model bad payload should carry error: {bad!r}")
+original_scan = _pr.scan_lmstudio
+try:
+    _pr.scan_lmstudio = lambda: discovered
+    selected = app.discover_lmstudio()
+finally:
+    _pr.scan_lmstudio = original_scan
+if selected.get("address") != "127.0.0.2:1234":
+    raise SystemExit(f"App.discover_lmstudio wrong: {selected!r}")
+status = app.provider_info()
+if status.get("lmstudio_address") != "127.0.0.2:1234":
+    raise SystemExit(f"App.provider_info missing LM Studio address: {status!r}")
 app.history.close()
 PY
 
@@ -2514,6 +2561,9 @@ run_standards() {
     || { echo "chat UI must expose the logoff button" >&2; exit 1; }
   grep -q 'case "/logout"' payload/agent/templates/index.html \
     || { echo "chat UI must expose the /logout command" >&2; exit 1; }
+  grep -q 'case "/lmstudio"' payload/agent/templates/index.html \
+    && grep -q 'case "/models"' payload/agent/templates/index.html \
+    || { echo "chat UI must expose /lmstudio and /models commands" >&2; exit 1; }
   grep -q 'setAuthState(false, false)' payload/agent/templates/index.html \
     || { echo "chat UI must hide Logoff when the password gate is removed" >&2; exit 1; }
   grep -q 'Commands by category:' payload/agent/templates/index.html \

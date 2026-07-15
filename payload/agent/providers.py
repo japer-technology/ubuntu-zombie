@@ -515,10 +515,13 @@ def lmstudio_address() -> str | None:
     if not isinstance(base_url, str):
         return None
     from urllib.parse import urlparse
-    parsed = urlparse(base_url)
+    try:
+        parsed = urlparse(base_url)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        return None
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     return f"{parsed.hostname}:{port}"
 
 
