@@ -36,6 +36,29 @@ Interactive installs open a parameter review before changing the host.
 Accept the defaults or edit the agent user, install root, chat port,
 chat password, Time to Live, receipt path, and local LLM settings.
 
+### Install Forgejo without zombie
+
+To install only Forgejo and PostgreSQL:
+
+```bash
+sudo ./scripts/install.sh install forgejo
+```
+
+This path does not create a root-capable zombie account or install the
+agent, Node runtime, policy, audit log, chat services, or desktop power
+settings. It keeps only installer-owned transcript and receipt records
+under `/var/log/`. Generated Forgejo credentials are recorded in the
+root-only receipt.
+
+To install both components in registry order:
+
+```bash
+sudo ./scripts/install.sh install zombie forgejo
+```
+
+The legacy `ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh install` form
+remains equivalent to that combined command.
+
 For unattended installs:
 
 ```bash
@@ -135,7 +158,3 @@ removed.
 The uninstaller removes Ubuntu Zombie services, sudoers entries,
 payload files, policy, logrotate rules, and optionally the agent account
 and archives. Shared packages such as Node and Python are left alone.
-
-Standalone `install forgejo` remains gated until Phase 3. For the current
-combined Ubuntu Zombie + Forgejo path, use
-`ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh install`.

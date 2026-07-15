@@ -116,7 +116,8 @@ no target, `install` keeps its existing meaning: install or upgrade the
 ```bash
 sudo ./scripts/install.sh install             # baseline zombie
 sudo ./scripts/install.sh install zombie      # same, explicit target
-sudo ./scripts/install.sh install zombie forgejo --dry-run
+sudo ./scripts/install.sh install forgejo      # standalone forge + PostgreSQL
+sudo ./scripts/install.sh install zombie forgejo
 sudo ./scripts/install.sh verify zombie
 sudo ./scripts/install.sh doctor forgejo
 
@@ -130,10 +131,10 @@ sudo ./scripts/install.sh uninstall zombie
 sudo ./scripts/install.sh uninstall
 ```
 
-The `install forgejo` target is accepted for parser and dry-run
-planning, but standalone non-dry-run Forgejo install remains gated until
-Phase 3. Use `ZOMBIE_INSTALL_FORGEJO=1` with `install` for the current
-supported combined Ubuntu Zombie + Forgejo path.
+`install forgejo` does not create the zombie account, install Node or the
+Python agent runtime, deploy policy or chat services, or change desktop
+sleep settings. `ZOMBIE_INSTALL_FORGEJO=1 install` remains supported and
+selects the legacy combined `zombie forgejo` path.
 
 To upgrade an existing host (or refresh after fixing a bug upstream),
 pull the latest source and re-run `install`:

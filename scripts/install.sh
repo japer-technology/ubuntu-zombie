@@ -860,6 +860,9 @@ validate_config() {
   if ! is_safe_absolute_path "${LOG_FILE}"; then
     die "LOG_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
+  if ! is_valid_option_flag "${ZOMBIE_RECEIPT}"; then
+    die "ZOMBIE_RECEIPT must be 0 or 1." 2
+  fi
   if [[ "${ZOMBIE_RECEIPT}" == "1" ]] && ! is_safe_absolute_path "${RECEIPT_FILE}"; then
     die "ZOMBIE_RECEIPT_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
@@ -899,6 +902,10 @@ validate_config() {
     fi
     if ! is_valid_forgejo_password "${FORGEJO_DB_PASSWORD}"; then
       die "FORGEJO_DB_PASSWORD must be 8-256 printable characters (or empty to auto-generate)." 2
+    fi
+    if [[ "${ZOMBIE_RECEIPT}" != "1" ]] \
+      && { [[ -z "${FORGEJO_ADMIN_PASSWORD}" ]] || [[ -z "${FORGEJO_DB_PASSWORD}" ]]; }; then
+      die "Forgejo password generation requires ZOMBIE_RECEIPT=1. Enable the root-only receipt or set both Forgejo passwords." 64
     fi
     if ! is_valid_forgejo_version "${FORGEJO_VERSION}"; then
       die "FORGEJO_VERSION must be a release like 11.0.3 (or empty for latest)." 2
@@ -2570,7 +2577,7 @@ else
 This installer will:
   - Install PostgreSQL and Forgejo without creating a zombie account
   - Expose Forgejo on port ${FORGEJO_HTTP_PORT} on all interfaces
-  - Keep the transcript and root-only receipt under /var/log/ubuntu-zombie
+  - Keep installer-owned transcript and root-only receipt records under /var/log
 EOF
 fi
 if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
@@ -3332,12 +3339,6 @@ EOF
       --email "${FORGEJO_ADMIN_EMAIL}" \
       --password "${FORGEJO_ADMIN_PASSWORD}" "${_fj_must_change[@]}"
     ok "Created Forgejo admin ${FORGEJO_ADMIN_USER}."
-    if [[ "${FORGEJO_ADMIN_PASSWORD_SOURCE}" == "generated" ]]; then
-      printf '\n%s  Forgejo admin credentials (also recorded in the install receipt):%s\n' "${C_BOLD}" "${C_RESET}"
-      printf '    username: %s\n' "${FORGEJO_ADMIN_USER}"
-      printf '    password: %s\n' "${FORGEJO_ADMIN_PASSWORD}"
-      printf '  You must change it on first sign-in at http://%s:%s/\n\n' "${_fj_domain}" "${FORGEJO_HTTP_PORT}"
-    fi
     unset _fj_must_change
     note_changed
   fi

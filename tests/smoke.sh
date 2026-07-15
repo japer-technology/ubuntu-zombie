@@ -1511,7 +1511,7 @@ run_subcommands() {
   # Component-aware install grammar: targets, flags before/between/after,
   # default selection, explicit forgejo-only planning, env-additive selection,
   # and -- target validation are all safe under --dry-run.
-  local default_out zombie_out forgejo_out combined_out
+  local default_out zombie_out forgejo_out combined_out reversed_out legacy_out
   default_out="$(ZOMBIE_COLOR=never ./scripts/install.sh install --dry-run)"
   zombie_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run install zombie)"
   [[ "${default_out}" == "${zombie_out}" ]] \
@@ -1522,11 +1522,54 @@ run_subcommands() {
     || { echo "FAIL: forgejo-only dry-run did not select only forgejo" >&2; exit 1; }
   ! grep -q "Agent user:" <<<"${forgejo_out}" \
     || { echo "FAIL: forgejo-only dry-run should not render zombie settings" >&2; exit 1; }
+  grep -q "PostgreSQL" <<<"${forgejo_out}" \
+    || { echo "FAIL: forgejo-only dry-run must include PostgreSQL" >&2; exit 1; }
+  grep -q "Transcript:" <<<"${forgejo_out}" \
+    || { echo "FAIL: forgejo-only dry-run must include the transcript" >&2; exit 1; }
+  grep -q "Receipt:" <<<"${forgejo_out}" \
+    || { echo "FAIL: forgejo-only dry-run must include the receipt" >&2; exit 1; }
+  ! grep -Eq "chat|Time to Live|local LLM|/opt/ai-zombie" <<<"${forgejo_out}" \
+    || { echo "FAIL: forgejo-only dry-run leaked zombie resources" >&2; exit 1; }
+
+  forgejo_out="$(ZOMBIE_COLOR=never ZOMBIE_INSTALL_FORGEJO_RUNNER=1 \
+    ./scripts/install.sh --dry-run install forgejo)"
+  grep -q "docker.io" <<<"${forgejo_out}" \
+    || { echo "FAIL: forgejo-only runner dry-run must include Docker" >&2; exit 1; }
 
   combined_out="$(ZOMBIE_COLOR=never ZOMBIE_INSTALL_FORGEJO=1 \
     ./scripts/install.sh --dry-run install zombie)"
   grep -q "Optional components enabled" <<<"${combined_out}" \
     || { echo "FAIL: legacy Forgejo env flag was not additive" >&2; exit 1; }
+
+  reversed_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run \
+    install forgejo zombie)"
+  legacy_out="$(ZOMBIE_COLOR=never ZOMBIE_INSTALL_FORGEJO=1 \
+    ./scripts/install.sh --dry-run install)"
+  [[ "${combined_out}" == "${reversed_out}" && "${combined_out}" == "${legacy_out}" ]] \
+    || { echo "FAIL: combined targets and legacy flag must resolve identically" >&2; exit 1; }
+
+  # Forgejo-only selection must not validate zombie-only settings.
+  expect_exit_code 0 env ZOMBIE_USER=INVALID ZOMBIE_CHAT_PORT=not-a-port \
+    ZOMBIE_TTL_DAYS=invalid ZOMBIE_NONINTERACTIVE=1 \
+    ./scripts/install.sh install forgejo --dry-run
+  expect_exit_code 64 env ZOMBIE_RECEIPT=0 ZOMBIE_NONINTERACTIVE=1 \
+    ./scripts/install.sh install forgejo --yes
+
+  # The extracted Forgejo hook must not depend on zombie runtime state.
+  local forgejo_hook
+  forgejo_hook="$(sed -n '/^install_forgejo() {$/,/^}$/p' scripts/install.sh)"
+  ! grep -Eq 'AGENT_USER|AGENT_HOME|CHAT_PORT|TTL_DAYS|LOCAL_LLM|ZOMBIE_ETC|/opt/ai-zombie' \
+    <<<"${forgejo_hook}" \
+    || { echo "FAIL: install_forgejo references zombie-owned state" >&2; exit 1; }
+  grep -q 'api/healthz' <<<"${forgejo_hook}" \
+    || { echo "FAIL: install_forgejo must require the Forgejo health check" >&2; exit 1; }
+  local hook_call_line manifest_write_line
+  hook_call_line="$(grep -n '^  install_forgejo$' scripts/install.sh | tail -n1 | cut -d: -f1)"
+  manifest_write_line="$(grep -n 'write_component_manifest "${COMPONENT_FORGEJO}"' \
+    scripts/install.sh | tail -n1 | cut -d: -f1)"
+  [[ -n "${hook_call_line}" && -n "${manifest_write_line}" \
+    && "${manifest_write_line}" -gt "${hook_call_line}" ]] \
+    || { echo "FAIL: Forgejo manifest must be written after the install/health hook" >&2; exit 1; }
 
   # Single valid component targets are exercised above and by dry-run checks;
   # the loop below verifies all public duplicate/invalid target failures.

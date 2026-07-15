@@ -387,9 +387,10 @@ The installer also drops `verify` under the same directory.
 
 When `scripts/install.sh install` runs on an interactive terminal (i.e.
 not `--yes` and not `ZOMBIE_NONINTERACTIVE=1`), it opens an editable
-**parameter review** before touching the host. Every install parameter —
-agent user, install root, chat port, transcript and receipt paths, chat
-password, TTL, and local LLM selection — is listed in a branded summary.
+**parameter review** before touching the host. The review is scoped to
+the selected components. Zombie runs show agent, chat, TTL, provider, and
+local-LLM settings; Forgejo-only runs show Forgejo, PostgreSQL, runner,
+transcript, and receipt settings.
 Enter a number to edit a field (with validation and re-prompting on bad
 input), toggle the boolean options, and repeat until you are satisfied;
 then accept to begin the install. Cancelling at the review (`q`) exits
@@ -417,11 +418,12 @@ by `verify`/`doctor`, repaired by `repair`, and reversed by
 `uninstall.sh`. The design surface for future components lives under
 [`options/`](../options/README.md).
 
-`install forgejo` is accepted syntax for dry-run planning, but standalone
-non-dry-run Forgejo execution is gated until the component extraction
-phase is complete. Use `ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh
-install` for the current supported combined Ubuntu Zombie + Forgejo
-installation.
+`install forgejo` installs Forgejo and PostgreSQL without creating the
+zombie account or deploying the agent runtime. Explicit targets and
+legacy environment selectors are additive and execute in registry order,
+so `install forgejo zombie` and `install zombie forgejo` converge the
+same components. `ZOMBIE_INSTALL_FORGEJO=1 install` remains equivalent
+to the combined path.
 
 ### Forgejo server (`ZOMBIE_INSTALL_FORGEJO=1`)
 
@@ -462,9 +464,12 @@ options: set
 `FORGEJO_ADMIN_PASSWORD` / `FORGEJO_DB_PASSWORD` to choose them, or
 leave them empty to have the installer generate them randomly and
 record the generated values in the install receipt (root-only, mode
-`600`). Operator-supplied passwords are never recorded. A generated
-admin password is also printed once to the console and must be changed
-on first sign-in; an operator-chosen one is kept as-is.
+`600`). Operator-supplied passwords are never recorded. Generated
+passwords are disclosed only in the root-only receipt. A generated admin
+password must be changed on first sign-in; an operator-chosen one is
+kept as-is. If receipts are disabled, both `FORGEJO_ADMIN_PASSWORD` and
+`FORGEJO_DB_PASSWORD` must be supplied; otherwise install exits `64`
+before host mutation.
 
 The configuration directory is mode `750` and the running Forgejo service
 cannot rewrite it. During an install or upgrade, the installer stops Forgejo,
@@ -548,7 +553,8 @@ Examples:
 
 ```bash
 sudo ./scripts/install.sh install zombie
-sudo ./scripts/install.sh install zombie forgejo --dry-run
+sudo ./scripts/install.sh install forgejo
+sudo ./scripts/install.sh install zombie forgejo
 sudo ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh install
 sudo ./scripts/install.sh verify zombie
 sudo ./scripts/install.sh uninstall forgejo --dry-run

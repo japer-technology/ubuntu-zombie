@@ -8,6 +8,23 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Phase 3 — Standalone Forgejo
+
+- **Standalone Forgejo install:** `install forgejo` now installs
+  PostgreSQL, Forgejo, and the optional runner without creating the zombie
+  account or deploying its Node/Python runtime, policy, audit, chat, or
+  desktop settings.
+- **Component hooks:** zombie and Forgejo mutations are isolated behind
+  target-aware install hooks, execute in registry order, and write each
+  manifest only after that component's install and health path completes.
+- **Target-aware experience:** preflight capacity guidance, interactive
+  review, dry-run plans, receipts, progress totals, and final summaries
+  now include only selected component state. Generated Forgejo passwords
+  are disclosed only in the root-only receipt.
+- **Compatibility:** no-target `install` remains zombie-only, and
+  `ZOMBIE_INSTALL_FORGEJO=1 install` remains equivalent to
+  `install zombie forgejo`.
+
 ### Phase 2 — Component manifest and selective lifecycle
 
 - **Selective uninstall**: `uninstall zombie` and `uninstall forgejo` now work as
