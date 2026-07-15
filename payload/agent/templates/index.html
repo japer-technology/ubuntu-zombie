@@ -1538,7 +1538,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     };
     const commandStatusNote = (tool, payload) => {
       const bits = [];
-      if (payload.exit_code !== undefined && payload.exit_code !== null) {
+      if (payload.exit_code != null) {
         bits.push(`exit ${payload.exit_code}`);
       }
       if (typeof payload.duration_ms === "number") bits.push(`${payload.duration_ms} ms`);

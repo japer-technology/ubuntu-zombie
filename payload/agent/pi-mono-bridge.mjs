@@ -425,6 +425,10 @@ async function run() {
         const exitCode = extractExitCode(evt);
         if (exitCode !== null) {
           progress.exit_code = exitCode;
+          // Mark only explicit non-zero command exits as command status:
+          // `ok=false` alone can also mean timeout, cancellation, or bridge
+          // failure, while a non-zero exit code on a successful event would
+          // be inconsistent metadata rather than a failed command status.
           if (progress.ok === false && exitCode !== 0 && isCommandTool(evt.toolName)) {
             progress.command_status = true;
           }
