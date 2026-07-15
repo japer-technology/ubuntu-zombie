@@ -391,7 +391,11 @@ remove_component_forgejo() {
     run "rm -f /usr/local/bin/forgejo /usr/local/bin/forgejo-runner"
     if [[ -f /etc/caddy/Caddyfile ]] \
         && grep -Fqx '# BEGIN install.sh Forgejo' /etc/caddy/Caddyfile; then
-      if [[ "${DRY_RUN}" == "1" ]]; then
+      if ! grep -Fqx '# END install.sh Forgejo' /etc/caddy/Caddyfile; then
+        warn "Caddyfile contains an incomplete managed Forgejo block; leaving it unchanged."
+        UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
+        UNINSTALL_EXIT=1
+      elif [[ "${DRY_RUN}" == "1" ]]; then
         run "remove the managed Forgejo block from /etc/caddy/Caddyfile"
       else
         _caddy_tmp="$(mktemp)"

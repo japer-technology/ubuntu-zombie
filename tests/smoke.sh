@@ -2376,7 +2376,7 @@ run_standards() {
     || { echo "Forgejo Caddy route must use the internal CA" >&2; exit 1; }
   grep -q 'reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}' scripts/install.sh \
     || { echo "Caddy must proxy to the Forgejo loopback backend" >&2; exit 1; }
-  grep -q '# BEGIN ${SCRIPT_NAME} Forgejo' scripts/install.sh \
+  grep -q '# BEGIN install.sh Forgejo' scripts/install.sh \
     && grep -q '/etc/caddy/Caddyfile' scripts/install.sh \
     || { echo "Forgejo route must be rendered in the active Caddyfile" >&2; exit 1; }
   grep -q 'rm -f /etc/caddy/conf.d/forgejo.caddy' scripts/install.sh \

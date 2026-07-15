@@ -3316,11 +3316,11 @@ configure_forgejo_lan_https() {
   fi
 
   [[ -f /etc/caddy/Caddyfile ]] || install -m 644 /dev/null /etc/caddy/Caddyfile
-  caddy_begin="# BEGIN ${SCRIPT_NAME} Forgejo"
-  caddy_end="# END ${SCRIPT_NAME} Forgejo"
+  caddy_begin="# BEGIN install.sh Forgejo"
+  caddy_end="# END install.sh Forgejo"
   if (( $(grep -Fxc "${caddy_begin}" /etc/caddy/Caddyfile || true) \
       != $(grep -Fxc "${caddy_end}" /etc/caddy/Caddyfile || true) )); then
-    die "Caddyfile contains an incomplete managed Forgejo block; refusing to overwrite it." 1
+    die "Caddyfile contains an incomplete managed Forgejo block. Restore or remove that block manually, then re-run repair forgejo." 1
   fi
   caddy_tmp="$(mktemp)"
   awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
