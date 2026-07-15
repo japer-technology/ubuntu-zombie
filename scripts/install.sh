@@ -3137,7 +3137,9 @@ print(tag)
 
 # Resolve the latest release tag (e.g. "11.0.3") of a Forgejo repository.
 codeberg_latest_release() {
-  local repo="$1" origin tag
+  local repo="$1" origin json tag
+  # Two short endpoint-local retries cover brief network flakes without
+  # spending curl_get's full outer retry budget on an obsolete release host.
   local metadata_retry_count=2 metadata_retry_delay=2 metadata_max_time=15
   for origin in $(forgejo_release_api_origins "${repo}"); do
     # Use a bounded direct curl instead of curl_get here so a stale mirror
@@ -3145,12 +3147,13 @@ codeberg_latest_release() {
     # one endpoint-local retry window before moving to the next origin. Forgejo
     # metadata mirrors have exposed the release version as either tag_name or
     # name, so accept both.
-    tag="$(curl -fsSL --retry "${metadata_retry_count}" \
-             --retry-delay "${metadata_retry_delay}" \
-             --max-time "${metadata_max_time}" \
-             "${origin}/api/v1/repos/${repo}/releases/latest" \
-             | forgejo_release_tag_from_json)" \
-      || { warn "Release metadata unavailable or malformed from ${origin}; trying the next Forgejo mirror."; continue; }
+    json="$(curl -fsSL --retry "${metadata_retry_count}" \
+              --retry-delay "${metadata_retry_delay}" \
+              --max-time "${metadata_max_time}" \
+              "${origin}/api/v1/repos/${repo}/releases/latest")" \
+      || { warn "Release metadata unavailable from ${origin}; trying the next Forgejo mirror."; continue; }
+    tag="$(forgejo_release_tag_from_json <<<"${json}")" \
+      || { warn "Release metadata malformed from ${origin}; trying the next Forgejo mirror."; continue; }
     tag="${tag#v}"
     if [[ "${tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
       printf '%s' "${tag}"

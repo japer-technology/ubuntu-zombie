@@ -34,6 +34,8 @@ shell_files() {
 # isolation without running the mutating installer.
 install_function() {
   local name="$1"
+  [[ "${name}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+    || { echo "unsafe install.sh function name: ${name}" >&2; exit 1; }
   sed -n "/^${name}() {/,/^}$/p" scripts/install.sh
 }
 
