@@ -598,7 +598,13 @@ def scan_lmstudio(
         raise ProviderError("The LM Studio scan network is not valid.") from exc
     if not isinstance(subnet, ipaddress.IPv4Network):
         raise ProviderError("LM Studio discovery requires an IPv4 network.")
-    addresses = [str(address) for address in subnet]
+    # LM Studio listens on loopback by default unless "Serve on Local
+    # Network" is enabled. Probe it explicitly because the primary
+    # interface's /24 does not include 127.0.0.1.
+    addresses = ["127.0.0.1"]
+    addresses.extend(
+        str(address) for address in subnet if str(address) != "127.0.0.1"
+    )
     with ThreadPoolExecutor(max_workers=min(32, len(addresses))) as pool:
         found = list(pool.map(
             lambda address: _probe_lmstudio(address, scan_port), addresses
