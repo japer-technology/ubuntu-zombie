@@ -902,6 +902,8 @@ out = pi_mono.run_turn(
 ends = [e for e in out["events"]
         if e.get("type") == "progress" and e.get("kind") == "tool_end"
         and e.get("name") == "bash"]
+if len(ends) != 2:
+    raise SystemExit(f"expected two bash completion events, got {ends!r}")
 probe, broken = ends
 if probe.get("exit_code") != 1 or probe.get("command_status") is not True:
     raise SystemExit(f"non-zero shell probe misclassified: {probe!r}")
