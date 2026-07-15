@@ -1511,7 +1511,8 @@ run_subcommands() {
   # Component-aware install grammar: targets, flags before/between/after,
   # default selection, explicit forgejo-only planning, env-additive selection,
   # and -- target validation are all safe under --dry-run.
-  local default_out zombie_out forgejo_out combined_out reversed_out legacy_out
+  local default_out zombie_out forgejo_out combined_out
+  local forgejo_zombie_order_out env_flag_out
   default_out="$(ZOMBIE_COLOR=never ./scripts/install.sh install --dry-run)"
   zombie_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run install zombie)"
   [[ "${default_out}" == "${zombie_out}" ]] \
@@ -1541,11 +1542,12 @@ run_subcommands() {
   grep -q "Optional components enabled" <<<"${combined_out}" \
     || { echo "FAIL: legacy Forgejo env flag was not additive" >&2; exit 1; }
 
-  reversed_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run \
+  forgejo_zombie_order_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run \
     install forgejo zombie)"
-  legacy_out="$(ZOMBIE_COLOR=never ZOMBIE_INSTALL_FORGEJO=1 \
+  env_flag_out="$(ZOMBIE_COLOR=never ZOMBIE_INSTALL_FORGEJO=1 \
     ./scripts/install.sh --dry-run install)"
-  [[ "${combined_out}" == "${reversed_out}" && "${combined_out}" == "${legacy_out}" ]] \
+  [[ "${combined_out}" == "${forgejo_zombie_order_out}" \
+    && "${combined_out}" == "${env_flag_out}" ]] \
     || { echo "FAIL: combined targets and legacy flag must resolve identically" >&2; exit 1; }
 
   # Forgejo-only selection must not validate zombie-only settings.
@@ -1560,6 +1562,8 @@ run_subcommands() {
   forgejo_hook="$(sed -n '/^install_forgejo() {$/,/^}$/p' scripts/install.sh)"
   [[ -n "${forgejo_hook}" ]] \
     || { echo "FAIL: could not locate the install_forgejo hook" >&2; exit 1; }
+  grep -q 'PostgreSQL' <<<"${forgejo_hook}" \
+    || { echo "FAIL: extracted install_forgejo hook is incomplete" >&2; exit 1; }
   ! grep -Eq 'AGENT_USER|AGENT_HOME|CHAT_PORT|TTL_DAYS|LOCAL_LLM|ZOMBIE_ETC|/opt/ai-zombie' \
     <<<"${forgejo_hook}" \
     || { echo "FAIL: install_forgejo references zombie-owned state" >&2; exit 1; }

@@ -903,9 +903,10 @@ validate_config() {
     if ! is_valid_forgejo_password "${FORGEJO_DB_PASSWORD}"; then
       die "FORGEJO_DB_PASSWORD must be 8-256 printable characters (or empty to auto-generate)." 2
     fi
-    if [[ "${ZOMBIE_RECEIPT}" != "1" ]] \
-      && { [[ -z "${FORGEJO_ADMIN_PASSWORD}" ]] || [[ -z "${FORGEJO_DB_PASSWORD}" ]]; }; then
-      die "Forgejo password generation requires a receipt. Set ZOMBIE_RECEIPT=1, or explicitly set both FORGEJO_ADMIN_PASSWORD and FORGEJO_DB_PASSWORD." 64
+    if [[ "${ZOMBIE_RECEIPT}" != "1" ]]; then
+      if [[ -z "${FORGEJO_ADMIN_PASSWORD}" || -z "${FORGEJO_DB_PASSWORD}" ]]; then
+        die "Forgejo password generation requires a receipt. Set ZOMBIE_RECEIPT=1, or explicitly set both FORGEJO_ADMIN_PASSWORD and FORGEJO_DB_PASSWORD." 64
+      fi
     fi
     if ! is_valid_forgejo_version "${FORGEJO_VERSION}"; then
       die "FORGEJO_VERSION must be a release like 11.0.3 (or empty for latest)." 2
