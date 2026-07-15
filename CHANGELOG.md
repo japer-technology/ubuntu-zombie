@@ -33,7 +33,7 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Phase 3 — Standalone Forgejo
 
-- **Forgejo URL canonicalisation:** generated Forgejo `DOMAIN` and
+- **Forgejo URL canonicalization:** generated Forgejo `DOMAIN` and
   `ROOT_URL` values now lowercase the host name so mixed-case Ubuntu
   hostnames do not trigger Forgejo's canonical URL warning in browsers.
 - **Runner Docker compatibility:** Forgejo runner installation now reuses an
