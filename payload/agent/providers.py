@@ -627,12 +627,12 @@ def activate_lmstudio(server: dict) -> tuple[str, str, str]:
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
-                raise ValueError("root is not an object")
+                raise ValueError("root is not a dictionary")
         else:
             data = {}
         provider_map = data.setdefault("providers", {})
         if not isinstance(provider_map, dict):
-            raise ValueError("providers is not an object")
+            raise ValueError("providers is not a dictionary")
         provider_map["lmstudio"] = {
             "baseUrl": base_url,
             "api": "openai-completions",
