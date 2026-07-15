@@ -1938,7 +1938,7 @@ async function handleSlashCommand(input) {
     }
     case "/lmstudio": {
       addMessage("user", input);
-      addMessage("system", "Scanning the local /24 for LM Studio servers...");
+      addMessage("system", "Scanning the local network for LM Studio servers...");
       try {
         const data = await uzPostJson("/api/lmstudio", {});
         addMessage("system",

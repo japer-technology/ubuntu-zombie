@@ -531,7 +531,7 @@ def _local_scan_network() -> ipaddress.IPv4Network:
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         # A UDP connect selects the primary outbound interface without
-        # transmitting a packet; TEST-NET-1 is intentionally non-routable.
+        # transmitting a packet; RFC 5737 reserves TEST-NET-1 for examples.
         sock.connect(("192.0.2.1", 9))
         address = sock.getsockname()[0]
     except OSError as exc:
@@ -598,7 +598,7 @@ def scan_lmstudio(
     if not isinstance(subnet, ipaddress.IPv4Network):
         raise ProviderError("LM Studio discovery requires an IPv4 network.")
     addresses = [str(address) for address in subnet]
-    with ThreadPoolExecutor(max_workers=min(64, len(addresses))) as pool:
+    with ThreadPoolExecutor(max_workers=min(32, len(addresses))) as pool:
         found = list(pool.map(
             lambda address: _probe_lmstudio(address, scan_port), addresses
         ))
