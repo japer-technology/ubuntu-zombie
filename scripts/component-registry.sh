@@ -14,6 +14,18 @@ register_component() {
     || die "Invalid component registry name: ${component}" 2
   [[ -z "${COMPONENT_DEPENDENCIES[${component}]+x}" ]] \
     || die "Duplicate component registry entry: ${component}" 2
+
+  # Dependencies must already be registered. Because dispatch follows
+  # registration order, this guarantees every dependency runs before its
+  # dependants and makes dependency cycles unrepresentable.
+  local dependency
+  for dependency in ${dependencies}; do
+    [[ "${dependency}" != "${component}" ]] \
+      || die "Component '${component}' cannot depend on itself." 2
+    [[ -n "${COMPONENT_DEPENDENCIES[${dependency}]+x}" ]] \
+      || die "Component '${component}' dependency '${dependency}' must be registered first." 2
+  done
+
   PUBLIC_COMPONENTS+=("${component}")
   COMPONENT_DEPENDENCIES["${component}"]="${dependencies}"
 
@@ -25,6 +37,8 @@ register_component() {
     hook="${entry#*=}"
     [[ "${field}" =~ ^[a-z_]+$ && "${hook}" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]] \
       || die "Invalid registry hook for ${component}: ${entry}" 2
+    [[ -z "${COMPONENT_HOOKS[${component}:${field}]+x}" ]] \
+      || die "Duplicate '${field}' hook for component ${component}." 2
     COMPONENT_HOOKS["${component}:${field}"]="${hook}"
   done
 }
@@ -55,6 +69,36 @@ validate_component_registry() {
         || die "Component '${component}' ${field} hook is not a function: ${hook}" 2
     done
   done
+}
+
+# Print the requested components plus every transitive registry dependency,
+# one per line, in registry order. Rejects unregistered names.
+resolve_component_targets() {
+  local component dependency
+  declare -A wanted=()
+  local -a queue=()
+  for component in "$@"; do
+    [[ -n "${COMPONENT_DEPENDENCIES[${component}]+x}" ]] \
+      || die "Unknown component target '${component}'." 2
+    if [[ -z "${wanted[${component}]+x}" ]]; then
+      wanted["${component}"]=1
+      queue+=("${component}")
+    fi
+  done
+  while (( ${#queue[@]} > 0 )); do
+    component="${queue[0]}"
+    queue=("${queue[@]:1}")
+    for dependency in ${COMPONENT_DEPENDENCIES[${component}]}; do
+      if [[ -z "${wanted[${dependency}]+x}" ]]; then
+        wanted["${dependency}"]=1
+        queue+=("${dependency}")
+      fi
+    done
+  done
+  for component in "${PUBLIC_COMPONENTS[@]}"; do
+    [[ -n "${wanted[${component}]+x}" ]] && printf '%s\n' "${component}"
+  done
+  return 0
 }
 
 component_dispatch_hook() {

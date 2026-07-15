@@ -538,6 +538,17 @@ validate_and_resolve_targets() {
     add_selected_component "${COMPONENT_FORGEJO}"
   fi
 
+  # Installing a component also installs its registered dependencies.
+  # verify/doctor/repair/uninstall keep operating on the explicit targets
+  # only, matching the documented selection rules.
+  if [[ "${SUBCOMMAND}" == "install" ]] && (( ${#SELECTED_COMPONENTS[@]} > 0 )); then
+    local -a resolved_targets=()
+    while IFS= read -r component; do
+      [[ -n "${component}" ]] && resolved_targets+=("${component}")
+    done < <(resolve_component_targets "${SELECTED_COMPONENTS[@]}")
+    SELECTED_COMPONENTS=("${resolved_targets[@]}")
+  fi
+
   # Execution order follows the registry, not the order targets were typed.
   # This also makes the legacy Forgejo flag equivalent to explicitly selecting
   # `zombie forgejo`.

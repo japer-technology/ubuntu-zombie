@@ -15,7 +15,9 @@ and uninstall hooks; explicit dependencies; target-scoped review and
 dry-run rendering; component-owned receipt and manifest data; and
 health-before-manifest ordering. Shared code validates dependency names
 and trusted hook functions, then dispatches in registry order (reversed
-for uninstall). Adding a component must not change parser or dispatcher
+for uninstall). Dependencies must be registered before their dependants,
+and installing a component automatically selects its registered
+dependencies. Adding a component must not change parser or dispatcher
 conditionals. Environment selectors remain an additive compatibility
 surface rather than the execution model.
 
