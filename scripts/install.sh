@@ -476,7 +476,7 @@ component_selected_for_lifecycle() {
 }
 
 validate_and_resolve_targets() {
-  local target
+  local target component
   declare -A seen_targets=()
   for target in "${TARGET_ARGS[@]}"; do
     if is_lifecycle_verb "${target}"; then
@@ -501,6 +501,19 @@ validate_and_resolve_targets() {
   if forgejo_config_selected; then
     add_selected_component "${COMPONENT_FORGEJO}"
   fi
+
+  # Execution order follows the registry, not the order targets were typed.
+  # This also makes the legacy Forgejo flag equivalent to explicitly selecting
+  # `zombie forgejo`.
+  declare -A requested_components=()
+  for target in "${SELECTED_COMPONENTS[@]}"; do
+    requested_components["${target}"]=1
+  done
+  SELECTED_COMPONENTS=()
+  for component in "${PUBLIC_COMPONENTS[@]}"; do
+    [[ -n "${requested_components[${component}]+x}" ]] \
+      && SELECTED_COMPONENTS+=("${component}")
+  done
 
   for target in "${SELECTED_COMPONENTS[@]}"; do
     case "${target}" in
@@ -562,9 +575,7 @@ Verbs:
 
 Components:
   zombie      The Ubuntu Zombie account, runtime, chat UI, policy, and services.
-  forgejo     Forgejo + PostgreSQL option. The component target is accepted for
-              parser/dry-run compatibility; standalone non-dry-run Forgejo
-              install remains gated until the component extraction phase lands.
+  forgejo     Forgejo + PostgreSQL, independently installable without zombie.
 
 Selection rules:
   install with no component target selects zombie. Explicit targets select
@@ -663,9 +674,8 @@ Examples:
   # Equivalent component-target preview for the combined install:
   sudo ./${SCRIPT_NAME} install zombie forgejo --dry-run
 
-  # Accepted syntax for standalone Forgejo planning; the non-dry-run
-  # standalone install is gated until component extraction is complete:
-  ./${SCRIPT_NAME} install forgejo --dry-run
+  # Install Forgejo + PostgreSQL without the zombie account/runtime:
+  sudo ./${SCRIPT_NAME} install forgejo
 
   # Machine-readable health for monitoring:
   ./${SCRIPT_NAME} verify --json
@@ -916,7 +926,13 @@ load_os_release() {
 
 preflight() {
   load_os_release
-  local errors=0 warnings=0
+  local errors=0 warnings=0 required_disk_kb=1000000 required_disk_label="1 GB"
+  local memory_context="selected services"
+  if (( COMPONENT_ZOMBIE_SELECTED )); then
+    required_disk_kb=3000000
+    required_disk_label="3 GB"
+    memory_context="agent runtime"
+  fi
 
   # Compact result table: parallel arrays of status (ok|warn|fail|info) and
   # a short label, rendered as a glance-able summary before the YES prompt.
@@ -945,12 +961,13 @@ preflight() {
        warnings=$((warnings + 1)); pf warn "Architecture ${arch}" ;;
   esac
 
-  # Disk: need ~3 GB free under / for runtime packages and the agent venv.
+  # Disk capacity follows the selected components. The zombie runtime and its
+  # Node/Python toolchain need more room than standalone Forgejo.
   local avail_kb
   avail_kb="$(df -P / | awk 'NR==2 {print $4}')"
-  if [[ "${avail_kb:-0}" -lt 3000000 ]]; then
-    warn "Less than 3 GB free under / ($((avail_kb/1024)) MB). Install may fail."
-    warnings=$((warnings + 1)); pf warn "Disk >= 3 GB free ($((avail_kb/1024)) MB)"
+  if [[ "${avail_kb:-0}" -lt "${required_disk_kb}" ]]; then
+    warn "Less than ${required_disk_label} free under / ($((avail_kb/1024)) MB). Install may fail."
+    warnings=$((warnings + 1)); pf warn "Disk >= ${required_disk_label} free ($((avail_kb/1024)) MB)"
   else
     pf ok "Disk free $((avail_kb/1024)) MB"
   fi
@@ -959,7 +976,7 @@ preflight() {
   local mem_kb
   mem_kb="$(awk '/MemTotal/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)"
   if [[ "${mem_kb:-0}" -lt 2000000 ]]; then
-    warn "Less than 2 GB RAM ($((mem_kb/1024)) MB). The agent runtime may be tight."
+    warn "Less than 2 GB RAM ($((mem_kb/1024)) MB). The ${memory_context} may be tight."
     warnings=$((warnings + 1)); pf warn "RAM >= 2 GB ($((mem_kb/1024)) MB)"
   else
     pf ok "RAM $((mem_kb/1024)) MB"
@@ -1432,9 +1449,7 @@ print_dry_run_plan() {
     cat <<EOF
 ${SCRIPT_NAME} ${SCRIPT_VERSION}  —  dry-run
 
-A real standalone Forgejo install is accepted by the parser but gated until
-the component extraction phase lands. With the current environment it would
-plan:
+A real standalone Forgejo install with the current environment would:
 
   Components:     $(selected_components_label)
   Host:           ${ID:-?} ${VERSION_ID:-?} on $(dpkg --print-architecture 2>/dev/null || uname -m)
@@ -1454,15 +1469,15 @@ EOF
     if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
       cat <<EOF
   Actions runner  co-located Forgejo Actions runner (Docker executor)
+                  apt: docker.io   binary: /usr/local/bin/forgejo-runner
                   unit: /etc/systemd/system/forgejo-runner.service
 EOF
     fi
     cat <<EOF
 
-Nothing has been changed. To install Forgejo today, use the legacy combined
-Ubuntu Zombie + Forgejo path:
+Nothing has been changed. To proceed for real:
 
-  sudo ZOMBIE_INSTALL_FORGEJO=1 ./${SCRIPT_NAME} install
+  sudo ./${SCRIPT_NAME} install forgejo
 
 See docs/QUICKSTART.md and docs/ARCHITECTURE.md for the full picture.
 EOF
@@ -2150,6 +2165,45 @@ review_parameters() {
   done
 }
 
+review_forgejo_parameters() {
+  [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && return 0
+  (( ASSUME_YES )) && return 0
+  [[ -t 0 ]] || return 0
+
+  local choice
+  while true; do
+    load_os_release
+    brand_banner "Forgejo — setup parameters"
+    field "1) Forgejo port"   "${FORGEJO_HTTP_PORT}/tcp (all interfaces)"
+    field "2) Forgejo admin"  "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))"
+    field "3) Database"       "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))"
+    field "4) Actions runner" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo disabled)"
+    field "5) Versions"       "Forgejo ${FORGEJO_VERSION:-latest release}"
+    field "6) Core records"   "${LOG_FILE}; $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo 'receipt disabled')"
+    field "   Host"           "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
+    printf '\n  %s[a]%s accept and install    %s[1-6]%s edit a field    %s[q]%s cancel\n' \
+      "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
+    if ! read -r -p "$(printf '%s➜%s your choice [a]: ' "${C_BRAND}" "${C_RESET}")" choice; then
+      info "No input (EOF); cancelling."; exit 0
+    fi
+    case "${choice,,}" in
+      ""|a|accept|y|yes)
+        validate_config
+        REVIEWED=1
+        ok "Parameters accepted."
+        return 0 ;;
+      q|quit|cancel|n|no) info "Cancelled."; exit 0 ;;
+      1) _edit_forgejo_port ;;
+      2) _edit_forgejo_admin ;;
+      3) _edit_forgejo_database ;;
+      4) _toggle_forgejo_runner ;;
+      5) _edit_forgejo_versions ;;
+      6) _edit_log_file; _toggle_receipt ;;
+      *) warn "Unrecognised choice: '${choice}'. Enter a number 1-6, 'a', or 'q'." ;;
+    esac
+  done
+}
+
 # ---------------------------------------------------------------------------
 # Install receipt (start + finish records)
 # ---------------------------------------------------------------------------
@@ -2187,16 +2241,19 @@ write_receipt_start() {
     printf 'Invoked by       : %s (uid %s)\n' "${SUDO_USER:-$(id -un)}" "$(id -u)"
     printf 'Mode             : %s\n' \
       "$([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)"
+    printf 'Components       : %s\n' "$(selected_components_label)"
     printf '\n-- Parameters --\n'
-    printf 'Agent user       : %s\n' "${AGENT_USER}"
-    printf 'Agent home       : %s\n' "${AGENT_HOME}"
-    printf 'Install root     : %s\n' "${ZOMBIE_DIR}"
-    printf 'Etc dir          : %s\n' "${ZOMBIE_ETC}"
-    printf 'Log dir          : %s\n' "${ZOMBIE_LOG_DIR}"
+    if (( COMPONENT_ZOMBIE_SELECTED )); then
+      printf 'Agent user       : %s\n' "${AGENT_USER}"
+      printf 'Agent home       : %s\n' "${AGENT_HOME}"
+      printf 'Install root     : %s\n' "${ZOMBIE_DIR}"
+      printf 'Etc dir          : %s\n' "${ZOMBIE_ETC}"
+      printf 'Log dir          : %s\n' "${ZOMBIE_LOG_DIR}"
+      printf 'Chat port        : %s/tcp (loopback only)\n' "${CHAT_PORT}"
+      printf 'Local LLM        : %s\n' \
+        "$([[ -n "${LOCAL_LLM_MODEL}" ]] && printf '%s @ %s' "${LOCAL_LLM_MODEL}" "${LOCAL_LLM_BASE_URL}" || echo 'none')"
+    fi
     printf 'Transcript log   : %s\n' "${LOG_FILE}"
-    printf 'Chat port        : %s/tcp (loopback only)\n' "${CHAT_PORT}"
-    printf 'Local LLM        : %s\n' \
-      "$([[ -n "${LOCAL_LLM_MODEL}" ]] && printf '%s @ %s' "${LOCAL_LLM_MODEL}" "${LOCAL_LLM_BASE_URL}" || echo 'none')"
     printf 'Receipt file     : %s\n' "${RECEIPT_FILE}"
     if any_option_enabled; then
       printf '\n-- Optional components --\n'
@@ -2235,8 +2292,10 @@ write_receipt_finish() {
     if [[ -n "${INSTALL_T0:-}" ]]; then
       printf 'Duration         : %s\n' "$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
     fi
-    printf 'Provider token   : %s\n' "$([[ "${PROVIDER_OK:-0}" == "1" ]] && echo present || echo missing)"
-    printf 'Chat service     : %s\n' "$([[ "${CHAT_OK:-0}" == "1" ]] && echo running || echo 'not running')"
+    if (( COMPONENT_ZOMBIE_SELECTED )); then
+      printf 'Provider token   : %s\n' "$([[ "${PROVIDER_OK:-0}" == "1" ]] && echo present || echo missing)"
+      printf 'Chat service     : %s\n' "$([[ "${CHAT_OK:-0}" == "1" ]] && echo running || echo 'not running')"
+    fi
     if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
       printf 'Forgejo version  : %s\n' "${FORGEJO_RESOLVED_VERSION:-unknown}"
       printf 'Forgejo service  : %s\n' \
@@ -2326,10 +2385,6 @@ if (( DRY_RUN )); then
   exit 0
 fi
 
-if (( COMPONENT_FORGEJO_SELECTED )) && (( ! COMPONENT_ZOMBIE_SELECTED )); then
-  die "Standalone Forgejo install syntax is accepted, but non-dry-run execution is gated until component extraction is complete. Use 'ZOMBIE_INSTALL_FORGEJO=1 ./${SCRIPT_NAME} install' for the current combined path." 2
-fi
-
 # =============================================================================
 # install — the rest of the file
 # =============================================================================
@@ -2360,13 +2415,19 @@ bootstrap_prerequisites
 # server and offer the models it advertises as the starting model. Runs before
 # the parameter review so the choice shows up in the table. No-op for
 # --yes / non-interactive / non-TTY runs or when ZOMBIE_SKIP_LLM_SCAN=1.
-discover_local_llms
+if (( COMPONENT_ZOMBIE_SELECTED )); then
+  discover_local_llms
+fi
 
 # Interactive review: present every parameter in a branded, editable table
 # and let the operator tweak settings until satisfied. Runs before any state
 # is touched and before the transcript is opened, so edits to LOG_FILE take
 # effect. No-op for --yes / non-interactive / non-TTY runs.
-review_parameters
+if (( COMPONENT_ZOMBIE_SELECTED )); then
+  review_parameters
+else
+  review_forgejo_parameters
+fi
 preflight
 
 # Transcript logging
@@ -2402,6 +2463,7 @@ ZOMBIE_PHASE_TOTAL="$(awk '/^# install — the rest of the file/{f=1} f && /^sec
 # result (e.g. if the marker comment is ever moved) — fall back to an
 # un-totalled "[n]" counter rather than printing a confusing "[n/0]".
 [[ "${ZOMBIE_PHASE_TOTAL}" =~ ^[0-9]+$ ]] || ZOMBIE_PHASE_TOTAL=0
+(( COMPONENT_ZOMBIE_SELECTED )) || ZOMBIE_PHASE_TOTAL=0
 
 # Optional components add indented `  section "..."` calls inside guarded
 # if-blocks (deliberately not matched by the top-level count above, so a
@@ -2479,17 +2541,21 @@ on_error() {
 INSTALL_T0="$(date +%s)"
 
 info "Log file: ${LOG_FILE}"
-info "Agent user: ${AGENT_USER}"
-info "Install root: ${ZOMBIE_DIR}"
-info "Chat port: ${CHAT_PORT} (loopback only)"
+info "Components: $(selected_components_label)"
+if (( COMPONENT_ZOMBIE_SELECTED )); then
+  info "Agent user: ${AGENT_USER}"
+  info "Install root: ${ZOMBIE_DIR}"
+  info "Chat port: ${CHAT_PORT} (loopback only)"
+fi
 info "Mode: $([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)"
 if (( ZOMBIE_PHASE_TOTAL > 0 )); then
-  info "Phases: ${ZOMBIE_PHASE_TOTAL}. Typical run takes ~10–20 min depending on network speed."
+  info "Phases: ${ZOMBIE_PHASE_TOTAL}. Typical run takes ~10–20 min depending on selected components and network speed."
 else
-  info "Typical run takes ~10–20 min depending on network speed."
+  info "Typical run takes ~5–20 min depending on selected components and network speed."
 fi
 
-cat <<EOF
+if (( COMPONENT_ZOMBIE_SELECTED )); then
+  cat <<EOF
 
 This installer will:
   - Create the ${AGENT_USER} user (operating identity of the AI Systems Administrator) with passwordless sudo
@@ -2498,6 +2564,15 @@ This installer will:
   - Install policy, audit log, and helper scripts
   - Enable automatic security updates
 EOF
+else
+  cat <<EOF
+
+This installer will:
+  - Install PostgreSQL and Forgejo without creating a zombie account
+  - Expose Forgejo on port ${FORGEJO_HTTP_PORT} on all interfaces
+  - Keep the transcript and root-only receipt under /var/log/ubuntu-zombie
+EOF
+fi
 if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
   printf '  - Install a Forgejo git forge + PostgreSQL on port %s (all interfaces)\n' "${FORGEJO_HTTP_PORT}"
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
@@ -2529,6 +2604,7 @@ write_receipt_start
 # System packages
 # ---------------------------------------------------------------------------
 
+install_zombie_base() {
 section "Update the operating system"
 
 apt_get update
@@ -2954,6 +3030,7 @@ retry 4 5 -- install_pinned_node_bridge pi-ai "${PAYLOAD_DIR}/agent/pi-ai.versio
 # pi-mono is the agent loop the chat service drives via
 # payload/agent/pi-mono-bridge.mjs. Pinned the same way as pi-ai.
 retry 4 5 -- install_pinned_node_bridge pi-mono "${PAYLOAD_DIR}/agent/pi-mono.version"
+}
 
 # ---------------------------------------------------------------------------
 # Optional component: Forgejo server (ZOMBIE_INSTALL_FORGEJO=1)
@@ -3008,7 +3085,7 @@ codeberg_fetch_verified() {
     || die "Checksum mismatch for ${url}." 1
 }
 
-if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+install_forgejo() {
   # option-sections: forgejo begin
   section "Install Forgejo prerequisites"
 
@@ -3351,14 +3428,13 @@ EOF
     ok "Forgejo Actions runner installed and enabled."
     # option-sections: forgejo-runner end
   fi
-elif [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
-  warn "ZOMBIE_INSTALL_FORGEJO_RUNNER=1 has no effect without ZOMBIE_INSTALL_FORGEJO=1; skipping the runner."
-fi
+}
 
 # ---------------------------------------------------------------------------
 # Deploy payload: chat service, helpers, policy, systemd, logrotate.
 # ---------------------------------------------------------------------------
 
+install_zombie_runtime() {
 section "Deploy the agent runtime"
 
 if [[ ! -d "${PAYLOAD_DIR}" ]]; then
@@ -3690,29 +3766,57 @@ bullet() {
 
 bullet "${PROVIDER_OK}"  "Provider token present in secrets/env"
 bullet "${CHAT_OK}"      "Chat service running on 127.0.0.1:${CHAT_PORT}"
-if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
+}
+
+install_zombie() {
+  install_zombie_base
+  install_zombie_runtime
+}
+
+if (( COMPONENT_ZOMBIE_SELECTED )); then
+  install_zombie
+  write_component_manifest "${COMPONENT_ZOMBIE}" "${SCRIPT_VERSION}" ""
+fi
+
+if (( COMPONENT_FORGEJO_SELECTED )); then
+  install_forgejo
   FORGEJO_OK=0
   systemctl is-active --quiet forgejo.service && FORGEJO_OK=1
-  bullet "${FORGEJO_OK}" "Forgejo ${FORGEJO_RESOLVED_VERSION:-} running on port ${FORGEJO_HTTP_PORT} (all interfaces)"
+  if (( FORGEJO_OK )); then
+    status ok "Forgejo ${FORGEJO_RESOLVED_VERSION:-} running on port ${FORGEJO_HTTP_PORT} (all interfaces)"
+  else
+    status warn "Forgejo ${FORGEJO_RESOLVED_VERSION:-} is not running"
+  fi
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
     RUNNER_OK=0
     systemctl is-active --quiet forgejo-runner.service && RUNNER_OK=1
-    bullet "${RUNNER_OK}" "Forgejo Actions runner registered and running"
+    if (( RUNNER_OK )); then
+      status ok "Forgejo Actions runner registered and running"
+    else
+      status warn "Forgejo Actions runner is not running"
+    fi
   fi
+  forgejo_suboptions=""
+  [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && forgejo_suboptions="runner"
+  write_component_manifest "${COMPONENT_FORGEJO}" \
+    "${FORGEJO_RESOLVED_VERSION:-${FORGEJO_VERSION:-}}" "${forgejo_suboptions}"
 fi
 echo
 
 NEXT_STEP=""
-if [[ "${PROVIDER_OK}" != "1" ]]; then
+if (( COMPONENT_ZOMBIE_SELECTED )) && [[ "${PROVIDER_OK}" != "1" ]]; then
   NEXT_STEP="sudo ${ZOMBIE_DIR}/bin/secrets-edit   # paste any of OPENAI/ANTHROPIC/GEMINI/XAI/OPENROUTER/MISTRAL/GROQ _API_KEY"
-elif [[ "${CHAT_OK}" != "1" ]]; then
+elif (( COMPONENT_ZOMBIE_SELECTED )) && [[ "${CHAT_OK}" != "1" ]]; then
   NEXT_STEP="sudo systemctl start ubuntu-zombie-chat.service"
-else
+elif (( COMPONENT_ZOMBIE_SELECTED )); then
   NEXT_STEP="sudo reboot"
+else
+  NEXT_STEP="open http://<host>:${FORGEJO_HTTP_PORT}/"
 fi
 
 INSTALL_DURATION="$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
-cat <<EOF
+if (( COMPONENT_ZOMBIE_SELECTED )); then
+  cat <<EOF
 
 ${C_GREEN}${C_BOLD}Install complete in ${INSTALL_DURATION}.${C_RESET}
 Next:    ${C_BOLD}${NEXT_STEP}${C_RESET}
@@ -3723,21 +3827,24 @@ Records: ${LOG_FILE}
 $([[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && printf 'Forgejo: http://<host>:%s/ (all interfaces%s)\n' "${FORGEJO_HTTP_PORT}" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled')")
 Remove:  sudo ${SCRIPT_DIR}/uninstall.sh --dry-run
 EOF
+else
+  cat <<EOF
 
-if [[ "${NEXT_STEP}" != "sudo reboot" ]]; then
+${C_GREEN}${C_BOLD}Install complete in ${INSTALL_DURATION}.${C_RESET}
+Next:    ${C_BOLD}${NEXT_STEP}${C_RESET}
+Forgejo: http://<host>:${FORGEJO_HTTP_PORT}/ (all interfaces$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled'))
+Records: ${LOG_FILE}
+         $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "receipt disabled")
+Remove:  sudo ${SCRIPT_DIR}/uninstall.sh forgejo --dry-run
+EOF
+fi
+
+if (( COMPONENT_ZOMBIE_SELECTED )) && [[ "${NEXT_STEP}" != "sudo reboot" ]]; then
   info "Reboot after completing the next step: sudo reboot"
 fi
 
 if (( STEPS_SATISFIED + STEPS_CHANGED > 0 )); then
   info "Idempotent steps: ${STEPS_SATISFIED} already satisfied, ${STEPS_CHANGED} applied this run."
-fi
-
-# Record components only after the install path and health summary have converged.
-write_component_manifest "${COMPONENT_ZOMBIE}" "${SCRIPT_VERSION}" ""
-if (( COMPONENT_FORGEJO_SELECTED )); then
-  forgejo_suboptions=""
-  [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && forgejo_suboptions="runner"
-  write_component_manifest "${COMPONENT_FORGEJO}" "${FORGEJO_RESOLVED_VERSION:-${FORGEJO_VERSION:-}}" "${forgejo_suboptions}"
 fi
 
 # Finalise the install receipt with the outcome of this run.
