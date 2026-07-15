@@ -3117,6 +3117,16 @@ forgejo_release_download_bases() {
   esac
 }
 
+forgejo_release_tag_from_json() {
+  python3 -c '
+import json
+import sys
+
+data = json.load(sys.stdin)
+print(data.get("tag_name") or data.get("name") or "")
+'
+}
+
 # Resolve the latest release tag (e.g. "11.0.3") of a Forgejo repository.
 codeberg_latest_release() {
   local repo="$1" origin tag
@@ -3126,13 +3136,7 @@ codeberg_latest_release() {
     # version as either tag_name or name, so accept both.
     tag="$(curl -fsSL --retry 2 --retry-delay 2 --max-time 15 \
              "${origin}/api/v1/repos/${repo}/releases/latest" \
-             | python3 -c '
-import json
-import sys
-
-data = json.load(sys.stdin)
-print(data.get("tag_name") or data.get("name") or "")
-' 2>/dev/null)" \
+             | forgejo_release_tag_from_json 2>/dev/null)" \
       || { warn "Release metadata unavailable from ${origin}; trying the next Forgejo mirror."; continue; }
     tag="${tag#v}"
     if [[ "${tag}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then

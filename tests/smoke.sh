@@ -2392,6 +2392,7 @@ run_standards() {
   local forgejo_release_helpers
   forgejo_release_helpers="$(install_function forgejo_release_api_origins)
 $(install_function forgejo_release_download_bases)
+$(install_function forgejo_release_tag_from_json)
 $(install_function codeberg_latest_release)
 $(install_function forgejo_fetch_release_asset)"
   bash -c "${forgejo_release_helpers}
