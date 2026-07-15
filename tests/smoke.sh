@@ -2376,12 +2376,18 @@ run_standards() {
     || { echo "Forgejo Caddy route must use the internal CA" >&2; exit 1; }
   grep -q 'reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}' scripts/install.sh \
     || { echo "Caddy must proxy to the Forgejo loopback backend" >&2; exit 1; }
+  grep -q '# BEGIN ${SCRIPT_NAME} Forgejo' scripts/install.sh \
+    && grep -q '/etc/caddy/Caddyfile' scripts/install.sh \
+    || { echo "Forgejo route must be rendered in the active Caddyfile" >&2; exit 1; }
+  grep -q 'rm -f /etc/caddy/conf.d/forgejo.caddy' scripts/install.sh \
+    || { echo "Forgejo install must migrate the legacy Caddy route fragment" >&2; exit 1; }
   grep -q '_https._tcp' scripts/install.sh \
     || { echo "Forgejo must advertise HTTPS through Avahi" >&2; exit 1; }
   grep -q '/etc/forgejo/caddy-local-ca.crt' scripts/install.sh \
     || { echo "Forgejo must export Caddy's public local CA root" >&2; exit 1; }
   grep -q '/etc/caddy/conf.d/forgejo.caddy' scripts/uninstall.sh \
-    || { echo "Forgejo uninstall must remove its Caddy route" >&2; exit 1; }
+    && grep -q '# BEGIN install.sh Forgejo' scripts/uninstall.sh \
+    || { echo "Forgejo uninstall must remove current and legacy Caddy routes" >&2; exit 1; }
   grep -q '/etc/avahi/services/forgejo.service' scripts/uninstall.sh \
     || { echo "Forgejo uninstall must remove its Avahi service" >&2; exit 1; }
   local confirmation_helper confirmation_out forgejo_hook

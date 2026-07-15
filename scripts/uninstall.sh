@@ -389,6 +389,21 @@ remove_component_forgejo() {
     run "rm -f /etc/systemd/system/forgejo.service /etc/systemd/system/forgejo-runner.service"
     run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
     run "rm -f /usr/local/bin/forgejo /usr/local/bin/forgejo-runner"
+    if [[ -f /etc/caddy/Caddyfile ]] \
+        && grep -Fqx '# BEGIN install.sh Forgejo' /etc/caddy/Caddyfile; then
+      if [[ "${DRY_RUN}" == "1" ]]; then
+        run "remove the managed Forgejo block from /etc/caddy/Caddyfile"
+      else
+        _caddy_tmp="$(mktemp)"
+        awk '
+          $0 == "# BEGIN install.sh Forgejo" { managed = 1; next }
+          $0 == "# END install.sh Forgejo" { managed = 0; next }
+          !managed { print }
+        ' /etc/caddy/Caddyfile > "${_caddy_tmp}"
+        install -m 644 -o root -g root "${_caddy_tmp}" /etc/caddy/Caddyfile
+        rm -f "${_caddy_tmp}"
+      fi
+    fi
     run "rm -f /etc/caddy/conf.d/forgejo.caddy /etc/avahi/services/forgejo.service"
     if systemctl cat caddy.service >/dev/null 2>&1; then
       run_or_warn "Reload Caddy after removing Forgejo route" \

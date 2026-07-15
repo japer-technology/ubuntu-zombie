@@ -437,6 +437,10 @@ point on HTTPS port `443`, uses its internal certificate authority, and
 proxies to Forgejo's loopback port. Avahi advertises the machine hostname
 through mDNS, so the default URL is
 `https://<lowercase-machine-hostname>.local/`.
+The installer writes this hostname route as a marked block in
+`/etc/caddy/Caddyfile` while preserving unrelated Caddy sites. Re-running
+`repair forgejo` replaces that managed block and migrates the older
+`/etc/caddy/conf.d/forgejo.caddy` fragment if present.
 
 | Variable                        | Default                                  | Effect |
 | ------------------------------- | ---------------------------------------- | ------ |
