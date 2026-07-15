@@ -3321,6 +3321,7 @@ configure_forgejo_lan_https() {
   caddy_end="# END install.sh Forgejo"
   read -r caddy_begin_count caddy_end_count < <(
     awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
+      BEGIN { begin_count = 0; end_count = 0 }
       $0 == begin { begin_count++ }
       $0 == end { end_count++ }
       END { print begin_count + 0, end_count + 0 }
@@ -3331,12 +3332,12 @@ configure_forgejo_lan_https() {
   fi
   caddy_tmp="$(mktemp)"
   awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
+    BEGIN { managed = 0 }
     $0 == begin { managed = 1; next }
     $0 == end { managed = 0; next }
     !managed { print }
   ' /etc/caddy/Caddyfile > "${caddy_tmp}"
   cat >> "${caddy_tmp}" <<EOF
-
 ${caddy_begin}
 # Managed by ${SCRIPT_NAME}. Forgejo stays on loopback; Caddy is the LAN edge.
 https://${host} {

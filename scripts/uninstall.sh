@@ -400,6 +400,7 @@ remove_component_forgejo() {
       else
         _caddy_tmp="$(mktemp)"
         awk '
+          BEGIN { managed = 0 }
           $0 == "# BEGIN install.sh Forgejo" { managed = 1; next }
           $0 == "# END install.sh Forgejo" { managed = 0; next }
           !managed { print }
