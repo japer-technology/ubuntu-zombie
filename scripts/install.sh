@@ -132,6 +132,11 @@ FORGEJO_DB_USER="${FORGEJO_DB_USER:-forgejo}"
 # never recorded anywhere.
 FORGEJO_ADMIN_PASSWORD="${FORGEJO_ADMIN_PASSWORD:-}"
 FORGEJO_DB_PASSWORD="${FORGEJO_DB_PASSWORD:-}"
+# Existing Forgejo and PostgreSQL state is never adopted implicitly. These
+# exact-value acknowledgements keep unattended upgrades possible without
+# allowing --yes to bypass the two data-safety gates.
+FORGEJO_CONFIRM_UPDATE="${FORGEJO_CONFIRM_UPDATE:-}"
+FORGEJO_CONFIRM_DATABASE_REUSE="${FORGEJO_CONFIRM_DATABASE_REUSE:-}"
 # Where each password came from this run: "operator" (env/prompt),
 # "generated" (random, recorded in the receipt), "existing" (reused from
 # the host, e.g. app.ini), or "" (not touched, e.g. admin already exists).
@@ -774,6 +779,25 @@ fi
 
 require_root() {
   [[ ${EUID} -eq 0 ]] || die "Run with sudo: sudo ./${SCRIPT_NAME} ${SUBCOMMAND}" 2
+}
+
+# Existing service and database state needs a stronger acknowledgement than
+# the general install confirmation. Only an exact, capitalized YES is accepted;
+# --yes deliberately does not bypass this gate.
+require_capitalized_yes() {
+  local variable="$1" prompt="$2" answer="${!1:-}"
+  if [[ "${answer}" == "YES" ]]; then
+    info "${variable}=YES: ${prompt}"
+    return 0
+  fi
+  if [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] || (( ASSUME_YES )) || [[ ! -t 0 ]]; then
+    die "${prompt} Set ${variable}=YES (capitalized exactly) to continue." 64
+  fi
+  if ! read -r -p "${prompt} Type YES to continue: " answer; then
+    info "No input (EOF); cancelled."
+    exit 0
+  fi
+  [[ "${answer}" == "YES" ]] || { info "Cancelled; existing data was left unchanged."; exit 0; }
 }
 
 # `retry` (exponential backoff) is provided by scripts/lib.sh.
@@ -2432,6 +2456,12 @@ fi
 require_root
 validate_noninteractive
 
+if is_selected_component "${COMPONENT_FORGEJO}" && legacy_forgejo_present; then
+  warn "An existing Forgejo installation was detected. The installer will update it in place and preserve repositories and database data."
+  require_capitalized_yes FORGEJO_CONFIRM_UPDATE \
+    "Allow Ubuntu Zombie to update the existing Forgejo installation?"
+fi
+
 # Bootstrap prerequisites: a fresh Ubuntu Desktop image ships without curl,
 # and a minimal image can also lack python3. Both are needed before the main
 # package phase — the local LLM scan, the preflight connectivity check, and
@@ -3290,8 +3320,22 @@ install_forgejo() {
     FORGEJO_DB_PASSWORD="$(openssl rand -hex 24)"
     FORGEJO_DB_PASSWORD_SOURCE="generated"
   fi
+  _fj_role_exists=0
+  _fj_database_exists=0
   if runuser -u postgres -- psql -tAc \
        "SELECT 1 FROM pg_roles WHERE rolname = '${FORGEJO_DB_USER}'" | grep -q 1; then
+    _fj_role_exists=1
+  fi
+  if runuser -u postgres -- psql -tAc \
+       "SELECT 1 FROM pg_database WHERE datname = '${FORGEJO_DB_NAME}'" | grep -q 1; then
+    _fj_database_exists=1
+  fi
+  if (( _fj_role_exists || _fj_database_exists )); then
+    warn "Existing PostgreSQL state was detected for Forgejo (database ${FORGEJO_DB_NAME}, role ${FORGEJO_DB_USER}). It will be reused, never dropped."
+    require_capitalized_yes FORGEJO_CONFIRM_DATABASE_REUSE \
+      "Allow Ubuntu Zombie to reuse the existing Forgejo PostgreSQL database and role?"
+  fi
+  if (( _fj_role_exists )); then
     info "PostgreSQL role ${FORGEJO_DB_USER} already exists; re-asserting password."
     note_satisfied
   else
@@ -3314,8 +3358,7 @@ END
 \$\$;
 PSQL
   unset _fj_pass_sql
-  if runuser -u postgres -- psql -tAc \
-       "SELECT 1 FROM pg_database WHERE datname = '${FORGEJO_DB_NAME}'" | grep -q 1; then
+  if (( _fj_database_exists )); then
     info "PostgreSQL database ${FORGEJO_DB_NAME} already exists."
     note_satisfied
   else
@@ -3323,6 +3366,7 @@ PSQL
     ok "Created PostgreSQL database ${FORGEJO_DB_NAME} (owner ${FORGEJO_DB_USER})."
     note_changed
   fi
+  unset _fj_role_exists _fj_database_exists
 
   section "Write Forgejo configuration"
 
