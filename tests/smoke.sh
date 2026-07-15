@@ -30,6 +30,8 @@ shell_files() {
   done | sort -u
 }
 
+# Extract one install.sh function so standards checks can exercise helpers in
+# isolation without running the mutating installer.
 install_function() {
   local name="$1"
   sed -n "/^${name}() {/,/^}$/p" scripts/install.sh

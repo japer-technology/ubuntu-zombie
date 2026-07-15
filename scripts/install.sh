@@ -3087,7 +3087,8 @@ forgejo_release_arch() {
 }
 
 # Candidate API origins for Forgejo release metadata. Forgejo's runner
-# metadata moved off Codeberg; keep the legacy origin last for old mirrors.
+# metadata moved off Codeberg; keep the legacy origin last for compatibility
+# with older pinned releases that may still only be available there.
 forgejo_release_api_origins() {
   case "$1" in
     forgejo/forgejo|forgejo/runner)
@@ -3132,8 +3133,10 @@ codeberg_latest_release() {
   local repo="$1" origin tag
   for origin in $(forgejo_release_api_origins "${repo}"); do
     # Use a bounded direct curl instead of curl_get here so a stale mirror
-    # fails over quickly; Forgejo metadata mirrors have exposed the release
-    # version as either tag_name or name, so accept both.
+    # fails over quickly. This trades curl_get's five outer attempts/logging for
+    # one endpoint-local retry window before moving to the next origin. Forgejo
+    # metadata mirrors have exposed the release version as either tag_name or
+    # name, so accept both.
     tag="$(curl -fsSL --retry 2 --retry-delay 2 --max-time 15 \
              "${origin}/api/v1/repos/${repo}/releases/latest" \
              | forgejo_release_tag_from_json 2>/dev/null)" \
