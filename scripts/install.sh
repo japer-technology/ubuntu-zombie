@@ -478,17 +478,17 @@ list_manifest_components() {
   shopt -u nullglob
 }
 
-legacy_component_present() {
-  case "$1" in
-    "${COMPONENT_ZOMBIE}") [[ -d "${ZOMBIE_DIR}" || -f "/etc/systemd/system/ubuntu-zombie-chat.service" || -d "${ZOMBIE_ETC}" ]] ;;
-    "${COMPONENT_FORGEJO}") [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
-      || -x /usr/local/bin/forgejo \
-      || -f /etc/systemd/system/forgejo-runner.service \
-      || -x /usr/local/bin/forgejo-runner \
-      || -d /var/lib/forgejo || -d /var/lib/forgejo-runner \
-      || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]] ;;
-    *) return 1 ;;
-  esac
+legacy_zombie_present() {
+  [[ -d "${ZOMBIE_DIR}" || -f "/etc/systemd/system/ubuntu-zombie-chat.service" || -d "${ZOMBIE_ETC}" ]]
+}
+
+legacy_forgejo_present() {
+  [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
+    || -x /usr/local/bin/forgejo \
+    || -f /etc/systemd/system/forgejo-runner.service \
+    || -x /usr/local/bin/forgejo-runner \
+    || -d /var/lib/forgejo || -d /var/lib/forgejo-runner \
+    || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]
 }
 
 resolve_lifecycle_targets_from_manifest() {
@@ -503,7 +503,7 @@ resolve_lifecycle_targets_from_manifest() {
   done < <(list_manifest_components)
   if (( ! found )); then
     for component in "${PUBLIC_COMPONENTS[@]}"; do
-      if legacy_component_present "${component}"; then
+      if component_dispatch_hook "${component}" legacy; then
         add_selected_component "${component}"
       fi
     done
@@ -893,17 +893,64 @@ is_valid_forgejo_password() {
   [[ "$1" =~ ^[[:print:]]+$ ]]
 }
 
-# Validate user-controlled install settings before they are interpolated into
-# paths, sudoers entries, generated unit files, or shell commands.
-validate_config() {
-  if zombie_config_selected; then
-    if ! is_supported_agent_username "${AGENT_USER}"; then
-      die "Invalid agent username '${AGENT_USER}'. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation)." 2
-    fi
-    if ! is_safe_absolute_path "${ZOMBIE_DIR}"; then
-      die "ZOMBIE_DIR must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
-    fi
+# Component-specific validation hooks.
+validate_zombie_config() {
+  if ! is_supported_agent_username "${AGENT_USER}"; then
+    die "Invalid agent username '${AGENT_USER}'. Use a non-reserved lowercase Linux username (letters first; then letters, digits, underscore, hyphen; max 32 chars; no trailing punctuation)." 2
   fi
+  if ! is_safe_absolute_path "${ZOMBIE_DIR}"; then
+    die "ZOMBIE_DIR must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
+  fi
+  if ! is_valid_tcp_port "${CHAT_PORT}"; then
+    die "ZOMBIE_CHAT_PORT must be an integer from 1 to 65535." 2
+  fi
+  if ! is_valid_ttl_days "${TTL_DAYS}"; then
+    die "ZOMBIE_TTL_DAYS must be an integer number of days from 1 to 36500." 2
+  fi
+}
+
+validate_forgejo_config() {
+  if ! is_valid_option_flag "${ZOMBIE_INSTALL_FORGEJO_RUNNER}"; then
+    die "ZOMBIE_INSTALL_FORGEJO_RUNNER must be 0 or 1." 2
+  fi
+  if ! is_valid_tcp_port "${FORGEJO_HTTP_PORT}"; then
+    die "FORGEJO_HTTP_PORT must be an integer from 1 to 65535." 2
+  fi
+  if ! is_valid_forgejo_name "${FORGEJO_ADMIN_USER}"; then
+    die "FORGEJO_ADMIN_USER must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
+  fi
+  if ! is_valid_forgejo_email "${FORGEJO_ADMIN_EMAIL}"; then
+    die "FORGEJO_ADMIN_EMAIL must look like an email address." 2
+  fi
+  if ! is_valid_forgejo_name "${FORGEJO_DB_NAME}"; then
+    die "FORGEJO_DB_NAME must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
+  fi
+  if ! is_valid_forgejo_name "${FORGEJO_DB_USER}"; then
+    die "FORGEJO_DB_USER must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
+  fi
+  if ! is_valid_forgejo_password "${FORGEJO_ADMIN_PASSWORD}"; then
+    die "FORGEJO_ADMIN_PASSWORD must be 8-256 printable characters (or empty to auto-generate)." 2
+  fi
+  if ! is_valid_forgejo_password "${FORGEJO_DB_PASSWORD}"; then
+    die "FORGEJO_DB_PASSWORD must be 8-256 printable characters (or empty to auto-generate)." 2
+  fi
+  if [[ "${ZOMBIE_RECEIPT}" != "1" ]] \
+      && [[ -z "${FORGEJO_ADMIN_PASSWORD}" || -z "${FORGEJO_DB_PASSWORD}" ]]; then
+    die "Forgejo password generation requires a receipt. Set ZOMBIE_RECEIPT=1, or explicitly set both FORGEJO_ADMIN_PASSWORD and FORGEJO_DB_PASSWORD." 64
+  fi
+  if ! is_valid_forgejo_version "${FORGEJO_VERSION}"; then
+    die "FORGEJO_VERSION must be a release like 11.0.3 (or empty for latest)." 2
+  fi
+  if ! is_valid_forgejo_version "${FORGEJO_RUNNER_VERSION}"; then
+    die "FORGEJO_RUNNER_VERSION must be a release like 6.3.1 (or empty for latest)." 2
+  fi
+  if ! is_valid_forgejo_runner_labels "${FORGEJO_RUNNER_LABELS}"; then
+    die "FORGEJO_RUNNER_LABELS must use only letters, digits, and . _ : / , + - (no spaces or quotes; max 512 chars)." 2
+  fi
+}
+
+# Validate common settings, then dispatch only the selected components.
+validate_config() {
   if ! is_safe_absolute_path "${LOG_FILE}"; then
     die "LOG_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
@@ -916,57 +963,13 @@ validate_config() {
     die "ZOMBIE_RECEIPT_FILE must be an absolute path using only letters, digits, dot, underscore, slash, plus, colon, and hyphen." 2
   fi
   validate_component_manifest_dir
-  if zombie_config_selected; then
-    if ! is_valid_tcp_port "${CHAT_PORT}"; then
-      die "ZOMBIE_CHAT_PORT must be an integer from 1 to 65535." 2
-    fi
-    if ! is_valid_ttl_days "${TTL_DAYS}"; then
-      die "ZOMBIE_TTL_DAYS must be an integer number of days from 1 to 36500." 2
-    fi
-  fi
+  local component
   if ! is_valid_option_flag "${ZOMBIE_INSTALL_FORGEJO}"; then
     die "ZOMBIE_INSTALL_FORGEJO must be 0 or 1." 2
   fi
-  if ! is_valid_option_flag "${ZOMBIE_INSTALL_FORGEJO_RUNNER}"; then
-    die "ZOMBIE_INSTALL_FORGEJO_RUNNER must be 0 or 1." 2
-  fi
-  if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
-    if ! is_valid_tcp_port "${FORGEJO_HTTP_PORT}"; then
-      die "FORGEJO_HTTP_PORT must be an integer from 1 to 65535." 2
-    fi
-    if ! is_valid_forgejo_name "${FORGEJO_ADMIN_USER}"; then
-      die "FORGEJO_ADMIN_USER must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
-    fi
-    if ! is_valid_forgejo_email "${FORGEJO_ADMIN_EMAIL}"; then
-      die "FORGEJO_ADMIN_EMAIL must look like an email address." 2
-    fi
-    if ! is_valid_forgejo_name "${FORGEJO_DB_NAME}"; then
-      die "FORGEJO_DB_NAME must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
-    fi
-    if ! is_valid_forgejo_name "${FORGEJO_DB_USER}"; then
-      die "FORGEJO_DB_USER must be a lowercase identifier (letters first; then letters, digits, underscore, hyphen; max 40 chars)." 2
-    fi
-    if ! is_valid_forgejo_password "${FORGEJO_ADMIN_PASSWORD}"; then
-      die "FORGEJO_ADMIN_PASSWORD must be 8-256 printable characters (or empty to auto-generate)." 2
-    fi
-    if ! is_valid_forgejo_password "${FORGEJO_DB_PASSWORD}"; then
-      die "FORGEJO_DB_PASSWORD must be 8-256 printable characters (or empty to auto-generate)." 2
-    fi
-    if [[ "${ZOMBIE_RECEIPT}" != "1" ]]; then
-      if [[ -z "${FORGEJO_ADMIN_PASSWORD}" || -z "${FORGEJO_DB_PASSWORD}" ]]; then
-        die "Forgejo password generation requires a receipt. Set ZOMBIE_RECEIPT=1, or explicitly set both FORGEJO_ADMIN_PASSWORD and FORGEJO_DB_PASSWORD." 64
-      fi
-    fi
-    if ! is_valid_forgejo_version "${FORGEJO_VERSION}"; then
-      die "FORGEJO_VERSION must be a release like 11.0.3 (or empty for latest)." 2
-    fi
-    if ! is_valid_forgejo_version "${FORGEJO_RUNNER_VERSION}"; then
-      die "FORGEJO_RUNNER_VERSION must be a release like 6.3.1 (or empty for latest)." 2
-    fi
-    if ! is_valid_forgejo_runner_labels "${FORGEJO_RUNNER_LABELS}"; then
-      die "FORGEJO_RUNNER_LABELS must use only letters, digits, and . _ : / , + - (no spaces or quotes; max 512 chars)." 2
-    fi
-  fi
+  for component in "${SELECTED_COMPONENTS[@]}"; do
+    component_dispatch_hook "${component}" validate
+  done
 }
 
 # Source /etc/os-release into the current shell.
@@ -1506,56 +1509,38 @@ cmd_uninstall() {
 
 print_dry_run_plan() {
   load_os_release
-  if (( COMPONENT_FORGEJO_SELECTED )) && (( ! COMPONENT_ZOMBIE_SELECTED )); then
-    cat <<EOF
+  cat <<EOF
 ${SCRIPT_NAME} ${SCRIPT_VERSION}  —  dry-run
 
-A real standalone Forgejo install with the current environment would:
+A real install of the selected components would:
 
   Components:     $(selected_components_label)
   Host:           ${ID:-?} ${VERSION_ID:-?} on $(dpkg --print-architecture 2>/dev/null || uname -m)
   Transcript:     ${LOG_FILE}
   Receipt:        $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "(disabled)")
-
-Forgejo component:
-  Forgejo server  git forge + PostgreSQL (${FORGEJO_VERSION:-latest release})
-                  apt: git-lfs postgresql postgresql-contrib openssl xz-utils
-                  binary: /usr/local/bin/forgejo (checksum-verified download)
-                  data: /var/lib/forgejo (git:git)  config: /etc/forgejo/app.ini
-                  database: ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))
-                  admin: ${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))
-                  unit: /etc/systemd/system/forgejo.service
-                  exposure: http://<host>:${FORGEJO_HTTP_PORT}/ on all interfaces (normal access)
 EOF
-    if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
-      cat <<EOF
-  Actions runner  co-located Forgejo Actions runner (Docker executor)
-                  apt: docker.io   binary: /usr/local/bin/forgejo-runner
-                  unit: /etc/systemd/system/forgejo-runner.service
-EOF
-    fi
-    cat <<EOF
+  local component
+  for component in "${SELECTED_COMPONENTS[@]}"; do
+    component_dispatch_hook "${component}" dry_run
+  done
+  cat <<EOF
 
 Nothing has been changed. To proceed for real:
 
-  sudo ./${SCRIPT_NAME} install forgejo
+  sudo ./${SCRIPT_NAME} install $(selected_components_label)
 
 See docs/QUICKSTART.md and docs/ARCHITECTURE.md for the full picture.
 EOF
-    return 0
-  fi
+}
+
+print_zombie_dry_run() {
   cat <<EOF
-${SCRIPT_NAME} ${SCRIPT_VERSION}  —  dry-run
 
-A real 'install' run with the current environment would:
-
-  Host:           ${ID:-?} ${VERSION_ID:-?} on $(dpkg --print-architecture 2>/dev/null || uname -m)
+Zombie component:
   Agent user:     ${AGENT_USER}  (home: ${AGENT_HOME})
   Install root:   ${ZOMBIE_DIR}
   Etc dir:        ${ZOMBIE_ETC}
   Log dir:        ${ZOMBIE_LOG_DIR}
-  Transcript:     ${LOG_FILE}
-  Receipt:        $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "(disabled)")
   Chat port:      ${CHAT_PORT}/tcp (loopback only)
   Mode:           $([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)
 
@@ -1579,10 +1564,12 @@ Files & directories created / re-asserted:
   /etc/systemd/system/ubuntu-zombie-health.timer
   /etc/logrotate.d/ubuntu-zombie
 EOF
-  if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
-    cat <<EOF
+}
 
-Optional components enabled (ZOMBIE_INSTALL_* flags):
+print_forgejo_dry_run() {
+  cat <<EOF
+
+Optional components enabled:
   Forgejo server  git forge + PostgreSQL (${FORGEJO_VERSION:-latest release})
                   apt: git-lfs postgresql postgresql-contrib openssl xz-utils
                   binary: /usr/local/bin/forgejo (checksum-verified download)
@@ -1592,8 +1579,8 @@ Optional components enabled (ZOMBIE_INSTALL_* flags):
                   unit: /etc/systemd/system/forgejo.service
                   exposure: http://<host>:${FORGEJO_HTTP_PORT}/ on all interfaces (normal access)
 EOF
-    if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
-      cat <<EOF
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+    cat <<EOF
   Actions runner  co-located Forgejo Actions runner (Docker executor)
                   apt: docker.io   binary: /usr/local/bin/forgejo-runner
                   registers against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels:
@@ -1602,16 +1589,7 @@ EOF
                   note: co-locating runner and forge is contrary to upstream
                         guidance and is enabled deliberately.
 EOF
-    fi
   fi
-  cat <<EOF
-
-Nothing has been changed. To proceed for real:
-
-  sudo ./${SCRIPT_NAME} install
-
-See docs/QUICKSTART.md and docs/ARCHITECTURE.md for the full picture.
-EOF
 }
 
 # ---------------------------------------------------------------------------
@@ -1647,11 +1625,6 @@ print_parameter_table() {
     field "8) Local LLM"     "${LOCAL_LLM_MODEL} @ ${LOCAL_LLM_BASE_URL}"
   else
     field "8) Local LLM"     "none (scan LAN for an OpenAI-compatible server)" "${C_DIM}"
-  fi
-  if any_option_enabled; then
-    field "9) Options"       "$(options_summary)"
-  else
-    field "9) Options"       "none selected (backup, forge, and more to come)" "${C_DIM}"
   fi
   field "   Host"            "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
   printf '\n'
@@ -2197,7 +2170,7 @@ review_parameters() {
   local choice
   while true; do
     print_parameter_table
-    printf '  %s[a]%s accept and install    %s[1-9]%s edit a field    %s[q]%s cancel\n' \
+    printf '  %s[a]%s accept and install    %s[1-8]%s edit a field    %s[q]%s cancel\n' \
       "${C_ACCENT}" "${C_RESET}" "${C_BRAND2}" "${C_RESET}" "${C_YELLOW}" "${C_RESET}"
     if ! read -r -p "$(printf '%s➜%s your choice [a]: ' "${C_BRAND}" "${C_RESET}")" choice; then
       info "No input (EOF); cancelling."; exit 0
@@ -2220,8 +2193,7 @@ review_parameters() {
       6)  _edit_admin_password ;;
       7)  _edit_ttl_days ;;
       8)  _edit_local_llm ;;
-      9)  review_options ;;
-      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-9, 'a', or 'q'." ;;
+      *)  warn "Unrecognised choice: '${choice}'. Enter a number 1-8, 'a', or 'q'." ;;
     esac
   done
 }
@@ -2274,6 +2246,51 @@ review_forgejo_parameters() {
 # are never written; passwords the installer generates itself are recorded
 # in the finish record so the operator can retrieve them.
 
+receipt_start_zombie() {
+  printf 'Agent user       : %s\n' "${AGENT_USER}"
+  printf 'Agent home       : %s\n' "${AGENT_HOME}"
+  printf 'Install root     : %s\n' "${ZOMBIE_DIR}"
+  printf 'Etc dir          : %s\n' "${ZOMBIE_ETC}"
+  printf 'Log dir          : %s\n' "${ZOMBIE_LOG_DIR}"
+  printf 'Chat port        : %s/tcp (loopback only)\n' "${CHAT_PORT}"
+  printf 'Local LLM        : %s\n' \
+    "$([[ -n "${LOCAL_LLM_MODEL}" ]] && printf '%s @ %s' "${LOCAL_LLM_MODEL}" "${LOCAL_LLM_BASE_URL}" || echo 'none')"
+}
+
+receipt_start_forgejo() {
+  printf 'Forgejo server   : enabled\n'
+  printf 'Forgejo port     : %s/tcp (all interfaces)\n' "${FORGEJO_HTTP_PORT}"
+  printf 'Forgejo admin    : %s <%s> (password %s)\n' \
+    "${FORGEJO_ADMIN_USER}" "${FORGEJO_ADMIN_EMAIL}" \
+    "$(password_source_label "${FORGEJO_ADMIN_PASSWORD}")"
+  printf 'Forgejo database : %s (role %s; password %s)\n' \
+    "${FORGEJO_DB_NAME}" "${FORGEJO_DB_USER}" \
+    "$(password_source_label "${FORGEJO_DB_PASSWORD}")"
+  printf 'Forgejo version  : %s\n' "${FORGEJO_VERSION:-latest (resolved at install)}"
+  printf 'Actions runner   : %s\n' \
+    "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, Docker executor)' || echo disabled)"
+}
+
+receipt_finish_zombie() {
+  printf 'Provider token   : %s\n' "$([[ "${PROVIDER_OK:-0}" == "1" ]] && echo present || echo missing)"
+  printf 'Chat service     : %s\n' "$([[ "${CHAT_OK:-0}" == "1" ]] && echo running || echo 'not running')"
+}
+
+receipt_finish_forgejo() {
+  printf 'Forgejo version  : %s\n' "${FORGEJO_RESOLVED_VERSION:-unknown}"
+  printf 'Forgejo service  : %s\n' \
+    "$(systemctl is-active --quiet forgejo.service 2>/dev/null && echo running || echo 'not running')"
+  printf 'Forgejo secrets  : generated (stored only in /etc/forgejo/app.ini, mode 640)\n'
+  printf 'Forgejo admin pw : %s\n' \
+    "$(receipt_password_line "${FORGEJO_ADMIN_PASSWORD_SOURCE}" "${FORGEJO_ADMIN_PASSWORD}")"
+  printf 'Forgejo DB pw    : %s\n' \
+    "$(receipt_password_line "${FORGEJO_DB_PASSWORD_SOURCE}" "${FORGEJO_DB_PASSWORD}")"
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+    printf 'Actions runner   : %s\n' \
+      "$(systemctl is-active --quiet forgejo-runner.service 2>/dev/null && echo running || echo 'not running')"
+  fi
+}
+
 write_receipt_start() {
   [[ "${ZOMBIE_RECEIPT}" == "1" ]] || return 0
   load_os_release
@@ -2304,34 +2321,12 @@ write_receipt_start() {
       "$([[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && echo non-interactive || echo interactive)"
     printf 'Components       : %s\n' "$(selected_components_label)"
     printf '\n-- Parameters --\n'
-    if (( COMPONENT_ZOMBIE_SELECTED )); then
-      printf 'Agent user       : %s\n' "${AGENT_USER}"
-      printf 'Agent home       : %s\n' "${AGENT_HOME}"
-      printf 'Install root     : %s\n' "${ZOMBIE_DIR}"
-      printf 'Etc dir          : %s\n' "${ZOMBIE_ETC}"
-      printf 'Log dir          : %s\n' "${ZOMBIE_LOG_DIR}"
-      printf 'Chat port        : %s/tcp (loopback only)\n' "${CHAT_PORT}"
-      printf 'Local LLM        : %s\n' \
-        "$([[ -n "${LOCAL_LLM_MODEL}" ]] && printf '%s @ %s' "${LOCAL_LLM_MODEL}" "${LOCAL_LLM_BASE_URL}" || echo 'none')"
-    fi
+    local component
+    for component in "${SELECTED_COMPONENTS[@]}"; do
+      component_dispatch_hook "${component}" receipt_start
+    done
     printf 'Transcript log   : %s\n' "${LOG_FILE}"
     printf 'Receipt file     : %s\n' "${RECEIPT_FILE}"
-    if any_option_enabled; then
-      printf '\n-- Optional components --\n'
-      if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
-        printf 'Forgejo server   : enabled\n'
-        printf 'Forgejo port     : %s/tcp (all interfaces)\n' "${FORGEJO_HTTP_PORT}"
-        printf 'Forgejo admin    : %s <%s> (password %s)\n' \
-          "${FORGEJO_ADMIN_USER}" "${FORGEJO_ADMIN_EMAIL}" \
-          "$(password_source_label "${FORGEJO_ADMIN_PASSWORD}")"
-        printf 'Forgejo database : %s (role %s; password %s)\n' \
-          "${FORGEJO_DB_NAME}" "${FORGEJO_DB_USER}" \
-          "$(password_source_label "${FORGEJO_DB_PASSWORD}")"
-        printf 'Forgejo version  : %s\n' "${FORGEJO_VERSION:-latest (resolved at install)}"
-        printf 'Actions runner   : %s\n' \
-          "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, Docker executor)' || echo disabled)"
-      fi
-    fi
     printf '============================================================\n'
   } >> "${RECEIPT_FILE}" 2>/dev/null; then
     warn "Could not write the install receipt to ${RECEIPT_FILE}."
@@ -2353,24 +2348,10 @@ write_receipt_finish() {
     if [[ -n "${INSTALL_T0:-}" ]]; then
       printf 'Duration         : %s\n' "$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
     fi
-    if (( COMPONENT_ZOMBIE_SELECTED )); then
-      printf 'Provider token   : %s\n' "$([[ "${PROVIDER_OK:-0}" == "1" ]] && echo present || echo missing)"
-      printf 'Chat service     : %s\n' "$([[ "${CHAT_OK:-0}" == "1" ]] && echo running || echo 'not running')"
-    fi
-    if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
-      printf 'Forgejo version  : %s\n' "${FORGEJO_RESOLVED_VERSION:-unknown}"
-      printf 'Forgejo service  : %s\n' \
-        "$(systemctl is-active --quiet forgejo.service 2>/dev/null && echo running || echo 'not running')"
-      printf 'Forgejo secrets  : generated (stored only in /etc/forgejo/app.ini, mode 640)\n'
-      printf 'Forgejo admin pw : %s\n' \
-        "$(receipt_password_line "${FORGEJO_ADMIN_PASSWORD_SOURCE}" "${FORGEJO_ADMIN_PASSWORD}")"
-      printf 'Forgejo DB pw    : %s\n' \
-        "$(receipt_password_line "${FORGEJO_DB_PASSWORD_SOURCE}" "${FORGEJO_DB_PASSWORD}")"
-      if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
-        printf 'Actions runner   : %s\n' \
-          "$(systemctl is-active --quiet forgejo-runner.service 2>/dev/null && echo running || echo 'not running')"
-      fi
-    fi
+    local component
+    for component in "${SELECTED_COMPONENTS[@]}"; do
+      component_dispatch_hook "${component}" receipt_finish
+    done
     printf 'Steps satisfied  : %s\n' "${STEPS_SATISFIED}"
     printf 'Steps applied    : %s\n' "${STEPS_CHANGED}"
     [[ -n "${NEXT_STEP:-}" ]] && printf 'Next step        : %s\n' "${NEXT_STEP}"
@@ -2417,6 +2398,8 @@ write_receipt_fail() {
 
 trap 'on_error ${LINENO}' ERR
 
+validate_component_registry \
+  "validate review dry_run receipt_start receipt_finish install manifest final legacy verify doctor repair phase_count"
 validate_config
 resolve_lifecycle_targets_from_manifest
 
@@ -2480,15 +2463,11 @@ if (( COMPONENT_ZOMBIE_SELECTED )); then
   discover_local_llms
 fi
 
-# Interactive review: present every parameter in a branded, editable table
-# and let the operator tweak settings until satisfied. Runs before any state
-# is touched and before the transcript is opened, so edits to LOG_FILE take
-# effect. No-op for --yes / non-interactive / non-TTY runs.
-if (( COMPONENT_ZOMBIE_SELECTED )); then
-  review_parameters
-else
-  review_forgejo_parameters
-fi
+# Interactive review: each selected component owns its parameter page. This
+# keeps a zombie-only install from asking about unselected options.
+for component in "${SELECTED_COMPONENTS[@]}"; do
+  component_dispatch_hook "${component}" review
+done
 preflight
 
 # Transcript logging
@@ -2519,21 +2498,6 @@ fi
 # phases are added or removed.
 ZOMBIE_PHASE=0
 SECTION_RULE_WIDTH=60
-ZOMBIE_PHASE_TOTAL="$(awk '/^# install — the rest of the file/{f=1} f && /^section "/{c++} END{print c+0}' "${BASH_SOURCE[0]}" 2>/dev/null || echo 0)"
-# The count is derived by scanning this file, so guard against a 0/empty
-# result (e.g. if the marker comment is ever moved) — fall back to an
-# un-totalled "[n]" counter rather than printing a confusing "[n/0]".
-[[ "${ZOMBIE_PHASE_TOTAL}" =~ ^[0-9]+$ ]] || ZOMBIE_PHASE_TOTAL=0
-# Drop the baseline count for Forgejo-only runs; its guarded section count is
-# added by the option-section counter immediately below, so progress still
-# renders [n/total] without zombie phases.
-(( COMPONENT_ZOMBIE_SELECTED )) || ZOMBIE_PHASE_TOTAL=0
-
-# Optional components add indented `  section "..."` calls inside guarded
-# if-blocks (deliberately not matched by the top-level count above, so a
-# default install's "[n/total]" is unaffected). When a component is
-# enabled, add its section count to the denominator so progress stays
-# honest. Blocks are delimited by "# option-sections: <name> begin/end".
 _count_option_sections() {
   awk -v m="$1" '
     $0 ~ "^ *# option-sections: " m " begin$" {f=1}
@@ -2542,14 +2506,24 @@ _count_option_sections() {
     END {print c+0}
   ' "${BASH_SOURCE[0]}" 2>/dev/null || echo 0
 }
-if (( ZOMBIE_PHASE_TOTAL > 0 )); then
-  if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
-    ZOMBIE_PHASE_TOTAL=$(( ZOMBIE_PHASE_TOTAL + $(_count_option_sections forgejo) ))
-    if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
-      ZOMBIE_PHASE_TOTAL=$(( ZOMBIE_PHASE_TOTAL + $(_count_option_sections forgejo-runner) ))
-    fi
+count_zombie_phases() {
+  awk '/^# install — the rest of the file/{f=1} f && /^section "/{c++} END{print c+0}' \
+    "${BASH_SOURCE[0]}" 2>/dev/null || echo 0
+}
+count_forgejo_phases() {
+  local count
+  count="$(_count_option_sections forgejo)"
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+    count=$(( count + $(_count_option_sections forgejo-runner) ))
   fi
-fi
+  printf '%s\n' "${count}"
+}
+ZOMBIE_PHASE_TOTAL=0
+for component in "${SELECTED_COMPONENTS[@]}"; do
+  component_phase_count="$(component_dispatch_hook "${component}" phase_count)"
+  [[ "${component_phase_count}" =~ ^[0-9]+$ ]] || component_phase_count=0
+  ZOMBIE_PHASE_TOTAL=$(( ZOMBIE_PHASE_TOTAL + component_phase_count ))
+done
 _SECTION_T0=""
 
 # Re-define section() to record a breadcrumb, number each phase, and report
@@ -3834,13 +3808,11 @@ install_zombie() {
   install_zombie_runtime
 }
 
-if (( COMPONENT_ZOMBIE_SELECTED )); then
-  install_zombie
+write_zombie_manifest() {
   write_component_manifest "${COMPONENT_ZOMBIE}" "${SCRIPT_VERSION}" ""
-fi
+}
 
-if (( COMPONENT_FORGEJO_SELECTED )); then
-  install_forgejo
+write_forgejo_manifest() {
   FORGEJO_URL_HOST="${FORGEJO_URL_HOST:-$(hostname -f 2>/dev/null || hostname)}"
   FORGEJO_OK=0
   systemctl is-active --quiet forgejo.service && FORGEJO_OK=1
@@ -3862,44 +3834,46 @@ if (( COMPONENT_FORGEJO_SELECTED )); then
   [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && forgejo_suboptions="runner"
   write_component_manifest "${COMPONENT_FORGEJO}" \
     "${FORGEJO_RESOLVED_VERSION:-${FORGEJO_VERSION:-}}" "${forgejo_suboptions}"
-fi
+}
+
+final_zombie_summary() {
+  if [[ "${PROVIDER_OK}" != "1" ]]; then
+    NEXT_STEP="sudo ${ZOMBIE_DIR}/bin/secrets-edit   # paste a supported provider API key"
+  elif [[ "${CHAT_OK}" != "1" ]]; then
+    NEXT_STEP="sudo systemctl start ubuntu-zombie-chat.service"
+  else
+    NEXT_STEP="sudo reboot"
+  fi
+  printf 'Chat:    http://127.0.0.1:%s/ (localhost only, after reboot)\n' "${CHAT_PORT}"
+  printf 'Check:   %s/bin/verify  ·  %s/bin/audit-recent\n' "${ZOMBIE_DIR}" "${ZOMBIE_DIR}"
+}
+
+final_forgejo_summary() {
+  [[ -n "${NEXT_STEP}" ]] || NEXT_STEP="http://${FORGEJO_URL_HOST}:${FORGEJO_HTTP_PORT}/"
+  printf 'Forgejo: http://%s:%s/ (all interfaces%s)\n' \
+    "${FORGEJO_URL_HOST}" "${FORGEJO_HTTP_PORT}" \
+    "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled')"
+}
+
+for component in "${SELECTED_COMPONENTS[@]}"; do
+  component_dispatch_hook "${component}" install
+  component_dispatch_hook "${component}" manifest
+done
 echo
 
 NEXT_STEP=""
-if (( COMPONENT_ZOMBIE_SELECTED )) && [[ "${PROVIDER_OK}" != "1" ]]; then
-  NEXT_STEP="sudo ${ZOMBIE_DIR}/bin/secrets-edit   # paste any of OPENAI/ANTHROPIC/GEMINI/XAI/OPENROUTER/MISTRAL/GROQ _API_KEY"
-elif (( COMPONENT_ZOMBIE_SELECTED )) && [[ "${CHAT_OK}" != "1" ]]; then
-  NEXT_STEP="sudo systemctl start ubuntu-zombie-chat.service"
-elif (( COMPONENT_ZOMBIE_SELECTED )); then
-  NEXT_STEP="sudo reboot"
-else
-  NEXT_STEP="http://${FORGEJO_URL_HOST}:${FORGEJO_HTTP_PORT}/"
-fi
-
 INSTALL_DURATION="$(fmt_duration "$(( $(date +%s) - INSTALL_T0 ))")"
-if (( COMPONENT_ZOMBIE_SELECTED )); then
-  cat <<EOF
-
-${C_GREEN}${C_BOLD}Install complete in ${INSTALL_DURATION}.${C_RESET}
+printf '\n%s%sInstall complete in %s.%s\n' \
+  "${C_GREEN}" "${C_BOLD}" "${INSTALL_DURATION}" "${C_RESET}"
+for component in "${SELECTED_COMPONENTS[@]}"; do
+  component_dispatch_hook "${component}" final
+done
+cat <<EOF
 Next:    ${C_BOLD}${NEXT_STEP}${C_RESET}
-Chat:    http://127.0.0.1:${CHAT_PORT}/ (localhost only, after reboot)
-Check:   ${ZOMBIE_DIR}/bin/verify  ·  ${ZOMBIE_DIR}/bin/audit-recent
-Records: ${LOG_FILE}
-         $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "receipt disabled")  ·  ${ZOMBIE_ETC}/policy.yaml
-$([[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]] && printf 'Forgejo: http://<host>:%s/ (all interfaces%s)\n' "${FORGEJO_HTTP_PORT}" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled')")
-Remove:  sudo ${SCRIPT_DIR}/uninstall.sh --dry-run
-EOF
-else
-  cat <<EOF
-
-${C_GREEN}${C_BOLD}Install complete in ${INSTALL_DURATION}.${C_RESET}
-Next:    ${C_BOLD}${NEXT_STEP}${C_RESET}
-Forgejo: http://${FORGEJO_URL_HOST}:${FORGEJO_HTTP_PORT}/ (all interfaces$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled'))
 Records: ${LOG_FILE}
          $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo "receipt disabled")
-Remove:  sudo ${SCRIPT_DIR}/uninstall.sh forgejo --dry-run
+Remove:  sudo ${SCRIPT_DIR}/uninstall.sh $(selected_components_label) --dry-run
 EOF
-fi
 
 if (( COMPONENT_ZOMBIE_SELECTED )) && [[ "${NEXT_STEP}" != "sudo reboot" ]]; then
   info "Reboot after completing the next step: sudo reboot"
