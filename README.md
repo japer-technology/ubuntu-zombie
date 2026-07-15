@@ -159,8 +159,8 @@ The baseline can be extended with opt-in components behind
 and reversible by `uninstall.sh`. These environment flags remain the
 compatibility API for cloud-init and other automation and are additive
 with explicit component targets. The first is a self-hosted **Forgejo**
-git forge (PostgreSQL-backed, normal LAN access, optional co-located
-Actions runner):
+git forge (PostgreSQL-backed, `.local` LAN discovery, Caddy internal-CA
+HTTPS, optional co-located Actions runner):
 
 ```bash
 sudo ZOMBIE_INSTALL_FORGEJO=1 ZOMBIE_INSTALL_FORGEJO_RUNNER=1 \

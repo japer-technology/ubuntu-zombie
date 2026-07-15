@@ -10,6 +10,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Phase 4 — Registry generalisation
 
+- **Forgejo LAN HTTPS:** Forgejo now binds only to loopback and is exposed
+  at the machine's `.local` name through Avahi discovery and Caddy HTTPS
+  using Caddy's internal CA. Install, verify, doctor, repair, receipts,
+  summaries, uninstall, and client CA trust documentation cover the full
+  lifecycle.
 - **Forgejo update safety:** re-runs now detect existing Forgejo and matching
   PostgreSQL state before mutation, require separate exact, capitalized `YES`
   approvals (including explicit environment acknowledgements for unattended

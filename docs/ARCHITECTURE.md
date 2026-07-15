@@ -114,8 +114,11 @@ as the dedicated `git` system user under a hardened `forgejo.service`
 unit, plus an optional co-located Actions runner
 (`ZOMBIE_INSTALL_FORGEJO_RUNNER`, Docker executor, `forgejo-runner`
 system user). Its trust boundary differs from the chat service: the
-forge is a **network-listening service on all interfaces** (normal
-access for people on the LAN), so its units are sandboxed
+Forgejo process is loopback-only, while Caddy is the **network-listening
+service** on HTTPS port `443`. Avahi publishes the machine's `.local`
+name, Caddy terminates a certificate from its internal CA, and the
+installer exports only the public CA root for clients to trust. These
+services are sandboxed
 (`NoNewPrivileges`, `ProtectSystem=full`, scoped `ReadWritePaths`) —
 the opposite of the deliberately unsandboxed chat unit. Its secrets
 live only in `/etc/forgejo/app.ini` (`root:git`, `640`). The policy
@@ -129,8 +132,9 @@ progress, and manifest writes. Component hooks own their mutations.
 `install_zombie` converges the account, runtimes, policy, and chat stack;
 `install_forgejo` converges PostgreSQL, Forgejo, and its optional runner.
 The Forgejo hook has an explicit package set (`git`, `git-lfs`,
-`postgresql`, `postgresql-contrib`, `openssl`, and `xz-utils`, plus
-`docker.io` for the runner) and does not depend on zombie-owned state.
+`postgresql`, `postgresql-contrib`, `openssl`, `xz-utils`, `caddy`,
+`avahi-daemon`, and `libnss-mdns`, plus `docker.io` for the runner) and
+does not depend on zombie-owned state.
 
 ## Installer command grammar
 

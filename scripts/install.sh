@@ -681,12 +681,12 @@ Environment variables (selected; see docs/CONFIGURATION.md for all):
 
 Optional components (all default 0 / off; see options/ for the roadmap):
   ZOMBIE_INSTALL_FORGEJO=1    also install a self-hosted Forgejo git forge
-                              backed by PostgreSQL, reachable on the normal
-                              network interfaces (port 3000 by default).
+                              backed by PostgreSQL, reachable over LAN HTTPS
+                              through Caddy and mDNS/Avahi.
   ZOMBIE_INSTALL_FORGEJO_RUNNER=1  also install a Forgejo Actions runner on
                               the same host (standard Docker executor).
                               Requires ZOMBIE_INSTALL_FORGEJO=1.
-  FORGEJO_HTTP_PORT=<n>       Forgejo web/API port (default 3000).
+  FORGEJO_HTTP_PORT=<n>       Forgejo loopback backend port (default 3000).
   FORGEJO_ADMIN_USER=<name>   initial admin account (default forgejo-admin).
   FORGEJO_ADMIN_EMAIL=<addr>  admin email (default forgejo-admin@localhost.localdomain).
   FORGEJO_ADMIN_PASSWORD=<p>  initial admin password (default: randomly
@@ -907,7 +907,8 @@ is_valid_forgejo_jwt_secret() {
 
 forgejo_url_host() {
   local host
-  host="$(hostname -f 2>/dev/null || hostname)"
+  host="$(hostname -s 2>/dev/null || hostname)"
+  host="${host%.local}.local"
   printf '%s\n' "${host}" | tr '[:upper:]' '[:lower:]'
 }
 
@@ -1196,6 +1197,7 @@ verify_forgejo() {
     && vr ok forgejo service_unit "Forgejo service unit present." \
     || vr fail forgejo service_unit "Forgejo service unit missing."
   local _fj_svc_active=0 _fj_dir_perms _fj_cfg_perms _fj_port _fj_health
+  local _fj_host _fj_root_url _fj_http_addr
   systemctl is-active --quiet forgejo.service 2>/dev/null \
     && { vr ok forgejo service_active "Forgejo service active."; _fj_svc_active=1; } \
     || vr fail forgejo service_active "Forgejo service not active."
@@ -1219,6 +1221,34 @@ verify_forgejo() {
       vr ok forgejo healthz "Forgejo /api/healthz reports healthy."
     else
       vr fail forgejo healthz "Forgejo /api/healthz did not return healthy. Check journalctl -u forgejo."
+    fi
+    _fj_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_root_url="$(awk -F' = ' '/^ROOT_URL/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_http_addr="$(awk -F' = ' '/^HTTP_ADDR/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    if [[ -n "${_fj_host}" && "${_fj_root_url}" == "https://${_fj_host}/" \
+        && "${_fj_http_addr}" == "127.0.0.1" ]]; then
+      vr ok forgejo public_url "Forgejo uses HTTPS at ${_fj_root_url}; backend is loopback-only."
+    else
+      vr fail forgejo public_url "Forgejo HTTPS URL or loopback bind is incorrect. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    fi
+    systemctl is-active --quiet caddy.service 2>/dev/null \
+      && vr ok forgejo caddy "Caddy HTTPS reverse proxy active." \
+      || vr fail forgejo caddy "Caddy reverse proxy not active. Run: sudo systemctl restart caddy"
+    systemctl is-active --quiet avahi-daemon.service 2>/dev/null \
+      && vr ok forgejo mdns "Avahi mDNS discovery active." \
+      || vr fail forgejo mdns "Avahi mDNS discovery not active. Run: sudo systemctl restart avahi-daemon"
+    [[ -r /etc/forgejo/caddy-local-ca.crt ]] \
+      && vr ok forgejo local_ca "Caddy local CA certificate exported." \
+      || vr fail forgejo local_ca "Caddy local CA certificate missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    if [[ -n "${_fj_host}" && -r /etc/forgejo/caddy-local-ca.crt ]]; then
+      _fj_health="$(curl -sf --max-time 5 --cacert /etc/forgejo/caddy-local-ca.crt \
+        --resolve "${_fj_host}:443:127.0.0.1" \
+        "https://${_fj_host}/api/healthz" 2>/dev/null || true)"
+      if printf '%s' "${_fj_health}" | grep -q '"healthy"'; then
+        vr ok forgejo https_healthz "Forgejo HTTPS endpoint reports healthy."
+      else
+        vr fail forgejo https_healthz "Forgejo HTTPS endpoint failed. Check journalctl -u caddy."
+      fi
     fi
   fi
   if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
@@ -1356,6 +1386,21 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_db "PostgreSQL not running (Forgejo needs it). Fix: sudo systemctl start postgresql"
       fi
+      if systemctl is-active --quiet caddy.service 2>/dev/null; then
+        dr ok forgejo forgejo_caddy "Caddy HTTPS reverse proxy active."
+      else
+        dr warn forgejo forgejo_caddy "Caddy is not running. Fix: sudo systemctl restart caddy"
+      fi
+      if systemctl is-active --quiet avahi-daemon.service 2>/dev/null; then
+        dr ok forgejo forgejo_mdns "Avahi mDNS discovery active."
+      else
+        dr warn forgejo forgejo_mdns "Avahi is not running. Fix: sudo systemctl restart avahi-daemon"
+      fi
+      if [[ -r /etc/forgejo/caddy-local-ca.crt ]]; then
+        dr ok forgejo forgejo_ca "Caddy local CA certificate exported for client trust."
+      else
+        dr warn forgejo forgejo_ca "Local CA export missing. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+      fi
       if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
         if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
           dr ok forgejo forgejo_runner "Forgejo Actions runner active."
@@ -1480,6 +1525,9 @@ cmd_repair() {
         systemctl daemon-reload
         systemctl restart forgejo.service || warn "Forgejo failed to restart; see journalctl -u forgejo"
       fi
+      if [[ -f /etc/forgejo/app.ini ]]; then
+        configure_forgejo_lan_https
+      fi
       if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
         chown -R forgejo-runner:forgejo-runner /var/lib/forgejo-runner 2>/dev/null || true
         systemctl restart forgejo-runner.service || warn "Forgejo runner failed to restart; see journalctl -u forgejo-runner"
@@ -1585,12 +1633,14 @@ print_forgejo_dry_run() {
 Optional components enabled:
   Forgejo server  git forge + PostgreSQL (${FORGEJO_VERSION:-latest release})
                   apt: git-lfs postgresql postgresql-contrib openssl xz-utils
+                       caddy avahi-daemon libnss-mdns
                   binary: /usr/local/bin/forgejo (checksum-verified download)
                   data: /var/lib/forgejo (git:git)  config: /etc/forgejo/app.ini
                   database: ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))
                   admin: ${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))
                   unit: /etc/systemd/system/forgejo.service
-                  exposure: http://<host>:${FORGEJO_HTTP_PORT}/ on all interfaces (normal access)
+                  exposure: https://$(forgejo_url_host)/ via mDNS + Caddy internal CA
+                  backend: 127.0.0.1:${FORGEJO_HTTP_PORT} (not directly exposed)
 EOF
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
     cat <<EOF
@@ -1892,7 +1942,7 @@ print_options_table() {
     "${C_DIM}" "${C_RESET}"
   if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
     field "1) Forgejo server"  "enabled"
-    field "2) Forgejo port"    "${FORGEJO_HTTP_PORT}/tcp (all interfaces)"
+    field "2) Forgejo port"    "${FORGEJO_HTTP_PORT}/tcp (loopback backend)"
     field "3) Forgejo admin"   "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))"
     field "4) Actions runner"  "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo 'disabled')"
     field "5) Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))"
@@ -2221,7 +2271,7 @@ review_forgejo_parameters() {
   while true; do
     load_os_release
     brand_banner "Forgejo — setup parameters"
-    field "1) Forgejo port"   "${FORGEJO_HTTP_PORT}/tcp (all interfaces)"
+    field "1) Forgejo port"   "${FORGEJO_HTTP_PORT}/tcp (loopback backend)"
     field "2) Forgejo admin"  "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))"
     field "3) PostgreSQL database" "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))"
     field "4) Actions runner" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo disabled)"
@@ -2273,7 +2323,9 @@ receipt_start_zombie() {
 
 receipt_start_forgejo() {
   printf 'Forgejo server   : enabled\n'
-  printf 'Forgejo port     : %s/tcp (all interfaces)\n' "${FORGEJO_HTTP_PORT}"
+  printf 'Forgejo URL      : https://%s/ (mDNS; Caddy local CA)\n' \
+    "$(forgejo_url_host)"
+  printf 'Forgejo backend  : 127.0.0.1:%s/tcp\n' "${FORGEJO_HTTP_PORT}"
   printf 'Forgejo admin    : %s <%s> (password %s)\n' \
     "${FORGEJO_ADMIN_USER}" "${FORGEJO_ADMIN_EMAIL}" \
     "$(password_source_label "${FORGEJO_ADMIN_PASSWORD}")"
@@ -2633,12 +2685,13 @@ else
 
 This installer will:
   - Install PostgreSQL and Forgejo without creating a zombie account
-  - Expose Forgejo on port ${FORGEJO_HTTP_PORT} on all interfaces
+  - Expose Forgejo at https://$(forgejo_url_host)/ through Caddy and Avahi
   - Keep installer-owned transcript and root-only receipt records under /var/log
 EOF
 fi
 if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
-  printf '  - Install a Forgejo git forge + PostgreSQL on port %s (all interfaces)\n' "${FORGEJO_HTTP_PORT}"
+  printf '  - Install Forgejo + PostgreSQL with LAN HTTPS at https://%s/\n' \
+    "$(forgejo_url_host)"
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
     printf '  - Install a co-located Forgejo Actions runner (Docker executor)\n'
   fi
@@ -3099,11 +3152,10 @@ retry 4 5 -- install_pinned_node_bridge pi-mono "${PAYLOAD_DIR}/agent/pi-mono.ve
 # ---------------------------------------------------------------------------
 # Optional component: Forgejo server (ZOMBIE_INSTALL_FORGEJO=1)
 # ---------------------------------------------------------------------------
-# A self-hosted git forge backed by PostgreSQL. This is a *normal* network
-# service for people: it listens on all interfaces (unlike the loopback-only
-# chat UI), and its admin/database credentials are generated at install time
-# and stored only in root-owned files on this host. Every step checks the
-# current state first so re-runs converge without errors.
+# A self-hosted git forge backed by PostgreSQL. Forgejo listens on loopback;
+# Avahi and Caddy provide LAN discovery and internal-CA HTTPS. Admin/database
+# credentials are generated at install time and stored only in root-owned
+# files on this host. Every step checks current state so re-runs converge.
 
 # Map dpkg architecture to the Forgejo release asset suffix. The uname -m
 # names (x86_64/aarch64) only apply when dpkg is unavailable and the
@@ -3248,12 +3300,95 @@ ensure_forgejo_runner_docker_package() {
   apt_install docker.io
 }
 
+configure_forgejo_lan_https() {
+  local host caddy_snippet caddy_tmp avahi_tmp ca_source
+  host="$(forgejo_url_host)"
+  FORGEJO_URL_HOST="${host}"
+
+  if [[ -f /etc/forgejo/app.ini ]]; then
+    sed -i \
+      -e 's|^HTTP_ADDR = .*|HTTP_ADDR = 127.0.0.1|' \
+      -e "s|^DOMAIN = .*|DOMAIN = ${host}|" \
+      -e "s|^ROOT_URL = .*|ROOT_URL = https://${host}/|" \
+      /etc/forgejo/app.ini
+    chown root:git /etc/forgejo/app.ini
+    chmod 640 /etc/forgejo/app.ini
+  fi
+
+  install -d -m 755 -o root -g root /etc/caddy/conf.d
+  [[ -f /etc/caddy/Caddyfile ]] || install -m 644 /dev/null /etc/caddy/Caddyfile
+  if ! grep -Fqx 'import /etc/caddy/conf.d/*.caddy' /etc/caddy/Caddyfile; then
+    printf '\nimport /etc/caddy/conf.d/*.caddy\n' >> /etc/caddy/Caddyfile
+  fi
+  caddy_snippet=/etc/caddy/conf.d/forgejo.caddy
+  caddy_tmp="$(mktemp)"
+  cat > "${caddy_tmp}" <<EOF
+# Managed by ${SCRIPT_NAME}. Forgejo stays on loopback; Caddy is the LAN edge.
+https://${host} {
+	tls internal
+	reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}
+}
+EOF
+  if [[ -f "${caddy_snippet}" ]] && cmp -s "${caddy_tmp}" "${caddy_snippet}"; then
+    rm -f "${caddy_tmp}"
+  else
+    install -m 644 -o root -g root "${caddy_tmp}" "${caddy_snippet}"
+    rm -f "${caddy_tmp}"
+  fi
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null \
+    || die "Caddy configuration validation failed; /etc/caddy/Caddyfile was not activated." 1
+
+  install -d -m 755 -o root -g root /etc/avahi/services
+  avahi_tmp="$(mktemp)"
+  cat > "${avahi_tmp}" <<EOF
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">Forgejo on %h</name>
+  <service>
+    <type>_https._tcp</type>
+    <port>443</port>
+  </service>
+</service-group>
+EOF
+  if [[ -f /etc/avahi/services/forgejo.service ]] \
+      && cmp -s "${avahi_tmp}" /etc/avahi/services/forgejo.service; then
+    rm -f "${avahi_tmp}"
+  else
+    install -m 644 -o root -g root "${avahi_tmp}" \
+      /etc/avahi/services/forgejo.service
+    rm -f "${avahi_tmp}"
+  fi
+
+  systemctl enable --now avahi-daemon.service >/dev/null 2>&1 \
+    || die "Avahi failed to start; see journalctl -u avahi-daemon." 1
+  systemctl enable --now caddy.service >/dev/null 2>&1 \
+    || die "Caddy failed to start; see journalctl -u caddy." 1
+  systemctl reload-or-restart caddy.service \
+    || die "Caddy failed to load the Forgejo HTTPS configuration; see journalctl -u caddy." 1
+  systemctl restart forgejo.service \
+    || die "Forgejo failed to apply its HTTPS public URL; see journalctl -u forgejo." 1
+
+  ca_source=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+  retry 6 1 -- test -r "${ca_source}" \
+    || die "Caddy did not create its local CA certificate; see journalctl -u caddy." 1
+  install -m 644 -o root -g root "${ca_source}" \
+    /etc/forgejo/caddy-local-ca.crt
+  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
+       --cacert /etc/forgejo/caddy-local-ca.crt \
+       --resolve "${host}:443:127.0.0.1" \
+       "https://${host}/api/healthz"; then
+    die "Forgejo HTTPS endpoint did not become healthy; see journalctl -u caddy and journalctl -u forgejo." 1
+  fi
+}
+
 # component-hook: forgejo begin
 install_forgejo() {
   # option-sections: forgejo begin
   section "Install Forgejo prerequisites"
 
-  apt_install git git-lfs postgresql postgresql-contrib openssl xz-utils
+  apt_install git git-lfs postgresql postgresql-contrib openssl xz-utils \
+    caddy avahi-daemon libnss-mdns
 
   section "Create git system user"
 
@@ -3418,12 +3553,11 @@ USER = ${FORGEJO_DB_USER}
 PASSWD = ${FORGEJO_DB_PASSWORD}
 
 [server]
-; Normal network access: the forge serves people on the LAN, unlike the
-; loopback-only chat UI.
-HTTP_ADDR = 0.0.0.0
+; Caddy is the LAN-facing HTTPS endpoint; Forgejo itself is loopback-only.
+HTTP_ADDR = 127.0.0.1
 HTTP_PORT = ${FORGEJO_HTTP_PORT}
 DOMAIN = ${_fj_domain}
-ROOT_URL = http://${_fj_domain}:${FORGEJO_HTTP_PORT}/
+ROOT_URL = https://${_fj_domain}/
 LFS_START_SERVER = true
 LFS_JWT_SECRET = ${_fj_lfs_jwt_secret}
 
@@ -3524,7 +3658,12 @@ EOF
       || warn "Could not disable the unhealthy Forgejo service."
     die "Forgejo started but did not become healthy; it was stopped. See journalctl -u forgejo." 1
   fi
-  ok "Forgejo is healthy at http://${_fj_domain}:${FORGEJO_HTTP_PORT}/."
+  ok "Forgejo backend is healthy on 127.0.0.1:${FORGEJO_HTTP_PORT}."
+
+  section "Configure Forgejo LAN HTTPS and mDNS"
+
+  configure_forgejo_lan_https
+  ok "Forgejo is available at https://${_fj_domain}/ after trusting the local CA."
   # option-sections: forgejo end
 
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
@@ -3874,6 +4013,7 @@ check "agent server.py compiles"           \${AGENT_HOME}/agent-env/bin/python -
 if sudo -n test -f /etc/forgejo/app.ini 2>/dev/null; then
   FORGEJO_PORT="\$(sudo -n awk -F' = ' '\$0=="[server]"{s=1;next} /^\\[/{s=0} s && \$1=="HTTP_PORT"{print \$2; exit}' /etc/forgejo/app.ini 2>/dev/null)"
   FORGEJO_PORT="\${FORGEJO_PORT:-3000}"
+  FORGEJO_HOST="\$(sudo -n awk -F' = ' '\$0=="[server]"{s=1;next} /^\\[/{s=0} s && \$1=="DOMAIN"{print \$2; exit}' /etc/forgejo/app.ini 2>/dev/null)"
   FORGEJO_DB="\$(sudo -n awk -F' = ' '\$0=="[database]"{s=1;next} /^\\[/{s=0} s && \$1=="NAME"{print \$2; exit}' /etc/forgejo/app.ini 2>/dev/null)"
   FORGEJO_DB="\${FORGEJO_DB:-forgejo}"
   hd "Forgejo (optional component):"
@@ -3885,6 +4025,15 @@ if sudo -n test -f /etc/forgejo/app.ini 2>/dev/null; then
   check "forgejo app.ini root:git 640"       bash -c "test \"\$(sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini)\" = 'root:git 640'"
   check "forgejo.service active"             systemctl is-active forgejo.service
   check "forgejo healthy on 127.0.0.1:\${FORGEJO_PORT}" curl -fsS -m 5 -o /dev/null "http://127.0.0.1:\${FORGEJO_PORT}/api/healthz"
+  check "caddy.service active"               systemctl is-active caddy.service
+  check "avahi-daemon.service active"        systemctl is-active avahi-daemon.service
+  check "Caddy local CA exported"            sudo -n test -r /etc/forgejo/caddy-local-ca.crt
+  if [[ -n "\${FORGEJO_HOST}" ]]; then
+    check "forgejo HTTPS healthy at \${FORGEJO_HOST}" sudo -n curl -fsS -m 5 -o /dev/null \
+      --cacert /etc/forgejo/caddy-local-ca.crt \
+      --resolve "\${FORGEJO_HOST}:443:127.0.0.1" \
+      "https://\${FORGEJO_HOST}/api/healthz"
+  fi
   if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
     check "forgejo-runner.service active"    systemctl is-active forgejo-runner.service
     check "runner registration present"      sudo -n test -f /var/lib/forgejo-runner/.runner
@@ -3956,7 +4105,7 @@ write_forgejo_manifest() {
   FORGEJO_OK=0
   systemctl is-active --quiet forgejo.service && FORGEJO_OK=1
   if (( FORGEJO_OK )); then
-    status ok "Forgejo ${FORGEJO_RESOLVED_VERSION:-} running on port ${FORGEJO_HTTP_PORT} (all interfaces)"
+    status ok "Forgejo ${FORGEJO_RESOLVED_VERSION:-} running at https://${FORGEJO_URL_HOST}/"
   else
     status warn "Forgejo ${FORGEJO_RESOLVED_VERSION:-} is not running"
   fi
@@ -3988,10 +4137,11 @@ final_zombie_summary() {
 }
 
 final_forgejo_summary() {
-  [[ -n "${NEXT_STEP}" ]] || NEXT_STEP="http://${FORGEJO_URL_HOST}:${FORGEJO_HTTP_PORT}/"
-  printf 'Forgejo: http://%s:%s/ (all interfaces%s)\n' \
-    "${FORGEJO_URL_HOST}" "${FORGEJO_HTTP_PORT}" \
+  [[ -n "${NEXT_STEP}" ]] || NEXT_STEP="https://${FORGEJO_URL_HOST}/"
+  printf 'Forgejo: https://%s/ (LAN mDNS + Caddy local CA%s)\n' \
+    "${FORGEJO_URL_HOST}" \
     "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled')"
+  printf 'Trust CA: /etc/forgejo/caddy-local-ca.crt\n'
 }
 
 for component in "${SELECTED_COMPONENTS[@]}"; do
