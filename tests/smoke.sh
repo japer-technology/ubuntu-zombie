@@ -886,6 +886,38 @@ if not any(e.get("type") == "token" for e in out["events"]):
     raise SystemExit("bridge must forward token events")
 PY
 
+    # A non-zero bash status can be a normal negative probe (for example,
+    # grep finding no match). Pi nests bash exit metadata under result.details;
+    # preserve it so the UI can distinguish that status from a tool failure.
+    echo "  pi-mono bridge distinguishes shell status from tool failure"
+    ZOMBIE_FAKE_PI_MODE="shell-status" \
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/payload/agent/pi-mono-bridge.mjs" \
+    ZOMBIE_PI_MONO_BIN="$(pwd)/tests/fixtures/fake-pi-json.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import pi_mono, tools
+
+out = pi_mono.run_turn(
+    prompt="probe",
+    system_prompt="stub",
+    history=[],
+    on_tool_call=lambda *_args: {"ok": True, "result": {}},
+    tool_names=tools.tool_names(),
+    timeout=20.0,
+)
+ends = [e for e in out["events"]
+        if e.get("type") == "progress" and e.get("kind") == "tool_end"
+        and e.get("name") == "bash"]
+if len(ends) != 2:
+    raise SystemExit(f"expected two bash completion events, got {ends!r}")
+probe, broken = ends
+if probe.get("exit_code") != 1 or probe.get("command_status") is not True:
+    raise SystemExit(f"non-zero shell probe misclassified: {probe!r}")
+if broken.get("command_status") is True or broken.get("ok") is not False:
+    raise SystemExit(f"genuine shell failure misclassified: {broken!r}")
+PY
+
     # The real bridge must forward the prior conversation into pi's
     # one-shot -p prompt so the agent has cross-turn memory (regression:
     # the bridge previously dropped `history`, so the model forgot names

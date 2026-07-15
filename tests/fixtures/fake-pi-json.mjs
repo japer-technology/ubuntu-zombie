@@ -15,6 +15,8 @@
 //   "error"           — a provider/connection error with no answer.
 //   "echo"            — answer with the exact -p prompt received, so a
 //                       test can assert the bridge forwarded history.
+//   "shell-status"    — expected non-zero shell status plus a genuine
+//                       tool failure, for progress classification tests.
 //
 // Crucially, it does NOT read stdin: the real `pi --mode json` is a
 // one-shot event stream, and the bridge must let it exit on stdin EOF
@@ -80,6 +82,24 @@ if (mode === "echo") {
 }
 
 out({ type: "message_start", message: asst("") });
+if (mode === "shell-status") {
+  out({ type: "tool_execution_start", toolCallId: "probe", toolName: "bash", args: { command: "grep -q missing file" } });
+  out({
+    type: "tool_execution_end",
+    toolCallId: "probe",
+    toolName: "bash",
+    result: { content: [{ type: "text", text: "Command exited with code 1" }], details: { exitCode: 1 } },
+    isError: true,
+  });
+  out({ type: "tool_execution_start", toolCallId: "broken", toolName: "bash", args: { command: "irrelevant" } });
+  out({
+    type: "tool_execution_end",
+    toolCallId: "broken",
+    toolName: "bash",
+    result: { content: [{ type: "text", text: "Unable to start shell" }] },
+    isError: true,
+  });
+}
 // A tool_execution pair the bridge must tolerate (log only) without
 // re-dispatching it as a mediated tool_call.
 out({ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "/etc/os-release" } });

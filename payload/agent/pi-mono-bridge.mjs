@@ -77,13 +77,11 @@ function asExitCode(value) {
 }
 
 function extractExitCode(evt) {
-  for (const key of ["exitCode", "exit_code", "status"]) {
-    const code = asExitCode(evt[key]);
-    if (code !== null) return code;
-  }
-  if (evt.result && typeof evt.result === "object") {
+  const candidates = [evt, evt.result, evt.result?.details];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object") continue;
     for (const key of ["exitCode", "exit_code", "status"]) {
-      const code = asExitCode(evt.result[key]);
+      const code = asExitCode(candidate[key]);
       if (code !== null) return code;
     }
   }
