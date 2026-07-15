@@ -1529,12 +1529,8 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tools: "Running tools…",
       finalising: "Finalising the reply…",
     };
-    const COMMAND_STATUS_TOOLS = new Set(["bash", "shell", "shell.run"]);
     const isCommandStatusExit = (payload) => {
-      if (!payload || payload.ok !== false) return false;
-      const toolName = String(payload.tool || "").toLowerCase();
-      if (!COMMAND_STATUS_TOOLS.has(toolName)) return false;
-      return payload.command_status === true;
+      return payload && payload.command_status === true && payload.ok === false;
     };
     const commandStatusNote = (tool, payload) => {
       const bits = [];

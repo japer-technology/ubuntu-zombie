@@ -65,9 +65,13 @@ function flushTokenBuffer() {
 }
 
 function asExitCode(value) {
-  if (typeof value === "number" && Number.isInteger(value)) return value;
-  if (typeof value === "string" && /^-?\d+$/.test(value.trim())) {
-    return Number.parseInt(value.trim(), 10);
+  const code = (typeof value === "number" && Number.isInteger(value))
+    ? value
+    : (typeof value === "string" && /^\d+$/.test(value.trim()))
+      ? Number.parseInt(value.trim(), 10)
+      : null;
+  if (code !== null && code >= 0 && code <= 255) {
+    return code;
   }
   return null;
 }
