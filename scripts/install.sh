@@ -2184,7 +2184,7 @@ review_forgejo_parameters() {
     brand_banner "Forgejo — setup parameters"
     field "1) Forgejo port"   "${FORGEJO_HTTP_PORT}/tcp (all interfaces)"
     field "2) Forgejo admin"  "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))"
-    field "3) Database"       "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))"
+    field "3) PostgreSQL database" "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))"
     field "4) Actions runner" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo disabled)"
     field "5) Versions"       "Forgejo ${FORGEJO_VERSION:-latest release}"
     field "6) Core records"   "${LOG_FILE}; $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo 'receipt disabled')"
