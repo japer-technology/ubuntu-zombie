@@ -1534,8 +1534,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       if (!payload || payload.ok !== false) return false;
       const toolName = String(payload.tool || "").toLowerCase();
       if (!COMMAND_STATUS_TOOLS.has(toolName)) return false;
-      if (!payload.error) return true;
-      return /\b(exit|status|code)\b/i.test(String(payload.error));
+      return payload.command_status === true;
     };
     const commandStatusNote = (tool, payload) => {
       const bits = [];

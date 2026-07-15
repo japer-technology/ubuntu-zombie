@@ -72,7 +72,7 @@ function asExitCode(value) {
   return null;
 }
 
-function extractExitCode(evt, outputText) {
+function extractExitCode(evt) {
   for (const key of ["exitCode", "exit_code", "status"]) {
     const code = asExitCode(evt[key]);
     if (code !== null) return code;
@@ -83,8 +83,11 @@ function extractExitCode(evt, outputText) {
       if (code !== null) return code;
     }
   }
-  const match = String(outputText || "").match(/\bexit(?:\s+code)?\s*[:=]?\s*(-?\d+)\b/i);
-  return match ? Number.parseInt(match[1], 10) : null;
+  return null;
+}
+
+function isCommandTool(name) {
+  return ["bash", "shell", "shell.run"].includes(String(name || "").toLowerCase());
 }
 
 function sendTokenDelta(delta) {
@@ -419,8 +422,13 @@ async function run() {
           ? evt.result
           : extractText(evt.result && evt.result.content);
         progress.output_bytes = Buffer.byteLength(outText || "", "utf8");
-        const exitCode = extractExitCode(evt, outText);
-        if (exitCode !== null) progress.exit_code = exitCode;
+        const exitCode = extractExitCode(evt);
+        if (exitCode !== null) {
+          progress.exit_code = exitCode;
+          if (progress.ok === false && exitCode !== 0 && isCommandTool(evt.toolName)) {
+            progress.command_status = true;
+          }
+        }
         send(progress);
       }
     } else if (kind === "agent_end") {

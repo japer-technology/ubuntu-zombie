@@ -741,6 +741,8 @@ class App:
                     exit_code = event.get("exit_code")
                     if isinstance(exit_code, int):
                         payload["exit_code"] = exit_code
+                    if event.get("command_status") is True:
+                        payload["command_status"] = True
                     out_bytes = event.get("output_bytes")
                     if isinstance(out_bytes, (int, float)):
                         payload["stdout_bytes"] = int(out_bytes)
