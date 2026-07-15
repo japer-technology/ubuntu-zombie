@@ -2216,6 +2216,10 @@ run_noninteractive() {
     || { echo "FAIL: Forgejo dry-run stanza missing" >&2; exit 1; }
   grep -q "forgejo-runner.service" <<<"${fj_out}" \
     || { echo "FAIL: runner dry-run stanza missing" >&2; exit 1; }
+  grep -q "Caddy internal CA" <<<"${fj_out}" \
+    || { echo "FAIL: Forgejo dry-run must describe LAN HTTPS" >&2; exit 1; }
+  grep -q "127.0.0.1:3000" <<<"${fj_out}" \
+    || { echo "FAIL: Forgejo dry-run must keep backend on loopback" >&2; exit 1; }
   # Invalid option values must be rejected before any host change.
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=2' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_HTTP_PORT=70000' ./scripts/install.sh doctor
@@ -2366,6 +2370,20 @@ run_standards() {
     || { echo "Forgejo config directory must be locked after migration" >&2; exit 1; }
   grep -q '/api/healthz' scripts/install.sh \
     || { echo "Forgejo install must verify application health" >&2; exit 1; }
+  grep -q 'HTTP_ADDR = 127.0.0.1' scripts/install.sh \
+    || { echo "Forgejo backend must stay loopback-only" >&2; exit 1; }
+  grep -q 'tls internal' scripts/install.sh \
+    || { echo "Forgejo Caddy route must use the internal CA" >&2; exit 1; }
+  grep -q 'reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}' scripts/install.sh \
+    || { echo "Caddy must proxy to the Forgejo loopback backend" >&2; exit 1; }
+  grep -q '_https._tcp' scripts/install.sh \
+    || { echo "Forgejo must advertise HTTPS through Avahi" >&2; exit 1; }
+  grep -q '/etc/forgejo/caddy-local-ca.crt' scripts/install.sh \
+    || { echo "Forgejo must export Caddy's public local CA root" >&2; exit 1; }
+  grep -q '/etc/caddy/conf.d/forgejo.caddy' scripts/uninstall.sh \
+    || { echo "Forgejo uninstall must remove its Caddy route" >&2; exit 1; }
+  grep -q '/etc/avahi/services/forgejo.service' scripts/uninstall.sh \
+    || { echo "Forgejo uninstall must remove its Avahi service" >&2; exit 1; }
   local confirmation_helper confirmation_out forgejo_hook
   forgejo_hook="$(sed -n \
     '/^# component-hook: forgejo begin$/,/^# component-hook: forgejo end$/p' \

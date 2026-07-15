@@ -428,18 +428,21 @@ to the combined path.
 ### Forgejo server (`ZOMBIE_INSTALL_FORGEJO=1`)
 
 A self-hosted [Forgejo](https://forgejo.org/) git forge backed by
-PostgreSQL, with an optional co-located Forgejo Actions runner using
-the standard Docker executor.
+PostgreSQL, with LAN discovery and HTTPS provided by Avahi and Caddy.
+An optional co-located Forgejo Actions runner uses the standard Docker
+executor.
 
-Unlike the loopback-only chat UI, the forge is a **normal network
-service**: it listens on all interfaces so people on the LAN can reach
-it at `http://<host>:<port>/`.
+Forgejo itself binds only to `127.0.0.1`. Caddy is the LAN-facing entry
+point on HTTPS port `443`, uses its internal certificate authority, and
+proxies to Forgejo's loopback port. Avahi advertises the machine hostname
+through mDNS, so the default URL is
+`https://<lowercase-machine-hostname>.local/`.
 
 | Variable                        | Default                                  | Effect |
 | ------------------------------- | ---------------------------------------- | ------ |
 | `ZOMBIE_INSTALL_FORGEJO`        | `0`                                      | Set to `1` to install Forgejo + PostgreSQL. |
 | `ZOMBIE_INSTALL_FORGEJO_RUNNER` | `0`                                      | Set to `1` to also install a co-located Actions runner. Requires the server flag. |
-| `FORGEJO_HTTP_PORT`             | `3000`                                   | Forgejo web/API port (all interfaces). |
+| `FORGEJO_HTTP_PORT`             | `3000`                                   | Forgejo loopback web/API port behind Caddy. |
 | `FORGEJO_ADMIN_USER`            | `forgejo-admin`                          | Initial admin account name. |
 | `FORGEJO_ADMIN_EMAIL`           | `forgejo-admin@localhost.localdomain`    | Initial admin email. |
 | `FORGEJO_ADMIN_PASSWORD`        | *(empty — generated)*                    | Initial admin password (8–256 printable chars). Leave empty to have one generated and recorded in the install receipt. |
@@ -485,20 +488,44 @@ unattended updates, set `FORGEJO_CONFIRM_UPDATE=YES` and
 `FORGEJO_CONFIRM_DATABASE_REUSE=YES`. The update path never drops the database
 or repository data.
 
+### Trust the Forgejo local certificate authority
+
+Caddy creates and renews the site certificate automatically. A client
+must trust Caddy's root certificate once before browsers and Git accept
+the HTTPS URL without a warning. The installer exports the public root
+certificate to:
+
+```text
+/etc/forgejo/caddy-local-ca.crt
+```
+
+Copy that file to each client over an authenticated channel (local console,
+SSH, or managed device deployment), then import it into that client's
+trusted root certificate store. Do not trust a copy downloaded through an
+unverified browser warning: anyone able to replace that download could
+substitute their own root CA. After import, open the URL shown by the
+installer or run `sudo ./scripts/install.sh verify forgejo`.
+
+The root certificate is intentionally public; Caddy's private CA key stays
+under `/var/lib/caddy` and is not exported. Removing Forgejo deletes the
+exported certificate and managed Caddy/Avahi configuration, but leaves the
+shared `caddy`, `avahi-daemon`, and `libnss-mdns` packages installed.
+Remove the trusted root from clients when the Forgejo host is retired.
+
 Caveats:
 
-- The forge listens on **all interfaces without HTTPS** by default. On a
-  trusted LAN that is the intended "normal access" posture; if the host
-  is reachable from untrusted networks, front Forgejo with a reverse
-  proxy that terminates TLS (see
-  [`options/plan-optional-proxy.md`](../options/plan-optional-proxy.md))
-  before exposing it. Registration is disabled by default
+- `.local` discovery is link-local and requires mDNS support on the client.
+  It does not replace a firewall. Caddy accepts HTTPS on host network
+  interfaces so DHCP address changes keep working; restrict TCP `443` at
+  the host or network firewall if the machine also has an untrusted
+  interface. Forgejo's backend port remains loopback-only. Registration
+  is disabled by default
   (`DISABLE_REGISTRATION = true`); the admin creates accounts.
 - Co-locating the runner with the forge is contrary to upstream
   guidance (a compromised job shares the host with the forge). The
   installer prints a warning and proceeds only because the flag is an
   explicit opt-in.
-- Binaries are downloaded from `codeberg.org` and verified against the
+- Binaries are downloaded from Forgejo's release host and verified against
   published SHA-256 checksums; pin `FORGEJO_VERSION` where
   reproducibility matters.
 - `uninstall.sh` reverses the component; dropping the database/role

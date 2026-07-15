@@ -48,7 +48,16 @@ This path does not create a root-capable zombie account or install the
 agent, Node runtime, policy, audit log, chat services, or desktop power
 settings. It keeps only installer-owned transcript and receipt records
 under `/var/log/`. Generated Forgejo credentials are recorded in the
-root-only receipt.
+root-only receipt. It also installs Avahi and Caddy: Forgejo listens on
+loopback, while Caddy serves
+`https://<lowercase-machine-hostname>.local/` with a locally issued
+certificate.
+
+Before opening Forgejo from another LAN device, copy
+`/etc/forgejo/caddy-local-ca.crt` from the host over an authenticated
+channel and import it into that device's trusted root certificate store.
+See [Configuration](CONFIGURATION.md#trust-the-forgejo-local-certificate-authority)
+for the trust and removal guidance.
 
 To install both components in registry order:
 

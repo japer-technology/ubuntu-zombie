@@ -390,12 +390,11 @@ remove_component_forgejo() {
     run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
     run "rm -f /usr/local/bin/forgejo /usr/local/bin/forgejo-runner"
     run "rm -f /etc/caddy/conf.d/forgejo.caddy /etc/avahi/services/forgejo.service"
-    if [[ -f /etc/systemd/system/caddy.service || -f /lib/systemd/system/caddy.service ]]; then
+    if systemctl cat caddy.service >/dev/null 2>&1; then
       run_or_warn "Reload Caddy after removing Forgejo route" \
         "systemctl reload-or-restart caddy.service"
     fi
-    if [[ -f /etc/systemd/system/avahi-daemon.service \
-        || -f /lib/systemd/system/avahi-daemon.service ]]; then
+    if systemctl cat avahi-daemon.service >/dev/null 2>&1; then
       run_or_warn "Reload Avahi after removing Forgejo advertisement" \
         "systemctl reload-or-restart avahi-daemon.service"
     fi
