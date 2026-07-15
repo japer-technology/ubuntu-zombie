@@ -13,6 +13,8 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Runtime LM Studio discovery:** `/lmstudio` rescans the local network and
   activates a discovered server and model, `/models` lists the active
   provider's available models, and `/status` includes the LM Studio address.
+- **Local LM Studio discovery:** `/lmstudio` now checks `127.0.0.1` before
+  scanning the LAN, so it finds LM Studio's default loopback-only server.
 
 ### Phase 4 — Registry generalisation
 
