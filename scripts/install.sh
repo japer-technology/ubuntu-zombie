@@ -3301,7 +3301,8 @@ ensure_forgejo_runner_docker_package() {
 }
 
 configure_forgejo_lan_https() {
-  local host caddy_snippet caddy_tmp avahi_tmp ca_source
+  local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
+  local caddy_begin_count caddy_end_count
   host="$(forgejo_url_host)"
   FORGEJO_URL_HOST="${host}"
 
@@ -3315,26 +3316,43 @@ configure_forgejo_lan_https() {
     chmod 640 /etc/forgejo/app.ini
   fi
 
-  install -d -m 755 -o root -g root /etc/caddy/conf.d
   [[ -f /etc/caddy/Caddyfile ]] || install -m 644 /dev/null /etc/caddy/Caddyfile
-  if ! grep -Fqx 'import /etc/caddy/conf.d/*.caddy' /etc/caddy/Caddyfile; then
-    printf '\nimport /etc/caddy/conf.d/*.caddy\n' >> /etc/caddy/Caddyfile
+  caddy_begin="# BEGIN install.sh Forgejo"
+  caddy_end="# END install.sh Forgejo"
+  read -r caddy_begin_count caddy_end_count < <(
+    awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
+      BEGIN { begin_count = 0; end_count = 0 }
+      $0 == begin { begin_count++ }
+      $0 == end { end_count++ }
+      END { print begin_count + 0, end_count + 0 }
+    ' /etc/caddy/Caddyfile
+  )
+  if (( caddy_begin_count != caddy_end_count )); then
+    die "Caddyfile contains an incomplete managed Forgejo block. Restore or remove that block manually, then re-run repair forgejo." 1
   fi
-  caddy_snippet=/etc/caddy/conf.d/forgejo.caddy
   caddy_tmp="$(mktemp)"
-  cat > "${caddy_tmp}" <<EOF
+  awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
+    BEGIN { managed = 0 }
+    $0 == begin { managed = 1; next }
+    $0 == end { managed = 0; next }
+    !managed { print }
+  ' /etc/caddy/Caddyfile > "${caddy_tmp}"
+  cat >> "${caddy_tmp}" <<EOF
+${caddy_begin}
 # Managed by ${SCRIPT_NAME}. Forgejo stays on loopback; Caddy is the LAN edge.
 https://${host} {
 	tls internal
 	reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}
 }
+${caddy_end}
 EOF
-  if [[ -f "${caddy_snippet}" ]] && cmp -s "${caddy_tmp}" "${caddy_snippet}"; then
+  if cmp -s "${caddy_tmp}" /etc/caddy/Caddyfile; then
     rm -f "${caddy_tmp}"
   else
-    install -m 644 -o root -g root "${caddy_tmp}" "${caddy_snippet}"
+    install -m 644 -o root -g root "${caddy_tmp}" /etc/caddy/Caddyfile
     rm -f "${caddy_tmp}"
   fi
+  rm -f /etc/caddy/conf.d/forgejo.caddy
   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null \
     || die "Caddy configuration validation failed; /etc/caddy/Caddyfile was not activated." 1
 

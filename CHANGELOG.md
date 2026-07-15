@@ -10,6 +10,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Phase 4 — Registry generalisation
 
+- **Forgejo Caddy repair:** the machine's `.local` Forgejo route is now
+  rendered directly in `/etc/caddy/Caddyfile`, preserving unrelated sites
+  while replacing the managed route on repair and migrating legacy route
+  fragments.
 - **Forgejo LAN HTTPS:** Forgejo now binds only to loopback and is exposed
   at the machine's `.local` name through Avahi discovery and Caddy HTTPS
   using Caddy's internal CA. Install, verify, doctor, repair, receipts,
