@@ -549,8 +549,10 @@ if (prov, chosen) != ("lmstudio", "qwen/qwen3-coder"):
 # Runtime LM Studio discovery scans a bounded network, preserves the full
 # advertised catalogue in pi's provider file, and activates the provider.
 original_probe = _pr._probe_lmstudio
+probed_addresses = []
 def fake_probe(address, port):
-    if address != "127.0.0.2":
+    probed_addresses.append(address)
+    if address != "127.0.0.1":
         return None
     return {
         "address": f"{address}:{port}",
@@ -563,7 +565,9 @@ try:
     discovered = _pr.scan_lmstudio("127.0.0.0/30", 1234)
 finally:
     _pr._probe_lmstudio = original_probe
-if len(discovered) != 1 or discovered[0]["address"] != "127.0.0.2:1234":
+if "127.0.0.2" not in probed_addresses:
+    raise SystemExit("scan_lmstudio must scan the selected subnet")
+if len(discovered) != 1 or discovered[0]["address"] != "127.0.0.1:1234":
     raise SystemExit(f"scan_lmstudio wrong: {discovered!r}")
 
 models_dir = tempfile.mkdtemp()
@@ -571,7 +575,7 @@ models_path = os.path.join(models_dir, "models.json")
 os.environ["ZOMBIE_PI_MODELS_JSON"] = models_path
 provider, chosen, address = _pr.activate_lmstudio(discovered[0])
 if (provider, chosen, address) != (
-    "lmstudio", "qwen/qwen3-coder", "127.0.0.2:1234"
+    "lmstudio", "qwen/qwen3-coder", "127.0.0.1:1234"
 ):
     raise SystemExit(f"activate_lmstudio wrong: {(provider, chosen, address)!r}")
 with open(models_path) as handle:
@@ -579,10 +583,10 @@ with open(models_path) as handle:
 saved_models = [m["id"] for m in saved["providers"]["lmstudio"]["models"]]
 if saved_models != ["qwen/qwen3-coder", "llama-3.1-8b"]:
     raise SystemExit(f"activate_lmstudio models wrong: {saved_models!r}")
-if _pr.lmstudio_address() != "127.0.0.2:1234":
+if _pr.lmstudio_address() != "127.0.0.1:1234":
     raise SystemExit("lmstudio_address must expose the configured host and port")
 if _pr.provider_status() != (
-    "lmstudio", "model qwen/qwen3-coder at 127.0.0.2:1234"
+    "lmstudio", "model qwen/qwen3-coder at 127.0.0.1:1234"
 ):
     raise SystemExit(f"lmstudio provider status wrong: {_pr.provider_status()!r}")
 
@@ -607,10 +611,10 @@ try:
     selected = app.discover_lmstudio()
 finally:
     _pr.scan_lmstudio = original_scan
-if selected.get("address") != "127.0.0.2:1234":
+if selected.get("address") != "127.0.0.1:1234":
     raise SystemExit(f"App.discover_lmstudio wrong: {selected!r}")
 status = app.provider_info()
-if status.get("lmstudio_address") != "127.0.0.2:1234":
+if status.get("lmstudio_address") != "127.0.0.1:1234":
     raise SystemExit(f"App.provider_info missing LM Studio address: {status!r}")
 app.history.close()
 PY
