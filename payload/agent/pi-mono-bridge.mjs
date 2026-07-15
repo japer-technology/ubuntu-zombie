@@ -64,6 +64,36 @@ function flushTokenBuffer() {
   }
 }
 
+function asExitCode(value) {
+  const code = (typeof value === "number" && Number.isInteger(value))
+    ? value
+    : (typeof value === "string" && /^\d+$/.test(value.trim()))
+      ? parseInt(value.trim(), 10)
+      : null;
+  if (code !== null && code >= 0 && code <= 255) {
+    return code;
+  }
+  return null;
+}
+
+function extractExitCode(evt) {
+  for (const key of ["exitCode", "exit_code", "status"]) {
+    const code = asExitCode(evt[key]);
+    if (code !== null) return code;
+  }
+  if (evt.result && typeof evt.result === "object") {
+    for (const key of ["exitCode", "exit_code", "status"]) {
+      const code = asExitCode(evt.result[key]);
+      if (code !== null) return code;
+    }
+  }
+  return null;
+}
+
+function isCommandTool(name) {
+  return ["bash", "shell", "shell.run"].includes((name || "").toLowerCase());
+}
+
 function sendTokenDelta(delta) {
   if (!delta) return;
   tokenBuffer += delta;
@@ -396,6 +426,17 @@ async function run() {
           ? evt.result
           : extractText(evt.result && evt.result.content);
         progress.output_bytes = Buffer.byteLength(outText || "", "utf8");
+        const exitCode = extractExitCode(evt);
+        if (exitCode !== null) {
+          progress.exit_code = exitCode;
+          // Mark only explicit non-zero command exits as command status:
+          // `ok=false` alone can also mean timeout, cancellation, or bridge
+          // failure, while a non-zero exit code on a successful event would
+          // be inconsistent metadata rather than a failed command status.
+          if (progress.ok === false && exitCode !== 0 && isCommandTool(evt.toolName)) {
+            progress.command_status = true;
+          }
+        }
         send(progress);
       }
     } else if (kind === "agent_end") {
