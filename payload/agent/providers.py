@@ -146,6 +146,7 @@ _PROVIDER_BY_NAME: dict[str, _ProviderSpec] = {
 
 SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(spec.name for spec in _PI_AI_PROVIDERS)
 _SAFE_MODEL_ID = re.compile(r"\A[A-Za-z0-9._:/+@-]{1,200}\Z")
+_MAX_MODELS_RESPONSE_SIZE = 1024 * 1024
 
 # Every provider key env var, in registry order. Used by the pi-mono
 # bridge driver to strip non-active provider keys before spawning the
@@ -529,6 +530,8 @@ def _local_scan_network() -> ipaddress.IPv4Network:
     """Resolve the primary IPv4 interface and return its /24 scan network."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
+        # A UDP connect selects the primary outbound interface without
+        # transmitting a packet; TEST-NET-1 is intentionally non-routable.
         sock.connect(("192.0.2.1", 9))
         address = sock.getsockname()[0]
     except OSError as exc:
@@ -545,10 +548,10 @@ def _probe_lmstudio(address: str, port: int) -> dict | None:
     request = Request(url, headers={"Accept": "application/json"})
     try:
         with urlopen(request, timeout=1.5) as response:
-            raw = response.read(1024 * 1024 + 1)
+            raw = response.read(_MAX_MODELS_RESPONSE_SIZE + 1)
     except (HTTPError, URLError, OSError, TimeoutError):
         return None
-    if len(raw) > 1024 * 1024:
+    if len(raw) > _MAX_MODELS_RESPONSE_SIZE:
         return None
     try:
         payload = json.loads(raw)
@@ -595,7 +598,7 @@ def scan_lmstudio(
     if not isinstance(subnet, ipaddress.IPv4Network):
         raise ProviderError("LM Studio discovery requires an IPv4 network.")
     addresses = [str(address) for address in subnet]
-    with ThreadPoolExecutor(max_workers=64) as pool:
+    with ThreadPoolExecutor(max_workers=min(64, len(addresses))) as pool:
         found = list(pool.map(
             lambda address: _probe_lmstudio(address, scan_port), addresses
         ))

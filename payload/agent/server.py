@@ -261,7 +261,7 @@ class App:
         # EventSource can receive a terminal event instead of hanging.
         self.turns: dict[str, TurnStream] = {}
         self._lock = threading.Lock()
-        self._provider_lock = threading.Lock()
+        self._lmstudio_lock = threading.Lock()
 
     # ---- authentication + lifecycle ----
     def login(self, password: str) -> dict[str, Any] | None:
@@ -1157,7 +1157,7 @@ class App:
             if not servers:
                 log_event("lmstudio_scan", servers_found=0)
                 return {"error": "No LM Studio servers were found on the local /24."}
-            with self._provider_lock:
+            with self._lmstudio_lock:
                 provider, model, address = providers.activate_lmstudio(servers[0])
         except providers.ProviderError as exc:
             log_event("lmstudio_scan_failed", error=str(exc))
