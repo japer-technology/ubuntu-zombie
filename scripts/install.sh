@@ -2399,7 +2399,9 @@ fi
 case "${SUBCOMMAND}" in
   # Verify reports failed health checks via its own output and exit status.
   # Do not let the install-time ERR trap re-label those expected failures as
-  # installer crashes, especially when --json is feeding monitoring.
+  # installer crashes, especially when --json is feeding monitoring. Other
+  # lifecycle subcommands keep the trap because their failures are mutations
+  # or diagnostics that should retain the normal installer error context.
   verify)    trap - ERR; cmd_verify; exit $? ;;
   doctor)    cmd_doctor; exit $? ;;
   repair)    require_root; cmd_repair; exit $? ;;

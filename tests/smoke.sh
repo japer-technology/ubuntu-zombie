@@ -1787,6 +1787,8 @@ EOF_FAKE_PSQL
   chmod +x "${fake_bin}/psql"
   out="$(ZOMBIE_COLOR=never ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
     PATH="${fake_bin}:${PATH}" ./scripts/uninstall.sh forgejo --yes --dry-run 2>&1 || true)"
+  ! grep -q "fake psql should not execute" <<<"${out}" \
+    || { echo "FAIL: forgejo dry-run must not execute PostgreSQL commands" >&2; exit 1; }
   grep -q "dropdb --if-exists -- forgejo" <<<"${out}" \
     || { echo "FAIL: forgejo uninstall should include PostgreSQL database cleanup" >&2; exit 1; }
   grep -q "dropuser --if-exists -- forgejo" <<<"${out}" \

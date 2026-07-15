@@ -403,7 +403,7 @@ remove_component_forgejo() {
     # Only prompt for the PostgreSQL database and role when PostgreSQL is
     # present and Forgejo database state was discovered before file cleanup.
     # This makes `uninstall forgejo --yes` reliably return the host to a clean
-    # testing slate while avoiding prompts on hosts with only runner artefacts.
+    # testing slate while avoiding prompts on hosts with only runner artifacts.
     # Dry-run only needs the client binary to render the planned drop commands;
     # real uninstalls also require the postgres system account before runuser.
     if (( _fj_has_db_state )) \
