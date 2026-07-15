@@ -2385,6 +2385,40 @@ run_standards() {
     dpkg-query() { return 1; }
     ensure_forgejo_runner_docker_package /missing/docker" \
     || { echo "docker.io must be installed when no Docker engine conflicts" >&2; exit 1; }
+  local forgejo_release_helpers
+  forgejo_release_helpers="$(sed -n \
+    '/^forgejo_release_api_origins() {/,/^}$/p' scripts/install.sh)
+$(sed -n '/^forgejo_release_download_bases() {/,/^}$/p' scripts/install.sh)
+$(sed -n '/^codeberg_latest_release() {/,/^}$/p' scripts/install.sh)
+$(sed -n '/^forgejo_fetch_release_asset() {/,/^}$/p' scripts/install.sh)"
+  bash -c "${forgejo_release_helpers}
+    warn() { :; }
+    curl() {
+      local url=\"\${*: -1}\"
+      [[ \"\${url}\" == 'https://data.forgejo.org/api/v1/repos/forgejo/runner/releases/latest' ]] \
+        || return 22
+      printf '%s\n' '{\"name\":\"v12.7.3\"}'
+    }
+    [[ \"\$(codeberg_latest_release forgejo/runner)\" == '12.7.3' ]]" \
+    || { echo "forgejo-runner latest release must use data.forgejo.org first" >&2; exit 1; }
+  bash -c "${forgejo_release_helpers}
+    warn() { :; }
+    curl() {
+      local url=\"\${*: -1}\"
+      [[ \"\${url}\" == 'https://code.forgejo.org/api/v1/repos/forgejo/runner/releases/latest' ]] \
+        || return 22
+      printf '%s\n' '{\"tag_name\":\"v12.0.1\"}'
+    }
+    [[ \"\$(codeberg_latest_release forgejo/runner)\" == '12.0.1' ]]" \
+    || { echo "forgejo-runner latest release must fall back to code.forgejo.org" >&2; exit 1; }
+  bash -c "${forgejo_release_helpers}
+    warn() { :; }
+    codeberg_fetch_verified() {
+      [[ \"\$1\" == 'https://code.forgejo.org/forgejo/runner/releases/download/v12.7.3/forgejo-runner-12.7.3-linux-amd64' ]]
+    }
+    forgejo_fetch_release_asset forgejo/runner 12.7.3 \
+      forgejo-runner-12.7.3-linux-amd64 /tmp/forgejo-runner-smoke" \
+    || { echo "forgejo-runner downloads must prefer code.forgejo.org" >&2; exit 1; }
   local forgejo_jwt_validator
   forgejo_jwt_validator="$(sed -n '/^is_valid_forgejo_jwt_secret() {/,/^}/p' scripts/install.sh)"
   bash -c "${forgejo_jwt_validator}
