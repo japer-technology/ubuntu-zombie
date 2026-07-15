@@ -490,10 +490,9 @@ legacy_forgejo_present() {
 }
 
 resolve_lifecycle_targets_from_manifest() {
-  local component found=0
+  local component found="${#SELECTED_COMPONENTS[@]}"
   (( EXPLICIT_TARGETS )) && return 0
   [[ "${SUBCOMMAND}" == "verify" || "${SUBCOMMAND}" == "doctor" || "${SUBCOMMAND}" == "repair" ]] || return 0
-  SELECTED_COMPONENTS=()
   while IFS= read -r component; do
     [[ -n "${component}" ]] || continue
     add_selected_component "${component}"
@@ -1395,7 +1394,7 @@ cmd_repair() {
         chmod 600 "${ZOMBIE_DIR}/secrets/env"
         ok "Re-asserted secrets/env permissions."
       fi
-      [[ ! -d "${ZOMBIE_DIR}" ]] || chown -R "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}"
+      [[ -d "${ZOMBIE_DIR}" ]] && chown -R "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}"
     fi
     if systemctl list-unit-files ubuntu-zombie-chat.service >/dev/null 2>&1; then
       systemctl daemon-reload
@@ -2375,7 +2374,6 @@ trap 'on_error ${LINENO}' ERR
 
 validate_component_registry \
   "validate review dry_run receipt_start receipt_finish install manifest final legacy verify doctor repair phase_count"
-validate_config
 resolve_lifecycle_targets_from_manifest
 validate_config
 
