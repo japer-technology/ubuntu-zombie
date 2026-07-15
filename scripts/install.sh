@@ -3302,6 +3302,7 @@ ensure_forgejo_runner_docker_package() {
 
 configure_forgejo_lan_https() {
   local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
+  local caddy_begin_count caddy_end_count
   host="$(forgejo_url_host)"
   FORGEJO_URL_HOST="${host}"
 
@@ -3318,8 +3319,14 @@ configure_forgejo_lan_https() {
   [[ -f /etc/caddy/Caddyfile ]] || install -m 644 /dev/null /etc/caddy/Caddyfile
   caddy_begin="# BEGIN install.sh Forgejo"
   caddy_end="# END install.sh Forgejo"
-  if (( $(grep -Fxc "${caddy_begin}" /etc/caddy/Caddyfile || true) \
-      != $(grep -Fxc "${caddy_end}" /etc/caddy/Caddyfile || true) )); then
+  read -r caddy_begin_count caddy_end_count < <(
+    awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
+      $0 == begin { begin_count++ }
+      $0 == end { end_count++ }
+      END { print begin_count + 0, end_count + 0 }
+    ' /etc/caddy/Caddyfile
+  )
+  if (( caddy_begin_count != caddy_end_count )); then
     die "Caddyfile contains an incomplete managed Forgejo block. Restore or remove that block manually, then re-run repair forgejo." 1
   fi
   caddy_tmp="$(mktemp)"
