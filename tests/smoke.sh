@@ -1806,12 +1806,13 @@ expect_exit_code() {
 run_manifest() {
   echo "[smoke] component manifest + selective uninstall"
 
-  local scratch_root bogus_zombie_dir out manifest_dir
+  local scratch_root bogus_zombie_dir verify_zombie_dir out manifest_dir
   scratch_root="$(pwd)/tests/.smoke-manifest.$$"
   rm -rf -- "${scratch_root}"
   mkdir -p "${scratch_root}"
   trap 'rm -rf -- "'"${scratch_root}"'"' RETURN
   bogus_zombie_dir="${scratch_root}/missing-zombie-root"
+  verify_zombie_dir="${scratch_root}/verify-zombie-root"
 
   manifest_dir="${scratch_root}/valid-zombie"
   mkdir -p "${manifest_dir}"
@@ -1831,20 +1832,20 @@ EOF_MANIFEST
   # verify must not delegate to a stale deployed verifier. Older generated
   # verifiers sourced secrets/env under nounset, so password hashes containing
   # '$' could abort with an unbound-variable error before checks were reported.
-  mkdir -p "${bogus_zombie_dir}/bin" "${bogus_zombie_dir}/secrets"
-  cat > "${bogus_zombie_dir}/bin/verify" <<'EOF_VERIFY'
+  mkdir -p "${verify_zombie_dir}/bin" "${verify_zombie_dir}/secrets"
+  cat > "${verify_zombie_dir}/bin/verify" <<'EOF_VERIFY'
 #!/usr/bin/env bash
 echo "STALE VERIFIER RAN" >&2
 exit 99
 EOF_VERIFY
-  chmod +x "${bogus_zombie_dir}/bin/verify"
+  chmod +x "${verify_zombie_dir}/bin/verify"
   printf '%s\n' 'ZOMBIE_ADMIN_PASSWORD_HASH=pbkdf2_sha256$600000$salt$digest' \
-    > "${bogus_zombie_dir}/secrets/env"
-  chmod 600 "${bogus_zombie_dir}/secrets/env"
+    > "${verify_zombie_dir}/secrets/env"
+  chmod 600 "${verify_zombie_dir}/secrets/env"
 
   set +e
   out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
-    ZOMBIE_USER="verify-missing" ZOMBIE_DIR="${bogus_zombie_dir}" \
+    ZOMBIE_USER="verify-missing" ZOMBIE_DIR="${verify_zombie_dir}" \
     ./scripts/install.sh verify --json 2>&1)"
   local verify_rc=$?
   set -e
@@ -1856,7 +1857,7 @@ EOF_VERIFY
     || { echo "FAIL: verify did not produce valid JSON with shell-sensitive secrets" >&2; exit 1; }
 
   out="$(ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
-    ZOMBIE_USER="verify-missing" ZOMBIE_DIR="${bogus_zombie_dir}" \
+    ZOMBIE_USER="verify-missing" ZOMBIE_DIR="${verify_zombie_dir}" \
     ./scripts/install.sh doctor --json 2>&1)"
   ! grep -q 'unbound variable' <<<"${out}" \
     || { echo "FAIL: doctor failed with shell-sensitive secrets" >&2; exit 1; }
