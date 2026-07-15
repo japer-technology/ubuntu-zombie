@@ -1565,7 +1565,8 @@ EOF
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
     cat <<EOF
   Actions runner  co-located Forgejo Actions runner (Docker executor)
-                  apt: docker.io   binary: /usr/local/bin/forgejo-runner
+                  Docker: reuse existing engine, otherwise apt: docker.io
+                  binary: /usr/local/bin/forgejo-runner
                   registers against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels:
                     ${FORGEJO_RUNNER_LABELS}
                   unit: /etc/systemd/system/forgejo-runner.service
@@ -3113,7 +3114,7 @@ codeberg_fetch_verified() {
 }
 
 ensure_forgejo_runner_docker_package() {
-  local docker_cli="${1:-/usr/bin/docker}" containerd_status
+  local docker_cli="$1" containerd_status
 
   if [[ -x "${docker_cli}" ]]; then
     info "Docker CLI already installed; reusing the existing Docker Engine."
@@ -3399,7 +3400,7 @@ EOF
     section "Install Forgejo runner"
 
     warn "Co-locating the Actions runner with the forge is contrary to upstream guidance; enabled deliberately."
-    ensure_forgejo_runner_docker_package
+    ensure_forgejo_runner_docker_package /usr/bin/docker
     systemctl enable --now docker >/dev/null 2>&1 \
       || die "Docker Engine failed to start; see journalctl -u docker." 1
     if id forgejo-runner >/dev/null 2>&1; then
