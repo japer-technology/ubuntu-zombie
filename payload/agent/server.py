@@ -1153,11 +1153,15 @@ class App:
     def discover_lmstudio(self) -> dict[str, Any]:
         """Rescan the LAN and activate the first discovered LM Studio server."""
         try:
-            servers = providers.scan_lmstudio()
-            if not servers:
-                log_event("lmstudio_scan", servers_found=0)
-                return {"error": "No LM Studio servers were found on the local /24."}
             with self._lmstudio_lock:
+                servers = providers.scan_lmstudio()
+                if not servers:
+                    log_event("lmstudio_scan", servers_found=0)
+                    return {
+                        "error": (
+                            "No LM Studio servers were found on the local /24."
+                        )
+                    }
                 provider, model, address = providers.activate_lmstudio(servers[0])
         except providers.ProviderError as exc:
             log_event("lmstudio_scan_failed", error=str(exc))
@@ -1466,7 +1470,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.app.ttl_status())
             return
         if self.path == "/api/health":
-            self._send_json({"ok": True, "facts": machine_facts()})
+            self._send_json({
+                "ok": True,
+                "facts": machine_facts(),
+                "provider": self.app.provider_info(),
+            })
             return
         if self.path == "/api/version":
             self._send_json(version_info())

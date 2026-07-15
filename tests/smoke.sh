@@ -569,7 +569,8 @@ if (provider, chosen, address) != (
     "lmstudio", "qwen/qwen3-coder", "127.0.0.2:1234"
 ):
     raise SystemExit(f"activate_lmstudio wrong: {(provider, chosen, address)!r}")
-saved = json.load(open(models_path))
+with open(models_path) as handle:
+    saved = json.load(handle)
 saved_models = [m["id"] for m in saved["providers"]["lmstudio"]["models"]]
 if saved_models != ["qwen/qwen3-coder", "llama-3.1-8b"]:
     raise SystemExit(f"activate_lmstudio models wrong: {saved_models!r}")

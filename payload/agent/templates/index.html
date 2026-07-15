@@ -1813,10 +1813,8 @@ async function handleSlashCommand(input) {
     case "/status": {
       addMessage("user", input);
       try {
-        const [health, provider] = await Promise.all([
-          uzFetchJson("/api/health"),
-          uzFetchJson("/api/status")
-        ]);
+        const health = await uzFetchJson("/api/health");
+        const provider = health.provider || {};
         const f = health.facts || {};
         const providerText = provider.provider && provider.provider !== "none"
           ? `${provider.provider}: ${provider.status}`
