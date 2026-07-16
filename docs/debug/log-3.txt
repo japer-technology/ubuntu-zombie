@@ -805,3 +805,5 @@ Components: forgejo
 [+] [forgejo] Caddy HTTPS reverse proxy active.
 [+] [forgejo] Avahi mDNS discovery active.
 [+] [forgejo] Caddy local CA certificate exported.
+[x] [forgejo] Forgejo HTTPS endpoint failed. Check journalctl -u caddy.
+[+] [forgejo] Forgejo Actions runner active.
