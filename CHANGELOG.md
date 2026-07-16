@@ -8,6 +8,18 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Policy design notes
+
+- **Owner-centric superuser policy draft:** new `docs/policy-new-v2.yaml`
+  revises `docs/policy-new.yaml` around the `docs/VISION.md` promise —
+  this machine only (fleet/remote tools like `ansible`, `terraform`,
+  `kubectl`, `ssh` become destructive), the owner's revocation levers
+  (`/opt/ai-zombie`, sudoers, agent units, audit/journal vacuuming)
+  cannot be touched without the confirmation phrase, `/home` mutations
+  need approval, exposure-expanding services (sshd, VNC, Tailscale,
+  `ufw allow`) are destructive, and per-turn budgets are resized for a
+  single desktop (24 tool calls / 8 elevated / 900 s idle).
+
 ### Promotion kit
 
 - **Promotion copy refresh:** `promotion/**` now matches the shipped
