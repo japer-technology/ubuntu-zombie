@@ -1,4 +1,4 @@
-# Plan: Zombie Floor Model
+# Zombie Floor Model
 
 ## Status
 
