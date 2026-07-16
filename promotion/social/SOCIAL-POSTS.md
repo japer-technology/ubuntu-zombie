@@ -78,7 +78,8 @@ honesty, not hype (see [`../brand/VOICE-AND-TONE.md`](../brand/VOICE-AND-TONE.md
 > diagnose, configure, repair, or operate itself. It proposes the exact
 > commands; you approve; it acts; every step is audit-logged.
 >
-> What makes it different from a chatbot: it has hands on the real machine. What makes it safe: a policy gate, explicit approval, a password-protected
+> What makes it different from a chatbot: it has hands on the real machine.
+> What makes it safe: a policy gate, explicit approval, a password-protected
 > loopback-only chat as the sole network surface, a built-in Time to Live, and
 > a kill switch the operator holds — not a vendor. It can even run fully
 > offline against a local LLM.
