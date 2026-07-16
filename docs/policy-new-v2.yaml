@@ -332,7 +332,7 @@ rules:
   # outlive its Time to Live, or widen its own privileges. These match
   # before everything else so no later, looser rule can shadow them.
   # -------------------------------------------------------------------------
-  - pattern: '\b(?:rm|mv|cp|ln|install|tee|sed|truncate|chmod|chown|chgrp|setfacl|shred|rsync|tar|unzip)\b.*(?:^|\s|=)/opt/ai-zombie\b'
+  - pattern: '\b(?:rm|mv|cp|ln|install|tee|sed|truncate|chmod|chown|chgrp|setfacl|shred|rsync|tar|zip|unzip)\b.*(?:^|\s|=)/opt/ai-zombie\b'
     class: destructive
   - pattern: '(?<!<)[0-9]*>>?\s*/opt/ai-zombie\b'
     class: destructive
