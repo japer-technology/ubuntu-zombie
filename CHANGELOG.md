@@ -8,6 +8,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Dependency updates
+
+- **Current pi agent stack:** updated `@earendil-works/pi-ai` and
+  `@earendil-works/pi-coding-agent` from 0.75.5 to 0.80.10 with refreshed
+  tarball checksums, and migrated the provider bridge to pi-ai's compatibility
+  entrypoint and assistant-message return shape.
+
 ### Policy design notes
 
 - **Owner-centric superuser policy draft:** new `docs/policy-new-v2.yaml`

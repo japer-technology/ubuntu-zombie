@@ -187,11 +187,11 @@ The agent brain is Node, not Python. Full functionality requires:
 - **`npm@latest`**, then global installs of:
   - **`@earendil-works/pi-coding-agent`** — provides the `pi` binary
     that *is* the agent loop. Version pinned by
-    `payload/agent/pi-mono.version` (currently `0.75.5`). Installed
+    `payload/agent/pi-mono.version` (currently `0.80.10`). Installed
     with `--ignore-scripts`.
   - **`@earendil-works/pi-ai`** — the provider library used by the
     one-shot completion path / status banner. Pinned by
-    `payload/agent/pi-ai.version` (currently `0.75.5`). Installed with
+    `payload/agent/pi-ai.version` (currently `0.80.10`). Installed with
     `--ignore-scripts`.
   - `yarn`, `pnpm`, `typescript`, `ts-node` — installed globally but
     **not referenced by any payload code**; they exist as an agent
