@@ -29,17 +29,24 @@ honesty, not hype (see [`../brand/VOICE-AND-TONE.md`](../brand/VOICE-AND-TONE.md
 3. Anything privileged passes through a local policy gate and waits for YOUR
    approval before it runs. You see exactly what's proposed first.
 4. Everything is audit-logged: what was asked, proposed, approved, and done.
-   SSH is key-only, root disabled, remote access opt-in over Tailscale. It binds
-   to localhost.
-5. You own the SSH key, the API key, and the kill switch. `uninstall` reverses
-   it. It's a transparent bash installer — inspect every line. [LINK]
+   The only network surface is a password-protected chat on 127.0.0.1 — no
+   SSH, no VNC, no inbound remote access.
+5. You own the API key, the chat password, and the kill switch. It even has a
+   built-in Time to Live: unless you renew it, it disables itself. `uninstall`
+   reverses it. It's a transparent bash installer — inspect every line. [LINK]
 
 ### Single-feature posts (schedule across the week)
 - "Preview before you commit: `install --dry-run` shows the entire plan and
   changes nothing." [SCREENSHOT]
 - "`doctor` explains failures. `repair` fixes known-safe drift. `verify` is a
-  read-only state check." [SCREENSHOT]
+  read-only state check — per component." [SCREENSHOT]
 - "Every action it takes is written to an audit log you can read." [SCREENSHOT]
+- "No cloud key? No problem. The installer auto-detects LM Studio, Ollama, or
+  llama.cpp on your LAN and runs fully offline." [SCREENSHOT]
+- "It expires by design. A built-in Time to Live disables the administrator
+  unless you renew it — and `/ttl --die` kills it instantly." [SCREENSHOT]
+- "Optional: a self-hosted Forgejo git forge at https://your-pc.local, with
+  PostgreSQL and an Actions runner. One command, fully reversible." [SCREENSHOT]
 
 ---
 
@@ -52,10 +59,12 @@ honesty, not hype (see [`../brand/VOICE-AND-TONE.md`](../brand/VOICE-AND-TONE.md
 
 ## Mastodon (fediverse — technical, no hype)
 > #UbuntuZombie adds a private, root-capable AI Systems Administrator to Ubuntu
-> Desktop LTS. Plain-language chat on 127.0.0.1, a policy gate that needs your
-> approval before any privileged action, full audit logging, key-only SSH, and
-> opt-in Tailscale. Transparent bash installer, MIT-licensed. Trust model is
-> documented up front. #Linux #Ubuntu #FOSS #SelfHosted
+> Desktop LTS. Plain-language chat on 127.0.0.1 (password-protected, the only
+> network surface), a policy gate that needs your approval before any
+> privileged action, full audit logging, a built-in Time to Live, and support
+> for fully local LLMs (LM Studio / Ollama / llama.cpp). Transparent bash
+> installer, MIT-licensed. Trust model is documented up front.
+> #Linux #Ubuntu #FOSS #SelfHosted
 > [LINK]
 
 ---
@@ -69,9 +78,10 @@ honesty, not hype (see [`../brand/VOICE-AND-TONE.md`](../brand/VOICE-AND-TONE.md
 > diagnose, configure, repair, or operate itself. It proposes the exact
 > commands; you approve; it acts; every step is audit-logged.
 >
-> What makes it different from a chatbot: it has hands on the real machine. What
-> makes it safe: a policy gate, explicit approval, localhost-only services,
-> key-only SSH, and a kill switch the operator holds — not a vendor.
+> What makes it different from a chatbot: it has hands on the real machine. What makes it safe: a policy gate, explicit approval, a password-protected
+> loopback-only chat as the sole network surface, a built-in Time to Live, and
+> a kill switch the operator holds — not a vendor. It can even run fully
+> offline against a local LLM.
 >
 > Open source, MIT-licensed. Read the trust model before you run it. [LINK]
 >

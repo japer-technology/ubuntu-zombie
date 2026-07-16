@@ -31,12 +31,14 @@ Artificial Intelligence · Developer Tools · Linux · Open Source · Privacy
 > and reversible.
 >
 > It's built around keeping you in control: a local policy gate before any
-> privileged action, localhost-only services, key-only SSH with root disabled,
-> opt-in Tailscale for remote access, and a kill switch you hold (rotate the
-> key, remove the SSH key, or `uninstall`). It's a transparent bash installer —
-> inspect every line.
+> privileged action, a password-protected loopback-only chat as the sole
+> network surface (no SSH, VNC, or inbound access provisioned), a built-in
+> Time to Live so it expires unless you renew it, and a kill switch you hold
+> (`/ttl --die`, rotate the key, or `uninstall`). It's a transparent bash
+> installer — inspect every line.
 >
-> It's MIT-licensed and free; you bring your own LLM provider key. I'd love
+> It's MIT-licensed and free. Bring your own cloud LLM key, or point it at a
+> local model (LM Studio / Ollama / llama.cpp) and run fully offline. I'd love
 > feedback, especially on the trust model (SECURITY.md). AMA!
 
 ## Gallery / media checklist
