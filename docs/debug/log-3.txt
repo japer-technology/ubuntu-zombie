@@ -1,0 +1,807 @@
+ericmourant@ericmourant-x1:~/ubuntu-zombie$ sudo scripts/install.sh install zombie
+[sudo] password for ericmourant: 
+
+╭──────────────────────────────────╮
+│  UBUNTU ZOMBIE                   │
+│  AI SYSTEMS ADMINISTRATOR        │
+╰──────────────────────────────────╯
+
+╭──────────────────────────────────────────────────────────────────╮
+│  AI Systems Administrator for Ubuntu Desktop LTS                 │
+│  v2026.07.16.02.48.54  --  install                               │
+│                                                                  │
+│  Ask the machine to diagnose, explain, configure, repair,        │
+│  and operate itself - every action is audit-logged.              │
+│                                                                  │
+│  Chat http://127.0.0.1:7878    You hold the kill switch.         │
+╰──────────────────────────────────────────────────────────────────╯
+[i] Scanning 192.168.1.0/24 on port 1234 for OpenAI-compatible LLM servers…
+
+────────────────────────────────────────────────────────────
+  Local LLM servers discovered on your network
+────────────────────────────────────────────────────────────
+  Pick a model to use as the starting model, or skip to configure a
+  cloud provider later in /opt/ai-zombie/secrets/env.
+
+   1)                    deepreinforce-ai_ornith-1.0-9b  @  http://192.168.1.156:1234/v1
+   2)                    deepseek/deepseek-r1-0528-qwen3-8b  @  http://192.168.1.156:1234/v1
+   3)                    gemma-1.1-2b-it  @  http://192.168.1.156:1234/v1
+   4)                    google/gemma-4-12b  @  http://192.168.1.156:1234/v1
+   5)                    google/gemma-4-12b-qat  @  http://192.168.1.156:1234/v1
+   6)                    google/gemma-4-26b-a4b  @  http://192.168.1.156:1234/v1
+   7)                    google/gemma-4-26b-a4b-qat  @  http://192.168.1.156:1234/v1
+   8)                    google/gemma-4-31b  @  http://192.168.1.156:1234/v1
+   9)                    google/gemma-4-31b-qat  @  http://192.168.1.156:1234/v1
+  10)                    google/gemma-4-e2b  @  http://192.168.1.156:1234/v1
+  11)                    google/gemma-4-e4b  @  http://192.168.1.156:1234/v1
+  12)                    huihui-ornith-1.0-35b-abliterated  @  http://192.168.1.156:1234/v1
+  13)                    liquid/lfm2-24b-a2b  @  http://192.168.1.156:1234/v1
+  14)                    liquid/lfm2.5-1.2b  @  http://192.168.1.156:1234/v1
+  15)                    mistralai/magistral-small-2509  @  http://192.168.1.156:1234/v1
+  16)                    nvidia/nemotron-3-nano-4b  @  http://192.168.1.156:1234/v1
+  17)                    openai/gpt-oss-20b  @  http://192.168.1.156:1234/v1
+  18)                    ornith-1.0-9b  @  http://192.168.1.156:1234/v1
+  19)                    ornith-1.0-9b-1m  @  http://192.168.1.156:1234/v1
+  20)                    ornith-1.0-9b-autoround  @  http://192.168.1.156:1234/v1
+  21)                    ornith-1.0-9b-ollama-fixedsas  @  http://192.168.1.156:1234/v1
+  22)                    ornstein-27b  @  http://192.168.1.156:1234/v1
+  23)                    qwen3.6-27b-claude-opus-deepseek-distilled-imatrix-mtp  @  http://192.168.1.156:1234/v1
+  24)                    qwen/qwen3.5-9b  @  http://192.168.1.156:1234/v1
+  25)                    qwen/qwen3.6-27b  @  http://192.168.1.156:1234/v1
+  26)                    qwen/qwen3-vl-30b  @  http://192.168.1.156:1234/v1
+  27)                    text-embedding-nomic-embed-text-v1.5  @  http://192.168.1.156:1234/v1
+  28)                    deepreinforce-ai_ornith-1.0-9b  @  http://192.168.1.225:1234/v1
+  29)                    deepseek/deepseek-r1-0528-qwen3-8b  @  http://192.168.1.225:1234/v1
+  30)                    gemma-1.1-2b-it  @  http://192.168.1.225:1234/v1
+  31)                    google/gemma-4-12b  @  http://192.168.1.225:1234/v1
+  32)                    google/gemma-4-12b-qat  @  http://192.168.1.225:1234/v1
+  33)                    google/gemma-4-26b-a4b  @  http://192.168.1.225:1234/v1
+  34)                    google/gemma-4-26b-a4b-qat  @  http://192.168.1.225:1234/v1
+  35)                    google/gemma-4-31b  @  http://192.168.1.225:1234/v1
+  36)                    google/gemma-4-31b-qat  @  http://192.168.1.225:1234/v1
+  37)                    google/gemma-4-e2b  @  http://192.168.1.225:1234/v1
+  38)                    google/gemma-4-e4b  @  http://192.168.1.225:1234/v1
+  39)                    huihui-ornith-1.0-35b-abliterated  @  http://192.168.1.225:1234/v1
+  40)                    liquid/lfm2-24b-a2b  @  http://192.168.1.225:1234/v1
+  41)                    liquid/lfm2.5-1.2b  @  http://192.168.1.225:1234/v1
+  42)                    mistralai/magistral-small-2509  @  http://192.168.1.225:1234/v1
+  43)                    nvidia/nemotron-3-nano-4b  @  http://192.168.1.225:1234/v1
+  44)                    openai/gpt-oss-20b  @  http://192.168.1.225:1234/v1
+  45)                    ornith-1.0-9b  @  http://192.168.1.225:1234/v1
+  46)                    ornith-1.0-9b-1m  @  http://192.168.1.225:1234/v1
+  47)                    ornith-1.0-9b-autoround  @  http://192.168.1.225:1234/v1
+  48)                    ornith-1.0-9b-ollama-fixedsas  @  http://192.168.1.225:1234/v1
+  49)                    ornstein-27b  @  http://192.168.1.225:1234/v1
+  50)                    qwen3.6-27b-claude-opus-deepseek-distilled-imatrix-mtp  @  http://192.168.1.225:1234/v1
+  51)                    qwen/qwen3.5-9b  @  http://192.168.1.225:1234/v1
+  52)                    qwen/qwen3.6-27b  @  http://192.168.1.225:1234/v1
+  53)                    qwen/qwen3-vl-30b  @  http://192.168.1.225:1234/v1
+  54)                    text-embedding-nomic-embed-text-v1.5  @  http://192.168.1.225:1234/v1
+
+  [1-54] use a model    [r] rescan    [s] skip
+➜ your choice [s]: 7
+[+] Local LLM google/gemma-4-26b-a4b-qat (http://192.168.1.156:1234/v1) chosen as the starting model.
+
+────────────────────────────────────────────────────────────
+  Ubuntu Zombie — setup parameters
+────────────────────────────────────────────────────────────
+  Review every setting below, edit any of them, then accept when happy.
+
+  1) Agent user          zombie
+     Agent home          /home/zombie
+  2) Install root        /opt/ai-zombie
+  3) Chat port           7878/tcp (loopback only)
+  4) Transcript log      /var/log/ubuntu-zombie-install.log
+  5) Receipt file        /var/log/ubuntu-zombie/install-receipt.txt
+  6) Chat password       default (braaaains)
+  7) Time to Live        7 day(s) then permanently disabled
+  8) Local LLM           google/gemma-4-26b-a4b-qat @ http://192.168.1.156:1234/v1
+     Host                ubuntu 24.04 (amd64)
+
+  [a] accept and install    [1-8] edit a field    [q] cancel
+➜ your choice [a]: 
+[+] Parameters accepted.
+
+Preflight summary:
+  [ok] OS is Ubuntu
+  [ok] Ubuntu version 24.04 (LTS)
+  [ok] Architecture amd64
+  [ok] Disk free 88140 MB
+  [ok] RAM 3615 MB
+  [ok] DNS resolution
+  [ok] Outbound connectivity
+
+[+] Preflight: clean.
+[i] Log file: /var/log/ubuntu-zombie-install.log
+[i] Components: zombie
+[i] Agent user: zombie
+[i] Install root: /opt/ai-zombie
+[i] Chat port: 7878 (loopback only)
+[i] Mode: interactive
+[i] Phases: 13. Typical run takes ~10–20 min depending on selected components and network speed.
+
+This installer will:
+  - Create the zombie user (operating identity of the AI Systems Administrator) with passwordless sudo
+  - Install Python and Node agent runtimes
+  - Install the loopback chat service (ubuntu-zombie-chat.service)
+  - Install policy, audit log, and helper scripts
+  - Enable automatic security updates
+
+Run this from the physical Ubuntu machine, not over public SSH.
+
+[i] Parameters reviewed and accepted: proceeding.
+[i] Install receipt opened: /var/log/ubuntu-zombie/install-receipt.txt
+
+Phase [1/13]  Update the operating system
+────────────────────────────────────────────────────────────
+Hit:1 http://au.archive.ubuntu.com/ubuntu noble InRelease
+Get:2 http://au.archive.ubuntu.com/ubuntu noble-updates InRelease [126 kB]
+Hit:3 https://deb.nodesource.com/node_22.x nodistro InRelease
+Get:4 http://au.archive.ubuntu.com/ubuntu noble-backports InRelease [126 kB]
+Get:5 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 Packages [1,096 kB]
+Get:6 http://security.ubuntu.com/ubuntu noble-security InRelease [126 kB]
+Get:7 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 Components [180 kB]
+Get:8 http://au.archive.ubuntu.com/ubuntu noble-updates/universe amd64 Components [388 kB]
+Get:9 http://au.archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Components [940 B]
+Get:10 http://au.archive.ubuntu.com/ubuntu noble-backports/main amd64 Components [5,776 B]
+Get:11 http://au.archive.ubuntu.com/ubuntu noble-backports/universe amd64 Components [10.5 kB]
+Get:12 http://security.ubuntu.com/ubuntu noble-security/main amd64 Packages [836 kB]
+Get:13 http://security.ubuntu.com/ubuntu noble-security/main Translation-en [189 kB]
+Get:14 http://security.ubuntu.com/ubuntu noble-security/main amd64 Components [44.9 kB]
+Get:15 http://security.ubuntu.com/ubuntu noble-security/universe amd64 Packages [1,177 kB]
+Get:16 http://security.ubuntu.com/ubuntu noble-security/universe Translation-en [232 kB]
+Get:17 http://security.ubuntu.com/ubuntu noble-security/universe amd64 Components [76.2 kB]
+Fetched 4,615 kB in 5s (945 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+Calculating upgrade...
+The following packages will be upgraded:
+  alsa-ucm-conf python3-idna
+2 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+Need to get 120 kB of archives.
+After this operation, 15.4 kB of additional disk space will be used.
+Get:1 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 alsa-ucm-conf all 1.2.10-1ubuntu5.13 [70.0 kB]
+Get:2 http://security.ubuntu.com/ubuntu noble-security/main amd64 python3-idna all 3.6-2ubuntu0.2 [49.7 kB]
+Fetched 120 kB in 1s (89.6 kB/s)
+(Reading database ... 206045 files and directories currently installed.)
+Preparing to unpack .../alsa-ucm-conf_1.2.10-1ubuntu5.13_all.deb ...
+Unpacking alsa-ucm-conf (1.2.10-1ubuntu5.13) over (1.2.10-1ubuntu5.11) ...
+Preparing to unpack .../python3-idna_3.6-2ubuntu0.2_all.deb ...
+Unpacking python3-idna (3.6-2ubuntu0.2) over (3.6-2ubuntu0.1) ...
+Setting up alsa-ucm-conf (1.2.10-1ubuntu5.13) ...
+Setting up python3-idna (3.6-2ubuntu0.2) ...
+    Completed in 21 seconds
+
+Phase [2/13]  Install system dependencies
+────────────────────────────────────────────────────────────
+Reading package lists...
+Building dependency tree...
+Reading state information...
+sudo is already the newest version (1.9.15p5-3ubuntu5.24.04.2).
+curl is already the newest version (8.5.0-2ubuntu10.11).
+wget is already the newest version (1.21.4-1ubuntu4.3).
+ca-certificates is already the newest version (20260601~24.04.1).
+gnupg is already the newest version (2.4.4-2ubuntu17.4).
+lsb-release is already the newest version (12.0-2).
+software-properties-common is already the newest version (0.99.49.4).
+apt-transport-https is already the newest version (2.8.3).
+git is already the newest version (1:2.43.0-1ubuntu7.3).
+vim is already the newest version (2:9.1.0016-1ubuntu7.18).
+nano is already the newest version (7.2-2ubuntu0.2).
+tmux is already the newest version (3.4-1ubuntu0.1).
+htop is already the newest version (3.3.0-4build1).
+unzip is already the newest version (6.0-28ubuntu4.1).
+zip is already the newest version (3.0-13ubuntu0.2).
+jq is already the newest version (1.7.1-3ubuntu0.24.04.2).
+iputils-ping is already the newest version (3:20240117-1ubuntu0.1).
+unattended-upgrades is already the newest version (2.9.1+nmu4ubuntu1).
+logrotate is already the newest version (3.21.0-2build1).
+python3 is already the newest version (3.12.3-0ubuntu2.1).
+python3-pip is already the newest version (24.0+dfsg-1ubuntu1.3).
+python3-venv is already the newest version (3.12.3-0ubuntu2.1).
+pipx is already the newest version (1.4.3-1).
+build-essential is already the newest version (12.10ubuntu1).
+ripgrep is already the newest version (14.1.0-1).
+fd-find is already the newest version (9.0.0-1).
+tree is already the newest version (2.1.1-2ubuntu3.24.04.2).
+rsync is already the newest version (3.2.7-1ubuntu1.5).
+cron is already the newest version (3.0pl1-184ubuntu2).
+pwgen is already the newest version (2.08-2build2).
+psmisc is already the newest version (23.7-1build1).
+0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+    Completed in 1 second
+
+Phase [3/13]  Configure the zombie agent identity
+────────────────────────────────────────────────────────────
+[i] User zombie already exists.
+[+] Configured passwordless sudo for zombie.
+    Completed in 0 seconds
+
+Phase [4/13]  Configure automatic security updates
+────────────────────────────────────────────────────────────
+Synchronizing state of unattended-upgrades.service with SysV service script with /usr/lib/systemd/systemd-sysv-install.
+Executing: /usr/lib/systemd/systemd-sysv-install enable unattended-upgrades
+[+] Automatic security updates enabled (reboots at 04:00 if required).
+    Completed in 2 seconds
+
+Phase [5/13]  Keep the desktop available
+────────────────────────────────────────────────────────────
+[+] Sleep and suspend targets masked.
+    Completed in 0 seconds
+
+Phase [6/13]  Prepare application state
+────────────────────────────────────────────────────────────
+[i] Preserving existing /opt/ai-zombie/secrets/env.
+[+] Applied local LLM google/gemma-4-26b-a4b-qat at http://192.168.1.156:1234/v1 to existing secrets/env.
+    Completed in 0 seconds
+
+Phase [7/13]  Build the Python runtime
+────────────────────────────────────────────────────────────
+Requirement already satisfied: pip in ./agent-env/lib/python3.12/site-packages (26.1.2)
+Requirement already satisfied: wheel in ./agent-env/lib/python3.12/site-packages (0.47.0)
+Requirement already satisfied: setuptools in ./agent-env/lib/python3.12/site-packages (83.0.0)
+Requirement already satisfied: packaging>=24.0 in ./agent-env/lib/python3.12/site-packages (from wheel) (26.2)
+Requirement already satisfied: requests in ./agent-env/lib/python3.12/site-packages (2.34.2)
+Requirement already satisfied: pydantic in ./agent-env/lib/python3.12/site-packages (2.13.4)
+Requirement already satisfied: rich in ./agent-env/lib/python3.12/site-packages (15.0.0)
+Requirement already satisfied: typer in ./agent-env/lib/python3.12/site-packages (0.26.8)
+Collecting typer
+  Downloading typer-0.27.0-py3-none-any.whl.metadata (15 kB)
+Requirement already satisfied: python-dotenv in ./agent-env/lib/python3.12/site-packages (1.2.2)
+Requirement already satisfied: charset_normalizer<4,>=2 in ./agent-env/lib/python3.12/site-packages (from requests) (3.4.9)
+Requirement already satisfied: idna<4,>=2.5 in ./agent-env/lib/python3.12/site-packages (from requests) (3.18)
+Requirement already satisfied: urllib3<3,>=1.26 in ./agent-env/lib/python3.12/site-packages (from requests) (2.7.0)
+Requirement already satisfied: certifi>=2023.5.7 in ./agent-env/lib/python3.12/site-packages (from requests) (2026.6.17)
+Requirement already satisfied: annotated-types>=0.6.0 in ./agent-env/lib/python3.12/site-packages (from pydantic) (0.7.0)
+Requirement already satisfied: pydantic-core==2.46.4 in ./agent-env/lib/python3.12/site-packages (from pydantic) (2.46.4)
+Requirement already satisfied: typing-extensions>=4.14.1 in ./agent-env/lib/python3.12/site-packages (from pydantic) (4.16.0)
+Requirement already satisfied: typing-inspection>=0.4.2 in ./agent-env/lib/python3.12/site-packages (from pydantic) (0.4.2)
+Requirement already satisfied: markdown-it-py>=2.2.0 in ./agent-env/lib/python3.12/site-packages (from rich) (4.2.0)
+Requirement already satisfied: pygments<3.0.0,>=2.13.0 in ./agent-env/lib/python3.12/site-packages (from rich) (2.20.0)
+Requirement already satisfied: shellingham>=1.3.0 in ./agent-env/lib/python3.12/site-packages (from typer) (1.5.4)
+Requirement already satisfied: annotated-doc>=0.0.2 in ./agent-env/lib/python3.12/site-packages (from typer) (0.0.4)
+Requirement already satisfied: mdurl~=0.1 in ./agent-env/lib/python3.12/site-packages (from markdown-it-py>=2.2.0->rich) (0.1.2)
+Downloading typer-0.27.0-py3-none-any.whl (122 kB)
+Installing collected packages: typer
+  Attempting uninstall: typer
+    Found existing installation: typer 0.26.8
+    Uninstalling typer-0.26.8:
+      Successfully uninstalled typer-0.26.8
+Successfully installed typer-0.27.0
+[+] Python venv ready at /home/zombie/agent-env.
+    Completed in 4 seconds
+
+Phase [8/13]  Build the Node agent runtime
+────────────────────────────────────────────────────────────
+[i] Waiting for apt/dpkg lock (0s/300s)...
+Hit:1 http://au.archive.ubuntu.com/ubuntu noble InRelease
+Hit:2 http://au.archive.ubuntu.com/ubuntu noble-updates InRelease
+Hit:3 http://au.archive.ubuntu.com/ubuntu noble-backports InRelease
+Hit:4 https://deb.nodesource.com/node_22.x nodistro InRelease
+Hit:5 http://security.ubuntu.com/ubuntu noble-security InRelease
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+nodejs is already the newest version (22.23.1-1nodesource1).
+0 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
+Installed npm@12.0.1 from the npm registry.
+
+removed 23 packages, and changed 23 packages in 6s
+
+1 package is looking for funding
+  run `npm fund` for details
+Installing @earendil-works/pi-ai@0.75.5 globally from checksum-pinned tarball.
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+
+changed 91 packages in 13s
+
+6 packages are looking for funding
+  run `npm fund` for details
+Installing @earendil-works/pi-coding-agent@0.75.5 globally from checksum-pinned tarball.
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+
+changed 124 packages in 15s
+
+12 packages are looking for funding
+  run `npm fund` for details
+    Completed in 50 seconds
+
+Phase [9/13]  Deploy the agent runtime
+────────────────────────────────────────────────────────────
+[+] Time to Live set: 7 day(s) until the zombie is disabled.
+    Completed in 0 seconds
+
+Phase [10/13]  Install policy and operator tools
+────────────────────────────────────────────────────────────
+[i] Preserving existing /etc/ubuntu-zombie/policy.yaml.
+[+] Installed built-in skills to /opt/ai-zombie/skills/.
+    Completed in 0 seconds
+
+Phase [11/13]  Enable background services
+────────────────────────────────────────────────────────────
+[+] Chat service installed and enabled.
+    Completed in 2 seconds
+
+Phase [12/13]  Install health checks
+────────────────────────────────────────────────────────────
+    Completed in 0 seconds
+
+Phase [13/13]  Verify the installation
+────────────────────────────────────────────────────────────
+  [!]  Provider token present in secrets/env
+  [ok] Chat service running on 127.0.0.1:7878
+
+
+Install complete in 1 minute 20 seconds.
+Chat:    http://127.0.0.1:7878/ (localhost only, after reboot)
+Check:   /opt/ai-zombie/bin/verify  ·  /opt/ai-zombie/bin/audit-recent
+Next:    sudo /opt/ai-zombie/bin/secrets-edit   # paste a supported provider API key
+Records: /var/log/ubuntu-zombie-install.log
+         /var/log/ubuntu-zombie/install-receipt.txt
+Remove:  sudo /home/ericmourant/ubuntu-zombie/scripts/uninstall.sh zombie --dry-run
+[i] Reboot after completing the next step: sudo reboot
+[+] Install receipt finalised: /var/log/ubuntu-zombie/install-receipt.txt
+ericmourant@ericmourant-x1:~/ubuntu-zombie$ sudo scripts/install.sh install forgejo
+
+╭──────────────────────────────────╮
+│  UBUNTU ZOMBIE                   │
+│  AI SYSTEMS ADMINISTRATOR        │
+╰──────────────────────────────────╯
+
+╭──────────────────────────────────────────────────────────────────╮
+│  AI Systems Administrator for Ubuntu Desktop LTS                 │
+│  v2026.07.16.02.48.54  --  install                               │
+│                                                                  │
+│  Ask the machine to diagnose, explain, configure, repair,        │
+│  and operate itself - every action is audit-logged.              │
+│                                                                  │
+│  Chat http://127.0.0.1:7878    You hold the kill switch.         │
+╰──────────────────────────────────────────────────────────────────╯
+
+────────────────────────────────────────────────────────────
+  Forgejo — setup parameters
+────────────────────────────────────────────────────────────
+  1) Forgejo port        3000/tcp (loopback backend)
+  2) Forgejo admin       forgejo-admin <forgejo-admin@localhost.localdomain> (password generated, recorded in receipt)
+  3) PostgreSQL database PostgreSQL forgejo (role forgejo, password generated, recorded in receipt)
+  4) Actions runner      disabled
+  5) Versions            Forgejo latest release
+  6) Core records        /var/log/ubuntu-zombie-install.log; /var/log/ubuntu-zombie/install-receipt.txt
+     Host                ubuntu 24.04 (amd64)
+
+  [a] accept and install    [1-6] edit a field    [q] cancel
+➜ your choice [a]: 2
+Forgejo admin username [forgejo-admin]: 
+Forgejo admin email [forgejo-admin@localhost.localdomain]: 
+Forgejo admin password (blank to auto-generate and record in the receipt): 
+Confirm Forgejo admin password: 
+[+] Forgejo admin password recorded.
+
+────────────────────────────────────────────────────────────
+  Forgejo — setup parameters
+────────────────────────────────────────────────────────────
+  1) Forgejo port        3000/tcp (loopback backend)
+  2) Forgejo admin       forgejo-admin <forgejo-admin@localhost.localdomain> (password set via env)
+  3) PostgreSQL database PostgreSQL forgejo (role forgejo, password generated, recorded in receipt)
+  4) Actions runner      disabled
+  5) Versions            Forgejo latest release
+  6) Core records        /var/log/ubuntu-zombie-install.log; /var/log/ubuntu-zombie/install-receipt.txt
+     Host                ubuntu 24.04 (amd64)
+
+  [a] accept and install    [1-6] edit a field    [q] cancel
+➜ your choice [a]: 4
+[!] Co-locating the runner with the forge is contrary to upstream guidance; enabling deliberately.
+[i] Forgejo Actions runner enabled (standard Docker executor).
+
+────────────────────────────────────────────────────────────
+  Forgejo — setup parameters
+────────────────────────────────────────────────────────────
+  1) Forgejo port        3000/tcp (loopback backend)
+  2) Forgejo admin       forgejo-admin <forgejo-admin@localhost.localdomain> (password set via env)
+  3) PostgreSQL database PostgreSQL forgejo (role forgejo, password generated, recorded in receipt)
+  4) Actions runner      enabled (Docker executor, same host)
+  5) Versions            Forgejo latest release
+  6) Core records        /var/log/ubuntu-zombie-install.log; /var/log/ubuntu-zombie/install-receipt.txt
+     Host                ubuntu 24.04 (amd64)
+
+  [a] accept and install    [1-6] edit a field    [q] cancel
+➜ your choice [a]: 3
+Forgejo PostgreSQL database name [forgejo]: 
+Forgejo PostgreSQL role (username) [forgejo]: 
+Forgejo PostgreSQL role password (blank to auto-generate and record in the receipt): 
+Confirm Forgejo PostgreSQL role password: 
+[+] Forgejo database password recorded.
+
+────────────────────────────────────────────────────────────
+  Forgejo — setup parameters
+────────────────────────────────────────────────────────────
+  1) Forgejo port        3000/tcp (loopback backend)
+  2) Forgejo admin       forgejo-admin <forgejo-admin@localhost.localdomain> (password set via env)
+  3) PostgreSQL database PostgreSQL forgejo (role forgejo, password set via env)
+  4) Actions runner      enabled (Docker executor, same host)
+  5) Versions            Forgejo latest release
+  6) Core records        /var/log/ubuntu-zombie-install.log; /var/log/ubuntu-zombie/install-receipt.txt
+     Host                ubuntu 24.04 (amd64)
+
+  [a] accept and install    [1-6] edit a field    [q] cancel
+➜ your choice [a]: 
+[+] Parameters accepted.
+
+Preflight summary:
+  [ok] OS is Ubuntu
+  [ok] Ubuntu version 24.04 (LTS)
+  [ok] Architecture amd64
+  [ok] Disk free 88070 MB
+  [ok] RAM 3615 MB
+  [ok] DNS resolution
+  [ok] Outbound connectivity
+
+[+] Preflight: clean.
+[i] Log file: /var/log/ubuntu-zombie-install.log
+[i] Components: forgejo
+[i] Mode: interactive
+[i] Phases: 10. Typical run takes ~10–20 min depending on selected components and network speed.
+
+This installer will:
+  - Install PostgreSQL and Forgejo without creating a zombie account
+  - Expose Forgejo at https://ericmourant-x1.local/ through Caddy and Avahi
+  - Keep installer-owned transcript and root-only receipt records under /var/log
+  - Install Forgejo + PostgreSQL with LAN HTTPS at https://ericmourant-x1.local/
+  - Install a co-located Forgejo Actions runner (Docker executor)
+
+Run this from the physical Ubuntu machine, not over public SSH.
+
+[i] Parameters reviewed and accepted: proceeding.
+[i] Install receipt opened: /var/log/ubuntu-zombie/install-receipt.txt
+
+Phase [1/10]  Install Forgejo prerequisites
+────────────────────────────────────────────────────────────
+Reading package lists...
+Building dependency tree...
+Reading state information...
+apt-transport-https is already the newest version (2.8.3).
+gnupg is already the newest version (2.4.4-2ubuntu17.4).
+The following NEW packages will be installed:
+  debian-archive-keyring debian-keyring
+0 upgraded, 2 newly installed, 0 to remove and 0 not upgraded.
+Need to get 31.5 MB of archives.
+After this operation, 33.4 MB of additional disk space will be used.
+Get:1 http://au.archive.ubuntu.com/ubuntu noble/universe amd64 debian-archive-keyring all 2023.4ubuntu1 [168 kB]
+Get:2 http://au.archive.ubuntu.com/ubuntu noble/universe amd64 debian-keyring all 2023.12.24 [31.3 MB]
+Fetched 31.5 MB in 4s (8,368 kB/s)
+                                  Selecting previously unselected package debian-archive-keyring.
+(Reading database ... 206056 files and directories currently installed.)
+Preparing to unpack .../debian-archive-keyring_2023.4ubuntu1_all.deb ...
+Unpacking debian-archive-keyring (2023.4ubuntu1) ...
+Selecting previously unselected package debian-keyring.
+Preparing to unpack .../debian-keyring_2023.12.24_all.deb ...
+Unpacking debian-keyring (2023.12.24) ...
+Setting up debian-archive-keyring (2023.4ubuntu1) ...
+Setting up debian-keyring (2023.12.24) ...
+Hit:1 http://au.archive.ubuntu.com/ubuntu noble InRelease
+Hit:2 http://au.archive.ubuntu.com/ubuntu noble-updates InRelease
+Get:3 https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version InRelease [14.8 kB]
+Hit:4 http://au.archive.ubuntu.com/ubuntu noble-backports InRelease
+Hit:5 https://deb.nodesource.com/node_22.x nodistro InRelease
+Get:6 https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version/main amd64 Packages [4,823 B]
+Hit:7 http://security.ubuntu.com/ubuntu noble-security InRelease
+Fetched 19.6 kB in 1s (24.7 kB/s)
+Reading package lists...
+Reading package lists...
+Building dependency tree...
+Reading state information...
+git is already the newest version (1:2.43.0-1ubuntu7.3).
+openssl is already the newest version (3.0.13-0ubuntu3.11).
+openssl set to manually installed.
+xz-utils is already the newest version (5.6.1+really5.4.5-1ubuntu0.3).
+xz-utils set to manually installed.
+avahi-daemon is already the newest version (0.8-13ubuntu6.2).
+avahi-daemon set to manually installed.
+libnss-mdns is already the newest version (0.15.1-4build1).
+libnss-mdns set to manually installed.
+The following additional packages will be installed:
+  libcommon-sense-perl libjson-perl libjson-xs-perl libllvm17t64 libpq5
+  libtypes-serialiser-perl postgresql-16 postgresql-client-16
+  postgresql-client-common postgresql-common
+Suggested packages:
+  postgresql-doc postgresql-doc-16
+The following NEW packages will be installed:
+  caddy git-lfs libcommon-sense-perl libjson-perl libjson-xs-perl libllvm17t64
+  libpq5 libtypes-serialiser-perl postgresql postgresql-16
+  postgresql-client-16 postgresql-client-common postgresql-common
+  postgresql-contrib
+0 upgraded, 14 newly installed, 0 to remove and 0 not upgraded.
+Need to get 64.8 MB of archives.
+After this operation, 236 MB of additional disk space will be used.
+Get:1 http://au.archive.ubuntu.com/ubuntu noble/main amd64 libjson-perl all 4.10000-1 [81.9 kB]
+Get:2 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 postgresql-client-common all 257build1.1 [36.4 kB]
+Get:3 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 postgresql-common all 257build1.1 [161 kB]
+Get:4 http://au.archive.ubuntu.com/ubuntu noble-updates/universe amd64 git-lfs amd64 3.4.1-1ubuntu0.4 [3,908 kB]
+Get:5 http://au.archive.ubuntu.com/ubuntu noble/main amd64 libcommon-sense-perl amd64 3.75-3build3 [20.4 kB]
+Get:6 http://au.archive.ubuntu.com/ubuntu noble/main amd64 libtypes-serialiser-perl all 1.01-1 [11.6 kB]
+Get:7 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 libjson-xs-perl amd64 4.040-0ubuntu0.24.04.1 [83.7 kB]
+Get:8 http://au.archive.ubuntu.com/ubuntu noble/main amd64 libllvm17t64 amd64 1:17.0.6-9ubuntu1 [26.2 MB]
+Get:9 https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version/main amd64 caddy amd64 2.11.4 [17.3 MB]
+Get:10 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 libpq5 amd64 16.14-0ubuntu0.24.04.1 [147 kB]
+Get:11 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 postgresql-client-16 amd64 16.14-0ubuntu0.24.04.1 [1,300 kB]
+Get:12 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 postgresql-16 amd64 16.14-0ubuntu0.24.04.1 [15.6 MB]
+Get:13 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 postgresql all 16+257build1.1 [11.6 kB]
+Get:14 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 postgresql-contrib all 16+257build1.1 [11.6 kB]
+Preconfiguring packages ...
+Fetched 64.8 MB in 9s (6,963 kB/s)
+                                  Selecting previously unselected package libjson-perl.
+(Reading database ... 206088 files and directories currently installed.)
+Preparing to unpack .../00-libjson-perl_4.10000-1_all.deb ...
+Unpacking libjson-perl (4.10000-1) ...
+Selecting previously unselected package postgresql-client-common.
+Preparing to unpack .../01-postgresql-client-common_257build1.1_all.deb ...
+Unpacking postgresql-client-common (257build1.1) ...
+Selecting previously unselected package postgresql-common.
+Preparing to unpack .../02-postgresql-common_257build1.1_all.deb ...
+Adding 'diversion of /usr/bin/pg_config to /usr/bin/pg_config.libpq-dev by postgresql-common'
+Unpacking postgresql-common (257build1.1) ...
+Selecting previously unselected package caddy.
+Preparing to unpack .../03-caddy_2.11.4_amd64.deb ...
+Unpacking caddy (2.11.4) ...
+Selecting previously unselected package git-lfs.
+Preparing to unpack .../04-git-lfs_3.4.1-1ubuntu0.4_amd64.deb ...
+Unpacking git-lfs (3.4.1-1ubuntu0.4) ...
+Selecting previously unselected package libcommon-sense-perl:amd64.
+Preparing to unpack .../05-libcommon-sense-perl_3.75-3build3_amd64.deb ...
+Unpacking libcommon-sense-perl:amd64 (3.75-3build3) ...
+Selecting previously unselected package libtypes-serialiser-perl.
+Preparing to unpack .../06-libtypes-serialiser-perl_1.01-1_all.deb ...
+Unpacking libtypes-serialiser-perl (1.01-1) ...
+Selecting previously unselected package libjson-xs-perl.
+Preparing to unpack .../07-libjson-xs-perl_4.040-0ubuntu0.24.04.1_amd64.deb ...
+Unpacking libjson-xs-perl (4.040-0ubuntu0.24.04.1) ...
+Selecting previously unselected package libllvm17t64:amd64.
+Preparing to unpack .../08-libllvm17t64_1%3a17.0.6-9ubuntu1_amd64.deb ...
+Unpacking libllvm17t64:amd64 (1:17.0.6-9ubuntu1) ...
+Selecting previously unselected package libpq5:amd64.
+Preparing to unpack .../09-libpq5_16.14-0ubuntu0.24.04.1_amd64.deb ...
+Unpacking libpq5:amd64 (16.14-0ubuntu0.24.04.1) ...
+Selecting previously unselected package postgresql-client-16.
+Preparing to unpack .../10-postgresql-client-16_16.14-0ubuntu0.24.04.1_amd64.deb ...
+Unpacking postgresql-client-16 (16.14-0ubuntu0.24.04.1) ...
+Selecting previously unselected package postgresql-16.
+Preparing to unpack .../11-postgresql-16_16.14-0ubuntu0.24.04.1_amd64.deb ...
+Unpacking postgresql-16 (16.14-0ubuntu0.24.04.1) ...
+Selecting previously unselected package postgresql.
+Preparing to unpack .../12-postgresql_16+257build1.1_all.deb ...
+Unpacking postgresql (16+257build1.1) ...
+Selecting previously unselected package postgresql-contrib.
+Preparing to unpack .../13-postgresql-contrib_16+257build1.1_all.deb ...
+Unpacking postgresql-contrib (16+257build1.1) ...
+Setting up postgresql-client-common (257build1.1) ...
+Setting up libpq5:amd64 (16.14-0ubuntu0.24.04.1) ...
+Setting up libcommon-sense-perl:amd64 (3.75-3build3) ...
+Setting up libllvm17t64:amd64 (1:17.0.6-9ubuntu1) ...
+Setting up libtypes-serialiser-perl (1.01-1) ...
+Setting up caddy (2.11.4) ...
+Created symlink /etc/systemd/system/multi-user.target.wants/caddy.service → /usr/lib/systemd/system/caddy.service.
+Setting up libjson-perl (4.10000-1) ...
+Setting up git-lfs (3.4.1-1ubuntu0.4) ...
+Setting up libjson-xs-perl (4.040-0ubuntu0.24.04.1) ...
+Setting up postgresql-client-16 (16.14-0ubuntu0.24.04.1) ...
+update-alternatives: using /usr/share/postgresql/16/man/man1/psql.1.gz to provide /usr/share/man/man1/psql.1.gz (psql.1.gz) in auto mode
+Setting up postgresql-common (257build1.1) ...
+
+Creating config file /etc/postgresql-common/createcluster.conf with new version
+Building PostgreSQL dictionaries from installed myspell/hunspell packages...
+  en_us
+Removing obsolete dictionary files:
+Created symlink /etc/systemd/system/multi-user.target.wants/postgresql.service → /usr/lib/systemd/system/postgresql.service.
+Setting up postgresql-16 (16.14-0ubuntu0.24.04.1) ...
+Creating new PostgreSQL cluster 16/main ...
+/usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/16/main --auth-local peer --auth-host scram-sha-256 --no-instructions
+The files belonging to this database system will be owned by user "postgres".
+This user must also own the server process.
+
+The database cluster will be initialized with this locale configuration:
+  provider:    libc
+  LC_COLLATE:  en_US.UTF-8
+  LC_CTYPE:    en_US.UTF-8
+  LC_MESSAGES: en_US.UTF-8
+  LC_MONETARY: en_AU.UTF-8
+  LC_NUMERIC:  en_AU.UTF-8
+  LC_TIME:     en_AU.UTF-8
+The default database encoding has accordingly been set to "UTF8".
+The default text search configuration will be set to "english".
+
+Data page checksums are disabled.
+
+fixing permissions on existing directory /var/lib/postgresql/16/main ... ok
+creating subdirectories ... ok
+selecting dynamic shared memory implementation ... posix
+selecting default max_connections ... 100
+selecting default shared_buffers ... 128MB
+selecting default time zone ... Australia/Melbourne
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+syncing data to disk ... ok
+Setting up postgresql-contrib (16+257build1.1) ...
+Setting up postgresql (16+257build1.1) ...
+Processing triggers for man-db (2.12.0-4build2) ...
+Processing triggers for libc-bin (2.39-0ubuntu8.7) ...
+    Completed in 47 seconds
+
+Phase [2/10]  Create git system user
+────────────────────────────────────────────────────────────
+info: Selecting UID from range 100 to 999 ...
+
+info: Selecting GID from range 100 to 999 ...
+info: Adding system user `git' (UID 123) ...
+info: Adding new group `git' (GID 125) ...
+info: Adding new user `git' (UID 123) with group `git' ...
+info: Creating home directory `/var/lib/forgejo' ...
+[+] Created system user git.
+    Completed in 1 second
+
+Phase [3/10]  Install Forgejo binary
+────────────────────────────────────────────────────────────
+[i] Latest Forgejo release: 15.0.4.
+[+] Installed Forgejo 15.0.4 to /usr/local/bin/forgejo (checksum verified).
+    Completed in 52 seconds
+
+Phase [4/10]  Create Forgejo directories
+────────────────────────────────────────────────────────────
+    Completed in 0 seconds
+
+Phase [5/10]  Configure PostgreSQL for Forgejo
+────────────────────────────────────────────────────────────
+[+] Creating PostgreSQL role forgejo.
+DO
+[+] Created PostgreSQL database forgejo (owner forgejo).
+    Completed in 2 seconds
+
+Phase [6/10]  Write Forgejo configuration
+────────────────────────────────────────────────────────────
+[+] Wrote /etc/forgejo/app.ini (secrets generated once, never logged).
+    Completed in 1 second
+
+Phase [7/10]  Initialize Forgejo database and service
+────────────────────────────────────────────────────────────
+2026/07/16 13:13:26 cmd/migrate.go:36:runMigrate() [I] AppPath: /usr/local/bin/forgejo
+2026/07/16 13:13:26 cmd/migrate.go:37:runMigrate() [I] AppWorkPath: /var/lib/forgejo
+2026/07/16 13:13:26 cmd/migrate.go:38:runMigrate() [I] Custom path: /var/lib/forgejo/custom
+2026/07/16 13:13:26 cmd/migrate.go:39:runMigrate() [I] Log path: /var/lib/forgejo/log
+2026/07/16 13:13:26 cmd/migrate.go:40:runMigrate() [I] Configuration file: /etc/forgejo/app.ini
+2026/07/16 13:13:26 ...3.7.0/command_run.go:294:run() [I] PING DATABASE pgx
+New user 'forgejo-admin' has been successfully created!
+[+] Created Forgejo admin forgejo-admin.
+Created symlink /etc/systemd/system/multi-user.target.wants/forgejo.service → /etc/systemd/system/forgejo.service.
+curl: (7) Failed to connect to 127.0.0.1 port 3000 after 0 ms: Couldn't connect to server
+[!] Attempt 1 failed, retrying in 2s: curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:3000/api/healthz
+curl: (7) Failed to connect to 127.0.0.1 port 3000 after 0 ms: Couldn't connect to server
+[!] Attempt 2 failed, retrying in 4s: curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:3000/api/healthz
+[+] Forgejo backend is healthy on 127.0.0.1:3000.
+    Completed in 13 seconds
+
+Phase [8/10]  Configure Forgejo LAN HTTPS and mDNS
+────────────────────────────────────────────────────────────
+{"level":"info","ts":1784171619.2949314,"msg":"using config from file","file":"/etc/caddy/Caddyfile"}
+{"level":"info","ts":1784171619.2999654,"msg":"adapted config to JSON","adapter":"caddyfile"}
+{"level":"info","ts":1784171619.3007054,"logger":"tls.cache.maintenance","msg":"started background certificate maintenance","cache":"0x1bd7c9fa7080"}
+{"level":"info","ts":1784171619.323553,"logger":"http.auto_https","msg":"server is listening only on the HTTPS port but has no TLS connection policies; adding one to enable TLS","server_name":"srv0","https_port":443}
+{"level":"info","ts":1784171619.3235989,"logger":"http.auto_https","msg":"enabling automatic HTTP->HTTPS redirects","server_name":"srv0"}
+{"level":"warn","ts":1784171619.3236089,"logger":"http.auto_https","msg":"server is listening only on the HTTP port, so no automatic HTTPS will be applied to this server","server_name":"srv1","http_port":80}
+{"level":"info","ts":1784171619.3262596,"logger":"tls.cache.maintenance","msg":"stopped background certificate maintenance","cache":"0x1bd7c9fa7080"}
+{"level":"info","ts":1784171619.3262908,"logger":"http","msg":"servers shutting down with eternal grace period"}
+curl: (22) The requested URL returned error: 502
+[!] Attempt 1 failed, retrying in 2s: curl -fsS --max-time 5 -o /dev/null --cacert /etc/forgejo/caddy-local-ca.crt --resolve ericmourant-x1.local:443:127.0.0.1 https://ericmourant-x1.local/api/healthz
+[+] Forgejo is available at https://ericmourant-x1.local/ after trusting the local CA.
+    Completed in 4 seconds
+
+Phase [9/10]  Install Forgejo runner
+────────────────────────────────────────────────────────────
+[!] Co-locating the Actions runner with the forge is contrary to upstream guidance; enabled deliberately.
+Reading package lists...
+Building dependency tree...
+Reading state information...
+The following additional packages will be installed:
+  bridge-utils containerd pigz runc ubuntu-fan
+Suggested packages:
+  ifupdown aufs-tools btrfs-progs cgroupfs-mount | cgroup-lite debootstrap
+  docker-buildx docker-compose-v2 docker-doc rinse zfs-fuse | zfsutils
+The following NEW packages will be installed:
+  bridge-utils containerd docker.io pigz runc ubuntu-fan
+0 upgraded, 6 newly installed, 0 to remove and 0 not upgraded.
+Need to get 73.4 MB of archives.
+After this operation, 278 MB of additional disk space will be used.
+Get:1 http://au.archive.ubuntu.com/ubuntu noble/universe amd64 pigz amd64 2.8-1 [65.6 kB]
+Get:2 http://au.archive.ubuntu.com/ubuntu noble/main amd64 bridge-utils amd64 1.7.1-1ubuntu2 [33.9 kB]
+Get:3 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 runc amd64 1.3.4-0ubuntu1~24.04.1 [9,574 kB]
+Get:4 http://au.archive.ubuntu.com/ubuntu noble-updates/main amd64 containerd amd64 2.2.1-0ubuntu1~24.04.3 [28.1 MB]
+Get:5 http://au.archive.ubuntu.com/ubuntu noble-updates/universe amd64 docker.io amd64 29.1.3-0ubuntu3~24.04.2 [35.6 MB]
+Get:6 http://au.archive.ubuntu.com/ubuntu noble-updates/universe amd64 ubuntu-fan all 0.12.16+24.04.1 [34.2 kB]
+Preconfiguring packages ...
+Fetched 73.4 MB in 8s (9,744 kB/s)
+                                  Selecting previously unselected package pigz.
+(Reading database ... 208132 files and directories currently installed.)
+Preparing to unpack .../0-pigz_2.8-1_amd64.deb ...
+Unpacking pigz (2.8-1) ...
+Selecting previously unselected package bridge-utils.
+Preparing to unpack .../1-bridge-utils_1.7.1-1ubuntu2_amd64.deb ...
+Unpacking bridge-utils (1.7.1-1ubuntu2) ...
+Selecting previously unselected package runc.
+Preparing to unpack .../2-runc_1.3.4-0ubuntu1~24.04.1_amd64.deb ...
+Unpacking runc (1.3.4-0ubuntu1~24.04.1) ...
+Selecting previously unselected package containerd.
+Preparing to unpack .../3-containerd_2.2.1-0ubuntu1~24.04.3_amd64.deb ...
+Unpacking containerd (2.2.1-0ubuntu1~24.04.3) ...
+Selecting previously unselected package docker.io.
+Preparing to unpack .../4-docker.io_29.1.3-0ubuntu3~24.04.2_amd64.deb ...
+Unpacking docker.io (29.1.3-0ubuntu3~24.04.2) ...
+Selecting previously unselected package ubuntu-fan.
+Preparing to unpack .../5-ubuntu-fan_0.12.16+24.04.1_all.deb ...
+Unpacking ubuntu-fan (0.12.16+24.04.1) ...
+Setting up runc (1.3.4-0ubuntu1~24.04.1) ...
+Setting up bridge-utils (1.7.1-1ubuntu2) ...
+Setting up pigz (2.8-1) ...
+Setting up containerd (2.2.1-0ubuntu1~24.04.3) ...
+Created symlink /etc/systemd/system/multi-user.target.wants/containerd.service → /usr/lib/systemd/system/containerd.service.
+Setting up ubuntu-fan (0.12.16+24.04.1) ...
+Created symlink /etc/systemd/system/multi-user.target.wants/ubuntu-fan.service → /usr/lib/systemd/system/ubuntu-fan.service.
+Setting up docker.io (29.1.3-0ubuntu3~24.04.2) ...
+info: Selecting GID from range 100 to 999 ...
+info: Adding group `docker' (GID 126) ...
+Created symlink /etc/systemd/system/multi-user.target.wants/docker.service → /usr/lib/systemd/system/docker.service.
+Created symlink /etc/systemd/system/sockets.target.wants/docker.socket → /usr/lib/systemd/system/docker.socket.
+Processing triggers for man-db (2.12.0-4build2) ...
+info: Selecting UID from range 100 to 999 ...
+
+info: Selecting GID from range 100 to 999 ...
+info: Adding system user `forgejo-runner' (UID 124) ...
+info: Adding new group `forgejo-runner' (GID 127) ...
+info: Adding new user `forgejo-runner' (UID 124) with group `forgejo-runner' ...
+info: Creating home directory `/var/lib/forgejo-runner' ...
+[+] Created system user forgejo-runner.
+[i] Latest forgejo-runner release: 12.13.0.
+[+] Installed forgejo-runner 12.13.0 (checksum verified).
+    Completed in 2 minutes 1 second
+
+Phase [10/10]  Register Forgejo runner
+────────────────────────────────────────────────────────────
+level=warning msg="`register` has been deprecated; declare connections in the runner configuration instead"
+level=info msg="Registering runner, arch=amd64, os=linux, version=v12.13.0."
+level=warning msg="Runner in user-mode."
+level=info msg="No configuration file specified; using default settings."
+level=debug msg="Successfully pinged the Forgejo instance server"
+level=info msg="Runner registered successfully."
+[+] Runner registered against 127.0.0.1:3000 with labels: ubuntu-latest:docker://node:20-bookworm
+Created symlink /etc/systemd/system/multi-user.target.wants/forgejo-runner.service → /etc/systemd/system/forgejo-runner.service.
+[+] Forgejo Actions runner installed and enabled.
+  [ok] Forgejo 15.0.4 running at https://ericmourant-x1.local/
+  [ok] Forgejo Actions runner registered and running
+
+
+Install complete in 4 minutes 2 seconds.
+Forgejo: https://ericmourant-x1.local/ (LAN mDNS + Caddy local CA, runner enabled)
+Trust CA: /etc/forgejo/caddy-local-ca.crt
+Next:    https://ericmourant-x1.local/
+Records: /var/log/ubuntu-zombie-install.log
+         /var/log/ubuntu-zombie/install-receipt.txt
+Remove:  sudo /home/ericmourant/ubuntu-zombie/scripts/uninstall.sh forgejo --dry-run
+[i] Idempotent steps: 1 already satisfied, 9 applied this run.
+[+] Install receipt finalised: /var/log/ubuntu-zombie/install-receipt.txt
+ericmourant@ericmourant-x1:~/ubuntu-zombie$ sudo scripts/install.sh verify forgejo
+== ubuntu-zombie verify ==
+
+Components: forgejo
+
+[+] [forgejo] Forgejo binary present.
+[+] [forgejo] Forgejo service unit present.
+[+] [forgejo] Forgejo service active.
+[+] [forgejo] Forgejo config present.
+[+] [forgejo] Forgejo config permissions correct (root:git 750/640).
+[+] [forgejo] PostgreSQL active.
+[x] [forgejo] Forgejo /api/healthz did not return healthy. Check journalctl -u forgejo.
+[+] [forgejo] Forgejo uses HTTPS at https://ericmourant-x1.local/; backend is loopback-only.
+[+] [forgejo] Caddy HTTPS reverse proxy active.
+[+] [forgejo] Avahi mDNS discovery active.
+[+] [forgejo] Caddy local CA certificate exported.
