@@ -2512,6 +2512,8 @@ run_standards() {
     || { echo "Forgejo route must be rendered in the active Caddyfile" >&2; exit 1; }
   grep -q 'rm -f /etc/caddy/conf.d/forgejo.caddy' scripts/install.sh \
     || { echo "Forgejo install must migrate the legacy Caddy route fragment" >&2; exit 1; }
+  # These exact endpoints are part of the installer contract: Forgejo must use
+  # Caddy's signed stable Cloudsmith repository rather than an Ubuntu fallback.
   awk '
     /https:\/\/dl.cloudsmith.io\/public\/caddy\/stable\/gpg.key/ { key_url = 1 }
     /caddy-stable-archive-keyring.gpg/ { keyring = 1 }
