@@ -649,9 +649,9 @@
           working before anything runs.
         </p>
         <p class="section-lede reveal">
-          Chat binds to <strong style="color:var(--text)">loopback only</strong>.
-          Reach it locally, or tunnel over key-only SSH from a machine you
-          trust.
+          Chat binds to <strong style="color:var(--text)">loopback only</strong>
+          and is password-protected. Reach it locally, or tunnel the port over
+          a transport you control from a machine you trust.
         </p>
       </div>
       <div class="terminal reveal" role="img" aria-label="Example chat with the AI Systems Administrator">
@@ -681,9 +681,9 @@
           <p>An append-only record of everything the agent does — proposed, approved, executed, denied — with log rotation handled for you.</p>
         </div>
         <div class="feature reveal">
-          <div class="icon" aria-hidden="true">🔑</div>
-          <h3>Key-only SSH</h3>
-          <p>The installer makes SSH key-only and disables root login. Only the computer holding your private key can connect.</p>
+          <div class="icon" aria-hidden="true">⏳</div>
+          <h3>Time to Live</h3>
+          <p>The administrator expires by default. Unless you renew it from the chat, it permanently disables itself — and <code>/ttl --die</code> is an instant kill switch.</p>
         </div>
         <div class="feature reveal">
           <div class="icon" aria-hidden="true">🩺</div>
@@ -704,7 +704,7 @@
       <div class="stats">
         <div class="stat reveal"><div class="big" data-count="100" data-suffix="%">0%</div><div class="small">of privileged actions audit-logged</div></div>
         <div class="stat reveal"><div class="big" data-count="0">0</div><div class="small">ports exposed beyond loopback by default</div></div>
-        <div class="stat reveal"><div class="big" data-count="2">0</div><div class="small">inputs needed to install (SSH key, VNC password)</div></div>
+        <div class="stat reveal"><div class="big" data-count="7">0</div><div class="small">days of Time to Live by default — renewable from the chat</div></div>
         <div class="stat reveal"><div class="big" data-count="1">0</div><div class="small">kill switch — and you hold it</div></div>
       </div>
     </div>
@@ -723,11 +723,11 @@
       <div class="trust-list">
         <div class="trust-item reveal">
           <span class="mark" aria-hidden="true">✓</span>
-          <div><h3>You own the machine</h3><p>And the SSH key, the API key, and the kill switch. The agent is a guest with a written contract.</p></div>
+          <div><h3>You own the machine</h3><p>And the API key, the chat password, and the kill switch. The agent is a guest with a written contract — and an expiry date.</p></div>
         </div>
         <div class="trust-item reveal">
           <span class="mark" aria-hidden="true">✓</span>
-          <div><h3>Loopback by default</h3><p>Chat and emergency VNC bind to 127.0.0.1. Optional private Tailscale access is strictly opt-in at install time.</p></div>
+          <div><h3>Loopback by default</h3><p>The password-protected chat on 127.0.0.1 is the only network surface. No SSH, VNC, or inbound remote access is provisioned.</p></div>
         </div>
         <div class="trust-item reveal">
           <span class="mark" aria-hidden="true">✓</span>

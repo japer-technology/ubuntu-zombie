@@ -14,7 +14,7 @@ quotable Q&A see [`../messaging/FAQ-PRESS.md`](../messaging/FAQ-PRESS.md).
 | **Platforms** | Ubuntu Desktop LTS 22.04, 24.04 |
 | **Repository** | <https://github.com/japer-technology/ubuntu-zombie> |
 | **Latest release** | <https://github.com/japer-technology/ubuntu-zombie/releases/latest> |
-| **Pricing** | Free; operator supplies their own LLM provider key |
+| **Pricing** | Free; operator supplies their own LLM provider key, or uses a local model at no cost |
 
 ## One-sentence description
 
@@ -29,8 +29,10 @@ under explicit human approval, with every action audit-logged and reversible.
    machine — only after you approve them through a local policy gate.
 2. **Honest about risk.** It grants a root-capable identity and says so;
    `SECURITY.md` documents the full trust boundary up front.
-3. **Local-first and reversible.** Services bind to localhost, SSH is key-only,
-   remote access is opt-in over Tailscale, and `uninstall` reverses everything.
+3. **Local-first, expiring, and reversible.** The only network surface is a
+   password-protected loopback chat; a built-in Time to Live disables the
+   administrator unless renewed; and `uninstall` reverses everything. It can
+   run fully offline against a local LLM.
 
 ## Approved quotes
 > "You ask, it proposes, you approve, it acts, and it logs everything."
@@ -52,7 +54,10 @@ rules: [`../brand/BRAND-GUIDELINES.md`](../brand/BRAND-GUIDELINES.md).
 ## What it is NOT (please don't mis-report)
 - Not autonomous — it never acts on privileged operations without approval.
 - Not a hosted service — it's an open bash installer on the user's own machine.
-- Not local-inference (yet) — the MVP uses a configured cloud LLM provider.
+- Not cloud-only — it works with the operator's own cloud key *or* a fully
+  local LLM (LM Studio / Ollama / `llama.cpp`).
+- Not permanent — it expires by default unless the operator renews its
+  Time to Live.
 - Not affiliated with Canonical / Ubuntu.
 
 ## Contact

@@ -39,8 +39,15 @@ or usernames in post.
 
 ## Optional / nice-to-have
 - `doctor` explaining a simulated failure.
-- An SSH tunnel command (`ssh -L 7878:127.0.0.1:7878 zombie@host`) to illustrate
-  the remote-access story.
+- The password gate on the chat UI (redact the password field).
+- `/ttl` output showing the remaining Time to Live.
+- `/lmstudio` discovering a local model server, or `/models` listing local
+  models — the fully-offline story.
+- The optional Forgejo forge at `https://<host>.local` (redact the hostname
+  or use a staged one).
+- An SSH tunnel command (`ssh -L 7878:127.0.0.1:7878 user@host`) to illustrate
+  the do-it-yourself remote-access story (SSH is the operator's own, not
+  provisioned by the installer).
 - A composite "before/after" of a fixed issue.
 
 ## Redaction checklist (every shot)

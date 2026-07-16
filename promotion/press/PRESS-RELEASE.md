@@ -28,11 +28,12 @@ Unlike a general-purpose chatbot, Ubuntu Zombie acts with real authority on the
 actual machine — but only under explicit human approval. A dedicated Linux
 account serves as the operating identity of the administrator; privileged,
 destructive, or system-altering actions pass through a local policy gate and
-wait for the operator's approval before running. The chat and remote-desktop
-services bind to `127.0.0.1`; SSH is key-only with root login disabled; and
-remote access is opt-in over a private Tailscale tailnet rather than the public
-internet. The operator owns the SSH key, the LLM provider key, and the kill
-switch, and can rotate, revoke, or uninstall at any time.
+wait for the operator's approval before running. The only network surface is a
+password-protected chat bound to `127.0.0.1`; the installer provisions no SSH,
+VNC, or other inbound access. The administrator ships with a built-in Time to
+Live and permanently disables itself unless the operator renews it. The
+operator owns the LLM provider key, the chat password, and the kill switch,
+and can rotate, revoke, or uninstall at any time.
 
 **Transparent and reversible**
 
@@ -45,8 +46,10 @@ packages ship with SHA-256 checksums and keyless cosign signatures.
 
 Ubuntu Zombie is available now under the MIT licence and supports Ubuntu Desktop
 LTS 22.04 and 24.04. The source, documentation, and releases are at
-<https://github.com/japer-technology/ubuntu-zombie>. The project relies on a
-cloud LLM provider configured by the operator with their own API key.
+<https://github.com/japer-technology/ubuntu-zombie>. Inference runs through a
+cloud LLM provider configured by the operator with their own API key, or
+through a local model server such as LM Studio, Ollama, or `llama.cpp` for
+fully offline operation.
 
 **About Japer Technology**
 

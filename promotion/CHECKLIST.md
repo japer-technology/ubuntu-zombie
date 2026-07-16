@@ -19,6 +19,7 @@ Walk this top to bottom. Boxes are grouped by phase. See
 - [ ] Demo video recorded, captioned, and a social cut exported (video/)
 
 ## 3. Copy finalised (all bracketed fields filled, British spelling)
+- [ ] Every claim checked against messaging/KEY-FEATURES.md (approved claims)
 - [ ] Taglines / boilerplate / positioning reviewed
 - [ ] Social posts (social/SOCIAL-POSTS.md)
 - [ ] Show HN (community/SHOW-HN.md) + prepared answers
@@ -45,14 +46,17 @@ Walk this top to bottom. Boxes are grouped by phase. See
 
 ## 6. Post-launch (T+1 to T+14)
 - [ ] Reply to every comment/issue/Discussion within the first 48h
-- [ ] Feature-drip social posts scheduled (--dry-run, audit log, doctor/repair)
+- [ ] Feature-drip social posts scheduled (--dry-run, audit log, doctor/repair,
+      local LLM discovery, TTL kill switch, optional Forgejo forge)
 - [ ] Product Hunt launch (its own day if possible)
 - [ ] Recap post: what we learned + top questions
 - [ ] Log feedback/feature requests into the issue tracker / roadmap
 
 ## 7. Guardrails (don't skip)
 - [ ] Never imply the AI is autonomous or "takes over" the machine
-- [ ] Always make the operator's control and kill switch obvious
+- [ ] Always make the operator's control and kill switch (TTL) obvious
+- [ ] Never claim SSH/VNC/Tailscale features — the loopback chat is the only
+      network surface (see messaging/KEY-FEATURES.md)
 - [ ] Include the Canonical/Ubuntu trademark disclaimer where space allows
 - [ ] Disclose authorship on HN / Reddit; no upvote solicitation or alt accounts
 - [ ] No secrets, real keys, hostnames, or IPs in any asset

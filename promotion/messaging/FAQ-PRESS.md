@@ -20,25 +20,38 @@ No — deliberately not. It listens, proposes, and waits. Nothing privileged run
 without the operator's approval.
 
 **Where does inference run?**
-Through a cloud LLM provider that the operator configures with their own API
-key. Local/on-device inference is roadmap, not shipped in the MVP.
+Either through a cloud LLM provider the operator configures with their own API
+key (OpenAI, Anthropic, Gemini, xAI, Mistral, Groq, OpenRouter), or through a
+local OpenAI-compatible server such as LM Studio, Ollama, or `llama.cpp`. The
+installer can auto-detect a local server on the LAN, so the whole system can
+run fully offline with no cloud key.
 
 **What can the provider see?**
 See [`../../SECURITY.md`](../../SECURITY.md) for the exact trust boundary and
-what is sent to the provider.
+what is sent to the provider. With a local LLM, nothing leaves the machine.
 
 **How is it secured?**
-A local policy gate classifies and gates privileged actions; chat and VNC bind
-to `127.0.0.1`; SSH is key-only with root login disabled; remote access is
-opt-in over a private Tailscale tailnet. Every action is audit-logged.
+A local policy gate classifies and gates privileged actions. The only network
+listener is the chat UI, bound to `127.0.0.1` and protected by a password
+(stored only as a PBKDF2 hash). The installer provisions no SSH, VNC, or other
+inbound access. The administrator has a Time to Live (default seven days) and
+permanently disables itself unless renewed. Every action is audit-logged.
 
 **How do I stop or remove it?**
-Rotate the provider API key, remove the SSH key, disable Tailscale, or run
-`sudo ./scripts/install.sh uninstall`. The kill switch is the operator's.
+Type `/ttl --die` in the chat to trip the kill switch immediately, rotate or
+remove the provider API key, disable the systemd service, or run
+`sudo ./scripts/install.sh uninstall`. Left alone, it expires on its own when
+the TTL runs out.
 
 **What does it cost?**
-The software is open source under the MIT licence. You pay your chosen LLM
-provider for usage.
+The software is open source under the MIT licence. You pay your chosen cloud
+LLM provider for usage — or nothing at all with a local model.
+
+**Can it do more than administer the machine?**
+Optionally, yes. The installer offers opt-in components — the first is a
+self-hosted Forgejo git forge (PostgreSQL-backed, served over LAN HTTPS at the
+machine's `.local` name, with an optional CI runner). All components are off by
+default, idempotent, and individually removable.
 
 **What platforms are supported?**
 Ubuntu Desktop LTS 22.04 and 24.04. See

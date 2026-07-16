@@ -8,6 +8,20 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Promotion kit
+
+- **Promotion copy refresh:** `promotion/**` now matches the shipped
+  product — the password-protected loopback chat is described as the
+  only network surface (no SSH/VNC/Tailscale claims), local LLM
+  support (LM Studio / Ollama / `llama.cpp`) is presented as shipped,
+  and the chat password, Time to Live, and `/ttl --die` kill switch
+  are covered across messaging, social, community, blog, press,
+  email, video, and landing-page drafts.
+- **Approved claims matrix:** new `promotion/messaging/KEY-FEATURES.md`
+  lists every claim the kit may make with its repository source, plus
+  claims that must not be made and feature-drip topics; the kit README
+  and launch checklist now reference it.
+
 ### Chat provider discovery
 
 - **Runtime LM Studio discovery:** `/lmstudio` rescans the local network and

@@ -33,9 +33,12 @@ post when your audience is awake (HN/Reddit: weekday mornings US Eastern).
 | --- | ------- | ----- | ----- | ------ |
 | T+1 | Social | Feature post: `--dry-run` | | ☐ |
 | T+3 | Social | Feature post: audit log | | ☐ |
-| T+5 | Social | Feature post: `doctor`/`repair` | | ☐ |
+| T+5 | Social | Feature post: `doctor`/`repair`/`verify` | | ☐ |
 | T+7 | Blog/Social | Recap: "What we learned launching" + top questions | | ☐ |
-| T+14 | All | Roadmap teaser (local inference, etc.) | | ☐ |
+| T+9 | Social | Feature post: local LLM auto-discovery (fully offline) | | ☐ |
+| T+11 | Social | Feature post: Time to Live + `/ttl --die` kill switch | | ☐ |
+| T+13 | Social | Feature post: optional Forgejo forge component | | ☐ |
+| T+14 | All | Roadmap teaser (next optional components, etc.) | | ☐ |
 
 ## Notes
 - Don't cross-post the identical wording everywhere; adapt tone per channel.
