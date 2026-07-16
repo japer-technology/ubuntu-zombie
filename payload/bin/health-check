@@ -9,7 +9,7 @@ health-check — one-shot health summary for Ubuntu Zombie.
 Usage:
   health-check [-h|--help]
 
-Checks the chat service, chat port, provider token presence, secrets
+Checks the chat service, chat port, provider credential presence, secrets
 permissions, disk space, and audit log, then prints an ok/warn/fail
 summary. Exits 1 if any check fails (unless ZOMBIE_HEALTH_WARN_ONLY=1).
 
