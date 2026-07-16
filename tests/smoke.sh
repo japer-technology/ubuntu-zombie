@@ -2512,9 +2512,12 @@ run_standards() {
     || { echo "Forgejo route must be rendered in the active Caddyfile" >&2; exit 1; }
   grep -q 'rm -f /etc/caddy/conf.d/forgejo.caddy' scripts/install.sh \
     || { echo "Forgejo install must migrate the legacy Caddy route fragment" >&2; exit 1; }
-  grep -q 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' scripts/install.sh \
-    && grep -q 'caddy-stable-archive-keyring.gpg' scripts/install.sh \
-    && grep -q 'https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main' scripts/install.sh \
+  awk '
+    /https:\/\/dl.cloudsmith.io\/public\/caddy\/stable\/gpg.key/ { key_url = 1 }
+    /caddy-stable-archive-keyring.gpg/ { keyring = 1 }
+    /https:\/\/dl.cloudsmith.io\/public\/caddy\/stable\/deb\/debian any-version main/ { repository = 1 }
+    END { exit !(key_url && keyring && repository) }
+  ' scripts/install.sh \
     || { echo "Forgejo install must configure Caddy's signed stable repository" >&2; exit 1; }
   grep -q '_https._tcp' scripts/install.sh \
     || { echo "Forgejo must advertise HTTPS through Avahi" >&2; exit 1; }

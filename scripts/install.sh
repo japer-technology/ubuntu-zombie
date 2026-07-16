@@ -3287,11 +3287,19 @@ ensure_forgejo_runner_docker_package() {
 configure_caddy_apt_repository() {
   local keyring=/usr/share/keyrings/caddy-stable-archive-keyring.gpg
   local source=/etc/apt/sources.list.d/caddy-stable.list
+  local key_tmp keyring_tmp
 
   install -d -m 755 /usr/share/keyrings /etc/apt/sources.list.d
-  curl_get https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
-    | gpg --dearmor --yes -o "${keyring}"
-  chmod 0644 "${keyring}"
+  key_tmp="$(mktemp)"
+  keyring_tmp="$(mktemp)"
+  if ! curl_get https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+      > "${key_tmp}" \
+      || ! gpg --dearmor --yes < "${key_tmp}" > "${keyring_tmp}"; then
+    rm -f "${key_tmp}" "${keyring_tmp}"
+    die "Could not install Caddy's stable repository signing key." 1
+  fi
+  install -m 0644 -o root -g root "${keyring_tmp}" "${keyring}"
+  rm -f "${key_tmp}" "${keyring_tmp}"
   cat > "${source}" <<EOF
 deb [signed-by=${keyring}] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
 EOF
