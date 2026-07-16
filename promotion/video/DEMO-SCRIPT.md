@@ -17,7 +17,7 @@ is the brand. Capture footage per the shot-list in
 | 5 | 0:42–0:52 | Approval prompt from the policy gate; user clicks approve | "Privileged actions wait for your approval. You're always in control." |
 | 6 | 0:52–1:02 | Commands execute; success status | "Then it acts — with real authority on the real machine." |
 | 7 | 1:02–1:10 | Audit log scrolls | "Every step is audit-logged and reversible." |
-| 8 | 1:10–1:18 | Terminal: `sudo ./scripts/install.sh install --dry-run` | "Preview the whole install first. Key-only SSH. Local-first. You hold the kill switch." |
+| 8 | 1:10–1:18 | Terminal: `sudo ./scripts/install.sh install --dry-run` | "Preview the whole install first. Loopback-only. Password-protected. It even expires unless you renew it." |
 | 9 | 1:18–1:25 | End card: logo + repo URL + "MIT · Ubuntu LTS 22.04 / 24.04" | "Ubuntu Zombie. Open source. github.com/japer-technology/ubuntu-zombie" |
 
 ## Production notes

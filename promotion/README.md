@@ -26,13 +26,14 @@ those documents, those documents win.
 | Path | What it holds |
 | ---- | ------------- |
 | [`brand/`](brand/) | Brand guidelines, voice & tone, logo usage, colour palette |
-| [`messaging/`](messaging/) | Taglines, elevator pitch, positioning, value propositions, boilerplate |
+| [`messaging/`](messaging/) | Taglines, elevator pitch, positioning, key features / approved claims, boilerplate, press FAQ |
 | [`social/`](social/) | Per-platform social posts (X/Twitter, LinkedIn, Mastodon, Bluesky, Reddit) |
 | [`community/`](community/) | Show HN, Product Hunt, and Reddit launch copy |
 | [`blog/`](blog/) | Launch announcement / blog post draft |
 | [`press/`](press/) | Press release and a one-page press kit |
 | [`email/`](email/) | Launch and newsletter email drafts |
 | [`video/`](video/) | Demo video script and storyboard |
+| [`landing-page/`](landing-page/) | Static landing-page draft(s) |
 | [`assets/`](assets/) | Asset manifest and screenshot shot-list |
 | [`CHECKLIST.md`](CHECKLIST.md) | End-to-end launch checklist |
 
@@ -41,9 +42,13 @@ those documents, those documents win.
 1. Read [`brand/BRAND-GUIDELINES.md`](brand/BRAND-GUIDELINES.md) and
    [`brand/VOICE-AND-TONE.md`](brand/VOICE-AND-TONE.md) first. They govern
    every other file.
-2. Lift the core copy from [`messaging/`](messaging/) and adapt it per channel.
-3. Produce the assets listed in [`assets/ASSET-MANIFEST.md`](assets/ASSET-MANIFEST.md).
-4. Walk [`CHECKLIST.md`](CHECKLIST.md) on launch day.
+2. Check every claim against
+   [`messaging/KEY-FEATURES.md`](messaging/KEY-FEATURES.md) — the approved
+   claims matrix. If the product changes, update that file first, then the
+   channel copy.
+3. Lift the core copy from [`messaging/`](messaging/) and adapt it per channel.
+4. Produce the assets listed in [`assets/ASSET-MANIFEST.md`](assets/ASSET-MANIFEST.md).
+5. Walk [`CHECKLIST.md`](CHECKLIST.md) on launch day.
 
 ## House style
 
@@ -54,3 +59,9 @@ those documents, those documents win.
   operator's ownership and kill switch obvious.
 - Never imply the AI is autonomous or "takes over" the machine. It listens,
   proposes, waits for approval, acts, and logs.
+- Only make claims listed in
+  [`messaging/KEY-FEATURES.md`](messaging/KEY-FEATURES.md) or backed by the
+  repository docs. In particular: the installer provisions **no SSH, VNC, or
+  Tailscale**; the only network surface is the password-protected loopback
+  chat; local LLMs are **shipped**, not roadmap; and the administrator has a
+  built-in Time to Live.

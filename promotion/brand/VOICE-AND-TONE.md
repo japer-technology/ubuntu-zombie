@@ -31,14 +31,14 @@ robot fused to a real PC, sharing one eye that belongs to the operator.
 | ------ | --------- |
 | "A root-capable AI Systems Administrator you approve before it acts." | "An autonomous AI that runs your computer for you." |
 | "Every action is audit-logged and reversible." | "Set it and forget it." |
-| "You own the SSH key, the API key, and the kill switch." | "Trust us with your machine." |
-| "Binds to 127.0.0.1; opt in to Tailscale for remote access." | "Access your PC from anywhere!" |
+| "You own the API key, the chat password, and the kill switch." | "Trust us with your machine." |
+| "The password-protected chat on 127.0.0.1 is the only network surface." | "Access your PC from anywhere!" |
 | "A transparent bash installer on a normal Ubuntu LTS system." | "A magic black box." |
 
 ## Words we use
 
-audit log · approval · policy gate · operator · kill switch · reversible ·
-transparent · local-only · key-only SSH · Tailscale (opt-in) · diagnose ·
+audit log · approval · policy gate · operator · kill switch · Time to Live ·
+reversible · transparent · local-only · loopback · local LLM · diagnose ·
 explain · configure · repair · operate.
 
 ## Words we avoid
@@ -63,6 +63,6 @@ unhackable · "AI replaces your IT guy".
 > Ubuntu Zombie is a normal Ubuntu PC with an administrator inside it. Any local
 > user can open a private chat, ask the machine to do something, see exactly
 > what is proposed, approve it, and watch it happen — with every action
-> audit-logged. SSH is key-only and root-disabled; remote access is opt-in over
-> a private Tailscale tailnet. The operator owns the machine, the SSH key, the
-> API key, and the kill switch.
+> audit-logged. The password-protected chat on 127.0.0.1 is the only network
+> surface, and the administrator expires unless renewed. The operator owns the
+> machine, the API key, the chat password, and the kill switch.

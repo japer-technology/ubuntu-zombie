@@ -64,21 +64,43 @@ about that. Every design decision points back at the operator:
 
 - A dedicated `zombie` Linux account (renameable) holds passwordless `sudo` and
   is the operating identity of the agent — never a shared human login.
-- The chat and remote-desktop services bind to `127.0.0.1` only. SSH is
-  key-only with root login disabled. Remote access is **opt-in** over a private
-  Tailscale tailnet — the public internet is never a control plane.
-- Revocation is first-class. Rotate the provider API key, remove the SSH key,
-  disable Tailscale, or run `uninstall`, and the agent stops.
+- The **only** network surface is the chat UI, bound to `127.0.0.1` and gated
+  by a password (stored only as a PBKDF2 hash). The installer provisions no
+  SSH, no VNC, and no inbound remote access — remote reach is a tunnel you set
+  up yourself. The public internet is never a control plane.
+- It **expires by default**. A built-in Time to Live (default seven days)
+  permanently disables the administrator unless you renew it from the chat —
+  and `/ttl --die` trips the kill switch immediately.
+- Revocation is first-class. Trip the TTL, rotate or remove the provider API
+  key, disable the service, or run `uninstall`, and the agent stops.
 
-You own the machine, the SSH key, the API key, and the kill switch.
+You own the machine, the API key, the chat password, and the kill switch.
+
+## Bring your own model — cloud or fully local
+
+Inference is yours to choose. Configure a cloud provider with your own API key
+(OpenAI, Anthropic, Gemini, xAI, Mistral, Groq, or OpenRouter) — or point it
+at a local OpenAI-compatible server such as LM Studio, Ollama, or `llama.cpp`.
+During an interactive install it will even scan your LAN, find a local server,
+and offer its models, so the whole system can run **fully offline with no
+cloud key at all**. At runtime, `/lmstudio` re-discovers a server, `/models`
+lists what's available, and `/model` switches.
 
 ## What it deliberately does not do
 
 - It is **not autonomous**. It listens, proposes, and waits.
-- It does **not** do local-only inference yet — the MVP uses a cloud LLM
-  provider that you configure with your own key. On-device models are roadmap.
 - It does **not** manage fleets, and it does **not** replace the humans already
   using the desktop. It installs *beside* them, not *over* them.
+- It does **not** stay around forever: unless you renew its Time to Live, it
+  turns itself off.
+
+## Optional extras, off by default
+
+The baseline can be extended with opt-in components — all off by default,
+idempotent, and individually removable. The first is a self-hosted **Forgejo**
+git forge: PostgreSQL-backed, served over LAN HTTPS at your machine's `.local`
+name, with an optional CI runner. `sudo ./scripts/install.sh install forgejo`
+sets it up standalone; `uninstall forgejo` removes just that piece.
 
 ## Try it (safely) in two minutes
 

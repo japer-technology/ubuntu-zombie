@@ -30,9 +30,10 @@ switch.
 > It's built around keeping you in control:
 >
 > • A local policy gate makes privileged actions wait for your approval
-> • Services bind to 127.0.0.1; SSH is key-only; remote access is opt-in (Tailscale)
-> • You own the SSH key, the API key, and the kill switch — `uninstall` reverses it all
-> • It's a transparent bash installer — inspect every line
+> • The only network surface is a password-protected chat on 127.0.0.1
+> • A built-in Time to Live disables it unless you renew it — and you hold the kill switch
+> • Bring your own cloud LLM key, or run fully offline with a local model
+> • It's a transparent bash installer — inspect every line; `uninstall` reverses it all
 >
 > Want to look before you leap? Preview the entire install without changing
 > anything:
@@ -57,8 +58,9 @@ switch.
 > **Ubuntu Zombie** — A private, root-capable AI Systems Administrator for
 > Ubuntu Desktop LTS. Ask your machine to diagnose and fix itself in plain
 > English; it proposes the commands, you approve, it acts, and everything is
-> audit-logged. Local-first (binds to 127.0.0.1), key-only SSH, opt-in
-> Tailscale, MIT-licensed, fully reversible. Preview it with `--dry-run`.
+> audit-logged. Local-first (a password-protected chat on 127.0.0.1 is the only
+> network surface), works with your own cloud key or a fully local LLM, expires
+> unless renewed, MIT-licensed, fully reversible. Preview it with `--dry-run`.
 > https://github.com/japer-technology/ubuntu-zombie
 
 ---
@@ -73,9 +75,9 @@ switch.
 > the most important one: *"A root-capable AI — is that safe?"*
 >
 > Short answer: nothing privileged runs without your approval, every action is
-> logged, and the whole thing is reversible. The long answer — the full trust
-> boundary and what the LLM provider sees — is in SECURITY.md, and it's worth
-> five minutes before you install.
+> logged, it expires unless you renew it, and the whole thing is reversible.
+> The long answer — the full trust boundary and what the LLM provider sees —
+> is in SECURITY.md, and it's worth five minutes before you install.
 >
 > If you haven't tried it yet, start with the no-changes preview:
 > `sudo ./scripts/install.sh install --dry-run`.
