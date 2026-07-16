@@ -168,14 +168,14 @@ async function fetchLiveModels(baseUrl, keyEnv) {
     }));
 }
 
-// Resolve and import @earendil-works/pi-ai.
+// Resolve and import @earendil-works/pi-ai/compat.
 //
 // The package is installed *globally* (npm install -g, see
 // scripts/install.sh) and this bridge is deployed to
 // /opt/ai-zombie/agent/, which is outside any node_modules tree. Node's
 // ESM loader resolves bare specifiers by walking node_modules up from
 // the importing file and — unlike CommonJS require — ignores NODE_PATH,
-// so a plain `import("@earendil-works/pi-ai")` cannot see a global
+// so a plain `import("@earendil-works/pi-ai/compat")` cannot see a global
 // install and dies with ERR_MODULE_NOT_FOUND. That broke the /model
 // command (and every completion) on a normal deployment.
 //
@@ -187,7 +187,7 @@ async function fetchLiveModels(baseUrl, keyEnv) {
 // require.resolve cannot be used here).
 let PI_AI_CACHE;
 
-function piAiEntry(packageDir) {
+function piAiEntry(packageDir, subpath) {
   let pkg;
   try {
     pkg = JSON.parse(readFileSync(join(packageDir, "package.json"), "utf8"));
@@ -196,17 +196,15 @@ function piAiEntry(packageDir) {
   }
   let rel;
   const exp = pkg.exports;
-  if (typeof exp === "string") {
-    rel = exp;
-  } else if (exp && typeof exp === "object") {
-    const dot = exp["."];
-    if (typeof dot === "string") {
-      rel = dot;
-    } else if (dot && typeof dot === "object") {
-      rel = dot.import || dot.node || dot.default;
-    }
+  const key = subpath === "." ? "." : `./${subpath}`;
+  const entry = typeof exp === "string" && key === "." ? exp : exp?.[key];
+  if (typeof entry === "string") {
+    rel = entry;
+  } else if (entry && typeof entry === "object") {
+    rel = entry.import || entry.node || entry.default;
   }
-  if (!rel) rel = pkg.module || pkg.main || "index.js";
+  if (!rel && key === ".") rel = pkg.module || pkg.main || "index.js";
+  if (!rel) return null;
   return resolve(packageDir, rel);
 }
 
@@ -239,7 +237,7 @@ async function loadPiAi() {
   if (PI_AI_CACHE) return PI_AI_CACHE;
   let lastErr;
   try {
-    PI_AI_CACHE = await import("@earendil-works/pi-ai");
+    PI_AI_CACHE = await import("@earendil-works/pi-ai/compat");
     return PI_AI_CACHE;
   } catch (err) {
     lastErr = err;
@@ -247,7 +245,7 @@ async function loadPiAi() {
   const searched = [];
   for (const base of globalModuleDirs()) {
     searched.push(base);
-    const entry = piAiEntry(join(base, "@earendil-works", "pi-ai"));
+    const entry = piAiEntry(join(base, "@earendil-works", "pi-ai"), "compat");
     if (!entry) continue;
     try {
       PI_AI_CACHE = await import(pathToFileURL(entry).href);
@@ -403,11 +401,9 @@ async function main() {
     die(`provider call failed: ${err.message || err}`, "provider_error");
   }
 
-  // pi-ai's complete() returns an updated Context. The assistant's
-  // reply is the last message; concatenate text parts when the content
-  // is an array (some providers return structured content).
-  const last = result?.messages?.[result.messages.length - 1];
-  emit({ ok: true, text: extractAssistantText(last) });
+  // pi-ai's complete() returns the assistant message. Concatenate text
+  // parts when the provider returns structured content.
+  emit({ ok: true, text: extractAssistantText(result) });
 }
 
 function extractAssistantText(message) {

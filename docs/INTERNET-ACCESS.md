@@ -81,7 +81,7 @@ Two options:
   tool surface, schema validation, and per-tool classification.
 - **pi built-in path** — if the pinned `@earendil-works/pi-coding-agent`
   version exposes a fetch/web built-in, add it to `PI_BUILTIN_TOOLS` in
-  `payload/agent/pi-mono-bridge.mjs`. (As of the pinned `0.75.5` the
+  `payload/agent/pi-mono-bridge.mjs`. (As of the pinned `0.80.10` the
   documented built-ins are only `read, bash, edit, write, grep, find,
   ls`, so this likely still means "shell out to `curl`".)
 

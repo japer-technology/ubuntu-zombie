@@ -686,6 +686,59 @@ ctx = {m["id"]: m["contextWindow"] for m in out["models"]}
 if ctx["llama-3.1-8b"] != 131072 or ctx["qwen/qwen3-coder"] is not None:
     raise SystemExit(f"live list_models context window wrong: {ctx!r}")
 PY
+
+    # The pi-ai 0.80 API moved the legacy getModel/getModels/complete
+    # surface to its /compat export. Model listing and completion must
+    # work when that export is resolved from a global node_modules tree.
+    echo "  pi-ai bridge compatibility entrypoint"
+    _PI_AI_DIR="${_LM_DIR}/node_modules/@earendil-works/pi-ai"
+    mkdir -p "${_PI_AI_DIR}"
+    cat > "${_PI_AI_DIR}/package.json" <<'JSON'
+{
+  "name": "@earendil-works/pi-ai",
+  "type": "module",
+  "exports": {
+    "./compat": {
+      "import": "./compat.js"
+    }
+  }
+}
+JSON
+    cat > "${_PI_AI_DIR}/compat.js" <<'JS'
+export function getModels(provider) {
+  return [{ id: `${provider}-model`, name: "Compat model",
+    reasoning: true, contextWindow: 64000 }];
+}
+export function getModel(provider, id) {
+  return { provider, id };
+}
+export async function complete(_model, _context) {
+  return { role: "assistant",
+    content: [{ type: "text", text: "compat completion" }] };
+}
+JS
+    _PI_AI_LIST_OUT="$(printf '%s' \
+        '{"op":"list_models","provider":"anthropic"}' \
+        | NODE_PATH="${_LM_DIR}/node_modules" \
+          node payload/agent/pi-ai-bridge.mjs)"
+    _PI_AI_COMPLETE_OUT="$(printf '%s' \
+        '{"provider":"openai","model":"compat-model","messages":[{"role":"user","content":"hello"}]}' \
+        | NODE_PATH="${_LM_DIR}/node_modules" OPENAI_API_KEY=test \
+          node payload/agent/pi-ai-bridge.mjs)"
+    ZOMBIE_PI_AI_LIST_OUT="${_PI_AI_LIST_OUT}" \
+      ZOMBIE_PI_AI_COMPLETE_OUT="${_PI_AI_COMPLETE_OUT}" python3 - <<'PY'
+import json
+import os
+
+listed = json.loads(os.environ["ZOMBIE_PI_AI_LIST_OUT"])
+if listed != {"ok": True, "models": [{
+        "id": "anthropic-model", "name": "Compat model",
+        "reasoning": True, "contextWindow": 64000}]}:
+    raise SystemExit(f"compat list_models failed: {listed!r}")
+completed = json.loads(os.environ["ZOMBIE_PI_AI_COMPLETE_OUT"])
+if completed != {"ok": True, "text": "compat completion"}:
+    raise SystemExit(f"compat completion failed: {completed!r}")
+PY
     rm -rf "${_LM_DIR}"
 
 
