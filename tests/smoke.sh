@@ -2506,6 +2506,11 @@ run_standards() {
   grep -q -- '-o /dev/null' <<<"${verify_forgejo_body}" \
     && ! grep -q "\"healthy\"" <<<"${verify_forgejo_body}" \
     || { echo "Forgejo verify must trust the health endpoint HTTP status" >&2; exit 1; }
+  for caddy_check in caddy_binary caddy_unit caddy_enabled caddy_route \
+      caddy_config caddy_legacy_route local_ca_current; do
+    grep -q "${caddy_check}" <<<"${verify_forgejo_body}" \
+      || { echo "Forgejo verify must include deep Caddy check: ${caddy_check}" >&2; exit 1; }
+  done
   grep -q 'HTTP_ADDR = 127.0.0.1' scripts/install.sh \
     || { echo "Forgejo backend must stay loopback-only" >&2; exit 1; }
   grep -q 'tls internal' scripts/install.sh \
@@ -2538,6 +2543,23 @@ EOF
     _ "${caddy_test_dir}/stock" "${caddy_test_dir}/custom" \
     || { rm -rf "${caddy_test_dir}"; echo "Forgejo must remove only Caddy's packaged welcome site" >&2; exit 1; }
   rm -rf "${caddy_test_dir}"
+  local caddy_route_helper
+  caddy_route_helper="$(install_function caddyfile_has_forgejo_route)"
+  cat > "${caddy_test_dir}" <<'EOF'
+# BEGIN install.sh Forgejo
+https://forgejo.test.local {
+	tls internal
+	reverse_proxy 127.0.0.1:3000
+}
+# END install.sh Forgejo
+EOF
+  bash -c "${caddy_route_helper}
+    caddyfile_has_forgejo_route \"\$1\" forgejo.test.local 3000
+    ! caddyfile_has_forgejo_route \"\$1\" stale.test.local 3000
+    ! caddyfile_has_forgejo_route \"\$1\" forgejo.test.local 3001" \
+    _ "${caddy_test_dir}" \
+    || { rm -f "${caddy_test_dir}"; echo "Forgejo Caddy route diagnostics must detect stale hosts and ports" >&2; exit 1; }
+  rm -f "${caddy_test_dir}"
   caddy_hook="$(sed -n \
     '/^configure_forgejo_lan_https() {$/,/^# component-hook: forgejo begin$/p' \
     scripts/install.sh)"

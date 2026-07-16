@@ -1209,32 +1209,57 @@ verify_forgejo() {
   systemctl is-active --quiet postgresql 2>/dev/null \
     && vr ok forgejo db "PostgreSQL active." \
     || vr fail forgejo db "PostgreSQL not running (Forgejo needs it). Run: sudo systemctl start postgresql"
+  _fj_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+  _fj_port="${_fj_port:-3000}"
+  _fj_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+  _fj_root_url="$(awk -F' = ' '/^ROOT_URL/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+  _fj_http_addr="$(awk -F' = ' '/^HTTP_ADDR/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+  if [[ -n "${_fj_host}" && "${_fj_root_url}" == "https://${_fj_host}/" \
+      && "${_fj_http_addr}" == "127.0.0.1" ]]; then
+    vr ok forgejo public_url "Forgejo uses HTTPS at ${_fj_root_url}; backend is loopback-only."
+  else
+    vr fail forgejo public_url "Forgejo HTTPS URL or loopback bind is incorrect. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+  fi
+  command -v caddy >/dev/null 2>&1 \
+    && vr ok forgejo caddy_binary "Caddy binary present." \
+    || vr fail forgejo caddy_binary "Caddy binary missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+  systemctl cat caddy.service >/dev/null 2>&1 \
+    && vr ok forgejo caddy_unit "Caddy service unit present." \
+    || vr fail forgejo caddy_unit "Caddy service unit missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+  systemctl is-enabled --quiet caddy.service 2>/dev/null \
+    && vr ok forgejo caddy_enabled "Caddy service enabled at boot." \
+    || vr fail forgejo caddy_enabled "Caddy service not enabled. Run: sudo systemctl enable caddy"
+  systemctl is-active --quiet caddy.service 2>/dev/null \
+    && vr ok forgejo caddy "Caddy HTTPS reverse proxy active." \
+    || vr fail forgejo caddy "Caddy reverse proxy not active. Run: sudo systemctl restart caddy"
+  if [[ -n "${_fj_host}" ]] \
+      && caddyfile_has_forgejo_route /etc/caddy/Caddyfile "${_fj_host}" "${_fj_port}"; then
+    vr ok forgejo caddy_route "Managed Caddy route matches ${_fj_host} -> 127.0.0.1:${_fj_port} with internal TLS."
+  else
+    vr fail forgejo caddy_route "Managed Caddy route is missing, duplicated, or stale. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+  fi
+  caddy_configuration_is_valid \
+    && vr ok forgejo caddy_config "Active Caddy configuration validates." \
+    || vr fail forgejo caddy_config "Caddy configuration is invalid. Run: sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile"
+  [[ ! -e /etc/caddy/conf.d/forgejo.caddy ]] \
+    && vr ok forgejo caddy_legacy_route "Legacy Forgejo Caddy fragment absent." \
+    || vr fail forgejo caddy_legacy_route "Legacy Forgejo Caddy fragment remains. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+  systemctl is-active --quiet avahi-daemon.service 2>/dev/null \
+    && vr ok forgejo mdns "Avahi mDNS discovery active." \
+    || vr fail forgejo mdns "Avahi mDNS discovery not active. Run: sudo systemctl restart avahi-daemon"
+  [[ -r /etc/forgejo/caddy-local-ca.crt ]] \
+    && vr ok forgejo local_ca "Caddy local CA certificate exported." \
+    || vr fail forgejo local_ca "Caddy local CA certificate missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+  caddy_exported_ca_is_current \
+    && vr ok forgejo local_ca_current "Exported Caddy local CA matches the active CA root." \
+    || vr fail forgejo local_ca_current "Exported Caddy local CA is stale or the active CA root is missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
   if (( _fj_svc_active )); then
-    _fj_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || echo 3000)"
     if curl -fsS --max-time 5 -o /dev/null \
         "http://127.0.0.1:${_fj_port}/api/healthz" 2>/dev/null; then
       vr ok forgejo healthz "Forgejo /api/healthz reports healthy."
     else
       vr fail forgejo healthz "Forgejo /api/healthz did not return healthy. Check journalctl -u forgejo."
     fi
-    _fj_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-    _fj_root_url="$(awk -F' = ' '/^ROOT_URL/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-    _fj_http_addr="$(awk -F' = ' '/^HTTP_ADDR/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-    if [[ -n "${_fj_host}" && "${_fj_root_url}" == "https://${_fj_host}/" \
-        && "${_fj_http_addr}" == "127.0.0.1" ]]; then
-      vr ok forgejo public_url "Forgejo uses HTTPS at ${_fj_root_url}; backend is loopback-only."
-    else
-      vr fail forgejo public_url "Forgejo HTTPS URL or loopback bind is incorrect. Run: sudo ./${SCRIPT_NAME} repair forgejo"
-    fi
-    systemctl is-active --quiet caddy.service 2>/dev/null \
-      && vr ok forgejo caddy "Caddy HTTPS reverse proxy active." \
-      || vr fail forgejo caddy "Caddy reverse proxy not active. Run: sudo systemctl restart caddy"
-    systemctl is-active --quiet avahi-daemon.service 2>/dev/null \
-      && vr ok forgejo mdns "Avahi mDNS discovery active." \
-      || vr fail forgejo mdns "Avahi mDNS discovery not active. Run: sudo systemctl restart avahi-daemon"
-    [[ -r /etc/forgejo/caddy-local-ca.crt ]] \
-      && vr ok forgejo local_ca "Caddy local CA certificate exported." \
-      || vr fail forgejo local_ca "Caddy local CA certificate missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
     if [[ -n "${_fj_host}" && -r /etc/forgejo/caddy-local-ca.crt ]]; then
       if curl -fsS --max-time 5 -o /dev/null \
           --cacert /etc/forgejo/caddy-local-ca.crt \
@@ -1381,10 +1406,45 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_db "PostgreSQL not running (Forgejo needs it). Fix: sudo systemctl start postgresql"
       fi
+      local forgejo_host forgejo_port
+      forgejo_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+      forgejo_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+      forgejo_port="${forgejo_port:-3000}"
+      if command -v caddy >/dev/null 2>&1; then
+        dr ok forgejo forgejo_caddy_binary "Caddy binary present."
+      else
+        dr warn forgejo forgejo_caddy_binary "Caddy binary missing. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+      fi
+      if systemctl cat caddy.service >/dev/null 2>&1; then
+        dr ok forgejo forgejo_caddy_unit "Caddy service unit present."
+      else
+        dr warn forgejo forgejo_caddy_unit "Caddy service unit missing. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+      fi
+      if systemctl is-enabled --quiet caddy.service 2>/dev/null; then
+        dr ok forgejo forgejo_caddy_enabled "Caddy service enabled at boot."
+      else
+        dr warn forgejo forgejo_caddy_enabled "Caddy service not enabled. Fix: sudo systemctl enable caddy"
+      fi
       if systemctl is-active --quiet caddy.service 2>/dev/null; then
         dr ok forgejo forgejo_caddy "Caddy HTTPS reverse proxy active."
       else
         dr warn forgejo forgejo_caddy "Caddy is not running. Fix: sudo systemctl restart caddy"
+      fi
+      if [[ -n "${forgejo_host}" ]] \
+          && caddyfile_has_forgejo_route /etc/caddy/Caddyfile "${forgejo_host}" "${forgejo_port}"; then
+        dr ok forgejo forgejo_caddy_route "Managed Caddy route matches ${forgejo_host} -> 127.0.0.1:${forgejo_port} with internal TLS."
+      else
+        dr warn forgejo forgejo_caddy_route "Managed Caddy route is missing, duplicated, or stale. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+      fi
+      if caddy_configuration_is_valid; then
+        dr ok forgejo forgejo_caddy_config "Active Caddy configuration validates."
+      else
+        dr warn forgejo forgejo_caddy_config "Caddy configuration is invalid. Fix: sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile"
+      fi
+      if [[ -e /etc/caddy/conf.d/forgejo.caddy ]]; then
+        dr warn forgejo forgejo_caddy_legacy "Legacy Forgejo Caddy fragment remains. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+      else
+        dr ok forgejo forgejo_caddy_legacy "Legacy Forgejo Caddy fragment absent."
       fi
       if systemctl is-active --quiet avahi-daemon.service 2>/dev/null; then
         dr ok forgejo forgejo_mdns "Avahi mDNS discovery active."
@@ -1395,6 +1455,11 @@ cmd_doctor() {
         dr ok forgejo forgejo_ca "Caddy local CA certificate exported for client trust."
       else
         dr warn forgejo forgejo_ca "Local CA export missing. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+      fi
+      if caddy_exported_ca_is_current; then
+        dr ok forgejo forgejo_ca_current "Exported Caddy local CA matches the active CA root."
+      else
+        dr warn forgejo forgejo_ca_current "Exported Caddy local CA is stale or the active CA root is missing. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
       if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
         if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
@@ -3341,6 +3406,54 @@ _caddyfile_is_packaged_default() {
   ' "$1"
 }
 
+caddyfile_has_forgejo_route() {
+  local caddyfile="$1" host="$2" port="$3"
+  [[ -r "${caddyfile}" ]] || return 1
+  awk -v host="${host}" -v port="${port}" '
+    BEGIN {
+      begin_marker = "# BEGIN install.sh Forgejo"
+      end_marker = "# END install.sh Forgejo"
+    }
+    $0 == begin_marker {
+      begin_count++
+      managed = 1
+      next
+    }
+    $0 == end_marker {
+      end_count++
+      managed = 0
+      next
+    }
+    managed {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == "https://" host " {") site_count++
+      if (line == "tls internal") tls_count++
+      if (line == "reverse_proxy 127.0.0.1:" port) proxy_count++
+    }
+    END {
+      exit !(begin_count == 1 && end_count == 1 && !managed \
+        && site_count == 1 && tls_count == 1 && proxy_count == 1)
+    }
+  ' "${caddyfile}"
+}
+
+caddy_configuration_is_valid() {
+  command -v caddy >/dev/null 2>&1 || return 1
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
+      >/dev/null 2>&1 \
+    || sudo -n caddy validate --config /etc/caddy/Caddyfile \
+      --adapter caddyfile >/dev/null 2>&1
+}
+
+caddy_exported_ca_is_current() {
+  local active_ca=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+  local exported_ca=/etc/forgejo/caddy-local-ca.crt
+  cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null \
+    || sudo -n cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null
+}
+
 configure_forgejo_lan_https() {
   local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
   local caddy_begin_count caddy_end_count
@@ -4086,9 +4199,31 @@ if sudo -n test -f /etc/forgejo/app.ini 2>/dev/null; then
   check "forgejo app.ini root:git 640"       bash -c "test \"\$(sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini)\" = 'root:git 640'"
   check "forgejo.service active"             systemctl is-active forgejo.service
   check "forgejo healthy on 127.0.0.1:\${FORGEJO_PORT}" curl -fsS -m 5 -o /dev/null "http://127.0.0.1:\${FORGEJO_PORT}/api/healthz"
+  check "caddy binary present"                bash -c "command -v caddy"
+  check "caddy.service unit present"          systemctl cat caddy.service
+  check "caddy.service enabled"               systemctl is-enabled caddy.service
   check "caddy.service active"               systemctl is-active caddy.service
+  check "Caddy configuration valid"           sudo -n caddy validate \
+    --config /etc/caddy/Caddyfile --adapter caddyfile
+  check "managed Caddy route markers unique"  bash -c \
+    "test \"\$(sudo -n grep -Fxc '# BEGIN install.sh Forgejo' /etc/caddy/Caddyfile)\" = 1 \
+      && test \"\$(sudo -n grep -Fxc '# END install.sh Forgejo' /etc/caddy/Caddyfile)\" = 1"
+  if [[ -n "\${FORGEJO_HOST}" ]]; then
+    check "Caddy route host matches \${FORGEJO_HOST}" sudo -n grep -Fqx \
+      "https://\${FORGEJO_HOST} {" /etc/caddy/Caddyfile
+    check "Caddy route uses internal TLS" sudo -n grep -Eq \
+      '^[[:space:]]*tls internal[[:space:]]*$' /etc/caddy/Caddyfile
+    check "Caddy route targets 127.0.0.1:\${FORGEJO_PORT}" sudo -n grep -Eq \
+      "^[[:space:]]*reverse_proxy 127\\\\.0\\\\.0\\\\.1:\${FORGEJO_PORT}[[:space:]]*$" \
+      /etc/caddy/Caddyfile
+  fi
+  check "legacy Forgejo Caddy fragment absent" sudo -n test ! -e \
+    /etc/caddy/conf.d/forgejo.caddy
   check "avahi-daemon.service active"        systemctl is-active avahi-daemon.service
   check "Caddy local CA exported"            sudo -n test -r /etc/forgejo/caddy-local-ca.crt
+  check "exported Caddy local CA is current"  sudo -n cmp -s \
+    /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt \
+    /etc/forgejo/caddy-local-ca.crt
   if [[ -n "\${FORGEJO_HOST}" ]]; then
     check "forgejo HTTPS healthy at \${FORGEJO_HOST}" sudo -n curl -fsS -m 5 -o /dev/null \
       --cacert /etc/forgejo/caddy-local-ca.crt \
