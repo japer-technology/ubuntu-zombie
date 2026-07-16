@@ -1252,7 +1252,7 @@ verify_forgejo() {
     || vr fail forgejo local_ca "Caddy local CA certificate missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
   caddy_exported_ca_is_current \
     && vr ok forgejo local_ca_current "Exported Caddy local CA matches the active CA root." \
-    || vr fail forgejo local_ca_current "Exported Caddy local CA is stale or the active CA root is missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    || vr fail forgejo local_ca_current "Exported and active Caddy local CA roots are missing or do not match. Run: sudo ./${SCRIPT_NAME} repair forgejo"
   if (( _fj_svc_active )); then
     if curl -fsS --max-time 5 -o /dev/null \
         "http://127.0.0.1:${_fj_port}/api/healthz" 2>/dev/null; then
@@ -1459,7 +1459,7 @@ cmd_doctor() {
       if caddy_exported_ca_is_current; then
         dr ok forgejo forgejo_ca_current "Exported Caddy local CA matches the active CA root."
       else
-        dr warn forgejo forgejo_ca_current "Exported Caddy local CA is stale or the active CA root is missing. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        dr warn forgejo forgejo_ca_current "Exported and active Caddy local CA roots are missing or do not match. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
       if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
         if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
@@ -3407,6 +3407,8 @@ _caddyfile_is_packaged_default() {
 }
 
 caddyfile_has_forgejo_route() {
+  # Return success only for one managed block containing the expected
+  # host, loopback backend port, and internal-TLS directive.
   local caddyfile="$1" host="$2" port="$3"
   [[ -r "${caddyfile}" ]] || return 1
   awk -v host="${host}" -v port="${port}" '
@@ -3440,6 +3442,8 @@ caddyfile_has_forgejo_route() {
 }
 
 caddy_configuration_is_valid() {
+  # Validate as the caller when possible, with passwordless sudo as the
+  # non-root doctor fallback.
   command -v caddy >/dev/null 2>&1 || return 1
   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
       >/dev/null 2>&1 \
@@ -3448,6 +3452,7 @@ caddy_configuration_is_valid() {
 }
 
 caddy_exported_ca_is_current() {
+  # Return success only when the client export matches Caddy's active root.
   local active_ca=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
   local exported_ca=/etc/forgejo/caddy-local-ca.crt
   cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null \
