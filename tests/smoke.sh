@@ -2501,6 +2501,11 @@ run_standards() {
     || { echo "Forgejo config directory must be locked after migration" >&2; exit 1; }
   grep -q '/api/healthz' scripts/install.sh \
     || { echo "Forgejo install must verify application health" >&2; exit 1; }
+  local verify_forgejo_body
+  verify_forgejo_body="$(install_function verify_forgejo)"
+  grep -q -- '-o /dev/null' <<<"${verify_forgejo_body}" \
+    && ! grep -q "\"healthy\"" <<<"${verify_forgejo_body}" \
+    || { echo "Forgejo verify must trust the health endpoint HTTP status" >&2; exit 1; }
   grep -q 'HTTP_ADDR = 127.0.0.1' scripts/install.sh \
     || { echo "Forgejo backend must stay loopback-only" >&2; exit 1; }
   grep -q 'tls internal' scripts/install.sh \
@@ -2512,6 +2517,37 @@ run_standards() {
     || { echo "Forgejo route must be rendered in the active Caddyfile" >&2; exit 1; }
   grep -q 'rm -f /etc/caddy/conf.d/forgejo.caddy' scripts/install.sh \
     || { echo "Forgejo install must migrate the legacy Caddy route fragment" >&2; exit 1; }
+  local caddy_helper caddy_test_dir caddy_hook
+  caddy_helper="$(install_function _caddyfile_is_packaged_default)"
+  caddy_test_dir="$(mktemp -d)"
+  cat > "${caddy_test_dir}/stock" <<'EOF'
+# Packaged Caddy welcome site.
+:80 {
+	root * /usr/share/caddy
+	file_server
+}
+EOF
+  cat > "${caddy_test_dir}/custom" <<'EOF'
+example.test {
+	reverse_proxy 127.0.0.1:8080
+}
+EOF
+  bash -c "${caddy_helper}
+    _caddyfile_is_packaged_default \"\$1\"
+    ! _caddyfile_is_packaged_default \"\$2\"" \
+    _ "${caddy_test_dir}/stock" "${caddy_test_dir}/custom" \
+    || { rm -rf "${caddy_test_dir}"; echo "Forgejo must remove only Caddy's packaged welcome site" >&2; exit 1; }
+  rm -rf "${caddy_test_dir}"
+  caddy_hook="$(sed -n \
+    '/^configure_forgejo_lan_https() {$/,/^# component-hook: forgejo begin$/p' \
+    scripts/install.sh)"
+  awk '
+    /systemctl restart forgejo.service/ { restart = NR }
+    /http:\/\/127.0.0.1:\$\{FORGEJO_HTTP_PORT\}\/api\/healthz/ { backend = NR }
+    /systemctl enable --now caddy.service/ { caddy = NR }
+    END { exit !(restart && backend > restart && caddy > backend) }
+  ' <<<"${caddy_hook}" \
+    || { echo "Forgejo must recover before Caddy activates its proxy" >&2; exit 1; }
   # These exact endpoints are part of the installer contract: Forgejo must use
   # Caddy's signed stable Cloudsmith repository rather than an Ubuntu fallback.
   awk '
@@ -2525,6 +2561,23 @@ run_standards() {
     || { echo "Forgejo must advertise HTTPS through Avahi" >&2; exit 1; }
   grep -q '/etc/forgejo/caddy-local-ca.crt' scripts/install.sh \
     || { echo "Forgejo must export Caddy's public local CA root" >&2; exit 1; }
+  local provider_helper password_helper provider_test_file
+  provider_helper="$(install_function provider_credential_configured)"
+  provider_test_file="$(mktemp)"
+  printf 'ZOMBIE_PROVIDER=lmstudio\nLMSTUDIO_API_KEY=local\n' > "${provider_test_file}"
+  bash -c "${provider_helper}
+    provider_credential_configured \"\$1\"" _ "${provider_test_file}" \
+    || { rm -f "${provider_test_file}"; echo "Local LLM credentials must satisfy installer health checks" >&2; exit 1; }
+  rm -f "${provider_test_file}"
+  grep -q 'GROQ|LMSTUDIO' payload/bin/health-check \
+    || { echo "Local LLM credentials must satisfy deployed health checks" >&2; exit 1; }
+  password_helper="$(install_function password_source_label)"
+  bash -c "${password_helper}
+    [[ \"\$(password_source_label operator)\" == 'set by operator, not recorded' ]]
+    [[ \"\$(password_source_label '')\" == 'generated, recorded in receipt' ]]" \
+    || { echo "Forgejo password source labels must describe receipt handling accurately" >&2; exit 1; }
+  grep -q 'password accepted (not recorded)' scripts/install.sh \
+    || { echo "Prompted Forgejo passwords must not be described as recorded" >&2; exit 1; }
   grep -q '/etc/caddy/conf.d/forgejo.caddy' scripts/uninstall.sh \
     && grep -q '# BEGIN install.sh Forgejo' scripts/uninstall.sh \
     || { echo "Forgejo uninstall must remove current and legacy Caddy routes" >&2; exit 1; }

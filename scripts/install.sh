@@ -159,7 +159,18 @@ any_option_enabled() {
 # One-line label for where an optional-component password will come from,
 # shared by the dry-run stanza, options table, and receipt start record.
 password_source_label() {
-  [[ -n "$1" ]] && echo 'set via env' || echo 'generated, recorded in receipt'
+  case "$1" in
+    operator) echo 'set by operator, not recorded' ;;
+    existing) echo 'reused from host, not recorded' ;;
+    generated) echo 'generated, recorded in receipt' ;;
+    *) echo 'generated, recorded in receipt' ;;
+  esac
+}
+
+provider_credential_configured() {
+  grep -Eq \
+    '^(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ|LMSTUDIO)_API_KEY=..+' \
+    "$1" 2>/dev/null
 }
 
 # UX flags (set by argument parsing below; env provides the defaults).
@@ -1180,7 +1191,7 @@ verify_forgejo() {
   [[ -f /etc/systemd/system/forgejo.service ]] \
     && vr ok forgejo service_unit "Forgejo service unit present." \
     || vr fail forgejo service_unit "Forgejo service unit missing."
-  local _fj_svc_active=0 _fj_dir_perms _fj_cfg_perms _fj_port _fj_health
+  local _fj_svc_active=0 _fj_dir_perms _fj_cfg_perms _fj_port
   local _fj_host _fj_root_url _fj_http_addr
   systemctl is-active --quiet forgejo.service 2>/dev/null \
     && { vr ok forgejo service_active "Forgejo service active."; _fj_svc_active=1; } \
@@ -1200,8 +1211,8 @@ verify_forgejo() {
     || vr fail forgejo db "PostgreSQL not running (Forgejo needs it). Run: sudo systemctl start postgresql"
   if (( _fj_svc_active )); then
     _fj_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || echo 3000)"
-    _fj_health="$(curl -sf --max-time 5 "http://127.0.0.1:${_fj_port}/api/healthz" 2>/dev/null || true)"
-    if printf '%s' "${_fj_health}" | grep -q '"healthy"'; then
+    if curl -fsS --max-time 5 -o /dev/null \
+        "http://127.0.0.1:${_fj_port}/api/healthz" 2>/dev/null; then
       vr ok forgejo healthz "Forgejo /api/healthz reports healthy."
     else
       vr fail forgejo healthz "Forgejo /api/healthz did not return healthy. Check journalctl -u forgejo."
@@ -1225,10 +1236,10 @@ verify_forgejo() {
       && vr ok forgejo local_ca "Caddy local CA certificate exported." \
       || vr fail forgejo local_ca "Caddy local CA certificate missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
     if [[ -n "${_fj_host}" && -r /etc/forgejo/caddy-local-ca.crt ]]; then
-      _fj_health="$(curl -sf --max-time 5 --cacert /etc/forgejo/caddy-local-ca.crt \
+      if curl -fsS --max-time 5 -o /dev/null \
+          --cacert /etc/forgejo/caddy-local-ca.crt \
         --resolve "${_fj_host}:443:127.0.0.1" \
-        "https://${_fj_host}/api/healthz" 2>/dev/null || true)"
-      if printf '%s' "${_fj_health}" | grep -q '"healthy"'; then
+          "https://${_fj_host}/api/healthz" 2>/dev/null; then
         vr ok forgejo https_healthz "Forgejo HTTPS endpoint reports healthy."
       else
         vr fail forgejo https_healthz "Forgejo HTTPS endpoint failed. Check journalctl -u caddy."
@@ -1326,10 +1337,10 @@ cmd_doctor() {
       else
         dr warn zombie secrets_perms "secrets/env permissions ${perms} (must be 600). Fix: sudo ./${SCRIPT_NAME} repair zombie"
       fi
-      if grep -Eq '^(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
-        dr ok zombie provider_token "Provider token present."
+      if provider_credential_configured "${ZOMBIE_DIR}/secrets/env"; then
+        dr ok zombie provider_token "Provider credential present."
       else
-        dr warn zombie provider_token "No provider token. Fix: sudo ${ZOMBIE_DIR}/bin/secrets-edit"
+        dr warn zombie provider_token "No provider credential. Fix: sudo ${ZOMBIE_DIR}/bin/secrets-edit"
       fi
     else
       dr warn zombie secrets_env "secrets/env missing. Fix: sudo ./${SCRIPT_NAME} install zombie"
@@ -1620,8 +1631,8 @@ Optional components enabled:
                        caddy avahi-daemon libnss-mdns
                   binary: /usr/local/bin/forgejo (checksum-verified download)
                   data: /var/lib/forgejo (git:git)  config: /etc/forgejo/app.ini
-                  database: ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))
-                  admin: ${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))
+                  database: ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}"))
+                  admin: ${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD_SOURCE}"))
                   unit: /etc/systemd/system/forgejo.service
                   exposure: https://$(forgejo_url_host)/ via mDNS + Caddy internal CA
                   backend: 127.0.0.1:${FORGEJO_HTTP_PORT} (not directly exposed)
@@ -1827,7 +1838,7 @@ _edit_forgejo_admin() {
   fi
   FORGEJO_ADMIN_PASSWORD="${p1}"
   FORGEJO_ADMIN_PASSWORD_SOURCE="operator"
-  ok "Forgejo admin password recorded."
+  ok "Forgejo admin password accepted (not recorded)."
 }
 
 _edit_forgejo_database() {
@@ -1869,7 +1880,7 @@ _edit_forgejo_database() {
   fi
   FORGEJO_DB_PASSWORD="${p1}"
   FORGEJO_DB_PASSWORD_SOURCE="operator"
-  ok "Forgejo database password recorded."
+  ok "Forgejo database password accepted (not recorded)."
 }
 
 # Accepts a release pin like 11.0.3 or the keyword "latest" (clears the pin).
@@ -1927,9 +1938,9 @@ print_options_table() {
   if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
     field "1) Forgejo server"  "enabled"
     field "2) Forgejo port"    "${FORGEJO_HTTP_PORT}/tcp (loopback backend)"
-    field "3) Forgejo admin"   "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))"
+    field "3) Forgejo admin"   "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD_SOURCE}"))"
     field "4) Actions runner"  "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo 'disabled')"
-    field "5) Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))"
+    field "5) Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}"))"
     if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
       field "6) Versions"      "Forgejo ${FORGEJO_VERSION:-latest release}, runner ${FORGEJO_RUNNER_VERSION:-latest release} (labels ${FORGEJO_RUNNER_LABELS})"
     else
@@ -2175,8 +2186,9 @@ discover_local_llms() {
     printf '  %sPick a model to use as the starting model, or skip to configure a%s\n' "${C_DIM}" "${C_RESET}"
     printf '  %scloud provider later in %s/secrets/env.%s\n\n' "${C_DIM}" "${ZOMBIE_DIR}" "${C_RESET}"
     for i in "${!DISCOVERED_MODELS[@]}"; do
-      field "$(printf '%2d)' "$((i + 1))")" \
-        "${DISCOVERED_MODELS[$i]}  @  http://${DISCOVERED_ENDPOINTS[$i]}/v1"
+      printf '  %s%2d)%s %s%s  @  http://%s/v1%s\n' \
+        "${C_BRAND2}" "$((i + 1))" "${C_RESET}" "${C_ACCENT}" \
+        "${DISCOVERED_MODELS[$i]}" "${DISCOVERED_ENDPOINTS[$i]}" "${C_RESET}"
     done
     printf '\n  %s[1-%d]%s use a model    %s[r]%s rescan    %s[s]%s skip\n' \
       "${C_BRAND2}" "${#DISCOVERED_MODELS[@]}" "${C_RESET}" \
@@ -2256,8 +2268,8 @@ review_forgejo_parameters() {
     load_os_release
     brand_banner "Forgejo — setup parameters"
     field "1) Forgejo port"   "${FORGEJO_HTTP_PORT}/tcp (loopback backend)"
-    field "2) Forgejo admin"  "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD}"))"
-    field "3) PostgreSQL database" "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD}"))"
+    field "2) Forgejo admin"  "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD_SOURCE}"))"
+    field "3) PostgreSQL database" "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}"))"
     field "4) Actions runner" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo disabled)"
     field "5) Versions"       "Forgejo ${FORGEJO_VERSION:-latest release}"
     field "6) Core records"   "${LOG_FILE}; $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo 'receipt disabled')"
@@ -2312,10 +2324,10 @@ receipt_start_forgejo() {
   printf 'Forgejo backend  : 127.0.0.1:%s/tcp\n' "${FORGEJO_HTTP_PORT}"
   printf 'Forgejo admin    : %s <%s> (password %s)\n' \
     "${FORGEJO_ADMIN_USER}" "${FORGEJO_ADMIN_EMAIL}" \
-    "$(password_source_label "${FORGEJO_ADMIN_PASSWORD}")"
+    "$(password_source_label "${FORGEJO_ADMIN_PASSWORD_SOURCE}")"
   printf 'Forgejo database : %s (role %s; password %s)\n' \
     "${FORGEJO_DB_NAME}" "${FORGEJO_DB_USER}" \
-    "$(password_source_label "${FORGEJO_DB_PASSWORD}")"
+    "$(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}")"
   printf 'Forgejo version  : %s\n' "${FORGEJO_VERSION:-latest (resolved at install)}"
   printf 'Actions runner   : %s\n' \
     "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, Docker executor)' || echo disabled)"
@@ -3310,6 +3322,25 @@ EOF
   apt_get update
 }
 
+_caddyfile_is_packaged_default() {
+  awk '
+    /^[[:space:]]*($|#)/ { next }
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      content[++count] = line
+    }
+    END {
+      exit !(count == 4 \
+        && content[1] == ":80 {" \
+        && content[2] == "root * /usr/share/caddy" \
+        && content[3] == "file_server" \
+        && content[4] == "}")
+    }
+  ' "$1"
+}
+
 configure_forgejo_lan_https() {
   local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
   local caddy_begin_count caddy_end_count
@@ -3327,6 +3358,9 @@ configure_forgejo_lan_https() {
   fi
 
   [[ -f /etc/caddy/Caddyfile ]] || install -m 644 /dev/null /etc/caddy/Caddyfile
+  if _caddyfile_is_packaged_default /etc/caddy/Caddyfile; then
+    install -m 644 -o root -g root /dev/null /etc/caddy/Caddyfile
+  fi
   caddy_begin="# BEGIN install.sh Forgejo"
   caddy_end="# END install.sh Forgejo"
   read -r caddy_begin_count caddy_end_count < <(
@@ -3390,12 +3424,16 @@ EOF
 
   systemctl enable --now avahi-daemon.service >/dev/null 2>&1 \
     || die "Avahi failed to start; see journalctl -u avahi-daemon." 1
+  systemctl restart forgejo.service \
+    || die "Forgejo failed to apply its HTTPS public URL; see journalctl -u forgejo." 1
+  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
+       "http://127.0.0.1:${FORGEJO_HTTP_PORT}/api/healthz"; then
+    die "Forgejo did not become healthy after applying its HTTPS public URL; see journalctl -u forgejo." 1
+  fi
   systemctl enable --now caddy.service >/dev/null 2>&1 \
     || die "Caddy failed to start; see journalctl -u caddy." 1
   systemctl reload-or-restart caddy.service \
     || die "Caddy failed to load the Forgejo HTTPS configuration; see journalctl -u caddy." 1
-  systemctl restart forgejo.service \
-    || die "Forgejo failed to apply its HTTPS public URL; see journalctl -u forgejo." 1
 
   ca_source=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
   retry 6 1 -- test -r "${ca_source}" \
@@ -4092,7 +4130,7 @@ ln -sf "${ZOMBIE_DIR}/bin/verify" /usr/local/bin/zombie-verify
 section "Verify the installation"
 
 PROVIDER_OK=0
-if grep -Eq '^(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ)_API_KEY=..+' "${ZOMBIE_DIR}/secrets/env" 2>/dev/null; then
+if provider_credential_configured "${ZOMBIE_DIR}/secrets/env"; then
   PROVIDER_OK=1
 fi
 
@@ -4110,7 +4148,7 @@ bullet() {
   fi
 }
 
-bullet "${PROVIDER_OK}"  "Provider token present in secrets/env"
+bullet "${PROVIDER_OK}"  "Provider credential present in secrets/env"
 bullet "${CHAT_OK}"      "Chat service running on 127.0.0.1:${CHAT_PORT}"
 }
 
