@@ -32,6 +32,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Phase 4 — Registry generalisation
 
+- **Deep Caddy diagnostics:** Forgejo verify and doctor now check the Caddy
+  binary and unit, boot enablement, the exact managed host/port/internal-TLS
+  route, configuration validity, legacy fragment cleanup, and whether the
+  exported client CA matches Caddy's active local CA root.
 - **Forgejo first-install convergence:** fresh Caddy installs discard only
   the packaged port-80 welcome site, Forgejo must recover from its public-URL
   restart before Caddy activates the proxy, and verification accepts the
