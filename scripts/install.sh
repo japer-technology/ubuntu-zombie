@@ -3284,6 +3284,21 @@ ensure_forgejo_runner_docker_package() {
   apt_install docker.io
 }
 
+configure_caddy_apt_repository() {
+  local keyring=/usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  local source=/etc/apt/sources.list.d/caddy-stable.list
+
+  install -d -m 755 /usr/share/keyrings /etc/apt/sources.list.d
+  curl_get https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+    | gpg --dearmor --yes -o "${keyring}"
+  chmod 0644 "${keyring}"
+  cat > "${source}" <<EOF
+deb [signed-by=${keyring}] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
+EOF
+  chmod 0644 "${source}"
+  apt_get update
+}
+
 configure_forgejo_lan_https() {
   local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
   local caddy_begin_count caddy_end_count
@@ -3389,6 +3404,8 @@ install_forgejo() {
   # option-sections: forgejo begin
   section "Install Forgejo prerequisites"
 
+  apt_install debian-keyring debian-archive-keyring apt-transport-https gnupg
+  configure_caddy_apt_repository
   apt_install git git-lfs postgresql postgresql-contrib openssl xz-utils \
     caddy avahi-daemon libnss-mdns
 

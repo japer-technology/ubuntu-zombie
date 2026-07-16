@@ -2512,6 +2512,10 @@ run_standards() {
     || { echo "Forgejo route must be rendered in the active Caddyfile" >&2; exit 1; }
   grep -q 'rm -f /etc/caddy/conf.d/forgejo.caddy' scripts/install.sh \
     || { echo "Forgejo install must migrate the legacy Caddy route fragment" >&2; exit 1; }
+  grep -q 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' scripts/install.sh \
+    && grep -q 'caddy-stable-archive-keyring.gpg' scripts/install.sh \
+    && grep -q 'https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main' scripts/install.sh \
+    || { echo "Forgejo install must configure Caddy's signed stable repository" >&2; exit 1; }
   grep -q '_https._tcp' scripts/install.sh \
     || { echo "Forgejo must advertise HTTPS through Avahi" >&2; exit 1; }
   grep -q '/etc/forgejo/caddy-local-ca.crt' scripts/install.sh \
@@ -2527,6 +2531,12 @@ run_standards() {
     scripts/install.sh)"
   [[ -n "${forgejo_hook}" ]] \
     || { echo "could not extract the Forgejo install hook" >&2; exit 1; }
+  awk '
+    /configure_caddy_apt_repository$/ { repository = NR }
+    /caddy avahi-daemon libnss-mdns/ { packages = NR }
+    END { exit !(repository && packages && repository < packages) }
+  ' <<<"${forgejo_hook}" \
+    || { echo "Caddy repository must be configured before installing Caddy" >&2; exit 1; }
   confirmation_helper="$(install_function require_capitalized_yes)"
   bash -c "${confirmation_helper}
     info() { :; }
