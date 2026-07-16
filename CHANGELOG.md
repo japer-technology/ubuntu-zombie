@@ -32,6 +32,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Phase 4 — Registry generalisation
 
+- **Forgejo Caddy installation:** Forgejo installs now configure Caddy's
+  official signed stable APT repository before installing the package, so
+  hosts no longer require manual Caddy repository setup.
 - **Chat command status UX:** live `bash`/shell tool progress now
   labels non-zero command statuses as completed with a non-zero
   status instead of a failed tool execution, matching Linux exit-code
