@@ -14,6 +14,7 @@ aren't backed by [`../../README.md`](../../README.md) or
 - Ask your computer to fix itself. Approve every step. Keep every log.
 - Root-capable AI for your Ubuntu desktop — listening, not autonomous.
 - A sysadmin on call, inside your PC, that never acts without a yes.
+- Password-protected, audit-logged, and it expires unless you renew it.
 - One machine, two identities, one eye — and it's yours.
 
 ## Six-word stories
@@ -21,6 +22,7 @@ aren't backed by [`../../README.md`](../../README.md) or
 - You ask. It proposes. You approve.
 - Root-capable, audit-logged, reversible, local-first.
 - Your machine. Your keys. Your kill switch.
+- Loopback-only chat. Built-in expiry. Reversible.
 
 ## Descriptors (for app stores / directories / GitHub "About")
 
@@ -36,3 +38,4 @@ aren't backed by [`../../README.md`](../../README.md) or
 - Read the trust model before you run it: `SECURITY.md`.
 - Preview the whole plan first: `install --dry-run`.
 - Star the repo · Try the dry run · Read `docs/VISION.md`.
+- Run it fully offline with a local LLM — no cloud key required.

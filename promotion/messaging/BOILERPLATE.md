@@ -15,11 +15,12 @@ Reusable, copy-paste blocks. Keep these consistent across every channel.
 > supported Ubuntu Desktop LTS machine into a computer that can administer
 > itself. It adds a dedicated, root-capable Linux account that serves as the
 > operating identity of an AI Systems Administrator. Owners open a private,
-> local chat and ask the machine to diagnose, explain, configure, repair, or
-> operate itself in plain language. Privileged actions pass through a local
-> policy gate and wait for the operator's approval; every action is audit-logged
-> and reversible. The operator owns the machine, the SSH key, the API key, and
-> the kill switch. Released under the MIT licence by Japer Technology.
+> password-protected local chat and ask the machine to diagnose, explain,
+> configure, repair, or operate itself in plain language. Privileged actions
+> pass through a local policy gate and wait for the operator's approval; every
+> action is audit-logged, the administrator expires unless renewed, and the
+> whole install is reversible. Inference can use the operator's own cloud key
+> or a fully local LLM. Released under the MIT licence by Japer Technology.
 
 ## About Japer Technology
 
@@ -56,6 +57,8 @@ Reusable, copy-paste blocks. Keep these consistent across every channel.
 | Platform | Ubuntu Desktop LTS 22.04 / 24.04 |
 | Licence | MIT |
 | Install | `git clone` + `sudo ./scripts/install.sh install`, or signed `.deb` |
-| Network posture | Chat/VNC bind to `127.0.0.1`; key-only SSH, root disabled; Tailscale opt-in |
-| Inference | Configured cloud LLM provider (operator's key) |
-| Kill switch | Rotate key / remove SSH key / disable Tailscale / `uninstall` |
+| Network posture | One surface: password-protected chat on `127.0.0.1:7878`; no SSH, VNC, or inbound remote access provisioned |
+| Inference | Operator's own cloud LLM key (OpenAI, Anthropic, Gemini, xAI, Mistral, Groq, OpenRouter) or a local server (LM Studio / Ollama / `llama.cpp`) — fully offline possible |
+| Lifespan | Time to Live (default 7 days); expires unless renewed from the chat |
+| Kill switch | `/ttl --die` in chat / rotate or remove the API key / disable the service / `uninstall` |
+| Optional components | Self-hosted Forgejo git forge (PostgreSQL, `.local` LAN HTTPS, optional Actions runner) |

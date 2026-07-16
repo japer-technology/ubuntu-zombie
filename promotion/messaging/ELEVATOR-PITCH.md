@@ -16,11 +16,12 @@ gap between "my laptop is broken" and "here's the exact systemd unit that fixes
 it" gets filled by a forum thread or a paid technician. Ubuntu Zombie closes
 that gap on the machine itself. It installs a dedicated `zombie` account with
 passwordless sudo as the operating identity of an AI Systems Administrator. You
-open a private chat on `127.0.0.1`, ask in plain English, and it proposes the
-commands it would run. Destructive or system-altering actions pass through a
-local policy gate and wait for your approval. Everything is written to an audit
-log. You own the SSH key, the API key, and the kill switch — uninstall and the
-whole thing reverses.
+open a private, password-protected chat on `127.0.0.1`, ask in plain English,
+and it proposes the commands it would run. Destructive or system-altering
+actions pass through a local policy gate and wait for your approval. Everything
+is written to an audit log. You own the API key, the chat password, and the
+kill switch — the administrator ships with a Time to Live and disables itself
+unless you renew it, and uninstall reverses the whole thing.
 
 ## 60 seconds (a podcast / press intro)
 
@@ -34,14 +35,18 @@ machine in plain language.
 
 The design is built around control. Privileged actions are classified and
 gated; the operator approves them before they run. Every proposal and command
-is audit-logged and inspectable after the fact. The chat and remote-desktop
-services bind to localhost only; SSH is key-only with root disabled; remote
-access is opt-in over a private Tailscale tailnet, never the public internet.
-Revocation is first-class: rotate the provider key, remove the SSH key, disable
-Tailscale, or run uninstall, and the agent stops.
+is audit-logged and inspectable after the fact. The only network surface is a
+password-protected chat bound to `127.0.0.1` — the installer provisions no
+SSH, no VNC, and no inbound remote access. The administrator ships with a
+Time to Live: unless the operator renews it from the chat, it permanently
+disables itself. Revocation is first-class: rotate the provider key, run
+`/ttl --die`, disable the service, or run uninstall, and the agent stops.
+Inference can be a cloud provider with the operator's own key or a fully
+local LLM server (LM Studio, Ollama, `llama.cpp`) that the installer
+auto-discovers — offline operation with no cloud key at all.
 
-It deliberately does *not* promise an autonomous machine, local-only inference,
-fleet management, or replacing the humans on the desktop. One machine, one
-operator, one trust boundary. The logo says it best: an ordinary PC with a calm,
-listening, root-capable administrator fused to it, sharing one glowing eye that
-belongs to the operator — who can always turn it off.
+It deliberately does *not* promise an autonomous machine, fleet management, or
+replacing the humans on the desktop. One machine, one operator, one trust
+boundary. The logo says it best: an ordinary PC with a calm, listening,
+root-capable administrator fused to it, sharing one glowing eye that belongs
+to the operator — who can always turn it off.
