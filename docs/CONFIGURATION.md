@@ -380,7 +380,7 @@ inspected from the agent account with
 | Command                | Purpose                                                                 |
 | ---------------------- | ----------------------------------------------------------------------- |
 | `secrets-edit`         | Safely edit `secrets/env`; re-asserts `0600` mode after `$EDITOR` exits |
-| `health-check`         | One-shot health summary (chat service, provider token, disk, …)         |
+| `health-check`         | One-shot health summary (chat service, provider credential, disk, …)    |
 | `audit-recent`         | Tail the most recent decisions from `audit.log`                         |
 | `collect-diagnostics`  | Bundle logs and state into a tarball with secrets redacted              |
 | `zombie-chat`          | Print the local chat URL                                               |

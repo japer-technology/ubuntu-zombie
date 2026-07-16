@@ -32,6 +32,15 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Phase 4 — Registry generalisation
 
+- **Forgejo first-install convergence:** fresh Caddy installs discard only
+  the packaged port-80 welcome site, Forgejo must recover from its public-URL
+  restart before Caddy activates the proxy, and verification accepts the
+  health endpoint's successful HTTP status instead of requiring a nonexistent
+  `"healthy"` response field.
+- **Accurate installer status:** local `lmstudio` credentials now satisfy
+  install, doctor, and deployed health checks; prompted Forgejo passwords are
+  described as operator-set and not recorded; and discovered model rows no
+  longer contain a wide blank label column.
 - **Forgejo Caddy installation:** Forgejo installs now configure Caddy's
   official signed stable APT repository before installing the package, so
   hosts no longer require manual Caddy repository setup.

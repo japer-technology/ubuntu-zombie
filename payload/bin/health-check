@@ -9,7 +9,7 @@ health-check — one-shot health summary for Ubuntu Zombie.
 Usage:
   health-check [-h|--help]
 
-Checks the chat service, chat port, provider token presence, secrets
+Checks the chat service, chat port, provider credential presence, secrets
 permissions, disk space, and audit log, then prints an ok/warn/fail
 summary. Exits 1 if any check fails (unless ZOMBIE_HEALTH_WARN_ONLY=1).
 
@@ -58,12 +58,12 @@ else
   check_warn "chat port not observed in ss output"
 fi
 
-# Provider token presence (without reading the value)
+# Provider credential presence (without reading the value)
 if [[ -r "${SECRETS_FILE}" ]]; then
-  if grep -Eq '^[[:space:]]*(export[[:space:]]+)?(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ)_API_KEY[[:space:]]*=[[:space:]]*.+' "${SECRETS_FILE}" 2>/dev/null; then
-    check_ok "provider token present in secrets/env"
+  if grep -Eq '^[[:space:]]*(export[[:space:]]+)?(OPENAI|ANTHROPIC|GEMINI|XAI|OPENROUTER|MISTRAL|GROQ|LMSTUDIO)_API_KEY[[:space:]]*=[[:space:]]*.+' "${SECRETS_FILE}" 2>/dev/null; then
+    check_ok "provider credential present in secrets/env"
   else
-    check_warn "no provider token in secrets/env (sudo ${ZOMBIE_DIR}/bin/secrets-edit)"
+    check_warn "no provider credential in secrets/env (sudo ${ZOMBIE_DIR}/bin/secrets-edit)"
   fi
   PERMS="$(stat -c %a "${SECRETS_FILE}" 2>/dev/null || echo 000)"
   if [[ "${PERMS}" == "600" ]]; then
