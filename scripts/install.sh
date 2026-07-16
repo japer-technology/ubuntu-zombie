@@ -3284,6 +3284,32 @@ ensure_forgejo_runner_docker_package() {
   apt_install docker.io
 }
 
+configure_caddy_apt_repository() {
+  local keyring=/usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  local source=/etc/apt/sources.list.d/caddy-stable.list
+  local tmp_dir
+
+  install -d -m 755 /usr/share/keyrings /etc/apt/sources.list.d
+  tmp_dir="$(mktemp -d)" \
+    || die "Could not create temporary storage for Caddy's signing key." 1
+  if ! curl_get https://dl.cloudsmith.io/public/caddy/stable/gpg.key \
+      > "${tmp_dir}/key"; then
+    rm -rf "${tmp_dir}"
+    die "Could not download Caddy's stable repository signing key." 1
+  fi
+  if ! gpg --dearmor --yes < "${tmp_dir}/key" > "${tmp_dir}/keyring"; then
+    rm -rf "${tmp_dir}"
+    die "Could not install Caddy's stable repository signing key." 1
+  fi
+  install -m 0644 -o root -g root "${tmp_dir}/keyring" "${keyring}"
+  rm -rf "${tmp_dir}"
+  cat > "${source}" <<EOF
+deb [signed-by=${keyring}] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main
+EOF
+  chmod 0644 "${source}"
+  apt_get update
+}
+
 configure_forgejo_lan_https() {
   local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
   local caddy_begin_count caddy_end_count
@@ -3389,6 +3415,8 @@ install_forgejo() {
   # option-sections: forgejo begin
   section "Install Forgejo prerequisites"
 
+  apt_install debian-keyring debian-archive-keyring apt-transport-https gnupg
+  configure_caddy_apt_repository
   apt_install git git-lfs postgresql postgresql-contrib openssl xz-utils \
     caddy avahi-daemon libnss-mdns
 
