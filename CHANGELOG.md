@@ -37,6 +37,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Proof-of-life status:** `/status` now probes the configured LLM and reports
   latency, provider/model, host/IP/resources, lifecycle, runtime work, local
   conversation/tool totals, and browser-session activity.
+- **Browser-local retitling:** `/retitle <title>` rebrands the browser title,
+  header, wordmark, login prompt, and tombstone label; `/retitle` resets them
+  to Ubuntu Zombie.
 
 ### Standalone llama.cpp
 

@@ -3046,6 +3046,9 @@ PY
   grep -q 'uzFetchJson("/api/status")' payload/agent/templates/index.html \
     && grep -q '"Persistent usage"' payload/agent/templates/index.html \
     || { echo "/status must show comprehensive proof-of-life data" >&2; exit 1; }
+  grep -q '"/retitle \[title\]"' payload/agent/templates/index.html \
+    && grep -q 'applyBrandTitle' payload/agent/templates/index.html \
+    || { echo "chat UI must expose /retitle branding controls" >&2; exit 1; }
   _MARKDOWN_TEST="$(mktemp)"
   python3 - "${_MARKDOWN_TEST}" <<'PY'
 import sys
@@ -3070,6 +3073,77 @@ Path(sys.argv[1]).write_text(text[start:end] + test)
 PY
   node "${_MARKDOWN_TEST}"
   rm -f "${_MARKDOWN_TEST}"
+  _BRAND_TEST="$(mktemp)"
+  python3 - "${_BRAND_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+brand_start = text.index("let brandTitle = ")
+brand_end = text.index("\n", brand_start) + 1
+helpers_start = text.index("const BRAND_STORAGE_KEY")
+end = text.index("function uzConversationMarkdown")
+test = r'''
+const store = new Map();
+global.window = { localStorage: {
+  getItem: key => store.has(key) ? store.get(key) : null,
+  setItem: (key, value) => store.set(key, String(value)),
+  removeItem: key => store.delete(key),
+}};
+const nodes = {
+  "brand-heading": {
+    firstChild: { nodeValue: "" },
+    attrs: {},
+    setAttribute(name, value) { this.attrs[name] = value; },
+  },
+  "brand-wordmark": { textContent: "" },
+  "login-brand-title": { textContent: "" },
+  "tomb-brand-title": { textContent: "" },
+};
+global.document = {
+  title: "",
+  getElementById: id => nodes[id] || null,
+};
+
+if (cleanBrandTitle("  New    Name  ") !== "New Name") {
+  throw new Error("brand title whitespace was not normalized");
+}
+if (cleanBrandTitle("x".repeat(90)).length !== 80) {
+  throw new Error("brand title was not clipped to 80 chars");
+}
+if (!brandWordmark("").includes("UBUNTU ZOMBIE")) {
+  throw new Error("empty wordmark did not fall back to default");
+}
+applyBrandTitle("  New    Name  ");
+if (brandTitle !== "New Name" || document.title !== "New Name") {
+  throw new Error("brand title was not applied");
+}
+if (nodes["brand-heading"].firstChild.nodeValue !== "New Name " ||
+    nodes["brand-heading"].attrs["aria-label"] !==
+      "New Name on {{HOSTNAME}}, user {{USERNAME}}" ||
+    nodes["login-brand-title"].textContent !== "New Name" ||
+    nodes["tomb-brand-title"].textContent !== "This New Name is dead" ||
+    !nodes["brand-wordmark"].textContent.includes("NEW NAME")) {
+  throw new Error("brand DOM targets were not updated");
+}
+if (store.get(BRAND_STORAGE_KEY) !== "New Name") {
+  throw new Error("brand title was not persisted");
+}
+applyBrandTitle(DEFAULT_BRAND_TITLE);
+if (store.has(BRAND_STORAGE_KEY)) {
+  throw new Error("default brand title should remove stored override");
+}
+applyBrandTitle("No Persist", false);
+if (store.has(BRAND_STORAGE_KEY)) {
+  throw new Error("non-persistent brand title wrote localStorage");
+}
+'''
+Path(sys.argv[1]).write_text(
+    text[brand_start:brand_end] + text[helpers_start:end] + test
+)
+PY
+  node "${_BRAND_TEST}"
+  rm -f "${_BRAND_TEST}"
   grep -Fq '["api", "stream"]' payload/agent/server.py \
     || { echo "server.py must expose the SSE stream endpoint" >&2; exit 1; }
   grep -q '"type":"progress"' payload/agent/pi_mono.py \
