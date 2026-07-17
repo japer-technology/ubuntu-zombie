@@ -14,6 +14,10 @@ both the exact code that runs and the intended upstream release.
 
 ## Workflow summary
 
+Workflows are documented in ascending order by workflow file name. Keep the
+summary table and the detailed sections below in the same order so additions,
+removals, and trigger changes are easy to review.
+
 | File | Workflow | Primary purpose | Main triggers |
 | --- | --- | --- | --- |
 | `ci.yml` | CI | Lint, syntax, smoke, pytest, package, and secret-pattern checks | Pull requests and pushes to `main` |
@@ -215,6 +219,7 @@ When changing these workflows:
   a documented step that requires them.
 - Keep CI-aligned commands in sync with `Makefile`, `tests/smoke.sh`, and
   contributor documentation.
+- Keep the summary table and workflow sections ordered by workflow file name.
 - Avoid real installer mutation in GitHub-hosted runners. Use dry-run paths
   here and reserve full installation checks for disposable Ubuntu Desktop
   LTS VMs.
