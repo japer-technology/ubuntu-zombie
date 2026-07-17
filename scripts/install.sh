@@ -127,6 +127,7 @@ LLAMA_MODEL_ID="${LLAMA_MODEL_ID:-smollm2-360m-instruct-q4_k_m}"
 LLAMA_CONTEXT_SIZE="${LLAMA_CONTEXT_SIZE:-2048}"
 LLAMA_CPU_THREADS="${LLAMA_CPU_THREADS:-$(nproc 2>/dev/null || echo 1)}"
 LLAMA_BOOT="${LLAMA_BOOT:-enabled}"
+readonly LLAMA_HEALTH_ATTEMPTS=60
 FORGEJO_HTTP_PORT="${FORGEJO_HTTP_PORT:-3000}"
 FORGEJO_ADMIN_USER="${FORGEJO_ADMIN_USER:-forgejo-admin}"
 FORGEJO_ADMIN_EMAIL="${FORGEJO_ADMIN_EMAIL:-forgejo-admin@localhost.localdomain}"
@@ -537,8 +538,7 @@ llama_installation_is_managed() {
   local marker
   for marker in /etc/llama.cpp/managed-by-ubuntu-zombie \
       /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
-    [[ -f "${marker}" ]] && [[ "$(stat -c '%U:%G %a' "${marker}" 2>/dev/null)" == "root:root 644" ]] \
-      && grep -Fqx 'component=llama' "${marker}" && return 0
+    valid_component_ownership_marker "${marker}" "${COMPONENT_LLAMA}" && return 0
   done
   return 1
 }
@@ -912,6 +912,23 @@ curl_get() {
   retry 5 3 -- curl -fsSL --retry 3 --retry-delay 2 "$@"
 }
 
+download_verified_file() {
+  local url="$1" sha256="$2" destination="$3" label="$4" actual
+  if [[ -f "${destination}" ]]; then
+    actual="$(sha256sum "${destination}" | awk '{print $1}')"
+    [[ "${actual}" == "${sha256}" ]] && return 0
+    rm -f "${destination}"
+  fi
+  rm -f "${destination}.part"
+  info "Downloading ${label}…"
+  curl_get -o "${destination}.part" "${url}" \
+    || { rm -f "${destination}.part"; die "Could not download ${label}." 1; }
+  actual="$(sha256sum "${destination}.part" | awk '{print $1}')"
+  [[ "${actual}" == "${sha256}" ]] \
+    || { rm -f "${destination}.part"; die "${label} checksum mismatch." 1; }
+  mv -f "${destination}.part" "${destination}"
+}
+
 is_supported_agent_username() {
   # Either 2-32 chars starting with a letter and ending alphanumeric, with
   # underscore/hyphen allowed in the middle, or 1-32 alphanumeric chars.
@@ -1050,13 +1067,26 @@ validate_forgejo_config() {
 }
 
 validate_llama_config() {
+  local model_context_limit
   [[ "${LLAMA_PORT}" == "8080" ]] \
     || die "LLAMA_PORT is fixed at 8080 for this release." 2
   [[ "${LLAMA_MODEL_ID}" == "smollm2-360m-instruct-q4_k_m" ]] \
     || die "LLAMA_MODEL_ID must be smollm2-360m-instruct-q4_k_m." 2
+  model_context_limit="$(awk -v id="${LLAMA_MODEL_ID}" '
+    index($0, "\"id\": \"" id "\"") { found=1 }
+    found && /"context_size":/ {
+      value=$0
+      sub(/^.*"context_size":[[:space:]]*/, "", value)
+      sub(/[^0-9].*$/, "", value)
+      print value
+      exit
+    }
+  ' "${PAYLOAD_DIR}/etc/llama-models.json")"
+  [[ "${model_context_limit}" =~ ^[0-9]+$ ]] \
+    || die "Approved llama model context metadata is missing." 1
   [[ "${LLAMA_CONTEXT_SIZE}" =~ ^[0-9]+$ ]] \
-    && (( LLAMA_CONTEXT_SIZE >= 512 && LLAMA_CONTEXT_SIZE <= 2048 )) \
-    || die "LLAMA_CONTEXT_SIZE must be between 512 and the approved model maximum of 2048." 2
+    && (( LLAMA_CONTEXT_SIZE >= 512 && LLAMA_CONTEXT_SIZE <= model_context_limit )) \
+    || die "LLAMA_CONTEXT_SIZE must be between 512 and the approved model maximum of ${model_context_limit}." 2
   [[ "${LLAMA_CPU_THREADS}" =~ ^[0-9]+$ ]] \
     && (( LLAMA_CPU_THREADS >= 1 && LLAMA_CPU_THREADS <= 1024 )) \
     || die "LLAMA_CPU_THREADS must be between 1 and 1024." 2
@@ -4536,7 +4566,7 @@ install_llama() {
   local model_catalog="${PAYLOAD_DIR}/etc/llama-models.json"
   local arch runtime_url runtime_sha archive_root model_url model_sha
   local model_filename model_size runtime_dir runtime_archive runtime_stage
-  local model_path model_part actual
+  local model_path
 
   # option-sections: llama begin
   section "Validate standalone llama ownership and catalogue"
@@ -4612,18 +4642,8 @@ PY
     runtime_valid=1
   fi
   if (( ! runtime_valid )); then
-    if [[ -f "${runtime_archive}" ]]; then
-      actual="$(sha256sum "${runtime_archive}" | awk '{print $1}')"
-      [[ "${actual}" == "${runtime_sha}" ]] || rm -f "${runtime_archive}"
-    fi
-    if [[ ! -f "${runtime_archive}" ]]; then
-      curl_get -o "${runtime_archive}.part" "${runtime_url}" \
-        || die "Could not download pinned llama.cpp ${LLAMA_RUNTIME_RELEASE}." 1
-      actual="$(sha256sum "${runtime_archive}.part" | awk '{print $1}')"
-      [[ "${actual}" == "${runtime_sha}" ]] \
-        || { rm -f "${runtime_archive}.part"; die "llama.cpp archive checksum mismatch." 1; }
-      mv -f "${runtime_archive}.part" "${runtime_archive}"
-    fi
+    download_verified_file "${runtime_url}" "${runtime_sha}" \
+      "${runtime_archive}" "pinned llama.cpp ${LLAMA_RUNTIME_RELEASE}"
     if tar -tzf "${runtime_archive}" \
         | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
       die "Pinned llama.cpp archive contains an unsafe path." 1
@@ -4652,24 +4672,18 @@ PY
   mv -Tf /opt/llama.cpp/current.new /opt/llama.cpp/current
 
   section "Install verified default llama model"
-  if [[ -f "${model_path}" ]]; then
-    actual="$(sha256sum "${model_path}" | awk '{print $1}')"
-    [[ "${actual}" == "${model_sha}" ]] || rm -f "${model_path}"
-  fi
-  if [[ ! -f "${model_path}" ]]; then
-    model_part="${model_path}.part"
-    rm -f "${model_part}"
-    curl_get -o "${model_part}" "${model_url}" \
-      || { rm -f "${model_part}"; die "Could not download the approved llama model." 1; }
-    [[ "$(stat -c %s "${model_part}")" == "${model_size}" ]] \
-      || { rm -f "${model_part}"; die "llama model size mismatch." 1; }
-    actual="$(sha256sum "${model_part}" | awk '{print $1}')"
-    [[ "${actual}" == "${model_sha}" ]] \
-      || { rm -f "${model_part}"; die "llama model checksum mismatch." 1; }
-    mv -f "${model_part}" "${model_path}"
-    note_changed
-  else
+  local model_present=0
+  [[ -f "${model_path}" ]] \
+    && [[ "$(sha256sum "${model_path}" | awk '{print $1}')" == "${model_sha}" ]] \
+    && model_present=1
+  download_verified_file "${model_url}" "${model_sha}" \
+    "${model_path}" "approved llama model"
+  [[ "$(stat -c %s "${model_path}")" == "${model_size}" ]] \
+    || { rm -f "${model_path}"; die "llama model size mismatch." 1; }
+  if (( model_present )); then
     note_satisfied
+  else
+    note_changed
   fi
   chown llama-cpp:llama-cpp "${model_path}"
   chmod 640 "${model_path}"
@@ -4700,7 +4714,7 @@ EOF
   if [[ "${LLAMA_BOOT}" == "enabled" ]]; then
     systemctl enable --now llama-server.service
     local ready=0
-    for _ in $(seq 1 60); do
+    for _ in $(seq 1 "${LLAMA_HEALTH_ATTEMPTS}"); do
       if curl -fsS --max-time 2 -o /dev/null \
           "http://127.0.0.1:${LLAMA_PORT}/health"; then
         ready=1

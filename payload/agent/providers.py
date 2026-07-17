@@ -149,6 +149,7 @@ _SAFE_MODEL_ID = re.compile(r"\A[A-Za-z0-9._:/+@-]{1,200}\Z")
 _MAX_MODELS_RESPONSE_SIZE = 1024 * 1024
 _DEFAULT_HTTP_PORT = 80
 _DEFAULT_HTTPS_PORT = 443
+_MANAGED_LLAMA_LOOPBACK_PORTS = (8080, 58080)
 
 # Every provider key env var, in registry order. Used by the pi-mono
 # bridge driver to strip non-active provider keys before spawning the
@@ -624,7 +625,7 @@ def scan_lmstudio(
         raise ProviderError("The LM Studio scan network is not valid.") from exc
     if not isinstance(subnet, ipaddress.IPv4Network):
         raise ProviderError("LM Studio discovery requires an IPv4 network.")
-    ports = list(dict.fromkeys((scan_port, 8080, 58080)))
+    ports = list(dict.fromkeys((scan_port, *_MANAGED_LLAMA_LOOPBACK_PORTS)))
     probes = [("127.0.0.1", candidate) for candidate in ports]
     probes.extend(
         (str(address), scan_port)

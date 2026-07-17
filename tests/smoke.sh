@@ -2442,7 +2442,10 @@ run_noninteractive() {
   local llama_out
   llama_out="$(ZOMBIE_COLOR=never ZOMBIE_NONINTERACTIVE=1 \
     ./scripts/install.sh install llama --dry-run)"
-  grep -q "llama.cpp b10054" <<<"${llama_out}" \
+  local llama_release
+  llama_release="$(python3 -c \
+    'import json; print(json.load(open("payload/etc/llama-builds.json"))["release"])')"
+  grep -q "llama.cpp ${llama_release}" <<<"${llama_out}" \
     && grep -q "127.0.0.1:8080" <<<"${llama_out}" \
     || { echo "FAIL: standalone llama dry-run stanza missing" >&2; exit 1; }
   # Invalid option values must be rejected before any host change.

@@ -482,9 +482,7 @@ remove_component_llama() {
   local marker="" candidate
   for candidate in /etc/llama.cpp/managed-by-ubuntu-zombie \
       /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
-    if [[ -f "${candidate}" ]] \
-        && [[ "$(stat -c '%U:%G %a' "${candidate}" 2>/dev/null)" == "root:root 644" ]] \
-        && grep -Fqx 'component=llama' "${candidate}"; then
+    if valid_component_ownership_marker "${candidate}" "${COMPONENT_LLAMA}"; then
       marker="${candidate}"
       break
     fi
