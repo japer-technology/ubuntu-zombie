@@ -670,7 +670,7 @@ executing privileged installation.
 ### Phase 2 — one-line Ubuntu installation
 
 - Install the verified stage-1 `.deb`.
-- hand off to `sudo ubuntu-zombie install`;
+- Hand off to `sudo ubuntu-zombie install`;
 - preserve `--dry-run`, arguments, environment variables, and exit codes;
 - record bootstrap source and release in the receipt;
 - document inspect-then-run and fully verified alternatives.
