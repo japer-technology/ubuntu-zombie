@@ -61,8 +61,9 @@ The CodeQL workflow runs GitHub's static analysis for the code CodeQL can
 inspect in this repository. It analyzes two language categories:
 
 - `python` for the agent service under `payload/agent/`.
-- `javascript` for shipped JavaScript bridge code such as pi-mono and
-  pi-ai bridge assets.
+- `javascript` for shipped JavaScript bridge modules such as
+  `payload/agent/pi-mono-bridge.mjs` and
+  `payload/agent/pi-ai-bridge.mjs`.
 
 The workflow runs on pull requests targeting `main`, pushes to `main`, and
 a weekly Monday schedule. The scheduled run is important because it picks
