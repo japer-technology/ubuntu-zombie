@@ -203,6 +203,11 @@ note_changed()   { STEPS_CHANGED=$((STEPS_CHANGED + 1)); }
 
 PAYLOAD_DIR="${PAYLOAD_DIR:-${REPO_ROOT}/payload}"
 
+llama_catalog_release() {
+  awk -F'"' '/"release":[[:space:]]*"/ {print $4; exit}' \
+    "${PAYLOAD_DIR}/etc/llama-builds.json"
+}
+
 # Pinned versions of the Node bridges, read from their single source of
 # truth (the *.version files deployed alongside the agent). They are
 # embedded into the generated verify script and used by the install-time
@@ -1897,7 +1902,7 @@ print_llama_dry_run() {
   cat <<EOF
 
 Llama component:
-  Runtime:        llama.cpp b10054 (checksum-verified upstream CPU binary)
+  Runtime:        llama.cpp $(llama_catalog_release) (checksum-verified upstream CPU binary)
   Model:          SmolLM2 360M Instruct Q4_K_M (Apache-2.0, verified GGUF)
   API:            http://127.0.0.1:${LLAMA_PORT}/v1 (loopback only)
   Context:        ${LLAMA_CONTEXT_SIZE} tokens
@@ -4565,6 +4570,7 @@ install_llama() {
   local arch runtime_url runtime_sha archive_root model_url model_sha
   local model_filename model_size runtime_dir runtime_archive runtime_stage
   local model_path
+  local -a llama_build_data=() llama_model_data=()
 
   # option-sections: llama begin
   section "Validate standalone llama ownership and catalogue"
@@ -4574,7 +4580,7 @@ install_llama() {
     x86_64) arch=amd64 ;;
     aarch64) arch=arm64 ;;
   esac
-  mapfile -t _llama_build < <(python3 - "${build_catalog}" "${arch}" <<'PY'
+  mapfile -t llama_build_data < <(python3 - "${build_catalog}" "${arch}" <<'PY'
 import json
 import sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -4585,13 +4591,13 @@ print(asset["sha256"])
 print(asset["archive_root"])
 PY
   ) || die "Could not read the llama build catalogue for ${arch}." 1
-  (( ${#_llama_build[@]} == 4 )) \
+  (( ${#llama_build_data[@]} == 4 )) \
     || die "No approved llama.cpp runtime for architecture ${arch}." 65
-  LLAMA_RUNTIME_RELEASE="${_llama_build[0]}"
-  runtime_url="${_llama_build[1]}"
-  runtime_sha="${_llama_build[2]}"
-  archive_root="${_llama_build[3]}"
-  mapfile -t _llama_model < <(python3 - "${model_catalog}" "${LLAMA_MODEL_ID}" <<'PY'
+  LLAMA_RUNTIME_RELEASE="${llama_build_data[0]}"
+  runtime_url="${llama_build_data[1]}"
+  runtime_sha="${llama_build_data[2]}"
+  archive_root="${llama_build_data[3]}"
+  mapfile -t llama_model_data < <(python3 - "${model_catalog}" "${LLAMA_MODEL_ID}" <<'PY'
 import json
 import sys
 data = json.load(open(sys.argv[1], encoding="utf-8"))
@@ -4602,12 +4608,12 @@ print(model["filename"])
 print(model["size_bytes"])
 PY
   ) || die "Could not read approved llama model ${LLAMA_MODEL_ID}." 1
-  (( ${#_llama_model[@]} == 4 )) \
+  (( ${#llama_model_data[@]} == 4 )) \
     || die "Approved llama model metadata is incomplete." 1
-  model_url="${_llama_model[0]}"
-  model_sha="${_llama_model[1]}"
-  model_filename="${_llama_model[2]}"
-  model_size="${_llama_model[3]}"
+  model_url="${llama_model_data[0]}"
+  model_sha="${llama_model_data[1]}"
+  model_filename="${llama_model_data[2]}"
+  model_size="${llama_model_data[3]}"
   runtime_dir="/opt/llama.cpp/versions/${LLAMA_RUNTIME_RELEASE}-${arch}"
   runtime_archive="/var/cache/llama.cpp/${LLAMA_RUNTIME_RELEASE}-${arch}.tar.gz"
   model_path="/var/lib/llama.cpp/models/${model_filename}"
