@@ -942,7 +942,7 @@ const SLASH_COMMANDS = [
   ["/help", "List available commands.", "Help"],
   ["/load <id>", "Load a past conversation (alias: /resume <id>).", "Conversation"],
   ["/logout", "Log out and ask for the chat password again.", "Session"],
-  ["/local <url>", "Switch to a discovered local API.", "Configuration"],
+  ["/local [url]", "List or switch the active local API.", "Configuration"],
   ["/locals", "List discovered local API URLs.", "Configuration"],
   ["/model [id]", "List or switch the active model.", "Configuration"],
   ["/models", "List models available from the active provider.", "Configuration"],
@@ -1960,7 +1960,8 @@ async function handleSlashCommand(input) {
     case "/locals":
     case "/local": {
       addMessage("user", input);
-      if (cmd === "/locals" || !arg) {
+      const listOnly = cmd === "/locals" || (cmd === "/local" && !arg);
+      if (listOnly) {
         addMessage("system", "Scanning the local network for local APIs...");
         try {
           const data = await uzFetchJson("/api/locals");

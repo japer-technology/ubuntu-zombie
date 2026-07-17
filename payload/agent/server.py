@@ -1170,7 +1170,7 @@ class App:
         }
 
     def set_local_api(self, base_url: str) -> dict[str, Any]:
-        """Activate a discovered local OpenAI-compatible API URL."""
+        """Rescan, verify, and activate a local OpenAI-compatible API URL."""
         try:
             with self._lmstudio_lock:
                 servers = providers.scan_lmstudio()

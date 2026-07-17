@@ -507,6 +507,7 @@ def _models_json_path() -> Path:
 
 
 def _lmstudio_endpoint() -> tuple[str, str] | None:
+    """Resolve the configured API URL and its explicit or scheme-default port."""
     try:
         data = json.loads(_models_json_path().read_text(encoding="utf-8"))
         base_url = data["providers"]["lmstudio"]["baseUrl"]
