@@ -1070,8 +1070,6 @@ validate_llama_config() {
   local model_context_limit
   [[ "${LLAMA_PORT}" == "8080" ]] \
     || die "LLAMA_PORT is fixed at 8080 for this release." 2
-  [[ "${LLAMA_MODEL_ID}" == "smollm2-360m-instruct-q4_k_m" ]] \
-    || die "LLAMA_MODEL_ID must be smollm2-360m-instruct-q4_k_m." 2
   model_context_limit="$(awk -v id="${LLAMA_MODEL_ID}" '
     index($0, "\"id\": \"" id "\"") { found=1 }
     found && /"context_size":/ {
@@ -1083,7 +1081,7 @@ validate_llama_config() {
     }
   ' "${PAYLOAD_DIR}/etc/llama-models.json")"
   [[ "${model_context_limit}" =~ ^[0-9]+$ ]] \
-    || die "Approved llama model context metadata is missing." 1
+    || die "LLAMA_MODEL_ID is not present in the approved model catalogue." 2
   [[ "${LLAMA_CONTEXT_SIZE}" =~ ^[0-9]+$ ]] \
     && (( LLAMA_CONTEXT_SIZE >= 512 && LLAMA_CONTEXT_SIZE <= model_context_limit )) \
     || die "LLAMA_CONTEXT_SIZE must be between 512 and the approved model maximum of ${model_context_limit}." 2

@@ -2460,6 +2460,8 @@ run_noninteractive() {
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_VERSION=not.a.version!' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_RUNNER_LABELS=bad label' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=2' ./scripts/install.sh doctor
+  expect_exit_code 0 env 'LLAMA_PORT=8080' 'ZOMBIE_NONINTERACTIVE=1' \
+    ./scripts/install.sh install llama --dry-run
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_PORT=8081' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_CONTEXT_SIZE=nope' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_CONTEXT_SIZE=4096' ./scripts/install.sh doctor
