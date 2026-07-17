@@ -218,7 +218,7 @@ Interactive use can default to the latest stable release. Automation
 must be able to pin:
 
 ```bash
-ZOMBIE_VERSION=<version> sh install.sh
+ZOMBIE_VERSION=<version> sh ubuntu-zombie-bootstrap.sh
 ```
 
 The version selector should accept only the repository's canonical
@@ -708,14 +708,14 @@ executing privileged installation.
 
 The best immediate result is:
 
-1. keep Ubuntu Desktop as the only supported host;
-2. add a small, auditable Ubuntu bootstrap;
-3. download a pinned GitHub Release `.deb`;
-4. verify the artifact before installation;
-5. preserve the separate `sudo ubuntu-zombie install --dry-run` and
-   `sudo ubuntu-zombie install` decisions;
-6. retain tarball and Git clone paths for inspection and development;
-7. provide clear Mac and Windows pages that recommend an Ubuntu VM and
+1. Keep Ubuntu Desktop as the only supported host.
+2. Add a small, auditable Ubuntu bootstrap.
+3. Download a pinned GitHub Release `.deb`.
+4. Verify the artifact before installation.
+5. Preserve the separate `sudo ubuntu-zombie install --dry-run` and
+   `sudo ubuntu-zombie install` decisions.
+6. Retain tarball and Git clone paths for inspection and development.
+7. Provide clear Mac and Windows pages that recommend an Ubuntu VM and
    do not claim native support.
 
 This delivers the desired “no Git pull required” experience without
