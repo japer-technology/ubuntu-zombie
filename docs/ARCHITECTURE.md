@@ -21,8 +21,10 @@ scripts/install.sh
 ```
 
 The default install does **not** provision SSH, Tailscale, VNC, Docker,
-graphical autologin, or GUI automation. The only product access surface
-is the chat service on `127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}`.
+graphical autologin, or GUI automation. The baseline product access
+surface is the chat service on
+`127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}`; the optional standalone llama
+component adds only a loopback listener on port `8080`.
 
 ## Runtime components
 

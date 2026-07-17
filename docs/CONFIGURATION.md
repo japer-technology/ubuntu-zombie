@@ -589,8 +589,9 @@ The manifest is used by `verify`, `doctor`, and `repair` to discover
 installed components when you do not pass explicit targets. Selective
 `uninstall` uses component targets to decide which component to remove:
 `uninstall zombie` removes only the zombie account/runtime,
-`uninstall forgejo` removes only Forgejo, and bare `uninstall` removes
-all managed components.
+`uninstall forgejo` removes only Forgejo, `uninstall llama` removes only
+the standalone local model service, and bare `uninstall` removes all
+managed components.
 
 `--archive` and `--keep-agent` are lifecycle flags for zombie removal
 only; `uninstall forgejo --archive` and
@@ -630,7 +631,7 @@ documented above. Valid component targets are `zombie`, `forgejo`, and
 | `verify`    | Read-only state check. Does not change state.                         |
 | `doctor`    | Explain failures and likely fixes.                                    |
 | `repair`    | Apply known-safe fixes (re-assert permissions, re-render `pi/` tree). |
-| `uninstall` | Reverse the install (delegates to `scripts/uninstall.sh`). `uninstall zombie` and `uninstall forgejo` remove only that component; no target removes all managed components. |
+| `uninstall` | Reverse the install (delegates to `scripts/uninstall.sh`). A component target removes only that component; no target removes all managed components. |
 
 Examples:
 

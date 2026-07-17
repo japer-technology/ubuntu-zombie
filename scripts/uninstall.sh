@@ -479,8 +479,17 @@ remove_component_forgejo() {
 
 remove_component_llama() {
   local fail_count_before="${UNINSTALL_FAIL_COUNT}"
-  local marker=/etc/llama.cpp/managed-by-ubuntu-zombie
-  if [[ ! -f "${marker}" ]] || ! grep -Fqx 'component=llama' "${marker}"; then
+  local marker="" candidate
+  for candidate in /etc/llama.cpp/managed-by-ubuntu-zombie \
+      /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
+    if [[ -f "${candidate}" ]] \
+        && [[ "$(stat -c '%U:%G %a' "${candidate}" 2>/dev/null)" == "root:root 644" ]] \
+        && grep -Fqx 'component=llama' "${candidate}"; then
+      marker="${candidate}"
+      break
+    fi
+  done
+  if [[ -z "${marker}" ]]; then
     if [[ -e "${COMPONENT_MANIFEST_DIR}/${COMPONENT_LLAMA}" ]]; then
       warn "Llama manifest exists but its ownership marker is missing or invalid."
       warn "Refusing to remove any potentially unmanaged llama.cpp files."
@@ -508,7 +517,7 @@ remove_component_llama() {
     || remove_tree_checked "/var/cache/llama.cpp" "/var/cache/llama.cpp"
   [[ ! -d /var/log/llama.cpp ]] \
     || remove_tree_checked "/var/log/llama.cpp" "/var/log/llama.cpp"
-  if id llama-cpp >/dev/null 2>&1; then
+  if id llama-cpp >/dev/null 2>&1 && [[ ! -d /var/lib/llama.cpp ]]; then
     if confirm "Remove the llama-cpp system account?"; then
       run_or_warn "Remove llama-cpp account" \
         "deluser llama-cpp >/dev/null 2>&1 || userdel llama-cpp"

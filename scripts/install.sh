@@ -534,7 +534,7 @@ legacy_forgejo_present() {
 }
 
 legacy_llama_present() {
-  [[ -f /etc/llama.cpp/managed-by-ubuntu-zombie ]]
+  llama_installation_is_managed
 }
 
 resolve_lifecycle_targets_from_manifest() {
@@ -4486,8 +4486,13 @@ install_zombie() {
 }
 
 llama_installation_is_managed() {
-  [[ -f /etc/llama.cpp/managed-by-ubuntu-zombie ]] \
-    && grep -Fqx 'component=llama' /etc/llama.cpp/managed-by-ubuntu-zombie
+  local marker
+  for marker in /etc/llama.cpp/managed-by-ubuntu-zombie \
+      /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
+    [[ -f "${marker}" ]] && [[ "$(stat -c '%U:%G %a' "${marker}" 2>/dev/null)" == "root:root 644" ]] \
+      && grep -Fqx 'component=llama' "${marker}" && return 0
+  done
+  return 1
 }
 
 assert_llama_installation_safe() {
@@ -4571,12 +4576,16 @@ PY
   fi
   install -d -m 755 -o root -g root /opt/llama.cpp /opt/llama.cpp/versions
   install -d -m 755 -o root -g root /etc/llama.cpp /var/cache/llama.cpp
+  install -d -m 755 -o root -g root /var/lib/llama.cpp
   install -d -m 750 -o llama-cpp -g llama-cpp \
-    /var/lib/llama.cpp /var/lib/llama.cpp/models \
+    /var/lib/llama.cpp/models \
     /var/lib/llama.cpp/state /var/log/llama.cpp
-  printf 'component=llama\nformat=1\n' \
-    | install -m 644 -o root -g root /dev/stdin \
-        /etc/llama.cpp/managed-by-ubuntu-zombie
+  local marker
+  for marker in /etc/llama.cpp/managed-by-ubuntu-zombie \
+      /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
+    printf 'component=llama\nformat=1\n' \
+      | install -m 644 -o root -g root /dev/stdin "${marker}"
+  done
 
   section "Install pinned llama.cpp CPU runtime"
   if [[ ! -x "${runtime_dir}/llama-server" ]]; then
