@@ -261,7 +261,7 @@ dry-run output, receipts, and `docs/CONFIGURATION.md`:
 | `LLAMA_MODEL_ID` | none | Approved model-catalogue identifier |
 | `LLAMA_QUANTIZATION` | none | Approved quantisation for the selected model |
 | `LLAMA_CONTEXT_SIZE` | `recommended` | Tested context size or explicit approved value |
-| `LLAMA_COMPUTE` | `cpu` | Lowercase enum: `cpu`, `cuda`, `rocm`, `vulkan`, or `sycl` |
+| `LLAMA_COMPUTE` | `cpu` | Lowercase enum: `cpu`, or a catalogue-approved `cuda`, `rocm`, `vulkan`, or `sycl` combination |
 | `LLAMA_GPU_DEVICE` | none | Stable detected device identifier |
 | `LLAMA_GPU_OFFLOAD` | `0` | Layer count or `full` |
 | `LLAMA_CPU_THREADS` | `recommended` | Positive value not exceeding detected threads |
@@ -531,10 +531,14 @@ Define the policies precisely:
 
 | Policy | Boot behaviour | Idle behaviour | Start trigger |
 | ------ | -------------- | -------------- | ------------- |
-| `resident` | Follows the instance's `LLAMA_BOOT` or `ZOMBIE_LLAMA_BOOT` value | Model remains loaded | systemd or manager |
-| `sleep` | Follows the instance's `LLAMA_BOOT` or `ZOMBIE_LLAMA_BOOT` value | Pinned native runtime sleep after idle threshold | New authenticated request wakes it |
+| `resident` | Starts at boot only when the instance's `LLAMA_BOOT` or `ZOMBIE_LLAMA_BOOT` value is `enabled` | Model remains loaded after it is started | systemd or manager |
+| `sleep` | Starts at boot only when the instance's `LLAMA_BOOT` or `ZOMBIE_LLAMA_BOOT` value is `enabled` | Pinned native runtime sleep after idle threshold | Manager start or an authenticated request to a running, sleeping service |
 | `on-demand` | Service disabled at boot | Service stops when no longer needed | Manager `ensure-running`; Zombie provider uses this before a private turn |
 | `manual` | Service disabled at boot | No automatic transition | Operator runs manager `start` |
+
+For `resident` and `sleep`, a disabled boot setting leaves the installed
+service stopped after boot until the manager starts it. `on-demand` and
+`manual` always require boot to be disabled; reject conflicting input.
 
 Do not emulate transparent on-demand startup by placing an unreviewed proxy
 in front of the API. Public third-party clients must call
@@ -603,7 +607,7 @@ Private integration must:
   the private model;
 - configure the exact private base URL and logical model ID;
 - pass the private credential only to the private bridge invocation;
-- call `ensure-running` before a chat conversation turn for `on-demand`;
+- call `ensure-running` before each inference request for `on-demand`;
 - report `starting`, `loading`, `sleeping`, `ready`, and failure states in
   chat status and model UX;
 - provide clear recovery guidance without exposing credentials or command
