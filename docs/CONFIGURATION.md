@@ -132,14 +132,16 @@ local server through this `lmstudio` provider; `pi --provider openai`
 would ignore the base URL and hit `api.openai.com` instead, so a
 dedicated local provider is required. Most local servers ignore the API
 key; set `ZOMBIE_LOCAL_LLM_API_KEY` (or edit the files afterwards) if
-yours requires a real one. After installation, `/locals` rescans the local
-`/24` and lists the discovered API URLs, marking the active URL when it is
-found. `/local <url>` activates a listed API, retaining the current model
-when that server advertises it, and updates the running provider, model,
-and `~/.pi/agent/models.json`. `/models` lists the catalogue exposed by the
-active provider, including live LM Studio models; `/model <id>` switches
-models. `/status` includes the configured LM Studio IP address and
-port.
+yours requires a real one. After installation, `/locals` rescans ports
+`1234`, `8080`, `11434`, and `51234` across the local `/24` and on
+`127.0.0.1`, then lists the discovered API URLs and marks the active URL
+when found. The private managed llama.cpp port `58080` is also checked on
+loopback. `/local <url>` activates a listed API, retaining the current
+model when that server advertises it, and updates the running provider,
+model, and `~/.pi/agent/models.json`. `/models` lists the catalogue exposed
+by the active provider, including live LM Studio models; `/model <id>`
+switches models. `/status` includes the configured LM Studio IP address
+and port.
 
 The scan is best-effort and skipped automatically for `--yes`,
 non-interactive, and non-TTY runs. It needs `curl` and `python3`
@@ -148,7 +150,7 @@ non-interactive, and non-TTY runs. It needs `curl` and `python3`
 | Variable                 | Default | Purpose                                                              |
 | ------------------------ | ------- | -------------------------------------------------------------------- |
 | `ZOMBIE_SKIP_LLM_SCAN`   | `0`     | Set to `1` to skip the LAN scan entirely.                            |
-| `ZOMBIE_LLM_SCAN_PORT`   | `1234`  | TCP port probed on each LAN address. Runtime `/locals` also probes loopback ports `8080` and `58080`. |
+| `ZOMBIE_LLM_SCAN_PORT`   | `1234`  | Extra TCP port probed by runtime `/locals`; installer discovery uses this port exclusively. |
 | `ZOMBIE_LOCAL_LLM_API_KEY` | `local` | API key recorded for the discovered server (most local servers ignore it). |
 
 You can also trigger the scan on demand from the interactive setup

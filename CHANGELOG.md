@@ -8,6 +8,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Chat discovery and layout
+
+- **Broader local API discovery:** `/locals` now scans ports `1234`, `8080`,
+  `11434`, and `51234` across the local IPv4 `/24` and on loopback, while
+  retaining private managed llama.cpp discovery on loopback port `58080`.
+- **Consistent transcript layout:** user questions now use the same transcript
+  width and offset as assistant responses.
+- **Optional full-width display:** `/fullwidth [on|off]` toggles or explicitly
+  controls a full-width transcript and composer for the current page.
+
 ### Standalone llama.cpp
 
 - **Independent PC-wide llama:** `install llama` now installs a pinned,
