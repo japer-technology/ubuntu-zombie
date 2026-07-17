@@ -105,7 +105,7 @@ method. Documentation should offer three confidence levels:
 ### Fast path
 
 ```bash
-curl -fsSL https://install.example/ubuntu-zombie | sh
+curl -fsSL https://get.ubuntu-zombie.example/ | sh
 ```
 
 This is memorable and suitable for a disposable machine. The bootstrap
@@ -115,7 +115,7 @@ must still verify the release artifact before running it.
 
 ```bash
 curl -fsSLo /tmp/ubuntu-zombie-install.sh \
-  https://install.example/ubuntu-zombie
+  https://get.ubuntu-zombie.example/
 less /tmp/ubuntu-zombie-install.sh
 sh /tmp/ubuntu-zombie-install.sh
 ```
@@ -144,7 +144,7 @@ This is the smallest useful improvement.
 The public command could eventually look like:
 
 ```bash
-curl -fsSL https://get.ubuntu-zombie.example/install.sh | sh
+curl -fsSL https://get.ubuntu-zombie.example/ | sh
 ```
 
 Until a project-controlled domain exists, a raw GitHub URL is possible:
@@ -183,7 +183,7 @@ It should preserve arguments after the bootstrap separator so an
 operator can request:
 
 ```bash
-curl -fsSL https://get.ubuntu-zombie.example/install.sh |
+curl -fsSL https://get.ubuntu-zombie.example/ |
   sh -s -- --dry-run
 ```
 
@@ -231,11 +231,11 @@ into a command.
 The most conventional long-term Ubuntu experience is:
 
 ```bash
-curl -fsSL https://packages.example/key.asc |
+curl -fsSL https://packages.ubuntu-zombie.example/key.asc |
   sudo gpg --dearmor -o /usr/share/keyrings/ubuntu-zombie.gpg
 
 echo "deb [signed-by=/usr/share/keyrings/ubuntu-zombie.gpg] \
-https://packages.example/ubuntu stable main" |
+https://packages.ubuntu-zombie.example/ubuntu stable main" |
   sudo tee /etc/apt/sources.list.d/ubuntu-zombie.list
 
 sudo apt update
@@ -433,15 +433,15 @@ They offer convenience without overstating cross-platform support.
 Use one friendly dispatcher plus platform-specific implementations:
 
 ```text
-https://get.example/ubuntu-zombie       universal shell dispatcher
-https://get.example/ubuntu-zombie/linux Ubuntu implementation
-https://get.example/ubuntu-zombie/macos macOS status/implementation
+https://get.ubuntu-zombie.example/        universal shell dispatcher
+https://get.ubuntu-zombie.example/linux   Ubuntu implementation
+https://get.ubuntu-zombie.example/macos   macOS status/implementation
 ```
 
 Windows needs PowerShell rather than pretending that `sh` is universal:
 
 ```text
-https://get.example/ubuntu-zombie/windows.ps1
+https://get.ubuntu-zombie.example/windows.ps1
 ```
 
 The dispatcher should contain only detection and delegation. Shared
@@ -519,7 +519,7 @@ secrets or arbitrary server responses.
 A one-line installer also needs a clear repeat story:
 
 ```bash
-curl -fsSL https://get.example/ubuntu-zombie | sh
+curl -fsSL https://get.ubuntu-zombie.example/ | sh
 ```
 
 On an installed host, the bootstrap should recognise the stage-1 package,
@@ -724,7 +724,7 @@ forking the installer or weakening the trust model.
 The command can eventually be as simple as:
 
 ```bash
-curl -fsSL https://get.example/ubuntu-zombie | sh
+curl -fsSL https://get.ubuntu-zombie.example/ | sh
 ```
 
 But the architecture behind that command should remain deliberately
