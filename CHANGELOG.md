@@ -8,6 +8,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Policy gate
+
+- **Fail-closed policy restored:** the shipped `policy.yaml` again defaults
+  unknown commands to `destructive`, requires approval for `user_change`,
+  and no longer escalates every `sudo`/`doas`/`pkexec` invocation — the
+  argv-aware classifier strips `sudo` and classifies the target program.
+- **Safe `/dev` pseudo-devices:** system-path rules now exclude
+  `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/tty` and `/dev/fd/N`,
+  so `tee /dev/stderr` and `>/dev/null` stay `read_only`.
+
 ### Chat discovery and layout
 
 - **Broader local API discovery:** `/locals` now scans ports `1234`, `8080`,
