@@ -1180,7 +1180,7 @@ class App:
                     None,
                 )
                 if selected is None:
-                    return {"error": f"No local API found at {base_url!r}."}
+                    return {"error": f"No local API found at {base_url}."}
                 provider, model, address = providers.activate_lmstudio(selected)
         except providers.ProviderError as exc:
             log_event("lmstudio_scan_failed", error=str(exc))
