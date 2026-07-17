@@ -60,7 +60,9 @@ The chat streams live turn progress when the browser supports
 `EventSource`, falls back automatically when it does not, and keeps one
 visible queued message if you submit while the agent is already working.
 Type `/` to browse and complete valid chat commands without leaving the
-composer; `/help` shows the compact command index.
+composer; `/help` shows the compact command index. User questions and
+assistant responses share the same transcript width, while
+`/fullwidth [on|off]` expands or restores the transcript and composer.
 
 Provider and model selection are read from
 `/opt/ai-zombie/secrets/env`, not from `pi`'s native `~/.pi` defaults:
@@ -77,8 +79,9 @@ fully offline with no cloud API key. Skip it with
 `ZOMBIE_SKIP_LLM_SCAN=1`. See
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md#optional-use-a-local-llm-auto-detected-on-your-lan)
 and [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#local-llm-discovery-lan-scan).
-At runtime, `/locals` also checks the conventional managed llama.cpp
-loopback ports `8080` and `58080`.
+At runtime, `/locals` checks ports `1234`, `8080`, `11434`, and `51234`
+across the local IPv4 `/24` and on `127.0.0.1`; the private managed
+llama.cpp port `58080` remains loopback-only.
 
 Prefer a `.deb`? Each [GitHub Release](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
 ships `ubuntu-zombie_<version>_all.deb` plus a `SHA256SUMS` checksum file

@@ -149,7 +149,8 @@ _SAFE_MODEL_ID = re.compile(r"\A[A-Za-z0-9._:/+@-]{1,200}\Z")
 _MAX_MODELS_RESPONSE_SIZE = 1024 * 1024
 _DEFAULT_HTTP_PORT = 80
 _DEFAULT_HTTPS_PORT = 443
-_MANAGED_LLAMA_LOOPBACK_PORTS = (8080, 58080)
+_LOCAL_API_LAN_PORTS = (1234, 8080, 11434, 51234)
+_MANAGED_LLAMA_LOOPBACK_PORTS = (58080,)
 
 # Every provider key env var, in registry order. Used by the pi-mono
 # bridge driver to strip non-active provider keys before spawning the
@@ -605,9 +606,9 @@ def scan_lmstudio(
 ) -> list[dict]:
     """Scan for local OpenAI-compatible servers.
 
-    The configured port is scanned across the local /24. The conventional
-    standalone and Zombie-private llama.cpp ports are also checked on loopback
-    only, so ``/locals`` finds either installation without widening LAN scans.
+    Conventional local API ports and the configured port are scanned across
+    the local /24 and on loopback. The Zombie-private llama.cpp port remains
+    loopback-only.
     """
     try:
         scan_port = int(port if port is not None
@@ -627,11 +628,15 @@ def scan_lmstudio(
         raise ProviderError("LM Studio discovery requires an IPv4 network.")
     # dict preserves insertion order, so this removes duplicates without
     # changing the configured-port-first probe order.
-    ports = list(dict.fromkeys((scan_port, *_MANAGED_LLAMA_LOOPBACK_PORTS)))
-    probes = [("127.0.0.1", candidate) for candidate in ports]
+    lan_ports = list(dict.fromkeys((scan_port, *_LOCAL_API_LAN_PORTS)))
+    loopback_ports = list(dict.fromkeys(
+        (*lan_ports, *_MANAGED_LLAMA_LOOPBACK_PORTS)
+    ))
+    probes = [("127.0.0.1", candidate) for candidate in loopback_ports]
     probes.extend(
-        (str(address), scan_port)
+        (str(address), candidate)
         for address in subnet if str(address) != "127.0.0.1"
+        for candidate in lan_ports
     )
     with ThreadPoolExecutor(max_workers=min(32, len(probes))) as pool:
         found = list(pool.map(

@@ -549,9 +549,9 @@ if (prov, chosen) != ("lmstudio", "qwen/qwen3-coder"):
 # Runtime LM Studio discovery scans a bounded network, preserves the full
 # advertised catalogue in pi's provider file, and activates the provider.
 original_probe = _pr._probe_lmstudio
-probed_addresses = []
+probes = []
 def fake_probe(address, port):
-    probed_addresses.append(address)
+    probes.append((address, port))
     if address != "127.0.0.1":
         return None
     return {
@@ -566,12 +566,20 @@ try:
 finally:
     _pr._probe_lmstudio = original_probe
 if (
-    "127.0.0.2" not in probed_addresses
-    or probed_addresses.index("127.0.0.1") > probed_addresses.index("127.0.0.2")
+    ("127.0.0.2", 1234) not in probes
+    or probes.index(("127.0.0.1", 1234)) > probes.index(("127.0.0.2", 1234))
 ):
     raise SystemExit("scan_lmstudio must probe loopback before the selected subnet")
+for address in ("127.0.0.1", "127.0.0.2", "127.0.0.3"):
+    for port in (1234, 8080, 11434, 51234):
+        if (address, port) not in probes:
+            raise SystemExit(f"scan_lmstudio missed {(address, port)!r}")
 if [entry["address"] for entry in discovered] != [
-    "127.0.0.1:1234", "127.0.0.1:8080", "127.0.0.1:58080"
+    "127.0.0.1:1234",
+    "127.0.0.1:8080",
+    "127.0.0.1:11434",
+    "127.0.0.1:51234",
+    "127.0.0.1:58080",
 ]:
     raise SystemExit(f"scan_lmstudio wrong: {discovered!r}")
 
@@ -622,6 +630,8 @@ if locals_info != {
     "locals": [
         "http://127.0.0.1:1234/v1",
         "http://127.0.0.1:8080/v1",
+        "http://127.0.0.1:11434/v1",
+        "http://127.0.0.1:51234/v1",
         "http://127.0.0.1:58080/v1",
     ],
 }:
@@ -2837,8 +2847,14 @@ EOF
     || { echo "uninstall.sh must reverse the Forgejo component" >&2; exit 1; }
   grep -q "Removing standalone llama component" scripts/uninstall.sh \
     || { echo "uninstall.sh must reverse the llama component" >&2; exit 1; }
-  grep -q "8080, 58080" payload/agent/providers.py \
-    || { echo "/locals must probe both managed llama loopback ports" >&2; exit 1; }
+  grep -q "_LOCAL_API_LAN_PORTS = (1234, 8080, 11434, 51234)" \
+    payload/agent/providers.py \
+    || { echo "/locals must probe standard API ports across the LAN" >&2; exit 1; }
+  grep -q '\["/fullwidth \[on|off\]"' payload/agent/templates/index.html \
+    || { echo "chat must expose /fullwidth with optional on/off" >&2; exit 1; }
+  grep -q 'body.fullwidth main, body.fullwidth .composer' \
+    payload/agent/templates/index.html \
+    || { echo "/fullwidth must widen the transcript and composer" >&2; exit 1; }
   python3 payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
 import importlib.machinery
