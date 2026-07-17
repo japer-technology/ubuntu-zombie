@@ -261,7 +261,7 @@ dry-run output, receipts, and `docs/CONFIGURATION.md`:
 | `LLAMA_MODEL_ID` | none | Approved model-catalogue identifier |
 | `LLAMA_QUANTISATION` | none | Approved quantisation for the selected model |
 | `LLAMA_CONTEXT_SIZE` | `recommended` | Tested context size or explicit approved value |
-| `LLAMA_COMPUTE` | `cpu` | Lowercase enum: `cpu`, or a catalogue-approved `cuda`, `rocm`, `vulkan`, or `sycl` combination |
+| `LLAMA_COMPUTE` | `cpu` | Lowercase backend enum; accelerator validity comes from the selected build/model catalogue entries |
 | `LLAMA_GPU_DEVICE` | none | Stable detected device identifier |
 | `LLAMA_GPU_OFFLOAD` | `0` | Layer count or `full` |
 | `LLAMA_CPU_THREADS` | `recommended` | Positive value not exceeding detected threads |
@@ -320,8 +320,9 @@ or changing the host.
 - GPU selection requires a detected, usable backend and stable device.
 - Offload cannot exceed the model's tested layer count or estimated VRAM.
 - `sleep` requires a pinned runtime with tested native idle sleep.
-- `on-demand` requires a manager-integrated caller; it must not be advertised
-  as transparent activation for arbitrary public API clients.
+- `on-demand` permits automatic `ensure-running` only for the private Zombie
+  provider. Public third-party clients must run `llama-manager start`
+  explicitly or select `resident` or `sleep`.
 - `manual` disables automatic start and automatic recovery.
 - A public and private combined install must have enough RAM, VRAM, disk, and
   port capacity for both selections, including simultaneous loading.
@@ -531,7 +532,7 @@ Define the policies precisely:
 
 | Policy | Boot behaviour | Idle behaviour | Start trigger |
 | ------ | -------------- | -------------- | ------------- |
-| `resident` | Respects the instance boot setting (`enabled` or `disabled`) | Model remains loaded after it is started | systemd or manager |
+| `resident` | Respects the instance boot setting (`enabled` or `disabled`) | Model remains loaded after it is started | Automatic through systemd when boot is enabled, or manual through the manager |
 | `sleep` | Respects the instance boot setting (`enabled` or `disabled`) | Pinned native runtime sleep after idle threshold | Manager start or an authenticated request to a running, sleeping service |
 | `on-demand` | Service disabled at boot | Service stops when no longer needed | Manager `ensure-running`; Zombie provider uses this before a private turn |
 | `manual` | Service disabled at boot | No automatic transition | Operator runs manager `start` |
@@ -545,9 +546,11 @@ in front of the API. Public third-party clients must call
 `llama-manager start` or use `resident`/`sleep`. The private Zombie provider
 may call the protected `ensure-running` operation before a turn.
 
-If the selected pinned runtime cannot prove native authenticated wake from
-sleep, omit `sleep` rather than approximating it with an unreliable process
-watcher.
+The pinned-build release validation must prove native sleep by observing the
+documented health-state transition, then sending an authenticated inference
+request and observing a bounded return to ready with a valid response. If the
+selected runtime cannot pass that integration test, omit `sleep` rather than
+approximating it with an unreliable process watcher.
 
 ## systemd and process isolation
 
@@ -772,8 +775,9 @@ ownership and later repair semantics are clear.
 - Record licences and redistribution decisions before release.
 - Build verified source in a root-owned staging directory.
 - Do not execute CMake or model metadata from an operator-writable tree.
-- Treat GGUF and chat-template metadata as untrusted input.
-- Do not evaluate arbitrary template code in installer or manager processes.
+- Treat GGUF chat templates and similar model metadata as untrusted input.
+- Do not evaluate arbitrary GGUF chat-template or model-metadata code in
+  installer or manager processes.
 - Require authentication even on loopback.
 - Keep private and public credentials, groups, and environment forwarding
   separate.
