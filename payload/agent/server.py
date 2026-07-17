@@ -1155,19 +1155,33 @@ class App:
             ),
         }
 
-    def discover_lmstudio(self) -> dict[str, Any]:
-        """Rescan the LAN and activate the first discovered LM Studio server."""
+    def local_apis_info(self) -> dict[str, Any]:
+        """List discovered local OpenAI-compatible API URLs."""
         try:
             with self._lmstudio_lock:
                 servers = providers.scan_lmstudio()
-                if not servers:
-                    log_event("lmstudio_scan", servers_found=0)
-                    return {
-                        "error": (
-                            "No LM Studio servers were found on the local /24."
-                        )
-                    }
-                provider, model, address = providers.activate_lmstudio(servers[0])
+        except providers.ProviderError as exc:
+            log_event("lmstudio_scan_failed", error=str(exc))
+            return {"error": str(exc)}
+        log_event("lmstudio_scan", servers_found=len(servers))
+        return {
+            "current": providers.lmstudio_base_url(),
+            "locals": [server["base_url"] for server in servers],
+        }
+
+    def set_local_api(self, base_url: str) -> dict[str, Any]:
+        """Activate a discovered local OpenAI-compatible API URL."""
+        try:
+            with self._lmstudio_lock:
+                servers = providers.scan_lmstudio()
+                selected = next(
+                    (server for server in servers
+                     if server.get("base_url") == base_url),
+                    None,
+                )
+                if selected is None:
+                    return {"error": f"No local API found at {base_url!r}."}
+                provider, model, address = providers.activate_lmstudio(selected)
         except providers.ProviderError as exc:
             log_event("lmstudio_scan_failed", error=str(exc))
             return {"error": str(exc)}
@@ -1180,7 +1194,7 @@ class App:
             "provider": provider,
             "model": model,
             "address": address,
-            "servers": servers,
+            "url": selected["base_url"],
         }
 
 
@@ -1511,6 +1525,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/models":
             self._send_json(self.app.models_info())
             return
+        if self.path == "/api/locals":
+            self._send_json(self.app.local_apis_info())
+            return
         if self.path == "/api/status":
             self._send_json(self.app.provider_info())
             return
@@ -1623,8 +1640,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send_json(self.app.set_model(model))
             return
-        if self.path == "/api/lmstudio":
-            self._send_json(self.app.discover_lmstudio())
+        if self.path == "/api/local":
+            data = self._read_json()
+            base_url = (data.get("url") or "").strip()
+            if not base_url:
+                self._send_json({"error": "missing local API URL"}, 400)
+                return
+            self._send_json(self.app.set_local_api(base_url))
             return
         if len(parts) == 4 and parts[:2] == ["api", "conversation"]:
             try:

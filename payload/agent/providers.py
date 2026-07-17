@@ -506,8 +506,8 @@ def _models_json_path() -> Path:
     return Path(os.environ.get("HOME", "/tmp")) / ".pi" / "agent" / "models.json"
 
 
-def lmstudio_address() -> str | None:
-    """Return the configured LM Studio host and port, if available."""
+def lmstudio_base_url() -> str | None:
+    """Return the configured local OpenAI-compatible API URL, if available."""
     try:
         data = json.loads(_models_json_path().read_text(encoding="utf-8"))
         base_url = data["providers"]["lmstudio"]["baseUrl"]
@@ -518,11 +518,22 @@ def lmstudio_address() -> str | None:
     from urllib.parse import urlparse
     try:
         parsed = urlparse(base_url)
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        parsed.port
     except ValueError:
         return None
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
+    return base_url
+
+
+def lmstudio_address() -> str | None:
+    """Return the configured LM Studio host and port, if available."""
+    base_url = lmstudio_base_url()
+    if not base_url:
+        return None
+    from urllib.parse import urlparse
+    parsed = urlparse(base_url)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     return f"{parsed.hostname}:{port}"
 
 

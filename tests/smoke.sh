@@ -593,7 +593,7 @@ if _pr.provider_status() != (
 ):
     raise SystemExit(f"lmstudio provider status wrong: {_pr.provider_status()!r}")
 
-# Server App wrappers: GET /api/models and POST /api/model payloads.
+# Server App wrappers: model and local API listing/selection payloads.
 os.environ["ZOMBIE_PROVIDER"] = "openai"
 os.environ.pop("ZOMBIE_MODEL", None)
 app = server.App()
@@ -611,11 +611,28 @@ if "error" not in bad:
 original_scan = _pr.scan_lmstudio
 try:
     _pr.scan_lmstudio = lambda *_args, **_kwargs: discovered
-    selected = app.discover_lmstudio()
+    locals_info = app.local_apis_info()
+    selected = app.set_local_api("http://127.0.0.1:1234/v1")
 finally:
     _pr.scan_lmstudio = original_scan
-if selected.get("address") != "127.0.0.1:1234":
-    raise SystemExit(f"App.discover_lmstudio wrong: {selected!r}")
+if locals_info != {
+    "current": "http://127.0.0.1:1234/v1",
+    "locals": ["http://127.0.0.1:1234/v1"],
+}:
+    raise SystemExit(f"App.local_apis_info wrong: {locals_info!r}")
+if (
+    selected.get("address") != "127.0.0.1:1234"
+    or selected.get("url") != "http://127.0.0.1:1234/v1"
+):
+    raise SystemExit(f"App.set_local_api wrong: {selected!r}")
+original_scan = _pr.scan_lmstudio
+try:
+    _pr.scan_lmstudio = lambda *_args, **_kwargs: discovered
+    missing = app.set_local_api("http://127.0.0.2:1234/v1")
+finally:
+    _pr.scan_lmstudio = original_scan
+if "error" not in missing:
+    raise SystemExit(f"App.set_local_api should reject unknown URL: {missing!r}")
 status = app.provider_info()
 if status.get("lmstudio_address") != "127.0.0.1:1234":
     raise SystemExit(f"App.provider_info missing LM Studio address: {status!r}")
@@ -2788,9 +2805,10 @@ EOF
     || { echo "chat UI must expose the logoff button" >&2; exit 1; }
   grep -q 'case "/logout"' payload/agent/templates/index.html \
     || { echo "chat UI must expose the /logout command" >&2; exit 1; }
-  grep -q 'case "/lmstudio"' payload/agent/templates/index.html \
+  grep -q 'case "/locals"' payload/agent/templates/index.html \
+    && grep -q 'case "/local"' payload/agent/templates/index.html \
     && grep -q 'case "/models"' payload/agent/templates/index.html \
-    || { echo "chat UI must expose /lmstudio and /models commands" >&2; exit 1; }
+    || { echo "chat UI must expose /locals, /local, and /models commands" >&2; exit 1; }
   grep -q 'setAuthState(false, false)' payload/agent/templates/index.html \
     || { echo "chat UI must hide Logoff when the password gate is removed" >&2; exit 1; }
   grep -q 'Commands by category:' payload/agent/templates/index.html \
