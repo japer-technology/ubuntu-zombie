@@ -20,6 +20,7 @@ _ubuntu_zombie_install() {
   components=(
     'zombie:Ubuntu Zombie account, runtime, chat UI, policy, and services'
     'forgejo:Forgejo + PostgreSQL option target'
+    'llama:Standalone PC-wide llama.cpp server'
   )
   common_flags=(
     '(-h --help)'{-h,--help}'[Show help and exit]'
@@ -44,7 +45,7 @@ _ubuntu_zombie_install() {
   for word in "${words[@]:1:CURRENT-1}"; do
     case "${word}" in
       install|verify|doctor|repair|uninstall) [[ -z "${seen_verb}" ]] && seen_verb="${word}" ;;
-      zombie|forgejo) used_components+=("${word}") ;;
+      zombie|forgejo|llama) used_components+=("${word}") ;;
     esac
   done
 

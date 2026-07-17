@@ -8,6 +8,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Standalone llama.cpp
+
+- **Independent PC-wide llama:** `install llama` now installs a pinned,
+  checksum-verified CPU llama.cpp runtime and small default model on
+  `127.0.0.1:8080`, with an isolated account, paths, systemd unit,
+  `llama-manager`, full component lifecycle, and conflict-safe uninstall.
+  It does not install or modify the Zombie component.
+- **Managed llama discovery:** chat `/locals` now checks loopback ports
+  `8080` and `58080` in addition to the configured LAN scan port.
+
 ### Dependency updates
 
 - **Current pi agent stack:** updated `@earendil-works/pi-ai` and

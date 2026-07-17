@@ -21,8 +21,10 @@ scripts/install.sh
 ```
 
 The default install does **not** provision SSH, Tailscale, VNC, Docker,
-graphical autologin, or GUI automation. The only product access surface
-is the chat service on `127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}`.
+graphical autologin, or GUI automation. The baseline product access
+surface is the chat service on
+`127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}`; the optional standalone llama
+component adds only a loopback listener on port `8080`.
 
 ## Runtime components
 
@@ -99,8 +101,8 @@ Built-in skills ship under `/opt/ai-zombie/skills/` and currently cover
 
 The installer uses the component-aware grammar `scripts/install.sh
 <verb> [component ...] [flags]`. Public targets currently are `zombie`
-(the baseline account, runtime, chat UI, policy, and services) and
-`forgejo`. The legacy `ZOMBIE_INSTALL_*` flags remain supported and are
+(the baseline account, runtime, chat UI, policy, and services), `forgejo`,
+and `llama`. The legacy `ZOMBIE_INSTALL_*` flags remain supported and are
 additive with explicit targets; all default to `0`, and specifications
 live under `options/`. Each component follows one contract: validated
 settings, an entry in the interactive Options menu, a dry-run stanza,
@@ -135,6 +137,21 @@ The Forgejo hook has an explicit package set (`git`, `git-lfs`,
 `postgresql`, `postgresql-contrib`, `openssl`, `xz-utils`, `caddy`,
 `avahi-daemon`, and `libnss-mdns`, plus `docker.io` for the runner) and
 does not depend on zombie-owned state.
+
+The standalone **llama** component has no dependency on `zombie`. It
+installs a pinned upstream CPU runtime under `/opt/llama.cpp`, a verified
+model under `/var/lib/llama.cpp`, fixed configuration under
+`/etc/llama.cpp`, and a hardened `llama-server.service` running as the
+non-login `llama-cpp` account. Its OpenAI-compatible listener is fixed to
+`127.0.0.1:8080`; it is intentionally available PC-wide to local users but
+never LAN-facing. `/usr/local/bin/llama-manager` is the lifecycle and
+health contract. The installer refuses to adopt paths, accounts, units, or
+ports without its ownership marker.
+
+Chat `/locals` discovery scans the configured LM Studio port across the
+local `/24`, plus loopback-only probes for the managed standalone port
+`8080` and reserved private port `58080`. The additional probes do not
+widen the LAN scan.
 
 ## Installer command grammar
 

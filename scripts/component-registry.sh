@@ -7,6 +7,14 @@ PUBLIC_COMPONENTS=()
 declare -A COMPONENT_DEPENDENCIES=()
 declare -A COMPONENT_HOOKS=()
 
+valid_component_ownership_marker() {
+  local path="$1" component="$2"
+  [[ -f "${path}" ]] \
+    && [[ "$(stat -c '%U:%G %a' "${path}" 2>/dev/null)" == "root:root 644" ]] \
+    && grep -Fqx "component=${component}" "${path}" \
+    && grep -Fqx 'format=1' "${path}"
+}
+
 register_component() {
   local component="$1" dependencies="$2"
   shift 2

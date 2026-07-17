@@ -149,6 +149,7 @@ _SAFE_MODEL_ID = re.compile(r"\A[A-Za-z0-9._:/+@-]{1,200}\Z")
 _MAX_MODELS_RESPONSE_SIZE = 1024 * 1024
 _DEFAULT_HTTP_PORT = 80
 _DEFAULT_HTTPS_PORT = 443
+_MANAGED_LLAMA_LOOPBACK_PORTS = (8080, 58080)
 
 # Every provider key env var, in registry order. Used by the pi-mono
 # bridge driver to strip non-active provider keys before spawning the
@@ -602,7 +603,12 @@ def scan_lmstudio(
     network: str | ipaddress.IPv4Network | None = None,
     port: int | None = None,
 ) -> list[dict]:
-    """Scan the local /24 for OpenAI-compatible LM Studio servers."""
+    """Scan for local OpenAI-compatible servers.
+
+    The configured port is scanned across the local /24. The conventional
+    standalone and Zombie-private llama.cpp ports are also checked on loopback
+    only, so ``/locals`` finds either installation without widening LAN scans.
+    """
     try:
         scan_port = int(port if port is not None
                         else os.environ.get("ZOMBIE_LLM_SCAN_PORT", "1234"))
@@ -619,16 +625,17 @@ def scan_lmstudio(
         raise ProviderError("The LM Studio scan network is not valid.") from exc
     if not isinstance(subnet, ipaddress.IPv4Network):
         raise ProviderError("LM Studio discovery requires an IPv4 network.")
-    # LM Studio listens on loopback by default unless "Serve on Local
-    # Network" is enabled. Probe it explicitly because the primary
-    # interface's /24 does not include 127.0.0.1.
-    addresses = ["127.0.0.1"]
-    addresses.extend(
-        str(address) for address in subnet if str(address) != "127.0.0.1"
+    # dict preserves insertion order, so this removes duplicates without
+    # changing the configured-port-first probe order.
+    ports = list(dict.fromkeys((scan_port, *_MANAGED_LLAMA_LOOPBACK_PORTS)))
+    probes = [("127.0.0.1", candidate) for candidate in ports]
+    probes.extend(
+        (str(address), scan_port)
+        for address in subnet if str(address) != "127.0.0.1"
     )
-    with ThreadPoolExecutor(max_workers=min(32, len(addresses))) as pool:
+    with ThreadPoolExecutor(max_workers=min(32, len(probes))) as pool:
         found = list(pool.map(
-            lambda address: _probe_lmstudio(address, scan_port), addresses
+            lambda probe: _probe_lmstudio(*probe), probes
         ))
     return [entry for entry in found if entry is not None]
 

@@ -30,7 +30,7 @@ sudo ./scripts/install.sh install
 This is equivalent to the explicit component form
 `sudo ./scripts/install.sh install zombie`. The canonical grammar is
 `scripts/install.sh <verb> [component ...] [flags]`; valid component
-targets are `zombie` and `forgejo`.
+targets are `zombie`, `forgejo`, and `llama`.
 
 Interactive installs open a parameter review before changing the host.
 Accept the defaults or edit the agent user, install root, chat port,
@@ -67,6 +67,19 @@ sudo ./scripts/install.sh install zombie forgejo
 
 The legacy `ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh install` form
 remains equivalent to that combined command.
+
+### Install standalone llama.cpp without zombie
+
+To install a CPU local model for applications and users on this PC:
+
+```bash
+sudo ./scripts/install.sh install llama
+llama-manager status
+```
+
+This independent component exposes an OpenAI-compatible API only at
+`http://127.0.0.1:8080/v1`. It does not create or modify the Zombie
+account or runtime.
 
 For unattended installs:
 
