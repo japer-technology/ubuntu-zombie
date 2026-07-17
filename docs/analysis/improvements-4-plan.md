@@ -26,7 +26,8 @@ decisions:
   after the runtime, model, metadata, and safe free-space reserve are counted.
 - The model is consumed only by the zombie account by default. The inference
   process runs as a separate, non-login, non-sudo service account so model
-  compromise does not inherit zombie's root capability.
+  compromise or runtime exploitation cannot directly inherit zombie's sudo
+  path or administrative privileges.
 - The optional local-server mode serves the same model through an
   OpenAI-compatible `/v1` API on `127.0.0.1:58080`.
 - A loopback TCP listener is host-local, not Unix-user-private. User-only
@@ -276,10 +277,12 @@ storage; do not symlink to mutable user files.
 
 - Calculate requirements from manifest sizes rather than a hard-coded 2 GB
   estimate.
-- Preflight the cache and install filesystems before download. Reserve room
-  for partial files, the installed copy when cache and model directories are
-  on different filesystems, runtime files, and a conservative post-install
-  margin.
+- Preflight the cache and install filesystems before download. On one
+  filesystem, account for the partial asset plus final storage and reclaimable
+  cache strategy. On different filesystems, reserve a full copy on each. If
+  paths partially overlap or only some assets can be linked/reflinked,
+  calculate each asset separately. Every case also reserves runtime space and
+  a conservative post-install margin.
 - Avoid a second full-size copy when cache and final model storage share a
   filesystem and a safe root-owned hard link or reflink is available; copying
   remains the portable fallback.
@@ -356,6 +359,10 @@ Add `payload/systemd/ubuntu-zombie-floor.service` with:
 - memory, task, file-descriptor, and process limits derived from the approved
   CPU profile;
 - journal output with request bodies and authorization headers disabled.
+
+Implementation validation must also exercise stderr, bridge logs, audit
+records, and diagnostic bundles to prove that alternate logging paths redact
+the bearer token rather than relying only on the service's journal settings.
 
 The chat unit should order itself after the floor service only when the option
 is installed. A slow or failed floor start must not prevent deterministic
