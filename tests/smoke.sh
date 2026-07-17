@@ -1160,6 +1160,7 @@ class Response:
 
 def fake_urlopen(request, timeout):
     assert timeout == server.VERSION_CHECK_TIMEOUT_SECONDS
+    assert request.get_header("User-agent").startswith("ubuntu-zombie/")
     if "github.com" in request.full_url:
         return Response({"tag_name": "v2099.1.2"})
     return Response({"version": "9.8.7"})

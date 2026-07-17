@@ -265,6 +265,8 @@ def system_health() -> dict[str, Any]:
     try:
         memory: dict[str, int] = {}
         for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            if ":" not in line:
+                continue
             key, value = line.split(":", 1)
             if key in {"MemTotal", "MemAvailable"}:
                 memory[key] = int(value.strip().split()[0]) * 1024
