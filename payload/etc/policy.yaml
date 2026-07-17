@@ -19,10 +19,10 @@
 settings:
   destructive_confirmation: "yes, I understand this is destructive"
 
-  # Full-administration default. An unknown command remains available and is
-  # presented as a system change rather than being blocked or automatically
-  # labelled destructive. Explicit destructive rules below still take priority.
-  default_class: system_change
+  # Fail-closed default. An unknown command is escalated to the highest
+  # gated class so it cannot auto-run; explicit rules below classify
+  # recognized commands into lower classes.
+  default_class: destructive
 
 # Programs the agent may invoke through sudo without being promoted merely
 # because their basename was not recognized. This is a capability list, not a
@@ -282,7 +282,7 @@ classes:
     description: Inspection, diagnostics and non-mutating queries.
 
   user_change:
-    approval: auto
+    approval: required
     description: Mutations limited to user-owned workspaces, caches or files.
 
   system_change:
@@ -454,9 +454,10 @@ rules:
   # already classified as destructive or a network change.
   # -------------------------------------------------------------------------
 
-  # Privilege escalation, root shells and interpreters.
-  - pattern: '\b(?:sudo|doas|pkexec)\b'
-    class: system_change
+  # Privilege escalation, root shells and interpreters. ``sudo`` itself
+  # carries no class: the argv-aware classifier strips it and classifies
+  # the target program, with unrecognized targets falling through to the
+  # fail-closed default via ``sudo_allow_list``.
   - pattern: '\b(?:su|runuser)\b'
     class: system_change
   - pattern: '(^|[;&|]\s*|\|\s*)(?:sudo\s+|doas\s+|pkexec\s+)?(?:bash|sh|dash|zsh|fish|python[23]?|perl|ruby|node)\b'
@@ -508,11 +509,13 @@ rules:
     class: system_change
 
   # System-file mutation. Generic user-path mutation is classified later.
-  - pattern: '\b(?:cp|mv|rm|ln|mkdir|rmdir|touch|install|sed|tee|truncate|rsync|tar|unzip)\b.*(?:^|\s)/(?:boot|dev|etc|lib|lib32|lib64|opt|proc|root|run|sbin|srv|sys|usr|var)(?:/|\s|$)'
+  # ``/dev`` excludes the harmless pseudo-devices (null, stdout, stderr,
+  # tty, fd/N) so safe redirections and ``tee /dev/stderr`` stay benign.
+  - pattern: '\b(?:cp|mv|rm|ln|mkdir|rmdir|touch|install|sed|tee|truncate|rsync|tar|unzip)\b.*(?:^|\s)/(?:boot|dev(?!/(?:null|stdout|stderr|tty|fd/\d+)\b)|etc|lib|lib32|lib64|opt|proc|root|run|sbin|srv|sys|usr|var)(?:/|\s|$)'
     class: system_change
-  - pattern: '(?<!<)[0-9]*>>?\s*(?:/(?:boot|dev|etc|lib|lib32|lib64|opt|root|run|sbin|srv|usr|var)(?:/|\s|$))'
+  - pattern: '(?<!<)[0-9]*>>?\s*(?:/(?:boot|dev(?!/(?:null|stdout|stderr|tty|fd/\d+)\b)|etc|lib|lib32|lib64|opt|root|run|sbin|srv|usr|var)(?:/|\s|$))'
     class: system_change
-  - pattern: '\btee\b.*(?:^|\s)/(?:boot|dev|etc|lib|lib32|lib64|opt|root|run|sbin|srv|usr|var)(?:/|\s|$)'
+  - pattern: '\btee\b.*(?:^|\s)/(?:boot|dev(?!/(?:null|stdout|stderr|tty|fd/\d+)\b)|etc|lib|lib32|lib64|opt|root|run|sbin|srv|usr|var)(?:/|\s|$)'
     class: system_change
   - pattern: '\bsed\b.*(?:^|\s)-i(?:[A-Za-z]*|\s)'
     class: system_change
