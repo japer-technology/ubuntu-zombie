@@ -224,6 +224,20 @@
   .md a { color: #4a90e2; }
   .md blockquote { margin: .5rem 0; padding: .2rem .8rem;
                    border-left: 3px solid #8886; opacity: .85; }
+  .md .table-wrap { margin: .75rem 0; overflow-x: auto;
+                    border: 1px solid var(--border); border-radius: .55rem;
+                    background: var(--surface); box-shadow: 0 1px 2px #0001; }
+  .md table { width: 100%; min-width: max-content; border-collapse: collapse;
+              font-size: .9rem; line-height: 1.4; }
+  .md th, .md td { padding: .65rem .8rem; text-align: left;
+                   vertical-align: top; border-right: 1px solid var(--border); }
+  .md th:last-child, .md td:last-child { border-right: 0; }
+  .md th { color: var(--text); background: var(--accent-soft);
+           font-weight: 700; border-bottom: 2px solid var(--border); }
+  .md td { color: var(--text); border-top: 1px solid var(--border); }
+  .md tbody tr:nth-child(even) { background: var(--surface-raised); }
+  .md .align-center { text-align: center; }
+  .md .align-right { text-align: right; }
   .result { margin-top: .5rem; }
   .result pre { background: #0003; padding: .4rem .6rem;
                 border-radius: .3rem; max-height: 16rem; overflow: auto;
@@ -437,6 +451,30 @@ function formatBytes(n) {
   return `${n.toFixed(1)} ${units[u]}`;
 }
 
+function formatDuration(seconds) {
+  seconds = Math.max(0, Math.round(Number(seconds) || 0));
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  if (days) return `${days}d ${hours}h ${minutes}m`;
+  if (hours) return `${hours}h ${minutes}m`;
+  if (minutes) return `${minutes}m ${seconds % 60}s`;
+  return `${seconds}s`;
+}
+
+function versionRelation(installed, latest) {
+  const parse = value => String(value).match(/\d+/g)?.map(Number) || [];
+  const left = parse(installed);
+  const right = parse(latest);
+  for (let i = 0; i < Math.max(left.length, right.length); i++) {
+    const a = left[i] || 0;
+    const b = right[i] || 0;
+    if (a < b) return "<";
+    if (a > b) return ">";
+  }
+  return "=";
+}
+
 function statsSummary(bucket) {
   const plural = (count, word) => `${count} ${word}${count === 1 ? "" : "s"}`;
   const elapsed = Math.max(0, Math.round((Date.now() - bucket.startedAt) / 1000));
@@ -558,7 +596,7 @@ viewport.addEventListener("scroll", () => {
 // HTML-escaped *before* we add any markup of our own, and the only
 // links we emit are http(s). Supported: fenced/indented code, inline
 // code, **bold**/_italic_, # headings, -/*/+ and 1. lists, > quotes,
-// and [text](url) links.
+// GFM-style tables, and [text](url) links.
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, "&amp;")
@@ -619,6 +657,18 @@ function renderMarkdown(src) {
     }
   }
   function flush() { flushPara(); flushList(); }
+  function tableCells(line) {
+    let row = line.trim();
+    if (row.startsWith("|")) row = row.slice(1);
+    if (row.endsWith("|")) row = row.slice(0, -1);
+    return row.split("|").map(cell => cell.trim());
+  }
+  function tableAlignment(cell) {
+    if (!/^:?-{3,}:?$/.test(cell)) return null;
+    if (cell.startsWith(":") && cell.endsWith(":")) return "align-center";
+    if (cell.endsWith(":")) return "align-right";
+    return "align-left";
+  }
 
   while (i < lines.length) {
     const line = lines[i];
@@ -640,6 +690,34 @@ function renderMarkdown(src) {
       continue;
     }
     if (/^\s*$/.test(line)) { flush(); i++; continue; }
+    if (i + 1 < lines.length && line.includes("|")) {
+      const headers = tableCells(line);
+      const separators = tableCells(lines[i + 1]);
+      const alignments = separators.map(tableAlignment);
+      if (headers.length === separators.length &&
+          alignments.every(alignment => alignment !== null)) {
+        flush();
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].includes("|") &&
+               !/^\s*$/.test(lines[i])) {
+          const cells = tableCells(lines[i]);
+          if (cells.length !== headers.length) break;
+          rows.push(cells);
+          i++;
+        }
+        const head = headers.map((cell, index) =>
+          `<th class="${alignments[index]}">${renderInline(escapeHtml(cell))}</th>`
+        ).join("");
+        const body = rows.map(cells => "<tr>" + cells.map((cell, index) =>
+          `<td class="${alignments[index]}">${renderInline(escapeHtml(cell))}</td>`
+        ).join("") + "</tr>").join("");
+        html.push('<div class="table-wrap" tabindex="0" ' +
+          'aria-label="Scrollable Markdown table"><table><thead><tr>' +
+          head + "</tr></thead><tbody>" + body + "</tbody></table></div>");
+        continue;
+      }
+    }
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
       flush();
@@ -967,6 +1045,47 @@ const SLASH_COMMANDS = [
   ["/whoami", "Show the active agent identity.", "Configuration"]
 ];
 
+const COMMAND_DETAILS = {
+  "/audit": "Reads the 50 most recent local audit records. It does not contact the provider or change the audit log.",
+  "/approve": "Approves one pending privileged tool call. Supply its id and, when required, the displayed confirmation phrase; omitting the id lists pending calls.",
+  "/branch": "Copies the current conversation and its prior events into a new conversation, leaving the original unchanged. An optional name becomes the new title.",
+  "/clear": "Clears only the transcript currently displayed in this browser. Stored conversation history is not deleted.",
+  "/commands": "Lists commands with one-line descriptions. The optional filter searches command names, descriptions, and categories.",
+  "/compress": "Creates a deterministic local summary of the current conversation for future context. It spends no provider tokens and preserves the original transcript.",
+  "/config": "Shows redacted runtime paths and settings, provider selection, and whether secrets are configured. Secret values are never displayed.",
+  "/conversations": "Lists recent stored conversations and their ids. The aliases /history and /sessions provide the same list.",
+  "/copy": "Copies the nth most recent assistant response to the clipboard; the default is the latest response. It does not copy system or user messages.",
+  "/deny": "Rejects a pending privileged tool call by id so it cannot execute. Omitting the id lists pending calls.",
+  "/examples": "Displays the safe example prompts shipped with this installation without sending them to the model.",
+  "/export": "Downloads the current conversation as both Markdown and JSON. The /save alias performs the same local browser export.",
+  "/fullwidth": "Expands the transcript and composer to the browser width. Use on or off explicitly, or omit the argument to toggle it for this page.",
+  "/health": "Shows inexpensive local machine facts such as hostname, operating system, kernel, and architecture. It does not probe the provider.",
+  "/help": "Shows commands by category. Add a command name, for example /help version, to see its usage, behavior, aliases, and side effects.",
+  "/load": "Loads a stored conversation by numeric id into the transcript and makes it active. The /resume alias is equivalent.",
+  "/logout": "Invalidates this browser's chat session and returns to the password prompt when authentication is enabled.",
+  "/local": "Without an argument, discovers local OpenAI-compatible APIs. With a listed URL, it activates that API and its first advertised model.",
+  "/locals": "Scans the local IPv4 network and loopback for supported OpenAI-compatible API ports, then lists every server that advertises models.",
+  "/model": "Without an argument, lists models from the active provider. With an id, it selects that model for subsequent turns in this server process.",
+  "/models": "Lists the model catalogue exposed by the active provider and marks the currently selected model.",
+  "/new": "Starts a blank conversation in the browser. The /reset alias is equivalent and existing stored conversations remain available.",
+  "/password": "Sets the chat password after confirmation, or removes it when no value is supplied. Password changes invalidate existing browser sessions.",
+  "/policy": "Shows policy classes, approval requirements, tool mappings, rule counts, and per-turn safety budgets without modifying policy.",
+  "/profile": "Shows the active local agent profile and instruction-file metadata used to shape agent behavior.",
+  "/redraw": "Reloads the active conversation and its tool events from SQLite, replacing the current browser transcript.",
+  "/retry": "Branches immediately before the latest user turn and submits that prompt again. The original conversation remains unchanged.",
+  "/shortcuts": "Lists keyboard controls for sending, inserting newlines, queueing a prompt, and stopping a running turn.",
+  "/skills": "Without an argument, lists installed skills. With a skill name, previews its local triggers, path, and instruction content.",
+  "/status": "Runs a proof-of-life report: provider connectivity and latency, provider/model, host and IP facts, resource health, lifecycle, runtime activity, and usage totals.",
+  "/stop": "Requests cancellation of the currently running model turn. It does not cancel a tool call that has already completed.",
+  "/title": "Sets the current stored conversation title to the supplied text without changing any messages.",
+  "/tools": "Lists the closed tool registry, including each tool's policy classification and description. It does not execute a tool.",
+  "/ttl": "Shows or changes the Time to Live kill switch. A duration extends it, reset replaces it after confirmation, and --die permanently trips it.",
+  "/undo": "Creates a branch rewound by the requested number of user turns, defaulting to one. The source conversation is preserved.",
+  "/verbose": "Shows or hides detailed per-turn API, stream, tool, byte, and timing activity. The setting and browser counters reset on page reload.",
+  "/version": "Shows installed Ubuntu Zombie, bridge, and runtime component versions, then checks fixed upstream release sources for the latest available versions.",
+  "/whoami": "Shows the local agent account, hostname, home directory, provider, model, and loaded instruction files without contacting the provider."
+};
+
 function timestamp(value) {
   if (typeof value === "number" && isFinite(value)) {
     return new Date(value * 1000).toLocaleString();
@@ -1115,6 +1234,17 @@ function uzCommandHelp(filter = "") {
   return lines;
 }
 
+function uzDetailedCommandHelp(query) {
+  const needle = query.trim().toLowerCase().replace(/^\/+/, "");
+  const entry = SLASH_COMMANDS.find(([signature]) =>
+    signature.split(" ")[0].slice(1).toLowerCase() === needle);
+  if (!entry) return null;
+  const [signature, description, group] = entry;
+  const command = signature.split(" ")[0];
+  return `${signature}\nCategory: ${group}\n\n${description}\n` +
+    (COMMAND_DETAILS[command] || "");
+}
+
 let commandMatches = [];
 let commandSelection = 0;
 let commandMenuBlurTimer = null;
@@ -1164,9 +1294,9 @@ function updateCommandMenu() {
     return;
   }
   const typed = promptEl.value.toLowerCase();
-  commandMatches = SLASH_COMMANDS
-    .filter(([signature]) => signature.split(" ")[0].toLowerCase().startsWith(typed))
-    .slice(0, MAX_COMMAND_MENU_ITEMS);
+  const matches = SLASH_COMMANDS
+    .filter(([signature]) => signature.split(" ")[0].toLowerCase().startsWith(typed));
+  commandMatches = typed === "/" ? matches : matches.slice(0, MAX_COMMAND_MENU_ITEMS);
   if (!commandMatches.length) {
     closeCommandMenu();
     return;
@@ -1712,6 +1842,13 @@ async function handleSlashCommand(input) {
     case "/help":
     case "/commands": {
       addMessage("user", input);
+      if (cmd === "/help" && arg) {
+        const detail = uzDetailedCommandHelp(arg);
+        addMessage("system", detail ||
+          `No command named "${arg}". Type /help to see all commands.`,
+          detail ? {} : { error: true });
+        return true;
+      }
       const filter = cmd === "/commands" ? arg : "";
       const lines = uzCommandHelp(filter);
       const title = filter
@@ -1852,16 +1989,58 @@ async function handleSlashCommand(input) {
     case "/status": {
       addMessage("user", input);
       try {
-        const health = await uzFetchJson("/api/health");
-        const providerInfo = health.provider || {};
-        const f = health.facts || {};
-        const providerText =
-          providerInfo.provider && providerInfo.provider !== "none"
-            ? `${providerInfo.provider}: ${providerInfo.status}`
-            : providerInfo.status;
-        addMessage("system",
-          `${f.hostname || "?"} - ${f.os || "Ubuntu"} - ${f.kernel || "?"} ` +
-          `(${f.arch || "?"})` + (providerText ? ` - ${providerText}` : ""));
+        const data = await uzFetchJson("/api/status");
+        const machine = data.machine || {};
+        const resources = data.resources || {};
+        const connectivity = data.connectivity || {};
+        const runtime = data.runtime || {};
+        const usage = data.usage || {};
+        const life = data.lifecycle || {};
+        const memoryUsed = Number(resources.memory_total_bytes || 0) -
+                           Number(resources.memory_available_bytes || 0);
+        const lines = [
+          "Ubuntu Zombie proof of life",
+          `Checked: ${timestamp(data.checked_at) || "now"}`,
+          "",
+          "Provider",
+          `  Connectivity: ${connectivity.ok ? "ONLINE" : "FAILED"} ` +
+            `(${connectivity.latency_ms ?? "?"} ms)`,
+          `  Provider: ${data.provider || "none"}`,
+          `  Model: ${data.model || "not configured"}`,
+        ];
+        if (connectivity.error) lines.push(`  Detail: ${connectivity.error}`);
+        lines.push(
+          "",
+          "Host",
+          `  ${machine.hostname || "?"} · ${machine.ip_address || "unknown"}`,
+          `  ${machine.os || "Ubuntu"} · ${machine.kernel || "?"} · ` +
+            `${machine.arch || "?"}`,
+          `  System uptime: ${formatDuration(resources.system_uptime_seconds)}`,
+          `  Load (1/5/15m): ${(resources.load_average || []).join(" / ") || "unknown"}`,
+          `  Memory: ${formatBytes(memoryUsed)} used / ` +
+            `${formatBytes(Number(resources.memory_total_bytes || 0))}`,
+          `  Disk: ${formatBytes(Number(resources.disk_free_bytes || 0))} free / ` +
+            `${formatBytes(Number(resources.disk_total_bytes || 0))}`,
+          "",
+          "Service",
+          `  Server uptime: ${formatDuration(runtime.server_uptime_seconds)}`,
+          `  Active turns: ${runtime.active_turns || 0} · retained: ` +
+            `${runtime.retained_turns || 0} · pending approvals: ` +
+            `${runtime.pending_approvals || 0}`,
+          `  Time to Live: ${life.dead ? "DEAD" :
+            (life.remaining_human || "not configured")}`,
+          "",
+          "Persistent usage",
+          `  Conversations: ${usage.conversations || 0} · messages: ` +
+            `${usage.messages || 0} (${usage.user_messages || 0} user / ` +
+            `${usage.assistant_messages || 0} assistant)`,
+          `  Tool calls: ${usage.tool_calls || 0} · observations: ` +
+            `${usage.tool_observations || 0}`,
+          "",
+          `Browser session: ${statsSummary(netStats.session)}`
+        );
+        addMessage("system", lines.join("\n"),
+          connectivity.ok ? {} : { error: true });
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
@@ -1889,9 +2068,20 @@ async function handleSlashCommand(input) {
       addMessage("user", input);
       try {
         const data = await uzFetchJson("/api/version");
-        const lines = [`ubuntu-zombie: ${data.version || "unknown"}`];
-        if (data.pi_mono) lines.push(`pi-mono: ${data.pi_mono}`);
-        if (data.pi_ai) lines.push(`pi-ai: ${data.pi_ai}`);
+        const lines = ["Installed < latest available"];
+        for (const component of data.components || []) {
+          if (component.latest) {
+            lines.push(`${component.name}: ${component.installed} ` +
+              `${versionRelation(component.installed, component.latest)} ` +
+              `${component.latest}`);
+          } else {
+            const suffix = data.latest_checked &&
+              ["ubuntu-zombie", "pi-mono", "pi-ai"].includes(component.name)
+              ? "latest unavailable"
+              : component.source;
+            lines.push(`${component.name}: ${component.installed} (${suffix})`);
+          }
+        }
         addMessage("system", lines.join("\n"));
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;

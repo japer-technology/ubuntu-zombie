@@ -124,6 +124,29 @@ class History:
                 for row in cur.fetchall()
             ]
 
+    def usage_stats(self) -> dict[str, int]:
+        """Return aggregate local conversation and tool usage counters."""
+        with self._lock:
+            conversations = int(self._conn.execute(
+                "SELECT COUNT(*) FROM conversations"
+            ).fetchone()[0])
+            message_rows = self._conn.execute(
+                "SELECT role, COUNT(*) FROM messages GROUP BY role"
+            ).fetchall()
+            event_rows = self._conn.execute(
+                "SELECT kind, COUNT(*) FROM events GROUP BY kind"
+            ).fetchall()
+        messages = {str(role): int(count) for role, count in message_rows}
+        events = {str(kind): int(count) for kind, count in event_rows}
+        return {
+            "conversations": conversations,
+            "messages": sum(messages.values()),
+            "user_messages": messages.get("user", 0),
+            "assistant_messages": messages.get("assistant", 0),
+            "tool_calls": events.get("tool_call", 0),
+            "tool_observations": events.get("tool_observation", 0),
+        }
+
     def get_conversation(self, conversation_id: int) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(

@@ -29,8 +29,11 @@ import json
 import os
 import platform
 import queue
+import shutil
 import socket
+import sqlite3
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -39,7 +42,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
+from urllib.error import HTTPError, URLError
 from urllib.parse import unquote
+from urllib.request import Request, urlopen
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -65,6 +70,27 @@ DEFAULT_HOST = "127.0.0.1"
 STREAM_QUEUE_MAX = 1000
 STREAM_RETAIN_SECONDS = 300.0
 STREAM_KEEPALIVE_SECONDS = 15.0
+VERSION_CHECK_TIMEOUT_SECONDS = 4.0
+VERSION_CACHE_SECONDS = 900.0
+MAX_VERSION_RESPONSE_BYTES = 64 * 1024
+_VERSION_SOURCES = {
+    "ubuntu-zombie": (
+        "https://api.github.com/repos/japer-technology/"
+        "ubuntu-zombie/releases/latest",
+        "tag_name",
+    ),
+    "pi-mono": (
+        "https://registry.npmjs.org/"
+        "%40earendil-works%2Fpi-coding-agent/latest",
+        "version",
+    ),
+    "pi-ai": (
+        "https://registry.npmjs.org/%40earendil-works%2Fpi-ai/latest",
+        "version",
+    ),
+}
+_version_cache: tuple[float, dict[str, str]] = (0.0, {})
+_version_cache_lock = threading.Lock()
 
 
 class TurnStream:
@@ -195,6 +221,7 @@ def machine_facts() -> dict[str, str]:
         "hostname": socket.gethostname(),
         "kernel": platform.release(),
         "arch": platform.machine(),
+        "ip_address": _primary_ipv4(),
     }
     try:
         for line in Path("/etc/os-release").read_text().splitlines():
@@ -204,6 +231,56 @@ def machine_facts() -> dict[str, str]:
     except OSError:
         pass
     return facts
+
+
+def _primary_ipv4() -> str:
+    """Return the primary IPv4 address without sending application data."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.connect(("192.0.2.1", 9))
+        return str(sock.getsockname()[0])
+    except OSError:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except OSError:
+            return "unknown"
+    finally:
+        sock.close()
+
+
+def system_health() -> dict[str, Any]:
+    """Return cheap local resource and uptime facts for proof-of-life status."""
+    info: dict[str, Any] = {}
+    try:
+        info["load_average"] = [round(value, 2) for value in os.getloadavg()]
+    except OSError:
+        pass
+    try:
+        info["system_uptime_seconds"] = int(float(
+            Path("/proc/uptime").read_text(encoding="utf-8").split()[0]
+        ))
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        memory: dict[str, int] = {}
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+            key, value = line.split(":", 1)
+            if key in {"MemTotal", "MemAvailable"}:
+                memory[key] = int(value.strip().split()[0]) * 1024
+        if memory:
+            info["memory_total_bytes"] = memory.get("MemTotal")
+            info["memory_available_bytes"] = memory.get("MemAvailable")
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        disk = shutil.disk_usage("/")
+        info.update({
+            "disk_total_bytes": disk.total,
+            "disk_free_bytes": disk.free,
+        })
+    except OSError:
+        pass
+    return info
 
 
 def _read_text_file(path: Path) -> str | None:
@@ -229,15 +306,107 @@ def app_version() -> str:
     return "unknown"
 
 
-def version_info() -> dict[str, str]:
-    """App version plus the pinned provider-bridge versions."""
-    info = {"version": app_version()}
+def _runtime_version(command: list[str]) -> str | None:
+    try:
+        result = subprocess.run(
+            command, capture_output=True, text=True, check=False, timeout=2
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    value = (result.stdout or result.stderr or "").strip()
+    return value.lstrip("v") or None
+
+
+def _latest_component_versions() -> dict[str, str]:
+    """Fetch fixed upstream latest-version metadata with a short shared cache."""
+    global _version_cache
+    now = time.monotonic()
+    with _version_cache_lock:
+        cached_at, cached = _version_cache
+        if now - cached_at < VERSION_CACHE_SECONDS:
+            return dict(cached)
+
+    latest: dict[str, str] = {}
+    for name, (url, field) in _VERSION_SOURCES.items():
+        request = Request(
+            url,
+            headers={
+                "Accept": "application/json",
+                "User-Agent": f"ubuntu-zombie/{app_version()}",
+            },
+        )
+        try:
+            with urlopen(
+                request, timeout=VERSION_CHECK_TIMEOUT_SECONDS
+            ) as response:
+                raw = response.read(MAX_VERSION_RESPONSE_BYTES + 1)
+            if len(raw) > MAX_VERSION_RESPONSE_BYTES:
+                continue
+            payload = json.loads(raw)
+            value = payload.get(field) if isinstance(payload, dict) else None
+            if isinstance(value, str) and value.strip():
+                latest[name] = value.strip().removeprefix("v")
+        except (
+            HTTPError, URLError, OSError, TimeoutError,
+            UnicodeDecodeError, ValueError,
+        ):
+            continue
+
+    with _version_cache_lock:
+        _version_cache = (time.monotonic(), dict(latest))
+    return latest
+
+
+def version_info(check_latest: bool = False) -> dict[str, Any]:
+    """Return installed component versions and optional upstream releases."""
+    info: dict[str, Any] = {"version": app_version()}
     pi_mono = _read_text_file(HERE / "pi-mono.version")
     if pi_mono:
         info["pi_mono"] = pi_mono
     pi_ai = _read_text_file(HERE / "pi-ai.version")
     if pi_ai:
         info["pi_ai"] = pi_ai
+    latest = _latest_component_versions() if check_latest else {}
+    components = [
+        {
+            "name": "ubuntu-zombie",
+            "installed": info["version"],
+            "latest": latest.get("ubuntu-zombie"),
+            "source": "GitHub releases",
+        },
+        {
+            "name": "pi-mono",
+            "installed": pi_mono or "unknown",
+            "latest": latest.get("pi-mono"),
+            "source": "npm",
+        },
+        {
+            "name": "pi-ai",
+            "installed": pi_ai or "unknown",
+            "latest": latest.get("pi-ai"),
+            "source": "npm",
+        },
+        {
+            "name": "python",
+            "installed": platform.python_version(),
+            "latest": None,
+            "source": "Ubuntu packages",
+        },
+        {
+            "name": "node",
+            "installed": _runtime_version(["node", "--version"]) or "not installed",
+            "latest": None,
+            "source": "Ubuntu Zombie runtime",
+        },
+        {
+            "name": "sqlite",
+            "installed": sqlite3.sqlite_version,
+            "latest": None,
+            "source": "Python runtime",
+        },
+    ]
+    info["components"] = components
+    info["latest_checked"] = check_latest
     return info
 
 
@@ -247,6 +416,7 @@ def version_info() -> dict[str, str]:
 
 class App:
     def __init__(self) -> None:
+        self.started_at = time.time()
         self.history = History()
         # Pending tool calls awaiting operator approval. Each item is
         # addressable by both the audit entry id and provider tool-call id
@@ -1155,6 +1325,52 @@ class App:
             ),
         }
 
+    def status_info(self) -> dict[str, Any]:
+        """Run an explicit provider probe and return a full proof-of-life report."""
+        provider = self.provider_info()
+        probe_started = time.monotonic()
+        try:
+            connectivity = providers.probe_provider()
+        except providers.ProviderError as exc:
+            connectivity = {
+                "ok": False,
+                "latency_ms": round((time.monotonic() - probe_started) * 1000),
+                "error": str(exc),
+            }
+        try:
+            model = providers.current_model()
+        except providers.ProviderError:
+            model = None
+        with self._lock:
+            runtime = {
+                "server_uptime_seconds": max(0, int(time.time() - self.started_at)),
+                "active_turns": sum(
+                    1 for turn in self.turns.values() if turn.done_at is None
+                ),
+                "retained_turns": len(self.turns),
+                "pending_approvals": len(self.pending),
+                "authenticated_sessions": len(self.sessions),
+            }
+        log_event(
+            "status_probe",
+            provider=provider.get("provider"),
+            ok=connectivity.get("ok", False),
+            latency_ms=connectivity.get("latency_ms"),
+        )
+        return {
+            "ok": True,
+            "checked_at": time.time(),
+            "provider": provider.get("provider"),
+            "model": model,
+            "provider_status": provider.get("status"),
+            "connectivity": connectivity,
+            "machine": machine_facts(),
+            "resources": system_health(),
+            "lifecycle": lifecycle.status(),
+            "runtime": runtime,
+            "usage": self.history.usage_stats(),
+        }
+
     def local_apis_info(self) -> dict[str, Any]:
         """List discovered local OpenAI-compatible API URLs."""
         try:
@@ -1499,7 +1715,7 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
         if self.path == "/api/version":
-            self._send_json(version_info())
+            self._send_json(version_info(check_latest=True))
             return
         if self.path == "/api/conversations":
             self._send_json({"conversations": self.app.history.list_conversations()})
@@ -1532,7 +1748,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(self.app.local_apis_info())
             return
         if self.path == "/api/status":
-            self._send_json(self.app.provider_info())
+            self._send_json(self.app.status_info())
             return
         if self.path == "/api/config":
             self._send_json(self.app.config_info())
