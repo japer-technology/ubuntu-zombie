@@ -259,7 +259,7 @@ dry-run output, receipts, and `docs/CONFIGURATION.md`:
 | `ZOMBIE_INSTALL_LLAMA` | `0` | Compatibility selector for the public component |
 | `LLAMA_PORT` | `8080` | Fixed standalone loopback port in the first release |
 | `LLAMA_MODEL_ID` | none | Approved model-catalogue identifier |
-| `LLAMA_QUANTIZATION` | none | Approved quantisation for the selected model |
+| `LLAMA_QUANTISATION` | none | Approved quantisation for the selected model |
 | `LLAMA_CONTEXT_SIZE` | `recommended` | Tested context size or explicit approved value |
 | `LLAMA_COMPUTE` | `cpu` | Lowercase enum: `cpu`, or a catalogue-approved `cuda`, `rocm`, `vulkan`, or `sycl` combination |
 | `LLAMA_GPU_DEVICE` | none | Stable detected device identifier |
@@ -287,7 +287,7 @@ Add parallel but separately named settings:
 | `ZOMBIE_INSTALL_ZOMBIE_LLAMA` | `0` | Private-instance opt-in |
 | `ZOMBIE_LLAMA_PORT` | `58080` | Fixed private loopback port |
 | `ZOMBIE_LLAMA_MODEL_ID` | none | Approved private model identifier |
-| `ZOMBIE_LLAMA_QUANTIZATION` | none | Approved model quantisation |
+| `ZOMBIE_LLAMA_QUANTISATION` | none | Approved model quantisation |
 | `ZOMBIE_LLAMA_CONTEXT_SIZE` | `recommended` | Tested context size |
 | `ZOMBIE_LLAMA_COMPUTE` | `cpu` | Selected backend |
 | `ZOMBIE_LLAMA_GPU_DEVICE` | none | Stable detected device identifier |
@@ -304,9 +304,9 @@ on the target, preserve it on convergent re-runs, and make it readable only
 by the required root-owned client group. This avoids leaking it through
 automation environments.
 
-This plan deliberately uses `quantisation` in prose and user-facing text,
-following the repository convention, but retains `QUANTIZATION` in
-environment names where it matches established upstream terminology.
+Use `quantisation` in prose, user-facing text, and Ubuntu Zombie environment
+names, following the repository convention. Translate it to any differently
+spelled upstream runtime flag only inside the managed launcher.
 
 ### Validation and non-interactive behaviour
 
@@ -531,8 +531,8 @@ Define the policies precisely:
 
 | Policy | Boot behaviour | Idle behaviour | Start trigger |
 | ------ | -------------- | -------------- | ------------- |
-| `resident` | Starts at boot only when the instance's `LLAMA_BOOT` or `ZOMBIE_LLAMA_BOOT` value is `enabled` | Model remains loaded after it is started | systemd or manager |
-| `sleep` | Starts at boot only when the instance's `LLAMA_BOOT` or `ZOMBIE_LLAMA_BOOT` value is `enabled` | Pinned native runtime sleep after idle threshold | Manager start or an authenticated request to a running, sleeping service |
+| `resident` | Respects the instance boot setting (`enabled` or `disabled`) | Model remains loaded after it is started | systemd or manager |
+| `sleep` | Respects the instance boot setting (`enabled` or `disabled`) | Pinned native runtime sleep after idle threshold | Manager start or an authenticated request to a running, sleeping service |
 | `on-demand` | Service disabled at boot | Service stops when no longer needed | Manager `ensure-running`; Zombie provider uses this before a private turn |
 | `manual` | Service disabled at boot | No automatic transition | Operator runs manager `start` |
 
