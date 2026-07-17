@@ -162,7 +162,7 @@ contain:
 - immutable URL path, filename, byte size, and SHA-256 for every asset;
 - supported Ubuntu architectures;
 - model format and quantisation;
-- context size and chat template;
+- context size and the approved `llama.cpp` chat-template identifier;
 - expected peak RAM and minimum system RAM;
 - minimum free disk, including staging and safety reserve;
 - licence identifier, licence URL, redistribution decision, and required
@@ -174,6 +174,11 @@ The parser must reject unknown schema versions, missing required fields,
 duplicate IDs, unsafe filenames, mutable asset references, unsupported
 architectures, size mismatches, missing or malformed hashes, unapproved
 licences, and assets outside the selected manifest entry.
+
+The model evaluation records the exact template identifier and a hash of the
+GGUF chat-template metadata. Installation checks those values against the
+approved manifest; it neither accepts an operator-supplied template nor
+executes Jinja, Mustache, or another template language itself.
 
 Start with exactly one `cpu-minimum` tier. Candidate guidance is a
 0.5B–1.5B instruct model in Q4-class GGUF, but size alone is not approval.
@@ -249,7 +254,7 @@ allowing model substitution.
 - Resolve fixed manifest filenames beneath that base.
 - Apply the same byte-size and digest checks as the upstream path.
 - Do not permit mirror-provided manifests, redirects to local files, or
-  credentials in receipts.
+  inclusion of credentials in receipts.
 
 ### 6. Import from an existing exact asset
 
@@ -363,6 +368,10 @@ Add `payload/systemd/ubuntu-zombie-floor.service` with:
 Implementation validation must also exercise stderr, bridge logs, audit
 records, and diagnostic bundles to prove that alternate logging paths redact
 the bearer token rather than relying only on the service's journal settings.
+The restriction applies for the service's entire lifetime, including model
+loading and health checks. Asset download and verification occur in the
+root-run installer before service startup; the model process never needs
+external network access for licence checks, configuration, or inference.
 
 The chat unit should order itself after the floor service only when the option
 is installed. A slow or failed floor start must not prevent deterministic
@@ -465,9 +474,9 @@ use the network.
 token, generated configuration, service account, and managed group when safe.
 Remove the cache unless an explicit keep-cache choice is made. Selective
 `uninstall forgejo` leaves all floor resources untouched. `--keep-agent`
-semantics must explicitly state whether floor assets remain; prefer removing
-the privileged integration and service while preserving only a requested
-verified cache.
+removes the floor service, runtime, installed model, token, and provider
+integration because they are managed executable state; it preserves only a
+verified cache when `ZOMBIE_FLOOR_KEEP_CACHE=1`.
 
 ## Documentation and release changes
 
@@ -592,6 +601,11 @@ payload/bin/floor-model-health
 payload/agent/floor.py
 tests/fixtures/floor/
 ```
+
+`floor-launch` is an internal service-initialisation wrapper used only by
+`ubuntu-zombie-floor.service` to validate managed state before `llama-server`
+starts. `floor-model-health` is the operator/lifecycle health helper, matching
+the existing helper naming pattern.
 
 Likely modified files:
 
