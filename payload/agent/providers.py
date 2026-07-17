@@ -506,8 +506,7 @@ def _models_json_path() -> Path:
     return Path(os.environ.get("HOME", "/tmp")) / ".pi" / "agent" / "models.json"
 
 
-def lmstudio_base_url() -> str | None:
-    """Return the configured local OpenAI-compatible API URL, if available."""
+def _lmstudio_endpoint() -> tuple[str, str] | None:
     try:
         data = json.loads(_models_json_path().read_text(encoding="utf-8"))
         base_url = data["providers"]["lmstudio"]["baseUrl"]
@@ -521,22 +520,25 @@ def lmstudio_base_url() -> str | None:
         port = parsed.port
     except ValueError:
         return None
-    if port is not None and not (0 < port <= 65535):
-        return None
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
-    return base_url
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    elif port == 0:
+        return None
+    return base_url, f"{parsed.hostname}:{port}"
+
+
+def lmstudio_base_url() -> str | None:
+    """Return the configured local OpenAI-compatible API URL, if available."""
+    endpoint = _lmstudio_endpoint()
+    return endpoint[0] if endpoint else None
 
 
 def lmstudio_address() -> str | None:
     """Return the configured LM Studio host and port, if available."""
-    base_url = lmstudio_base_url()
-    if not base_url:
-        return None
-    from urllib.parse import urlparse
-    parsed = urlparse(base_url)
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    return f"{parsed.hostname}:{port}"
+    endpoint = _lmstudio_endpoint()
+    return endpoint[1] if endpoint else None
 
 
 def _local_scan_network() -> ipaddress.IPv4Network:
