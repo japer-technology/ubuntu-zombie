@@ -146,10 +146,12 @@ The chat command finder shows every command when the composer contains only
 `/`, then narrows the list as you type. `/help <command>` gives detailed
 usage and side-effect information for one command. `/status` makes a minimal
 completion against the selected provider to prove credentials and
-connectivity, so hosted providers may record a very small amount of usage. It
-also reports the provider and model, primary host IP, OS and resource facts,
-system and service uptime, lifecycle state, active work, conversation/message
-totals, tool totals, and browser-session transfer counters. `/version` checks
+connectivity, so hosted providers may record a very small amount of usage.
+That probe is cached for 30 seconds to prevent rapid requests from multiplying
+provider cost. It also reports the provider and model, primary host IP, OS and
+resource facts, system and service uptime, lifecycle state, active work,
+conversation/message totals, tool totals, and browser-session transfer
+counters. `/version` checks
 fixed GitHub and npm metadata endpoints for current Ubuntu Zombie, `pi-mono`,
 and `pi-ai` releases and also reports the installed Python, Node, and SQLite
 runtimes. Both commands degrade cleanly when an upstream service is offline.

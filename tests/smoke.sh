@@ -1181,12 +1181,18 @@ PY
   PYTHONPATH=payload/agent python3 - <<'PY'
 import server
 
-server.providers.probe_provider = lambda: {
-    "provider": "openai",
-    "model": "test-model",
-    "ok": True,
-    "latency_ms": 12,
-}
+probe_calls = 0
+def probe():
+    global probe_calls
+    probe_calls += 1
+    return {
+        "provider": "openai",
+        "model": "test-model",
+        "ok": True,
+        "latency_ms": 12,
+    }
+
+server.providers.probe_provider = probe
 server.providers.current_model = lambda: "test-model"
 app = server.App()
 conversation_id = app.history.create_conversation()
@@ -1198,6 +1204,9 @@ assert status["model"] == "test-model", status
 assert status["machine"]["ip_address"], status
 assert status["usage"]["messages"] == 2, status
 assert "disk_free_bytes" in status["resources"], status
+cached_status = app.status_info()
+assert cached_status["connectivity"]["cached"] is True, cached_status
+assert probe_calls == 1, probe_calls
 PY
   rm -rf "${_STATUS_TMP}"
 

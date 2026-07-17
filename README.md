@@ -69,7 +69,9 @@ while `/fullwidth [on|off]` expands or restores the transcript and composer.
 `/status` runs a full proof-of-life check: it makes a tiny completion against
 the configured LLM provider (which can incur minimal provider usage), measures
 latency, and reports provider/model, host IP and resources, lifecycle,
-service activity, and local usage totals. `/version` reports the installed
+service activity, and local usage totals. Probe results are reused for 30
+seconds to prevent rapid status requests from multiplying provider cost.
+`/version` reports the installed
 application, bridge, Python, Node, and SQLite versions; it also checks fixed
 GitHub and npm endpoints for the latest Ubuntu Zombie and bridge releases.
 Failed or offline update checks are reported as unavailable rather than

@@ -664,7 +664,7 @@ function renderMarkdown(src) {
     return row.split("|").map(cell => cell.trim());
   }
   function tableAlignment(cell) {
-    if (!/^:?-{3,}:?$/.test(cell)) return null;
+    if (!/^:?-+:?$/.test(cell)) return null;
     if (cell.startsWith(":") && cell.endsWith(":")) return "align-center";
     if (cell.endsWith(":")) return "align-right";
     return "align-left";
@@ -1086,6 +1086,14 @@ const COMMAND_DETAILS = {
   "/whoami": "Shows the local agent account, hostname, home directory, provider, model, and loaded instruction files without contacting the provider."
 };
 
+const COMMAND_ALIASES = {
+  "/history": "/conversations",
+  "/reset": "/new",
+  "/resume": "/load",
+  "/save": "/export",
+  "/sessions": "/conversations"
+};
+
 function timestamp(value) {
   if (typeof value === "number" && isFinite(value)) {
     return new Date(value * 1000).toLocaleString();
@@ -1236,8 +1244,10 @@ function uzCommandHelp(filter = "") {
 
 function uzDetailedCommandHelp(query) {
   const needle = query.trim().toLowerCase().replace(/^\/+/, "");
+  const requested = `/${needle}`;
+  const canonical = COMMAND_ALIASES[requested] || requested;
   const entry = SLASH_COMMANDS.find(([signature]) =>
-    signature.split(" ")[0].slice(1).toLowerCase() === needle);
+    signature.split(" ")[0].toLowerCase() === canonical);
   if (!entry) return null;
   const [signature, description, group] = entry;
   const command = signature.split(" ")[0];
@@ -2004,7 +2014,8 @@ async function handleSlashCommand(input) {
           "",
           "Provider",
           `  Connectivity: ${connectivity.ok ? "ONLINE" : "FAILED"} ` +
-            `(${connectivity.latency_ms ?? "?"} ms)`,
+            `(${connectivity.latency_ms ?? "?"} ms` +
+            `${connectivity.cached ? ", recent cached probe" : ""})`,
           `  Provider: ${data.provider || "none"}`,
           `  Model: ${data.model || "not configured"}`,
         ];
@@ -2071,9 +2082,15 @@ async function handleSlashCommand(input) {
         const lines = ["Installed < latest available"];
         for (const component of data.components || []) {
           if (component.latest) {
-            lines.push(`${component.name}: ${component.installed} ` +
-              `${versionRelation(component.installed, component.latest)} ` +
-              `${component.latest}`);
+            if (component.installed === "unknown" ||
+                component.installed === "not installed") {
+              lines.push(`${component.name}: ${component.installed} ` +
+                `(latest: ${component.latest})`);
+            } else {
+              lines.push(`${component.name}: ${component.installed} ` +
+                `${versionRelation(component.installed, component.latest)} ` +
+                `${component.latest}`);
+            }
           } else {
             const suffix = data.latest_checked &&
               ["ubuntu-zombie", "pi-mono", "pi-ai"].includes(component.name)

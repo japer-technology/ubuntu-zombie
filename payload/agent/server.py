@@ -72,7 +72,8 @@ STREAM_RETAIN_SECONDS = 300.0
 STREAM_KEEPALIVE_SECONDS = 15.0
 VERSION_CHECK_TIMEOUT_SECONDS = 4.0
 VERSION_CACHE_SECONDS = 900.0
-MAX_VERSION_RESPONSE_BYTES = 64 * 1024
+STATUS_PROBE_CACHE_SECONDS = 30.0
+MAX_VERSION_RESPONSE_BYTES = 1024 * 1024
 _VERSION_SOURCES = {
     "ubuntu-zombie": (
         "https://api.github.com/repos/japer-technology/"
@@ -430,8 +431,10 @@ class App:
         # turn id. The final payload is retained briefly so a late
         # EventSource can receive a terminal event instead of hanging.
         self.turns: dict[str, TurnStream] = {}
+        self._status_probe_cache: tuple[float, dict[str, Any]] = (0.0, {})
         self._lock = threading.Lock()
         self._lmstudio_lock = threading.Lock()
+        self._status_probe_lock = threading.Lock()
 
     # ---- authentication + lifecycle ----
     def login(self, password: str) -> dict[str, Any] | None:
@@ -1328,15 +1331,30 @@ class App:
     def status_info(self) -> dict[str, Any]:
         """Run an explicit provider probe and return a full proof-of-life report."""
         provider = self.provider_info()
-        probe_started = time.monotonic()
-        try:
-            connectivity = providers.probe_provider()
-        except providers.ProviderError as exc:
-            connectivity = {
-                "ok": False,
-                "latency_ms": round((time.monotonic() - probe_started) * 1000),
-                "error": str(exc),
-            }
+        with self._status_probe_lock:
+            cached_at, cached_probe = self._status_probe_cache
+            if (
+                cached_probe
+                and time.monotonic() - cached_at < STATUS_PROBE_CACHE_SECONDS
+            ):
+                connectivity = {**cached_probe, "cached": True}
+            else:
+                probe_started = time.monotonic()
+                try:
+                    connectivity = providers.probe_provider()
+                except providers.ProviderError as exc:
+                    connectivity = {
+                        "ok": False,
+                        "latency_ms": round(
+                            (time.monotonic() - probe_started) * 1000
+                        ),
+                        "error": str(exc),
+                    }
+                connectivity["checked_at"] = time.time()
+                connectivity["cached"] = False
+                self._status_probe_cache = (
+                    time.monotonic(), dict(connectivity)
+                )
         try:
             model = providers.current_model()
         except providers.ProviderError:
