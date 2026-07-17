@@ -8,10 +8,10 @@ Can Ubuntu Zombie offer an installation experience like Ollama:
 curl -fsSL https://ollama.com/install.sh | sh
 ```
 
-Can the same product install on a PC or Mac, ideally through a small
-number of obvious scripts that choose the correct installation surface
-for an operator who does not know which package or platform details
-matter?
+Can the same product install on an Ubuntu PC, a Windows PC, or a Mac,
+ideally through a small number of obvious scripts that choose the
+correct installation surface for an operator who does not know which
+package or platform details matter?
 
 The short answers are:
 
@@ -101,6 +101,10 @@ root-capable account.
 
 The project can provide a one-liner without presenting it as the safest
 method. Documentation should offer three confidence levels:
+
+All `ubuntu-zombie.example` addresses below are non-operational
+placeholder domains. A production URL and its ownership model remain an
+implementation decision.
 
 ### Fast path
 
@@ -553,7 +557,8 @@ It must:
 - create temporary directories safely and clean them with traps;
 - reject unsupported operating systems and architectures;
 - validate versions and artifact names against strict patterns;
-- never use `eval`;
+- never use `eval`, preventing untrusted release or argument data from
+  becoming shell commands;
 - never execute a downloaded artifact before verification;
 - avoid passing secrets on command lines or logging secret environment
   values;
