@@ -3079,7 +3079,9 @@ import sys
 from pathlib import Path
 
 text = Path("payload/agent/templates/index.html").read_text()
-start = text.index("const BRAND_STORAGE_KEY")
+brand_start = text.index("let brandTitle = ")
+brand_end = text.index("\n", brand_start) + 1
+helpers_start = text.index("const BRAND_STORAGE_KEY")
 end = text.index("function uzConversationMarkdown")
 test = r'''
 const store = new Map();
@@ -3136,7 +3138,9 @@ if (store.has(BRAND_STORAGE_KEY)) {
   throw new Error("non-persistent brand title wrote localStorage");
 }
 '''
-Path(sys.argv[1]).write_text("let brandTitle = 'Ubuntu Zombie';\n" + text[start:end] + test)
+Path(sys.argv[1]).write_text(
+    text[brand_start:brand_end] + text[helpers_start:end] + test
+)
 PY
   node "${_BRAND_TEST}"
   rm -f "${_BRAND_TEST}"
