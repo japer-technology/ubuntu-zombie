@@ -27,6 +27,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   width and offset as assistant responses.
 - **Optional full-width display:** `/fullwidth [on|off]` toggles or explicitly
   controls a full-width transcript and composer for the current page.
+- **Readable Markdown tables:** assistant table syntax now renders as
+  accessible, high-contrast tables with padded cells, borders, alignment,
+  striping, and horizontal overflow for narrow screens.
+- **Deeper command discovery:** a bare `/` shows every command, while
+  `/help <command>` explains that command's usage, behavior, and side effects.
+- **Component update visibility:** `/version` reports installed bridge and
+  runtime versions and checks fixed GitHub/npm sources for latest releases.
+- **Proof-of-life status:** `/status` now probes the configured LLM and reports
+  latency, provider/model, host/IP/resources, lifecycle, runtime work, local
+  conversation/tool totals, and browser-session activity.
 
 ### Standalone llama.cpp
 

@@ -59,10 +59,23 @@ reinstall. Extend it from the chat with `/ttl <days>`. See
 The chat streams live turn progress when the browser supports
 `EventSource`, falls back automatically when it does not, and keeps one
 visible queued message if you submit while the agent is already working.
-Type `/` to browse and complete valid chat commands without leaving the
-composer; `/help` shows the compact command index. User questions and
-assistant responses share the same transcript width, while
-`/fullwidth [on|off]` expands or restores the transcript and composer.
+Type `/` to browse the complete command catalogue without leaving the
+composer; keep typing to narrow it. `/help` shows the compact command index,
+and `/help <command>` explains one command in detail. Assistant Markdown
+tables use bordered, high-contrast cells and scroll horizontally when wide.
+User questions and assistant responses share the same transcript width,
+while `/fullwidth [on|off]` expands or restores the transcript and composer.
+
+`/status` runs a full proof-of-life check: it makes a tiny completion against
+the configured LLM provider (which can incur minimal provider usage), measures
+latency, and reports provider/model, host IP and resources, lifecycle,
+service activity, and local usage totals. Probe results are reused for 30
+seconds to prevent rapid status requests from multiplying provider cost.
+`/version` reports the installed
+application, bridge, Python, Node, and SQLite versions; it also checks fixed
+GitHub and npm endpoints for the latest Ubuntu Zombie and bridge releases.
+Failed or offline update checks are reported as unavailable rather than
+blocking the command.
 
 Provider and model selection are read from
 `/opt/ai-zombie/secrets/env`, not from `pi`'s native `~/.pi` defaults:

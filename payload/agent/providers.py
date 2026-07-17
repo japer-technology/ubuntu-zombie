@@ -60,6 +60,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -239,7 +240,11 @@ def _bridge_env(spec: _ProviderSpec) -> dict[str, str]:
     return env
 
 
-def _run_bridge(spec: _ProviderSpec, request: dict) -> dict:
+def _run_bridge(
+    spec: _ProviderSpec,
+    request: dict,
+    timeout: float | None = None,
+) -> dict:
     """Invoke the Node bridge with ``request`` and return the parsed reply.
 
     Shared by the chat-completion path (:func:`_call_bridge`) and the
@@ -263,9 +268,14 @@ def _run_bridge(spec: _ProviderSpec, request: dict) -> dict:
             capture_output=True,
             text=True,
             check=False,
+            timeout=timeout,
         )
     except FileNotFoundError as exc:
         raise ProviderError(f"failed to spawn node: {exc}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise ProviderError(
+            f"provider bridge timed out after {timeout:g} seconds"
+        ) from exc
 
     stdout = (proc.stdout or "").strip()
     stderr = (proc.stderr or "").strip()
@@ -466,6 +476,35 @@ def current_model(name: str | None = None) -> str | None:
     when no provider is configured at all.
     """
     return _resolve_model(_resolve_spec(name)) or None
+
+
+def probe_provider(timeout: float = 15.0) -> dict:
+    """Make a minimal completion to prove provider credentials and reachability."""
+    spec = _resolve_spec()
+    model = _resolve_model(spec)
+    if not model:
+        raise NoProviderConfigured(
+            f"No model is configured for provider {spec.name!r}."
+        )
+    started = time.monotonic()
+    _run_bridge(spec, {
+        "op": "complete",
+        "provider": spec.name,
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "Connectivity check. Reply with only OK.",
+            },
+            {"role": "user", "content": "ping"},
+        ],
+    }, timeout=timeout)
+    return {
+        "provider": spec.name,
+        "model": model,
+        "ok": True,
+        "latency_ms": round((time.monotonic() - started) * 1000),
+    }
 
 
 def list_models(name: str | None = None) -> list[dict]:

@@ -1134,6 +1134,7 @@ PY
 
   echo "  server version_info endpoint"
   PYTHONPATH=payload/agent python3 - <<'PY'
+import json
 import server
 
 info = server.version_info()
@@ -1144,7 +1145,71 @@ assert info.get("version") and info["version"] != "unknown", info
 # so version_info must surface them too.
 assert info.get("pi_mono"), info
 assert info.get("pi_ai"), info
+components = {row["name"]: row for row in info["components"]}
+assert {"ubuntu-zombie", "pi-mono", "pi-ai", "python", "node", "sqlite"} <= set(components), info
+
+class Response:
+    def __init__(self, payload):
+        self.payload = payload
+    def __enter__(self):
+        return self
+    def __exit__(self, *_args):
+        return False
+    def read(self, _limit):
+        return json.dumps(self.payload).encode()
+
+def fake_urlopen(request, timeout):
+    assert timeout == server.VERSION_CHECK_TIMEOUT_SECONDS
+    assert request.get_header("User-agent").startswith("ubuntu-zombie/")
+    if "github.com" in request.full_url:
+        return Response({"tag_name": "v2099.1.2"})
+    return Response({"version": "9.8.7"})
+
+server.urlopen = fake_urlopen
+server._version_cache = (0.0, {})
+checked = server.version_info(check_latest=True)
+checked_components = {row["name"]: row for row in checked["components"]}
+assert checked_components["ubuntu-zombie"]["latest"] == "2099.1.2", checked
+assert checked_components["pi-mono"]["latest"] == "9.8.7", checked
 PY
+
+  echo "  server proof-of-life status"
+  _STATUS_TMP="$(mktemp -d)"
+  ZOMBIE_HISTORY_DB="${_STATUS_TMP}/conversations.db" \
+  ZOMBIE_LIFECYCLE_STATE="${_STATUS_TMP}/lifecycle.json" \
+  ZOMBIE_AUDIT_LOG="${_STATUS_TMP}/audit.log" \
+  ZOMBIE_POLICY=payload/etc/policy.yaml \
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import server
+
+probe_calls = 0
+def probe():
+    global probe_calls
+    probe_calls += 1
+    return {
+        "provider": "openai",
+        "model": "test-model",
+        "ok": True,
+        "latency_ms": 12,
+    }
+
+server.providers.probe_provider = probe
+server.providers.current_model = lambda: "test-model"
+app = server.App()
+conversation_id = app.history.create_conversation()
+app.history.add_message(conversation_id, "user", "hello")
+app.history.add_message(conversation_id, "assistant", "hi")
+status = app.status_info()
+assert status["connectivity"]["ok"] is True, status
+assert status["model"] == "test-model", status
+assert status["machine"]["ip_address"], status
+assert status["usage"]["messages"] == 2, status
+assert "disk_free_bytes" in status["resources"], status
+cached_status = app.status_info()
+assert cached_status["connectivity"]["cached"] is True, cached_status
+assert probe_calls == 1, probe_calls
+PY
+  rm -rf "${_STATUS_TMP}"
 
   echo "  server conversation endpoint (existing / bad id / not found)"
   _CONV_TMP="$(mktemp -d)"
@@ -2969,6 +3034,42 @@ PY
   grep -q 'body.innerHTML = renderMarkdown(liveMarkdown)' \
     payload/agent/templates/index.html \
     || { echo "streamed assistant replies must render as Markdown" >&2; exit 1; }
+  grep -q 'class="table-wrap"' payload/agent/templates/index.html \
+    && grep -q '\.md th, \.md td' payload/agent/templates/index.html \
+    || { echo "Markdown tables must render with readable table styling" >&2; exit 1; }
+  grep -q 'uzDetailedCommandHelp(arg)' payload/agent/templates/index.html \
+    && grep -q '"/version": "Shows installed Ubuntu Zombie' \
+      payload/agent/templates/index.html \
+    || { echo "/help <command> must provide detailed command help" >&2; exit 1; }
+  grep -Fq 'typed === "/" ? matches' payload/agent/templates/index.html \
+    || { echo "a bare slash must show the complete command finder" >&2; exit 1; }
+  grep -q 'uzFetchJson("/api/status")' payload/agent/templates/index.html \
+    && grep -q '"Persistent usage"' payload/agent/templates/index.html \
+    || { echo "/status must show comprehensive proof-of-life data" >&2; exit 1; }
+  _MARKDOWN_TEST="$(mktemp)"
+  python3 - "${_MARKDOWN_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+start = text.index("function escapeHtml")
+end = text.index("function showThinking")
+test = r'''
+const output = renderMarkdown(
+  "| Name | State |\n| :--- | ---: |\n| api | **online** |"
+);
+if (!output.includes("<table>") ||
+    !output.includes('<th class="align-left">Name</th>') ||
+    !output.includes(
+      '<td class="align-right"><strong>online</strong></td>'
+    )) {
+  throw new Error(output);
+}
+'''
+Path(sys.argv[1]).write_text(text[start:end] + test)
+PY
+  node "${_MARKDOWN_TEST}"
+  rm -f "${_MARKDOWN_TEST}"
   grep -Fq '["api", "stream"]' payload/agent/server.py \
     || { echo "server.py must expose the SSE stream endpoint" >&2; exit 1; }
   grep -q '"type":"progress"' payload/agent/pi_mono.py \
