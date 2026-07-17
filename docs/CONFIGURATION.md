@@ -132,12 +132,13 @@ local server through this `lmstudio` provider; `pi --provider openai`
 would ignore the base URL and hit `api.openai.com` instead, so a
 dedicated local provider is required. Most local servers ignore the API
 key; set `ZOMBIE_LOCAL_LLM_API_KEY` (or edit the files afterwards) if
-yours requires a real one. After installation, `/lmstudio` rescans the
-local `/24`, selects the first discovered server (retaining the current
-model when that server advertises it), and updates the running provider,
-model, and `~/.pi/agent/models.json`. `/models` lists the catalogue exposed
-by the active provider, including live LM Studio models; `/model <id>`
-switches models. `/status` includes the configured LM Studio IP address and
+yours requires a real one. After installation, `/locals` rescans the local
+`/24` and lists the discovered API URLs, marking the active URL when it is
+found. `/local <url>` activates a listed API, retaining the current model
+when that server advertises it, and updates the running provider, model,
+and `~/.pi/agent/models.json`. `/models` lists the catalogue exposed by the
+active provider, including live LM Studio models; `/model <id>` switches
+models. `/status` includes the configured LM Studio IP address and
 port.
 
 The scan is best-effort and skipped automatically for `--yes`,

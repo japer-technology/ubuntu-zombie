@@ -147,6 +147,8 @@ _PROVIDER_BY_NAME: dict[str, _ProviderSpec] = {
 SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(spec.name for spec in _PI_AI_PROVIDERS)
 _SAFE_MODEL_ID = re.compile(r"\A[A-Za-z0-9._:/+@-]{1,200}\Z")
 _MAX_MODELS_RESPONSE_SIZE = 1024 * 1024
+_DEFAULT_HTTP_PORT = 80
+_DEFAULT_HTTPS_PORT = 443
 
 # Every provider key env var, in registry order. Used by the pi-mono
 # bridge driver to strip non-active provider keys before spawning the
@@ -506,8 +508,8 @@ def _models_json_path() -> Path:
     return Path(os.environ.get("HOME", "/tmp")) / ".pi" / "agent" / "models.json"
 
 
-def lmstudio_address() -> str | None:
-    """Return the configured LM Studio host and port, if available."""
+def _lmstudio_endpoint() -> tuple[str, str] | None:
+    """Return ``(base_url, host_port)`` for the configured API, if valid."""
     try:
         data = json.loads(_models_json_path().read_text(encoding="utf-8"))
         base_url = data["providers"]["lmstudio"]["baseUrl"]
@@ -518,12 +520,31 @@ def lmstudio_address() -> str | None:
     from urllib.parse import urlparse
     try:
         parsed = urlparse(base_url)
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        port = parsed.port
     except ValueError:
         return None
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
-    return f"{parsed.hostname}:{port}"
+    if port is None:
+        port = (
+            _DEFAULT_HTTPS_PORT
+            if parsed.scheme == "https" else _DEFAULT_HTTP_PORT
+        )
+    elif port < 1:
+        return None
+    return base_url, f"{parsed.hostname}:{port}"
+
+
+def lmstudio_base_url() -> str | None:
+    """Return the configured local OpenAI-compatible API URL, if available."""
+    endpoint = _lmstudio_endpoint()
+    return endpoint[0] if endpoint else None
+
+
+def lmstudio_address() -> str | None:
+    """Return the configured LM Studio host and port, if available."""
+    endpoint = _lmstudio_endpoint()
+    return endpoint[1] if endpoint else None
 
 
 def _local_scan_network() -> ipaddress.IPv4Network:

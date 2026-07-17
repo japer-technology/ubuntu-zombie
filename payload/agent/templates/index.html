@@ -942,7 +942,8 @@ const SLASH_COMMANDS = [
   ["/help", "List available commands.", "Help"],
   ["/load <id>", "Load a past conversation (alias: /resume <id>).", "Conversation"],
   ["/logout", "Log out and ask for the chat password again.", "Session"],
-  ["/lmstudio", "Rescan the LAN and use a discovered LM Studio server.", "Configuration"],
+  ["/local [url]", "List or switch the active local API.", "Configuration"],
+  ["/locals", "List discovered local API URLs.", "Configuration"],
   ["/model [id]", "List or switch the active model.", "Configuration"],
   ["/models", "List models available from the active provider.", "Configuration"],
   ["/new", "Start a new conversation (alias: /reset).", "Conversation"],
@@ -1956,15 +1957,38 @@ async function handleSlashCommand(input) {
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
-    case "/lmstudio": {
+    case "/locals":
+    case "/local": {
       addMessage("user", input);
-      addMessage("system", "Scanning the local network for LM Studio servers...");
+      const listOnly = cmd === "/locals" || (cmd === "/local" && arg === "");
+      if (listOnly) {
+        addMessage("system", "Scanning the local network for local APIs...");
+        try {
+          const data = await uzFetchJson("/api/locals");
+          const locals = data.locals || [];
+          if (data.error) {
+            addMessage("system", data.error, { error: true });
+            return true;
+          }
+          if (!locals.length) {
+            addMessage("system", "No local APIs were found.");
+            return true;
+          }
+          const currentFound = data.current && locals.includes(data.current);
+          const lines = locals.map(url =>
+            `${currentFound && url === data.current ? "* " : "  "}${url}`);
+          addMessage("system",
+            "Local APIs (use /local <url> to switch" +
+            (currentFound ? "; * = current" : "") + "):\n" +
+            lines.join("\n"));
+        } catch (err) { addMessage("system", String(err), { error: true }); }
+        return true;
+      }
+      addMessage("system", `Checking for a local API at ${arg}...`);
       try {
-        const data = await uzPostJson("/api/lmstudio", {});
+        const data = await uzPostJson("/api/local", { url: arg });
         addMessage("system",
-          `LM Studio selected at ${data.address} with model ${data.model}.` +
-          (data.servers && data.servers.length > 1
-            ? ` Found ${data.servers.length} servers; using the first.` : ""));
+          `Local API set to ${data.url} with model ${data.model}.`);
         const banner = document.querySelector("header .status");
         if (banner) {
           banner.textContent =
