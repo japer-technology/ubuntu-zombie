@@ -261,7 +261,7 @@ dry-run output, receipts, and `docs/CONFIGURATION.md`:
 | `LLAMA_MODEL_ID` | none | Approved model-catalogue identifier |
 | `LLAMA_QUANTIZATION` | none | Approved quantisation for the selected model |
 | `LLAMA_CONTEXT_SIZE` | `recommended` | Tested context size or explicit approved value |
-| `LLAMA_COMPUTE` | `cpu` | `cpu`, `cuda`, `rocm`, `vulkan`, or `sycl` |
+| `LLAMA_COMPUTE` | `cpu` | Lowercase enum: `cpu`, `cuda`, `rocm`, `vulkan`, or `sycl` |
 | `LLAMA_GPU_DEVICE` | none | Stable detected device identifier |
 | `LLAMA_GPU_OFFLOAD` | `0` | Layer count or `full` |
 | `LLAMA_CPU_THREADS` | `recommended` | Positive value not exceeding detected threads |
@@ -304,9 +304,9 @@ on the target, preserve it on convergent re-runs, and make it readable only
 by the required root-owned client group. This avoids leaking it through
 automation environments.
 
-Use `quantisation` in prose and user-facing text, but retain
-`QUANTIZATION` in environment names where it matches established upstream
-terminology.
+This plan deliberately uses `quantisation` in prose and user-facing text,
+following the repository convention, but retains `QUANTIZATION` in
+environment names where it matches established upstream terminology.
 
 ### Validation and non-interactive behaviour
 
@@ -412,7 +412,8 @@ selected accelerator variant:
 - NVIDIA CUDA;
 - AMD ROCm;
 - Vulkan;
-- Intel SYCL where supported.
+- Intel SYCL only for catalogue-approved Intel hardware, driver, compiler,
+  and oneAPI toolkit combinations.
 
 Prefer separately tested variants instead of one binary containing every
 backend. This reduces dependency and compatibility risk and preserves a CPU
@@ -530,8 +531,8 @@ Define the policies precisely:
 
 | Policy | Boot behaviour | Idle behaviour | Start trigger |
 | ------ | -------------- | -------------- | ------------- |
-| `resident` | Follows `*_BOOT` | Model remains loaded | systemd or manager |
-| `sleep` | Follows `*_BOOT` | Pinned native runtime sleep after idle threshold | New authenticated request wakes it |
+| `resident` | Follows the instance's `LLAMA_BOOT` or `ZOMBIE_LLAMA_BOOT` value | Model remains loaded | systemd or manager |
+| `sleep` | Follows the instance's `LLAMA_BOOT` or `ZOMBIE_LLAMA_BOOT` value | Pinned native runtime sleep after idle threshold | New authenticated request wakes it |
 | `on-demand` | Service disabled at boot | Service stops when no longer needed | Manager `ensure-running`; Zombie provider uses this before a private turn |
 | `manual` | Service disabled at boot | No automatic transition | Operator runs manager `start` |
 
@@ -602,7 +603,7 @@ Private integration must:
   the private model;
 - configure the exact private base URL and logical model ID;
 - pass the private credential only to the private bridge invocation;
-- call `ensure-running` before a turn for `on-demand`;
+- call `ensure-running` before a chat conversation turn for `on-demand`;
 - report `starting`, `loading`, `sleeping`, `ready`, and failure states in
   chat status and model UX;
 - provide clear recovery guidance without exposing credentials or command
