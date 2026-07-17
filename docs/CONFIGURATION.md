@@ -449,7 +449,7 @@ LAN.
 | `ZOMBIE_INSTALL_LLAMA` | `0` | Add the independent `llama` component to selected install targets. |
 | `LLAMA_PORT` | `8080` | Fixed loopback port; other values are rejected. |
 | `LLAMA_MODEL_ID` | `smollm2-360m-instruct-q4_k_m` | Approved default model; other IDs are rejected in this release. |
-| `LLAMA_CONTEXT_SIZE` | `2048` | Context size from 512 through 8192 tokens. |
+| `LLAMA_CONTEXT_SIZE` | `2048` | Context size from 512 through the approved model maximum of 2048 tokens. |
 | `LLAMA_CPU_THREADS` | detected logical CPUs | CPU worker count from 1 through 1024. |
 | `LLAMA_BOOT` | `enabled` | `enabled` starts now and at boot; `disabled` installs the service stopped. |
 

@@ -2459,6 +2459,7 @@ run_noninteractive() {
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=2' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_PORT=8081' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_CONTEXT_SIZE=nope' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_CONTEXT_SIZE=4096' ./scripts/install.sh doctor
 }
 
 run_diagnostics() {
@@ -2834,12 +2835,70 @@ EOF
     || { echo "/locals must probe both managed llama loopback ports" >&2; exit 1; }
   python3 payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
+import importlib.machinery
+import importlib.util
 import json
+import os
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+
 for name in ("llama-builds.json", "llama-models.json"):
     data = json.loads((Path("payload/etc") / name).read_text())
     if data.get("schema_version") != 1:
         raise SystemExit(f"{name} has wrong schema")
+
+loader = importlib.machinery.SourceFileLoader(
+    "llama_manager", "payload/bin/llama-manager"
+)
+spec = importlib.util.spec_from_loader(loader.name, loader)
+manager = importlib.util.module_from_spec(spec)
+loader.exec_module(manager)
+with tempfile.TemporaryDirectory() as directory:
+    root = Path(directory)
+    runtime = root / "runtime"
+    runtime.mkdir()
+    (runtime / "llama-server").touch()
+    model = root / "model.gguf"
+    model.touch()
+    config = root / "config.json"
+    config.write_text(json.dumps({
+        "schema_version": 1,
+        "port": 8080,
+        "model_id": "fixture",
+        "model_path": str(model),
+        "context_size": 2048,
+        "threads": 2,
+        "runtime_release": "fixture",
+        "runtime_dir": str(runtime),
+    }))
+    manager.CONFIG_PATH = config
+    manager.service_property = lambda _name: "inactive"
+    manager.systemctl = lambda *_args, **_kwargs: SimpleNamespace(
+        returncode=0, stdout="enabled\n", stderr=""
+    )
+    status = manager.status_payload()
+    assert status["state"] == "installed-stopped", status
+    captured = {}
+    original_execv = manager.os.execv
+    original_library_path = os.environ.get("LD_LIBRARY_PATH")
+    def fake_execv(path, args):
+        captured["path"] = path
+        captured["args"] = args
+        raise StopIteration
+    manager.os.execv = fake_execv
+    try:
+        manager.serve()
+    except StopIteration:
+        pass
+    finally:
+        manager.os.execv = original_execv
+        if original_library_path is None:
+            os.environ.pop("LD_LIBRARY_PATH", None)
+        else:
+            os.environ["LD_LIBRARY_PATH"] = original_library_path
+    assert captured["path"] == runtime / "llama-server", captured
+    assert captured["args"][-2:] == ["--alias", "fixture"], captured
 PY
   grep -q 'id="logout"' payload/agent/templates/index.html \
     || { echo "chat UI must expose the logoff button" >&2; exit 1; }

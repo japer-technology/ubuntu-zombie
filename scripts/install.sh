@@ -533,6 +533,16 @@ legacy_forgejo_present() {
     || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]
 }
 
+llama_installation_is_managed() {
+  local marker
+  for marker in /etc/llama.cpp/managed-by-ubuntu-zombie \
+      /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
+    [[ -f "${marker}" ]] && [[ "$(stat -c '%U:%G %a' "${marker}" 2>/dev/null)" == "root:root 644" ]] \
+      && grep -Fqx 'component=llama' "${marker}" && return 0
+  done
+  return 1
+}
+
 legacy_llama_present() {
   llama_installation_is_managed
 }
@@ -1045,8 +1055,8 @@ validate_llama_config() {
   [[ "${LLAMA_MODEL_ID}" == "smollm2-360m-instruct-q4_k_m" ]] \
     || die "LLAMA_MODEL_ID must be smollm2-360m-instruct-q4_k_m." 2
   [[ "${LLAMA_CONTEXT_SIZE}" =~ ^[0-9]+$ ]] \
-    && (( LLAMA_CONTEXT_SIZE >= 512 && LLAMA_CONTEXT_SIZE <= 8192 )) \
-    || die "LLAMA_CONTEXT_SIZE must be between 512 and 8192." 2
+    && (( LLAMA_CONTEXT_SIZE >= 512 && LLAMA_CONTEXT_SIZE <= 2048 )) \
+    || die "LLAMA_CONTEXT_SIZE must be between 512 and the approved model maximum of 2048." 2
   [[ "${LLAMA_CPU_THREADS}" =~ ^[0-9]+$ ]] \
     && (( LLAMA_CPU_THREADS >= 1 && LLAMA_CPU_THREADS <= 1024 )) \
     || die "LLAMA_CPU_THREADS must be between 1 and 1024." 2
@@ -1568,7 +1578,7 @@ cmd_doctor() {
   }
 
   doctor_llama() {
-    if [[ ! -f /etc/llama.cpp/managed-by-ubuntu-zombie ]]; then
+    if ! llama_installation_is_managed; then
       dr warn llama marker "Managed llama ownership marker missing. Fix: sudo ./${SCRIPT_NAME} install llama"
       return
     fi
@@ -1714,8 +1724,25 @@ cmd_repair() {
       warn "  To install: sudo ./${SCRIPT_NAME} install llama"
       return
     fi
-    install_llama
-    ok "llama runtime, model, ownership, and service re-asserted."
+    local -a current=()
+    mapfile -t current < <(python3 - /etc/llama.cpp/config.json <<'PY'
+import json
+import sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+print(data["context_size"])
+print(data["threads"])
+PY
+    ) || die "Could not read the managed llama configuration." 1
+    (( ${#current[@]} == 2 )) \
+      || die "Managed llama configuration is incomplete." 1
+    local boot=disabled
+    systemctl is-enabled --quiet llama-server.service 2>/dev/null \
+      && boot=enabled
+    info "Re-running the idempotent llama installer to verify and repair assets."
+    env ZOMBIE_NONINTERACTIVE=1 ZOMBIE_INSTALL_LLAMA=0 \
+      LLAMA_CONTEXT_SIZE="${current[0]}" LLAMA_CPU_THREADS="${current[1]}" \
+      LLAMA_BOOT="${boot}" \
+      "${SCRIPT_DIR}/install.sh" install llama --yes
   }
 
   local component
@@ -4485,16 +4512,6 @@ install_zombie() {
   install_zombie_runtime
 }
 
-llama_installation_is_managed() {
-  local marker
-  for marker in /etc/llama.cpp/managed-by-ubuntu-zombie \
-      /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
-    [[ -f "${marker}" ]] && [[ "$(stat -c '%U:%G %a' "${marker}" 2>/dev/null)" == "root:root 644" ]] \
-      && grep -Fqx 'component=llama' "${marker}" && return 0
-  done
-  return 1
-}
-
 assert_llama_installation_safe() {
   if ! llama_installation_is_managed; then
     local path
@@ -4588,7 +4605,13 @@ PY
   done
 
   section "Install pinned llama.cpp CPU runtime"
-  if [[ ! -x "${runtime_dir}/llama-server" ]]; then
+  local runtime_valid=0
+  if [[ -x "${runtime_dir}/llama-server" \
+      && -f "${runtime_dir}/.tree-sha256" ]] \
+      && (cd "${runtime_dir}" && sha256sum -c .tree-sha256 >/dev/null 2>&1); then
+    runtime_valid=1
+  fi
+  if (( ! runtime_valid )); then
     if [[ -f "${runtime_archive}" ]]; then
       actual="$(sha256sum "${runtime_archive}" | awk '{print $1}')"
       [[ "${actual}" == "${runtime_sha}" ]] || rm -f "${runtime_archive}"
@@ -4615,6 +4638,11 @@ PY
     mv "${runtime_stage}/${archive_root}" "${runtime_dir}"
     rm -rf "${runtime_stage}"
     chown -R root:root "${runtime_dir}"
+    (
+      cd "${runtime_dir}"
+      find . -type f ! -name .tree-sha256 -print0 \
+        | sort -z | xargs -0 sha256sum > .tree-sha256
+    )
     chmod -R a-w "${runtime_dir}"
     note_changed
   else
