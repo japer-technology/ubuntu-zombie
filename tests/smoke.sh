@@ -2887,9 +2887,11 @@ with tempfile.TemporaryDirectory() as directory:
     captured = {}
     original_execv = manager.os.execv
     original_library_path = os.environ.get("LD_LIBRARY_PATH")
+    os.environ.pop("LD_LIBRARY_PATH", None)
     def fake_execv(path, args):
         captured["path"] = path
         captured["args"] = args
+        captured["library_path"] = os.environ.get("LD_LIBRARY_PATH")
         raise StopIteration
     manager.os.execv = fake_execv
     try:
@@ -2904,6 +2906,7 @@ with tempfile.TemporaryDirectory() as directory:
             os.environ["LD_LIBRARY_PATH"] = original_library_path
     assert captured["path"] == runtime / "llama-server", captured
     assert captured["args"][-2:] == ["--alias", "fixture"], captured
+    assert captured["library_path"] == str(runtime), captured
 PY
   grep -q 'id="logout"' payload/agent/templates/index.html \
     || { echo "chat UI must expose the logoff button" >&2; exit 1; }

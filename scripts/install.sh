@@ -2621,7 +2621,7 @@ receipt_start_forgejo() {
 receipt_start_llama() {
   printf 'Llama component  : standalone PC-wide service\n'
   printf 'Llama API        : http://127.0.0.1:%s/v1 (loopback only)\n' "${LLAMA_PORT}"
-  printf 'Llama runtime    : b10054\n'
+  printf 'Llama runtime    : %s\n' "$(llama_catalog_release)"
   printf 'Llama model      : %s\n' "${LLAMA_MODEL_ID}"
   printf 'Llama context    : %s tokens; %s CPU threads\n' \
     "${LLAMA_CONTEXT_SIZE}" "${LLAMA_CPU_THREADS}"
