@@ -530,7 +530,7 @@ def _lmstudio_endpoint() -> tuple[str, str] | None:
             _DEFAULT_HTTPS_PORT
             if parsed.scheme == "https" else _DEFAULT_HTTP_PORT
         )
-    elif port == 0:
+    elif port < 1:
         return None
     return base_url, f"{parsed.hostname}:{port}"
 

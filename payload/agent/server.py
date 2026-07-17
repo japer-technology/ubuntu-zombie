@@ -1175,8 +1175,11 @@ class App:
             with self._lmstudio_lock:
                 servers = providers.scan_lmstudio()
                 selected = next(
-                    (server for server in servers
-                     if server.get("base_url") == base_url),
+                    (
+                        server
+                        for server in servers
+                        if server.get("base_url") == base_url
+                    ),
                     None,
                 )
                 if selected is None:
