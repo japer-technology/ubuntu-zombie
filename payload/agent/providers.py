@@ -147,6 +147,8 @@ _PROVIDER_BY_NAME: dict[str, _ProviderSpec] = {
 SUPPORTED_PROVIDERS: tuple[str, ...] = tuple(spec.name for spec in _PI_AI_PROVIDERS)
 _SAFE_MODEL_ID = re.compile(r"\A[A-Za-z0-9._:/+@-]{1,200}\Z")
 _MAX_MODELS_RESPONSE_SIZE = 1024 * 1024
+_DEFAULT_HTTP_PORT = 80
+_DEFAULT_HTTPS_PORT = 443
 
 # Every provider key env var, in registry order. Used by the pi-mono
 # bridge driver to strip non-active provider keys before spawning the
@@ -524,7 +526,10 @@ def _lmstudio_endpoint() -> tuple[str, str] | None:
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
     if port is None:
-        port = 443 if parsed.scheme == "https" else 80
+        port = (
+            _DEFAULT_HTTPS_PORT
+            if parsed.scheme == "https" else _DEFAULT_HTTP_PORT
+        )
     elif port == 0:
         return None
     return base_url, f"{parsed.hostname}:{port}"

@@ -1960,7 +1960,7 @@ async function handleSlashCommand(input) {
     case "/locals":
     case "/local": {
       addMessage("user", input);
-      const listOnly = cmd === "/locals" || (cmd === "/local" && !arg);
+      const listOnly = cmd === "/locals" || (cmd === "/local" && arg === "");
       if (listOnly) {
         addMessage("system", "Scanning the local network for local APIs...");
         try {

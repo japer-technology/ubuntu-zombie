@@ -1644,7 +1644,7 @@ class Handler(BaseHTTPRequestHandler):
             data = self._read_json()
             base_url = (data.get("url") or "").strip()
             if not base_url:
-                self._send_json({"error": "missing local API URL"}, 400)
+                self._send_json({"error": "Local API URL is required."}, 400)
                 return
             self._send_json(self.app.set_local_api(base_url))
             return
