@@ -102,11 +102,11 @@ root-capable account.
 The project can provide a one-liner without presenting it as the safest
 method. Documentation should offer three confidence levels:
 
+### Fast path
+
 All `ubuntu-zombie.example` addresses below are non-operational
 placeholder domains. A production URL and its ownership model remain an
 implementation decision.
-
-### Fast path
 
 ```bash
 curl -fsSL https://get.ubuntu-zombie.example/ | sh
@@ -235,8 +235,13 @@ into a command.
 The most conventional long-term Ubuntu experience is:
 
 ```bash
-curl -fsSL https://packages.ubuntu-zombie.example/key.asc |
-  sudo gpg --dearmor -o /usr/share/keyrings/ubuntu-zombie.gpg
+curl -fsSLo /tmp/ubuntu-zombie-key.asc \
+  https://packages.ubuntu-zombie.example/key.asc
+# Compare this fingerprint with one published through an independent
+# trusted channel before installing the key.
+gpg --show-keys --fingerprint /tmp/ubuntu-zombie-key.asc
+sudo gpg --dearmor -o /usr/share/keyrings/ubuntu-zombie.gpg \
+  /tmp/ubuntu-zombie-key.asc
 
 echo "deb [signed-by=/usr/share/keyrings/ubuntu-zombie.gpg] \
 https://packages.ubuntu-zombie.example/ubuntu stable main" |
