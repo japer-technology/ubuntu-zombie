@@ -3046,6 +3046,9 @@ PY
   grep -q 'uzFetchJson("/api/status")' payload/agent/templates/index.html \
     && grep -q '"Persistent usage"' payload/agent/templates/index.html \
     || { echo "/status must show comprehensive proof-of-life data" >&2; exit 1; }
+  grep -q '"/retitle \[title\]"' payload/agent/templates/index.html \
+    && grep -q 'applyBrandTitle' payload/agent/templates/index.html \
+    || { echo "chat UI must expose /retitle branding controls" >&2; exit 1; }
   _MARKDOWN_TEST="$(mktemp)"
   python3 - "${_MARKDOWN_TEST}" <<'PY'
 import sys

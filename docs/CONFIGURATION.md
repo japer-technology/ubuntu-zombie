@@ -144,8 +144,10 @@ switches models.
 
 The chat command finder shows every command when the composer contains only
 `/`, then narrows the list as you type. `/help <command>` gives detailed
-usage and side-effect information for one command. `/status` makes a minimal
-completion against the selected provider to prove credentials and
+usage and side-effect information for one command. `/retitle <title>` changes
+the browser title, header, wordmark, login prompt, and tombstone label for the
+current browser; `/retitle` resets those labels to Ubuntu Zombie. `/status`
+makes a minimal completion against the selected provider to prove credentials and
 connectivity, so hosted providers may record a very small amount of usage.
 That probe is cached for 30 seconds to prevent rapid requests from multiplying
 provider cost. It also reports the provider and model, primary host IP, OS and

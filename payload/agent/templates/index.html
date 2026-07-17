@@ -280,7 +280,7 @@
 </head>
 <body>
 <header>
-  <h1 aria-label="Ubuntu Zombie on {{HOSTNAME}}, user {{USERNAME}}">
+  <h1 id="brand-heading" aria-label="Ubuntu Zombie on {{HOSTNAME}}, user {{USERNAME}}">
     Ubuntu Zombie <span class="host">{{HOSTNAME}}[{{USERNAME}}]</span>
   </h1>
   <div class="header-actions">
@@ -294,7 +294,7 @@
 </header>
 <main id="viewport">
 <div id="welcome" class="welcome">
-<pre class="wordmark" aria-hidden="true">╭──────────────────────────────────╮
+<pre id="brand-wordmark" class="wordmark" aria-hidden="true">╭──────────────────────────────────╮
 │  UBUNTU ZOMBIE                   │
 │  AI SYSTEMS ADMINISTRATOR        │
 ╰──────────────────────────────────╯</pre>
@@ -343,7 +343,7 @@
      to decide whether the Logoff control exists. -->
 <div id="login-overlay" class="overlay" hidden>
   <div class="panel">
-    <h2>Ubuntu Zombie</h2>
+    <h2 id="login-brand-title">Ubuntu Zombie</h2>
     <p>A password is required.</p>
     <form id="login-form">
       <input type="password" id="login-password" autocomplete="current-password"
@@ -358,7 +358,7 @@
      terminal and must disable the chat controls rather than prompt again. -->
 <div id="tomb-overlay" class="overlay tomb" hidden>
   <div class="panel">
-    <h2>This Ubuntu Zombie is dead</h2>
+    <h2 id="tomb-brand-title">This Ubuntu Zombie is dead</h2>
     <p id="tomb-message">The Ubuntu Zombie Systems Administrator has reached
       the end of its time to live and is permanently disabled. Reinstall
       Ubuntu Zombie to bring it back.</p>
@@ -381,6 +381,7 @@ let visibleMessages = [];
 let authRequired = false;
 let chatDisabled = false;
 let fullWidthMode = false;
+let brandTitle = "Ubuntu Zombie";
 
 // In-flight turn state. ``turnController`` lets the operator (or a
 // client-side timeout) abort a request that the server is taking too
@@ -1031,6 +1032,7 @@ const SLASH_COMMANDS = [
   ["/policy", "Show policy classes and rule counts.", "Configuration"],
   ["/profile", "Show the active local profile.", "Configuration"],
   ["/redraw", "Reload the current conversation from SQLite.", "Conversation"],
+  ["/retitle [title]", "Retitle this browser's Ubuntu Zombie UI; omit title to reset.", "Configuration"],
   ["/retry", "Retry the last user turn in a new branch.", "Conversation"],
   ["/shortcuts", "Show keyboard shortcuts.", "Help"],
   ["/skills [name]", "List skills or preview one skill.", "Tools"],
@@ -1072,6 +1074,7 @@ const COMMAND_DETAILS = {
   "/policy": "Shows policy classes, approval requirements, tool mappings, rule counts, and per-turn safety budgets without modifying policy.",
   "/profile": "Shows the active local agent profile and instruction-file metadata used to shape agent behavior.",
   "/redraw": "Reloads the active conversation and its tool events from SQLite, replacing the current browser transcript.",
+  "/retitle": "Changes the browser title, header, wordmark, login prompt, and tombstone label for this browser. The title is stored locally; omit the title to reset to Ubuntu Zombie.",
   "/retry": "Branches immediately before the latest user turn and submits that prompt again. The original conversation remains unchanged.",
   "/shortcuts": "Lists keyboard controls for sending, inserting newlines, queueing a prompt, and stopping a running turn.",
   "/skills": "Without an argument, lists installed skills. With a skill name, previews its local triggers, path, and instruction content.",
@@ -1353,6 +1356,58 @@ function uzSafeName(value) {
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80) || "conversation";
+}
+
+const BRAND_STORAGE_KEY = "ubuntu-zombie.brandTitle";
+const DEFAULT_BRAND_TITLE = "Ubuntu Zombie";
+
+function uzStorageGet(key) {
+  try { return window.localStorage.getItem(key); }
+  catch (_e) { return null; }
+}
+
+function uzStorageSet(key, value) {
+  try { window.localStorage.setItem(key, value); }
+  catch (_e) { /* ignore private/locked storage */ }
+}
+
+function uzStorageRemove(key) {
+  try { window.localStorage.removeItem(key); }
+  catch (_e) { /* ignore private/locked storage */ }
+}
+
+function cleanBrandTitle(value) {
+  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+function brandWordmark(title) {
+  const line1 = cleanBrandTitle(title).toUpperCase() || DEFAULT_BRAND_TITLE.toUpperCase();
+  const line2 = "AI SYSTEMS ADMINISTRATOR";
+  const width = Math.max(line1.length, line2.length) + 4;
+  const rule = "─".repeat(width);
+  const row = text => `│  ${text.padEnd(width - 4)}  │`;
+  return `╭${rule}╮\n${row(line1)}\n${row(line2)}\n╰${rule}╯`;
+}
+
+function applyBrandTitle(title, persist = true) {
+  brandTitle = cleanBrandTitle(title) || DEFAULT_BRAND_TITLE;
+  if (persist) {
+    if (brandTitle === DEFAULT_BRAND_TITLE) uzStorageRemove(BRAND_STORAGE_KEY);
+    else uzStorageSet(BRAND_STORAGE_KEY, brandTitle);
+  }
+  document.title = brandTitle;
+  const heading = document.getElementById("brand-heading");
+  if (heading) {
+    if (heading.firstChild) heading.firstChild.nodeValue = `${brandTitle} `;
+    heading.setAttribute("aria-label",
+      `${brandTitle} on {{HOSTNAME}}, user {{USERNAME}}`);
+  }
+  const wordmark = document.getElementById("brand-wordmark");
+  if (wordmark) wordmark.textContent = brandWordmark(brandTitle);
+  const loginTitle = document.getElementById("login-brand-title");
+  if (loginTitle) loginTitle.textContent = brandTitle;
+  const tombTitle = document.getElementById("tomb-brand-title");
+  if (tombTitle) tombTitle.textContent = `This ${brandTitle} is dead`;
 }
 
 function uzConversationMarkdown(data) {
@@ -1893,6 +1948,18 @@ async function handleSlashCommand(input) {
       else {
         try { await uzLoadConversation(conversationId, `Redrew conversation #${conversationId}.`); }
         catch (err) { addMessage("system", String(err), { error: true }); }
+      }
+      return true;
+    }
+    case "/retitle": {
+      addMessage("user", input);
+      const requested = cleanBrandTitle(arg);
+      if (!requested) {
+        applyBrandTitle(DEFAULT_BRAND_TITLE);
+        addMessage("system", "Title reset to Ubuntu Zombie.");
+      } else {
+        applyBrandTitle(requested);
+        addMessage("system", `Title set to ${brandTitle}.`);
       }
       return true;
     }
@@ -2539,8 +2606,13 @@ function showTombstone(status) {
   // A dead zombie can never be revived from the browser; lock the UI.
   if (status && status.dead_reason === "killed") {
     tombMessage.textContent =
-      "The Ubuntu Zombie Systems Administrator has been killed and is " +
-      "permanently disabled. Reinstall Ubuntu Zombie to bring it back.";
+      `The ${brandTitle} Systems Administrator has been killed and is ` +
+      `permanently disabled. Reinstall ${brandTitle} to bring it back.`;
+  } else {
+    tombMessage.textContent =
+      `The ${brandTitle} Systems Administrator has reached ` +
+      `the end of its time to live and is permanently disabled. ` +
+      `Reinstall ${brandTitle} to bring it back.`;
   }
   tombOverlay.hidden = false;
   showLogin(false);
@@ -2615,6 +2687,7 @@ async function bootstrap() {
   }
 }
 
+applyBrandTitle(uzStorageGet(BRAND_STORAGE_KEY) || DEFAULT_BRAND_TITLE, false);
 bootstrap();
 </script>
 </body>
