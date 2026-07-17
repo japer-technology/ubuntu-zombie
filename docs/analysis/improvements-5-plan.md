@@ -322,7 +322,8 @@ or changing the host.
 - `sleep` requires a pinned runtime with tested native idle sleep.
 - `on-demand` permits automatic `ensure-running` only for the private Zombie
   provider. Public third-party clients must run `llama-manager start`
-  explicitly or select `resident` or `sleep`.
+  explicitly or select `resident` or `sleep`; the public instance never
+  starts automatically in response to an API connection.
 - `manual` disables automatic start and automatic recovery.
 - A public and private combined install must have enough RAM, VRAM, disk, and
   port capacity for both selections, including simultaneous loading.
@@ -469,6 +470,10 @@ Add a repository-owned catalogue with:
 Reject mutable branch URLs, unknown schema versions, unsafe filenames,
 duplicate IDs, missing hashes, size mismatches, unapproved licences,
 untested templates, and model/build combinations outside the catalogue.
+Installation compares the exact GGUF chat-template identifier and metadata
+digest with the approved catalogue entry. Only the pinned `llama.cpp` runtime
+interprets that verified template during inference; installer and manager
+processes treat it as opaque data.
 
 Download to a partial file in the managed cache, verify size and SHA-256,
 then rename atomically. Support exact offline source directories and verified
