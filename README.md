@@ -77,6 +77,8 @@ fully offline with no cloud API key. Skip it with
 `ZOMBIE_SKIP_LLM_SCAN=1`. See
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md#optional-use-a-local-llm-auto-detected-on-your-lan)
 and [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#local-llm-discovery-lan-scan).
+At runtime, `/locals` also checks the conventional managed llama.cpp
+loopback ports `8080` and `58080`.
 
 Prefer a `.deb`? Each [GitHub Release](https://github.com/japer-technology/ubuntu-zombie/releases/latest)
 ships `ubuntu-zombie_<version>_all.deb` plus a `SHA256SUMS` checksum file
@@ -109,7 +111,8 @@ sudo ./scripts/install.sh <verb> [component ...] [flags]
 ```
 
 Valid verbs are `install`, `verify`, `doctor`, `repair`, and
-`uninstall`. Public component targets are `zombie` and `forgejo`. With
+`uninstall`. Public component targets are `zombie`, `forgejo`, and
+`llama`. With
 no target, `install` keeps its existing meaning: install or upgrade the
 `zombie` baseline. Examples:
 
@@ -117,6 +120,7 @@ no target, `install` keeps its existing meaning: install or upgrade the
 sudo ./scripts/install.sh install             # baseline zombie
 sudo ./scripts/install.sh install zombie      # same, explicit target
 sudo ./scripts/install.sh install forgejo      # standalone forge + PostgreSQL
+sudo ./scripts/install.sh install llama        # standalone PC-wide llama.cpp
 sudo ./scripts/install.sh install zombie forgejo
 sudo ./scripts/install.sh verify zombie
 sudo ./scripts/install.sh doctor forgejo
@@ -131,7 +135,8 @@ sudo ./scripts/install.sh uninstall zombie
 sudo ./scripts/install.sh uninstall
 ```
 
-`install forgejo` does not create the zombie account, install Node or the
+`install forgejo` and `install llama` do not create the zombie account,
+install Node or the
 Python agent runtime, deploy policy or chat services, or change desktop
 sleep settings. `ZOMBIE_INSTALL_FORGEJO=1 install` remains supported and
 selects the legacy combined `zombie forgejo` path.
@@ -171,6 +176,22 @@ Interactive installs can also toggle components from item
 `9) Options` of the parameter review. Settings and caveats:
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#optional-components-ubuntu-zombie--options).
 More components are specified under [`options/`](options/README.md).
+
+### Standalone llama.cpp
+
+Install an independent CPU llama.cpp server and a small verified default
+model without installing Zombie:
+
+```bash
+sudo ./scripts/install.sh install llama
+llama-manager status
+```
+
+The OpenAI-compatible endpoint is
+`http://127.0.0.1:8080/v1`. It is available to local applications and
+local users only; it never listens on the LAN. Use `llama-manager` to
+start, stop, restart, enable, disable, test, or inspect it. Removing
+Zombie leaves this component untouched.
 
 ## Documentation
 

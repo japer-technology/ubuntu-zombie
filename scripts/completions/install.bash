@@ -12,7 +12,7 @@ _ubuntu_zombie_install() {
   cur="${COMP_WORDS[COMP_CWORD]}"
 
   verbs="install verify doctor repair uninstall"
-  components="zombie forgejo"
+  components="zombie forgejo llama"
   common_flags="-h --help -v --version -n --dry-run -y --yes -q --quiet \
                 --verbose --debug --no-color --no-colour --strict --json"
   uninstall_flags="--archive --keep-agent"
@@ -24,7 +24,7 @@ _ubuntu_zombie_install() {
     case "${word}" in
       install|verify|doctor|repair|uninstall)
         [[ -z "${seen_verb}" ]] && seen_verb="${word}" ;;
-      zombie|forgejo)
+      zombie|forgejo|llama)
         used_components+="${word} " ;;
     esac
   done

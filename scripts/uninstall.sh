@@ -15,6 +15,7 @@
 #   sudo ./uninstall.sh                # interactive (remove all managed components)
 #   sudo ./uninstall.sh zombie         # remove only the zombie component
 #   sudo ./uninstall.sh forgejo        # remove only the Forgejo component
+#   sudo ./uninstall.sh llama          # remove only the standalone llama
 #   sudo ./uninstall.sh -n|--dry-run   # preview
 #   sudo ./uninstall.sh --archive      # archive then remove
 #   sudo ./uninstall.sh -y|--yes       # skip confirmations
@@ -58,6 +59,7 @@ KEEP_AGENT=0
 TARGET_ARGS=()
 readonly COMPONENT_ZOMBIE="zombie"
 readonly COMPONENT_FORGEJO="forgejo"
+readonly COMPONENT_LLAMA="llama"
 COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
@@ -80,8 +82,10 @@ fi
 . "${SCRIPT_DIR}/component-registry.sh"
 component_remove_zombie() { remove_component_zombie; }
 component_remove_forgejo() { remove_component_forgejo; }
+component_remove_llama() { remove_component_llama; }
 register_component "${COMPONENT_ZOMBIE}" "" remove=component_remove_zombie
 register_component "${COMPONENT_FORGEJO}" "" remove=component_remove_forgejo
+register_component "${COMPONENT_LLAMA}" "" remove=component_remove_llama
 
 component_names() {
   printf '%s' "${PUBLIC_COMPONENTS[*]}"
@@ -166,6 +170,8 @@ Usage:
   sudo ./uninstall.sh -n|--dry-run    # preview
   sudo ./uninstall.sh forgejo --dry-run
                                       # remove only the Forgejo component
+  sudo ./uninstall.sh llama
+                                      # remove only standalone llama.cpp
   sudo ./uninstall.sh zombie
                                       # remove only the zombie component
   sudo ./uninstall.sh --archive       # archive then remove
@@ -467,6 +473,51 @@ remove_component_forgejo() {
     remove_component_manifest "${COMPONENT_FORGEJO}"
   else
     warn "Keeping Forgejo manifest because removal finished with errors."
+  fi
+  warn_remaining_components
+}
+
+remove_component_llama() {
+  local fail_count_before="${UNINSTALL_FAIL_COUNT}"
+  local marker=/etc/llama.cpp/managed-by-ubuntu-zombie
+  if [[ ! -f "${marker}" ]] || ! grep -Fqx 'component=llama' "${marker}"; then
+    if [[ -e "${COMPONENT_MANIFEST_DIR}/${COMPONENT_LLAMA}" ]]; then
+      warn "Llama manifest exists but its ownership marker is missing or invalid."
+      warn "Refusing to remove any potentially unmanaged llama.cpp files."
+      UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
+      UNINSTALL_EXIT=1
+    fi
+    return 0
+  fi
+
+  info "Removing standalone llama component"
+  run "systemctl disable --now llama-server.service 2>/dev/null || true"
+  run "rm -f /etc/systemd/system/llama-server.service"
+  run_or_warn "Reload systemd after llama removal" "systemctl daemon-reload"
+  run "rm -f /usr/local/bin/llama-manager"
+  remove_tree_checked "/etc/llama.cpp" "/etc/llama.cpp (managed configuration)"
+  remove_tree_checked "/opt/llama.cpp" "/opt/llama.cpp (managed runtime)"
+  if [[ -d /var/lib/llama.cpp ]]; then
+    if confirm "Remove /var/lib/llama.cpp (downloaded models and state)?"; then
+      remove_tree_checked "/var/lib/llama.cpp" "/var/lib/llama.cpp (models and state)"
+    else
+      warn "Keeping /var/lib/llama.cpp."
+    fi
+  fi
+  [[ ! -d /var/cache/llama.cpp ]] \
+    || remove_tree_checked "/var/cache/llama.cpp" "/var/cache/llama.cpp"
+  [[ ! -d /var/log/llama.cpp ]] \
+    || remove_tree_checked "/var/log/llama.cpp" "/var/log/llama.cpp"
+  if id llama-cpp >/dev/null 2>&1; then
+    if confirm "Remove the llama-cpp system account?"; then
+      run_or_warn "Remove llama-cpp account" \
+        "deluser llama-cpp >/dev/null 2>&1 || userdel llama-cpp"
+    fi
+  fi
+  if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
+    remove_component_manifest "${COMPONENT_LLAMA}"
+  else
+    warn "Keeping llama manifest because removal finished with errors."
   fi
   warn_remaining_components
 }

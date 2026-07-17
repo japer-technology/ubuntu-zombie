@@ -148,7 +148,7 @@ non-interactive, and non-TTY runs. It needs `curl` and `python3`
 | Variable                 | Default | Purpose                                                              |
 | ------------------------ | ------- | -------------------------------------------------------------------- |
 | `ZOMBIE_SKIP_LLM_SCAN`   | `0`     | Set to `1` to skip the LAN scan entirely.                            |
-| `ZOMBIE_LLM_SCAN_PORT`   | `1234`  | TCP port probed on each address for the `/v1/models` endpoint.       |
+| `ZOMBIE_LLM_SCAN_PORT`   | `1234`  | TCP port probed on each LAN address. Runtime `/locals` also probes loopback ports `8080` and `58080`. |
 | `ZOMBIE_LOCAL_LLM_API_KEY` | `local` | API key recorded for the discovered server (most local servers ignore it). |
 
 You can also trigger the scan on demand from the interactive setup
@@ -395,7 +395,8 @@ not `--yes` and not `ZOMBIE_NONINTERACTIVE=1`), it opens an editable
 **parameter review** before touching the host. The review is scoped to
 the selected components. Zombie runs show agent, chat, TTL, provider, and
 local-LLM settings; Forgejo-only runs show Forgejo, PostgreSQL, runner,
-transcript, and receipt settings.
+transcript, and receipt settings; llama-only runs show the runtime, model,
+context, CPU threads, and boot policy.
 Enter a number to edit a field (with validation and re-prompting on bad
 input), toggle the boolean options, and repeat until you are satisfied;
 then accept to begin the install. Cancelling at the review (`q`) exits
@@ -413,7 +414,7 @@ the review entirely and use the supplied environment unchanged.
 
 Beyond the baseline, the installer supports **opt-in components**. The
 canonical command grammar is `scripts/install.sh <verb> [component ...]
-[flags]`; public component targets are `zombie` and `forgejo`. Existing
+[flags]`; public component targets are `zombie`, `forgejo`, and `llama`. Existing
 `ZOMBIE_INSTALL_<COMPONENT>` flags remain supported for automation and
 are additive with explicit targets. Every flag defaults to `0`, so a
 default install is unchanged. Enabled components appear in the
@@ -429,6 +430,41 @@ legacy environment selectors are additive and execute in registry order,
 so `install forgejo zombie` and `install zombie forgejo` converge the
 same components. `ZOMBIE_INSTALL_FORGEJO=1 install` remains equivalent
 to the combined path.
+
+`install llama` installs a standalone application without selecting
+`zombie`. `ZOMBIE_INSTALL_LLAMA=1` remains an additive compatibility
+selector for automation.
+
+### Standalone llama.cpp (`install llama`)
+
+The standalone `llama` component installs the pinned CPU build of
+`llama.cpp` b10054 and a checksum-verified SmolLM2 360M Instruct Q4_K_M
+model. It runs as the dedicated `llama-cpp` system account and exposes an
+OpenAI-compatible API only at `http://127.0.0.1:8080/v1`. The endpoint is
+PC-wide: every local user can reach it, but it is not reachable from the
+LAN.
+
+| Variable | Default | Effect |
+| -------- | ------- | ------ |
+| `ZOMBIE_INSTALL_LLAMA` | `0` | Add the independent `llama` component to selected install targets. |
+| `LLAMA_PORT` | `8080` | Fixed loopback port; other values are rejected. |
+| `LLAMA_MODEL_ID` | `smollm2-360m-instruct-q4_k_m` | Approved default model; other IDs are rejected in this release. |
+| `LLAMA_CONTEXT_SIZE` | `2048` | Context size from 512 through 8192 tokens. |
+| `LLAMA_CPU_THREADS` | detected logical CPUs | CPU worker count from 1 through 1024. |
+| `LLAMA_BOOT` | `enabled` | `enabled` starts now and at boot; `disabled` installs the service stopped. |
+
+The runtime lives under `/opt/llama.cpp`, configuration under
+`/etc/llama.cpp`, models and state under `/var/lib/llama.cpp`, and logs
+under `/var/log/llama.cpp`. Downloads are pinned by immutable release or
+model revision and SHA-256. If any owned path, account, unit, or port
+already exists without the installer ownership marker, installation stops
+without adopting or changing it.
+
+`llama-manager` supports `status`, `start`, `stop`, `restart`, `enable`,
+`disable`, `test`, `models`, and `hardware`; mutating commands require
+root. `verify llama`, `doctor llama`, `repair llama`, and
+`uninstall llama` are target-scoped. Uninstall asks separately before
+removing downloaded models and state.
 
 ### Forgejo server (`ZOMBIE_INSTALL_FORGEJO=1`)
 
@@ -585,7 +621,8 @@ scripts/install.sh <verb> [component ...] [flags]
 ```
 
 All verbs honour the same relevant `ZOMBIE_*` environment variables
-documented above. Valid component targets are `zombie` and `forgejo`.
+documented above. Valid component targets are `zombie`, `forgejo`, and
+`llama`.
 
 | Verb        | Effect                                                                |
 | ----------- | --------------------------------------------------------------------- |

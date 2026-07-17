@@ -570,7 +570,9 @@ if (
     or probed_addresses.index("127.0.0.1") > probed_addresses.index("127.0.0.2")
 ):
     raise SystemExit("scan_lmstudio must probe loopback before the selected subnet")
-if len(discovered) != 1 or discovered[0]["address"] != "127.0.0.1:1234":
+if [entry["address"] for entry in discovered] != [
+    "127.0.0.1:1234", "127.0.0.1:8080", "127.0.0.1:58080"
+]:
     raise SystemExit(f"scan_lmstudio wrong: {discovered!r}")
 
 models_dir = tempfile.mkdtemp()
@@ -617,7 +619,11 @@ finally:
     _pr.scan_lmstudio = original_scan
 if locals_info != {
     "current": "http://127.0.0.1:1234/v1",
-    "locals": ["http://127.0.0.1:1234/v1"],
+    "locals": [
+        "http://127.0.0.1:1234/v1",
+        "http://127.0.0.1:8080/v1",
+        "http://127.0.0.1:58080/v1",
+    ],
 }:
     raise SystemExit(f"App.local_apis_info wrong: {locals_info!r}")
 if (
@@ -1664,7 +1670,7 @@ run_subcommands() {
       echo "${out}"
       exit 1
     fi
-    for target in zombie forgejo; do
+    for target in zombie forgejo llama; do
       set +e
       out="$(./scripts/install.sh "${sub}" "${target}" 2>&1)"
       rc=$?
@@ -1682,7 +1688,7 @@ run_subcommands() {
   # Component-aware install grammar: targets, flags before/between/after,
   # default selection, explicit forgejo-only planning, env-additive selection,
   # and -- target validation are all safe under --dry-run.
-  local default_out zombie_out forgejo_out combined_out
+  local default_out zombie_out forgejo_out llama_out combined_out
   local forgejo_zombie_order_out env_flag_out
   default_out="$(ZOMBIE_COLOR=never ./scripts/install.sh install --dry-run)"
   zombie_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run install zombie)"
@@ -1706,6 +1712,16 @@ run_subcommands() {
     || { echo "FAIL: forgejo-only dry-run must include the receipt" >&2; exit 1; }
   ! grep -Eq "chat|Time to Live|local LLM|/opt/ai-zombie" <<<"${forgejo_out}" \
     || { echo "FAIL: forgejo-only dry-run leaked zombie resources" >&2; exit 1; }
+
+  llama_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run install llama)"
+  grep -q "Components:     llama" <<<"${llama_out}" \
+    || { echo "FAIL: llama-only dry-run did not select only llama" >&2; exit 1; }
+  grep -q "127.0.0.1:8080" <<<"${llama_out}" \
+    || { echo "FAIL: llama-only dry-run must expose loopback port 8080" >&2; exit 1; }
+  grep -q "Zombie impact:  none" <<<"${llama_out}" \
+    || { echo "FAIL: llama-only dry-run must state component isolation" >&2; exit 1; }
+  ! grep -Eq "Agent user:|PostgreSQL|/opt/ai-zombie" <<<"${llama_out}" \
+    || { echo "FAIL: llama-only dry-run leaked another component's resources" >&2; exit 1; }
 
   forgejo_out="$(ZOMBIE_COLOR=never ZOMBIE_INSTALL_FORGEJO_RUNNER=1 \
     ./scripts/install.sh --dry-run install forgejo)"
@@ -1770,6 +1786,7 @@ run_subcommands() {
     expect_exit_code 2 ./scripts/install.sh "${sub}" nope
     expect_exit_code 2 ./scripts/install.sh "${sub}" zombie zombie
     expect_exit_code 2 ./scripts/install.sh "${sub}" forgejo forgejo
+    expect_exit_code 2 ./scripts/install.sh "${sub}" llama llama
     expect_exit_code 2 ./scripts/install.sh "${sub}" "${sub}"
   done
   # After --, every token is a component target; flag-looking tokens are
@@ -1778,6 +1795,7 @@ run_subcommands() {
   expect_exit_code 2 ./scripts/install.sh install forgejo --archive
   expect_exit_code 2 ./scripts/install.sh uninstall forgejo --archive --dry-run
   expect_exit_code 0 ./scripts/install.sh uninstall forgejo --dry-run
+  expect_exit_code 0 ./scripts/install.sh uninstall llama --dry-run
   expect_exit_code 0 ./scripts/install.sh uninstall zombie --archive --keep-agent --dry-run
 }
 
@@ -2401,7 +2419,7 @@ run_noninteractive() {
     exit 1
   fi
 
-  echo "[smoke] optional components (Forgejo) dry-run"
+  echo "[smoke] optional components dry-run"
   # The Forgejo option must parse from env alone (no new required
   # non-interactive input), never touch the host under --dry-run, and
   # leave the default dry-run output byte-for-byte unchanged when off.
@@ -2421,6 +2439,12 @@ run_noninteractive() {
     || { echo "FAIL: Forgejo dry-run must describe LAN HTTPS" >&2; exit 1; }
   grep -q "127.0.0.1:3000" <<<"${fj_out}" \
     || { echo "FAIL: Forgejo dry-run must keep backend on loopback" >&2; exit 1; }
+  local llama_out
+  llama_out="$(ZOMBIE_COLOR=never ZOMBIE_NONINTERACTIVE=1 \
+    ./scripts/install.sh install llama --dry-run)"
+  grep -q "llama.cpp b10054" <<<"${llama_out}" \
+    && grep -q "127.0.0.1:8080" <<<"${llama_out}" \
+    || { echo "FAIL: standalone llama dry-run stanza missing" >&2; exit 1; }
   # Invalid option values must be rejected before any host change.
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=2' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_HTTP_PORT=70000' ./scripts/install.sh doctor
@@ -2432,6 +2456,9 @@ run_noninteractive() {
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_DB_PASSWORD=short' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_VERSION=not.a.version!' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_FORGEJO=1' 'FORGEJO_RUNNER_LABELS=bad label' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=2' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_PORT=8081' ./scripts/install.sh doctor
+  expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_CONTEXT_SIZE=nope' ./scripts/install.sh doctor
 }
 
 run_diagnostics() {
@@ -2801,6 +2828,19 @@ EOF
   grep -q "ZOMBIE_INSTALL_FORGEJO" scripts/uninstall.sh 2>/dev/null \
     || grep -q "Removing optional Forgejo component" scripts/uninstall.sh \
     || { echo "uninstall.sh must reverse the Forgejo component" >&2; exit 1; }
+  grep -q "Removing standalone llama component" scripts/uninstall.sh \
+    || { echo "uninstall.sh must reverse the llama component" >&2; exit 1; }
+  grep -q "8080, 58080" payload/agent/providers.py \
+    || { echo "/locals must probe both managed llama loopback ports" >&2; exit 1; }
+  python3 payload/bin/llama-manager --help >/dev/null
+  python3 - <<'PY'
+import json
+from pathlib import Path
+for name in ("llama-builds.json", "llama-models.json"):
+    data = json.loads((Path("payload/etc") / name).read_text())
+    if data.get("schema_version") != 1:
+        raise SystemExit(f"{name} has wrong schema")
+PY
   grep -q 'id="logout"' payload/agent/templates/index.html \
     || { echo "chat UI must expose the logoff button" >&2; exit 1; }
   grep -q 'case "/logout"' payload/agent/templates/index.html \
@@ -2903,6 +2943,7 @@ run_flags() {
 
   # --help must document the optional-component flags.
   ./scripts/install.sh --help | grep -q "ZOMBIE_INSTALL_FORGEJO"
+  ./scripts/install.sh --help | grep -q "ZOMBIE_INSTALL_LLAMA"
   ./scripts/install.sh --help | grep -q "FORGEJO_HTTP_PORT"
   ./scripts/install.sh --help | grep -q "FORGEJO_ADMIN_PASSWORD"
   ./scripts/install.sh --help | grep -q "FORGEJO_DB_PASSWORD"
@@ -2983,7 +3024,7 @@ run_flags() {
     || { echo "FAIL: install.bash completion has a syntax error" >&2; exit 1; }
   [[ -r scripts/completions/_install.sh ]] \
     || { echo "FAIL: scripts/completions/_install.sh missing" >&2; exit 1; }
-  for component in zombie forgejo; do
+  for component in zombie forgejo llama; do
     grep -q "${component}" scripts/completions/install.bash \
       || { echo "FAIL: bash completion missing ${component}" >&2; exit 1; }
     grep -q "${component}" scripts/completions/_install.sh \
