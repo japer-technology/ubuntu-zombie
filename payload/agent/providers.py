@@ -518,9 +518,10 @@ def lmstudio_base_url() -> str | None:
     from urllib.parse import urlparse
     try:
         parsed = urlparse(base_url)
-        # Accessing the property rejects invalid or out-of-range ports.
-        parsed.port
+        port = parsed.port
     except ValueError:
+        return None
+    if port is not None and not (0 < port <= 65535):
         return None
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         return None
