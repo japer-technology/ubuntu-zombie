@@ -2464,6 +2464,7 @@ run_noninteractive() {
     ./scripts/install.sh install llama --dry-run
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_PORT=8081' ./scripts/install.sh doctor
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_CONTEXT_SIZE=nope' ./scripts/install.sh doctor
+  # The approved default model has a 2048-token catalogue ceiling.
   expect_exit_code 2 env 'ZOMBIE_INSTALL_LLAMA=1' 'LLAMA_CONTEXT_SIZE=4096' ./scripts/install.sh doctor
 }
 

@@ -625,6 +625,8 @@ def scan_lmstudio(
         raise ProviderError("The LM Studio scan network is not valid.") from exc
     if not isinstance(subnet, ipaddress.IPv4Network):
         raise ProviderError("LM Studio discovery requires an IPv4 network.")
+    # dict preserves insertion order, so this removes duplicates without
+    # changing the configured-port-first probe order.
     ports = list(dict.fromkeys((scan_port, *_MANAGED_LLAMA_LOOPBACK_PORTS)))
     probes = [("127.0.0.1", candidate) for candidate in ports]
     probes.extend(

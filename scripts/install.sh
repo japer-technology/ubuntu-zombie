@@ -4764,7 +4764,8 @@ write_forgejo_manifest() {
 
 write_llama_manifest() {
   write_component_manifest "${COMPONENT_LLAMA}" \
-    "${LLAMA_RUNTIME_RELEASE:-b10054}" "${LLAMA_MODEL_ID}"
+    "${LLAMA_RUNTIME_RELEASE:?llama runtime release was not resolved}" \
+    "${LLAMA_MODEL_ID}"
 }
 
 final_zombie_summary() {
