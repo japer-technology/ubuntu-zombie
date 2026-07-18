@@ -406,6 +406,7 @@ let transcriptPinnedToBottom = true;
 const CLIENT_TURN_TIMEOUT_MS = 720000;
 const QUEUED_PROMPT_PREVIEW_CHARS = 4000;
 const MAX_COMMAND_MENU_ITEMS = 8;
+const MAX_PROMPT_PLACEHOLDER_CHARS = 160;
 // Leave time for a pointer press on an option before textarea blur closes it.
 const COMMAND_MENU_BLUR_DELAY_MS = 100;
 
@@ -1398,7 +1399,8 @@ function cleanBrandTitle(value) {
 }
 
 function cleanPromptPlaceholder(value) {
-  return String(value || "").replace(/\s+/g, " ").trim().slice(0, 160);
+  return String(value || "").replace(/\s+/g, " ").trim()
+    .slice(0, MAX_PROMPT_PLACEHOLDER_CHARS);
 }
 
 function applyPromptPlaceholder(value, persist = true) {

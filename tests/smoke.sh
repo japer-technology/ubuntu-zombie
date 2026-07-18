@@ -3199,6 +3199,8 @@ aliases_match = re.search(
 details_match = re.search(
     r"const COMMAND_DETAILS = \{(.*?)\n\};", text, re.DOTALL
 )
+if not details_match:
+    raise SystemExit("slash-command details registry not found")
 handler_start = text.index("async function handleSlashCommand")
 handler_end = text.index('\nform.addEventListener("submit"', handler_start)
 handler = text[handler_start:handler_end]
