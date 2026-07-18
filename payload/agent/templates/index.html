@@ -1949,7 +1949,8 @@ function uzPositiveInteger(value) {
 async function handleSlashCommand(input) {
   const parsed = uzParseSlashCommand(input);
   if (!parsed) return false;
-  const { cmd, arg } = parsed;
+  const cmd = COMMAND_ALIASES[parsed.cmd] || parsed.cmd;
+  const { arg } = parsed;
   switch (cmd) {
     case "/help":
     case "/commands": {
