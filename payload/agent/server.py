@@ -1592,6 +1592,7 @@ def _render_index(app: App) -> bytes:
     text = text.replace("{{HOSTNAME}}", html.escape(facts.get("hostname", "?")))
     text = text.replace("{{USERNAME}}", html.escape(AGENT_USER))
     text = text.replace("{{PROVIDER_STATUS}}", html.escape(banner))
+    text = text.replace("{{VERSION}}", html.escape(app_version()))
     examples = (HERE / "examples.md").read_text(encoding="utf-8") if (HERE / "examples.md").exists() else ""
     text = text.replace("{{EXAMPLES}}", html.escape(examples))
     return text.encode("utf-8")

@@ -42,6 +42,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   to Ubuntu Zombie.
 - **Compact model status:** the chat header now shows only the active model,
   with its IP address appended when the model server is local.
+- **Visible installed version:** the chat footer now shows the Ubuntu Zombie
+  version beneath the composer buttons, and the decorative green header dot
+  has been removed.
 - **Reliable exact slash commands:** exact command names such as
   `/conversations` are selected ahead of longer autocomplete matches and
   submit normally.
