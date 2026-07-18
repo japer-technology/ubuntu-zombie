@@ -45,6 +45,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Reliable exact slash commands:** exact command names such as
   `/conversations` are selected ahead of longer autocomplete matches and
   submit normally.
+- **Working command aliases:** slash-command aliases are now resolved in one
+  place before dispatch, so every alias runs its canonical command — including
+  `/exit` and `/quit`, which previously reported "Unknown command."
 
 ### Standalone llama.cpp
 
