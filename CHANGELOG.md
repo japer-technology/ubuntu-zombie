@@ -27,13 +27,15 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   width and offset as assistant responses.
 - **Visible conversation output:** the chat transcript now remains visible when
   the welcome panel is hidden after the first message.
-- **Optional full-width display:** `/fullwidth [on|off]` toggles or explicitly
-  controls a full-width transcript and composer for the current page.
+- **Persistent full-width display:** `/fullwidth [on|off]` toggles or explicitly
+  controls a full-width transcript and composer and remembers the setting in
+  the current browser.
 - **Readable Markdown tables:** assistant table syntax now renders as
   accessible, high-contrast tables with padded cells, borders, alignment,
   striping, and horizontal overflow for narrow screens.
-- **Deeper command discovery:** a bare `/` shows every command, while
-  `/help <command>` explains that command's usage, behavior, and side effects.
+- **Deeper command discovery:** a bare `/` shows every command;
+  `/help <command>` explains canonical commands and aliases, `/help <pattern*>`
+  gives full pages for matches, and `/help all` shows every full help page.
 - **Component update visibility:** `/version` reports installed bridge and
   runtime versions and checks fixed GitHub/npm sources for latest releases.
 - **Proof-of-life status:** `/status` now probes the configured LLM and reports

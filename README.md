@@ -61,10 +61,12 @@ The chat streams live turn progress when the browser supports
 visible queued message if you submit while the agent is already working.
 Type `/` to browse the complete command catalogue without leaving the
 composer; keep typing to narrow it. `/help` shows the compact command index,
-and `/help <command>` explains one command in detail. Assistant Markdown
-tables use bordered, high-contrast cells and scroll horizontally when wide.
-User questions and assistant responses share the same transcript width,
-while `/fullwidth [on|off]` expands or restores the transcript and composer.
+`/help <command>` explains one command in detail, `/help <pattern*>` explains
+matching commands, and `/help all` shows every full help page. Assistant
+Markdown tables use bordered, high-contrast cells and scroll horizontally
+when wide. User questions and assistant responses share the same transcript
+width, while `/fullwidth [on|off]` expands or restores the transcript and
+composer and remembers that setting in the current browser.
 Use `/rebrand <title>` to rebrand the browser title, header, wordmark, and
 login/tombstone labels for this browser; `/rebrand` resets them. Use
 `/reprompt <placeholder>` to replace and remember the composer placeholder

@@ -3131,6 +3131,9 @@ PY
     && grep -q '"/version": "Shows installed component versions' \
       payload/agent/templates/index.html \
     || { echo "/help <command> must provide detailed command help" >&2; exit 1; }
+  grep -q 'needle === "all"' payload/agent/templates/index.html \
+    && grep -q 'needle.includes("\*")' payload/agent/templates/index.html \
+    || { echo "/help must support all and wildcard detail pages" >&2; exit 1; }
   grep -Fq 'typed === "/" ? matches' payload/agent/templates/index.html \
     || { echo "a bare slash must show the complete command finder" >&2; exit 1; }
   _COMMAND_TEST="$(mktemp)"
@@ -3225,6 +3228,52 @@ if "const cmd = COMMAND_ALIASES[parsed.cmd] || parsed.cmd;" not in handler:
 PY
   node "${_SLASH_PARSE_TEST}"
   rm -f "${_SLASH_PARSE_TEST}"
+  _HELP_TEST="$(mktemp)"
+  python3 - "${_HELP_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+registry_start = text.index("const SLASH_COMMANDS")
+registry_end = text.index("function timestamp", registry_start)
+help_start = text.index("function uzCommandEntries")
+help_end = text.index("function uzCommandName", help_start)
+test = r'''
+const reprompt = uzDetailedCommandHelp("reprompt");
+if (!reprompt.includes("/reprompt [placeholder]") ||
+    !reprompt.includes("Changes the prompt placeholder")) {
+  throw new Error("/help reprompt did not return its full help page");
+}
+if (!uzDetailedCommandHelp("help").includes("/help [command]")) {
+  throw new Error("/help help did not return its own help page");
+}
+const quit = uzDetailedCommandHelp("quit");
+if (!quit.includes("/quit") || !quit.includes("Alias for: /logout") ||
+    !quit.includes("Ends the current browser session")) {
+  throw new Error("/help quit did not return alias-aware detailed help");
+}
+const wildcard = uzDetailedCommandHelp("re*");
+for (const command of ["/rebrand", "/redraw", "/reprompt", "/reset", "/resume", "/retry"]) {
+  if (!wildcard.includes(command)) {
+    throw new Error(`/help re* omitted ${command}`);
+  }
+}
+const all = uzDetailedCommandHelp("all");
+for (const command of ["/audit", "/help", "/quit", "/whoami"]) {
+  if (!all.includes(command)) {
+    throw new Error(`/help all omitted ${command}`);
+  }
+}
+if (uzDetailedCommandHelp("does-not-exist") !== null) {
+  throw new Error("unknown detailed help query should not match");
+}
+'''
+Path(sys.argv[1]).write_text(
+    text[registry_start:registry_end] + text[help_start:help_end] + test
+)
+PY
+  node "${_HELP_TEST}"
+  rm -f "${_HELP_TEST}"
   _REPROMPT_TEST="$(mktemp)"
   python3 - "${_REPROMPT_TEST}" <<'PY'
 import sys
@@ -3267,6 +3316,52 @@ Path(sys.argv[1]).write_text(test)
 PY
   node "${_REPROMPT_TEST}"
   rm -f "${_REPROMPT_TEST}"
+  _FULLWIDTH_TEST="$(mktemp)"
+  python3 - "${_FULLWIDTH_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+start = text.index("const BRAND_STORAGE_KEY")
+end = text.index("function brandWordmark", start)
+test = r'''
+const stored = new Map();
+const classes = new Set();
+const window = { localStorage: {
+  getItem: key => stored.has(key) ? stored.get(key) : null,
+  setItem: (key, value) => stored.set(key, value),
+  removeItem: key => stored.delete(key),
+} };
+const document = { body: { classList: {
+  toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name),
+} } };
+const promptEl = {};
+let fullWidthMode = false;
+const MAX_PROMPT_PLACEHOLDER_CHARS = 160;
+'''
+test += text[start:end]
+test += r'''
+applyFullWidth(true);
+if (!fullWidthMode || !classes.has("fullwidth") ||
+    stored.get(FULLWIDTH_STORAGE_KEY) !== "on") {
+  throw new Error("/fullwidth on did not apply and persist");
+}
+fullWidthMode = false;
+classes.delete("fullwidth");
+applyFullWidth(uzStorageGet(FULLWIDTH_STORAGE_KEY) === "on", false);
+if (!fullWidthMode || !classes.has("fullwidth")) {
+  throw new Error("/fullwidth did not survive a reload");
+}
+applyFullWidth(false);
+if (fullWidthMode || classes.has("fullwidth") ||
+    stored.has(FULLWIDTH_STORAGE_KEY)) {
+  throw new Error("/fullwidth off did not restore and forget the default");
+}
+'''
+Path(sys.argv[1]).write_text(test)
+PY
+  node "${_FULLWIDTH_TEST}"
+  rm -f "${_FULLWIDTH_TEST}"
   grep -q 'uzFetchJson("/api/status")' payload/agent/templates/index.html \
     && grep -q '"Persistent usage"' payload/agent/templates/index.html \
     || { echo "/status must show comprehensive proof-of-life data" >&2; exit 1; }
@@ -3277,6 +3372,9 @@ PY
     && grep -q 'applyPromptPlaceholder' payload/agent/templates/index.html \
     && grep -q 'PROMPT_STORAGE_KEY' payload/agent/templates/index.html \
     || { echo "chat UI must expose persistent /reprompt controls" >&2; exit 1; }
+  grep -q 'FULLWIDTH_STORAGE_KEY' payload/agent/templates/index.html \
+    && grep -q 'applyFullWidth' payload/agent/templates/index.html \
+    || { echo "chat UI must persist /fullwidth controls" >&2; exit 1; }
   ! grep -q '"/retitle' payload/agent/templates/index.html \
     || { echo "chat UI must not expose the old /retitle command" >&2; exit 1; }
   grep -q 'id="provider-status"' payload/agent/templates/index.html \
