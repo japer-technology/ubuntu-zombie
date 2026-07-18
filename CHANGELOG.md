@@ -53,6 +53,8 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Reliable slash-command input:** command arguments retain internal
   whitespace, numeric arguments reject malformed values, `/exit` and `/quit`
   now log out as documented, and `//` sends a message beginning with `/`.
+- **Editable prompt recall:** `/reprompt` restores the latest conversation
+  prompt to the composer for editing without sending it to the model.
 - **Working command aliases:** slash-command aliases are now resolved in one
   place before dispatch, so every alias runs its canonical command — including
   `/exit` and `/quit`, which previously reported "Unknown command."

@@ -3219,6 +3219,10 @@ PY
   grep -q '"/rebrand \[title\]"' payload/agent/templates/index.html \
     && grep -q 'applyBrandTitle' payload/agent/templates/index.html \
     || { echo "chat UI must expose /rebrand branding controls" >&2; exit 1; }
+  grep -q '"/reprompt"' payload/agent/templates/index.html \
+    && grep -q 'promptEl.value = lastConversationPrompt' \
+      payload/agent/templates/index.html \
+    || { echo "chat UI must expose /reprompt prompt restoration" >&2; exit 1; }
   ! grep -q '"/retitle' payload/agent/templates/index.html \
     || { echo "chat UI must not expose the old /retitle command" >&2; exit 1; }
   grep -q 'id="provider-status"' payload/agent/templates/index.html \

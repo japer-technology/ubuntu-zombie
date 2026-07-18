@@ -365,6 +365,7 @@
 <script>
 "use strict";
 let conversationId = null;
+let lastConversationPrompt = "";
 const log = document.getElementById("log");
 const viewport = document.getElementById("viewport");
 const form = document.getElementById("form");
@@ -1031,6 +1032,7 @@ const SLASH_COMMANDS = [
   ["/profile", "Show the active local profile.", "Configuration"],
   ["/redraw", "Reload the current conversation from SQLite.", "Conversation"],
   ["/rebrand [title]", "Rebrand this browser's Ubuntu Zombie UI; omit title to reset.", "Configuration"],
+  ["/reprompt", "Restore the last user prompt to the composer for editing.", "Conversation"],
   ["/retry", "Retry the last user turn in a new branch.", "Conversation"],
   ["/shortcuts", "Show keyboard shortcuts.", "Help"],
   ["/skills [name]", "List skills or preview one skill.", "Tools"],
@@ -1073,6 +1075,7 @@ const COMMAND_DETAILS = {
   "/profile": "Shows the active agent profile and loaded instruction metadata.",
   "/redraw": "Reloads the active conversation and tool events from local storage.",
   "/rebrand": "Changes this browser's interface branding or resets it to Ubuntu Zombie.",
+  "/reprompt": "Restores the latest conversation prompt to the composer without sending it.",
   "/retry": "Branches before the latest user turn and submits that prompt again.",
   "/shortcuts": "Lists keyboard shortcuts for sending, queueing, line breaks, and stopping.",
   "/skills": "Lists installed skills or previews one skill's triggers and instructions.",
@@ -1105,6 +1108,7 @@ function timestamp(value) {
 }
 
 function renderConversation(messages, events) {
+  lastConversationPrompt = "";
   // Replay a stored conversation faithfully: interleave chat messages
   // and tool events by their recorded timestamp so a loaded transcript
   // reads in the same order it happened live (rather than every message
@@ -1120,7 +1124,10 @@ function renderConversation(messages, events) {
       // would paint a blank bubble — an empty line in the transcript —
       // so skip it entirely.
       if (!m.content || !String(m.content).trim()) continue;
-      items.push({ at: m.created_at, seq: seq++, node: () => addMessage(m.role, m.content) });
+      items.push({ at: m.created_at, seq: seq++, node: () => {
+        if (m.role === "user") lastConversationPrompt = m.content;
+        addMessage(m.role, m.content);
+      }});
     }
   }
   for (const ev of events || []) {
@@ -1547,6 +1554,7 @@ function applyTurnPayload(data) {
 
 async function uzSendPromptSync(prompt, convId = conversationId) {
   netStats.turn = newStatBucket();
+  lastConversationPrompt = prompt;
   addMessage("user", prompt);
   scrollLogToBottom();
   setBusy(true);
@@ -1595,6 +1603,7 @@ async function uzSendPromptSync(prompt, convId = conversationId) {
 async function uzSendPrompt(prompt, convId = conversationId) {
   if (!window.EventSource) return uzSendPromptSync(prompt, convId);
   netStats.turn = newStatBucket();
+  lastConversationPrompt = prompt;
   addMessage("user", prompt);
   scrollLogToBottom();
   setBusy(true);
@@ -1940,6 +1949,16 @@ async function handleSlashCommand(input) {
           detail ? {} : { error: true });
         return true;
       }
+      case "/reprompt": {
+        if (!lastConversationPrompt) {
+          addMessage("system", "No conversation prompt to restore.", { error: true });
+          return true;
+        }
+        promptEl.value = lastConversationPrompt;
+        resizePrompt();
+        promptEl.focus();
+        return true;
+      }
       const filter = cmd === "/commands" ? arg : "";
       const lines = uzCommandHelp(filter);
       const title = filter
@@ -1991,6 +2010,7 @@ async function handleSlashCommand(input) {
     }
     case "/new": {
       conversationId = null;
+      lastConversationPrompt = "";
       uzClearLog();
       addMessage("system", "Started a new conversation.");
       return true;
