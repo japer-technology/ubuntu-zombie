@@ -3093,6 +3093,34 @@ PY
     || { echo "/help <command> must provide detailed command help" >&2; exit 1; }
   grep -Fq 'typed === "/" ? matches' payload/agent/templates/index.html \
     || { echo "a bare slash must show the complete command finder" >&2; exit 1; }
+  _COMMAND_TEST="$(mktemp)"
+  python3 - "${_COMMAND_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+start = text.index("function uzCommandName")
+end = text.index("let commandMatches", start)
+test = r'''
+const entries = [
+  ["/local [url]"],
+  ["/locals"],
+  ["/conversations"],
+];
+if (uzExactCommandIndex(entries, "/conversations") !== 2) {
+  throw new Error("exact /conversations command was not selected");
+}
+if (uzExactCommandIndex(entries, "/LOCAL") !== 0) {
+  throw new Error("exact command matching must be case-insensitive");
+}
+if (uzExactCommandIndex(entries, "/loc") !== -1) {
+  throw new Error("partial commands must remain autocomplete candidates");
+}
+'''
+Path(sys.argv[1]).write_text(text[start:end] + test)
+PY
+  node "${_COMMAND_TEST}"
+  rm -f "${_COMMAND_TEST}"
   grep -q 'uzFetchJson("/api/status")' payload/agent/templates/index.html \
     && grep -q '"Persistent usage"' payload/agent/templates/index.html \
     || { echo "/status must show comprehensive proof-of-life data" >&2; exit 1; }
