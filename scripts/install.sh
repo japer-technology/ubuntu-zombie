@@ -4330,7 +4330,16 @@ render_unit "${PAYLOAD_DIR}/systemd/ubuntu-zombie-chat.service"   /etc/systemd/s
 render_unit "${PAYLOAD_DIR}/systemd/ubuntu-zombie-health.service" /etc/systemd/system/ubuntu-zombie-health.service
 install -m 644 "${PAYLOAD_DIR}/systemd/ubuntu-zombie-health.timer"   /etc/systemd/system/ubuntu-zombie-health.timer
 systemctl daemon-reload
-systemctl enable --now ubuntu-zombie-chat.service || warn "Chat service did not start; see journalctl -u ubuntu-zombie-chat"
+systemctl enable ubuntu-zombie-chat.service >/dev/null 2>&1 \
+  || warn "Could not enable the chat service; see journalctl -u ubuntu-zombie-chat"
+# Use restart, not just start: on an in-place upgrade the agent tree
+# (server.py, templates/index.html, VERSION) has just been overwritten,
+# but `enable --now` would leave an already-running unit untouched, so
+# the old process would keep serving the new template — rendering a
+# literal "v{{VERSION}}" footer and a UI that no longer matches its API.
+# Restart is idempotent: it starts the unit if it is stopped.
+systemctl restart ubuntu-zombie-chat.service \
+  || warn "Chat service did not start; see journalctl -u ubuntu-zombie-chat"
 systemctl enable --now ubuntu-zombie-health.timer || true
 ok "Chat service installed and enabled."
 
