@@ -2011,7 +2011,7 @@ async function handleSlashCommand(input) {
     case "/reprompt": {
       addMessage("user", input);
       const requested = cleanPromptPlaceholder(arg);
-      applyPromptPlaceholder(requested || DEFAULT_PROMPT_PLACEHOLDER);
+      applyPromptPlaceholder(requested);
       addMessage("system", requested
         ? `Prompt placeholder set to ${requested}.`
         : "Prompt placeholder reset to AI System Administrator.");
