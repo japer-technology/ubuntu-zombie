@@ -753,9 +753,17 @@ export function getModels(provider) {
     reasoning: true, contextWindow: 64000 }];
 }
 export function getModel(provider, id) {
+  // Mirror pi-ai 0.80: local providers (lmstudio) have no static
+  // catalogue entry, so getModel returns undefined instead of throwing.
+  if (provider === "lmstudio") return undefined;
   return { provider, id };
 }
-export async function complete(_model, _context) {
+export async function complete(model, _context, options) {
+  if (model.provider === "lmstudio") {
+    return { role: "assistant", content: [{ type: "text",
+      text: `local ${model.api} ${model.baseUrl} ` +
+        `key=${options && options.apiKey}` }] };
+  }
   return { role: "assistant",
     content: [{ type: "text", text: "compat completion" }] };
 }
@@ -768,8 +776,20 @@ JS
         '{"provider":"openai","model":"compat-model","messages":[{"role":"user","content":"hello"}]}' \
         | NODE_PATH="${_LM_DIR}/node_modules" OPENAI_API_KEY=test \
           node payload/agent/pi-ai-bridge.mjs)"
+    # A local provider (lmstudio) has no static pi-ai catalogue entry:
+    # getModel returns undefined and the bridge must synthesise a model
+    # handle from models.json (baseUrl + default openai-completions api)
+    # and pass the API key explicitly, instead of crashing on the
+    # undefined handle.
+    _PI_AI_LOCAL_OUT="$(printf '%s' \
+        '{"provider":"lmstudio","model":"llama-3.1-8b","messages":[{"role":"user","content":"ping"}]}' \
+        | NODE_PATH="${_LM_DIR}/node_modules" \
+          ZOMBIE_PI_MODELS_JSON="${_LM_DIR}/models.json" \
+          LMSTUDIO_API_KEY=local \
+          node payload/agent/pi-ai-bridge.mjs)"
     ZOMBIE_PI_AI_LIST_OUT="${_PI_AI_LIST_OUT}" \
-      ZOMBIE_PI_AI_COMPLETE_OUT="${_PI_AI_COMPLETE_OUT}" python3 - <<'PY'
+      ZOMBIE_PI_AI_COMPLETE_OUT="${_PI_AI_COMPLETE_OUT}" \
+      ZOMBIE_PI_AI_LOCAL_OUT="${_PI_AI_LOCAL_OUT}" python3 - <<'PY'
 import json
 import os
 
@@ -781,6 +801,12 @@ if listed != {"ok": True, "models": [{
 completed = json.loads(os.environ["ZOMBIE_PI_AI_COMPLETE_OUT"])
 if completed != {"ok": True, "text": "compat completion"}:
     raise SystemExit(f"compat completion failed: {completed!r}")
+local = json.loads(os.environ["ZOMBIE_PI_AI_LOCAL_OUT"])
+expected_text = (
+    "local openai-completions http://127.0.0.1:7891/v1 key=local"
+)
+if local != {"ok": True, "text": expected_text}:
+    raise SystemExit(f"local provider completion failed: {local!r}")
 PY
     rm -rf "${_LM_DIR}"
 

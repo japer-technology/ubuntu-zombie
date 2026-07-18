@@ -94,6 +94,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   provider's available models, and `/status` includes the local API address.
 - **Local LM Studio discovery:** `/locals` checks `127.0.0.1` before scanning
   the LAN, so it finds LM Studio's default loopback-only server.
+- **Local provider completions repaired:** the pi-ai bridge no longer
+  crashes with `Cannot read properties of undefined (reading 'api')`
+  when the active provider (e.g. the shipped local `lmstudio`/llama.cpp
+  endpoint) or model has no entry in pi-ai's static catalogue. The
+  bridge now synthesises a model handle from `~/.pi/agent/models.json`
+  and passes the API key explicitly, restoring the `/status`
+  connectivity probe and completion calls for local LLM deployments;
+  in-band provider errors are surfaced instead of reported as success.
 
 ### Phase 4 — Registry generalisation
 
