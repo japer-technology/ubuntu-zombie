@@ -144,8 +144,11 @@ switches models.
 
 The chat command finder shows every command when the composer contains only
 `/`, then narrows the list as you type. `/help <command>` gives detailed
-usage and side-effect information for one command. `/rebrand <title>` changes
-the browser title, header, wordmark, login prompt, and tombstone label for the
+usage and side-effect information for one command, aliases included;
+`/help <pattern*>` gives full pages for matching commands and `/help all`
+shows every full help page. `/fullwidth [on|off]` changes and remembers the
+transcript width for the current browser. `/rebrand <title>` changes the
+browser title, header, wordmark, login prompt, and tombstone label for the
 current browser; `/rebrand` resets those labels to Ubuntu Zombie.
 `/reprompt <placeholder>` changes and remembers the composer placeholder for
 the current browser; `/reprompt` resets it to `AI System Administrator`. The

@@ -1250,15 +1250,36 @@ function uzCommandHelp(filter = "") {
 
 function uzDetailedCommandHelp(query) {
   const needle = query.trim().toLowerCase().replace(/^\/+/, "");
-  const requested = `/${needle}`;
-  const canonical = COMMAND_ALIASES[requested] || requested;
-  const entry = SLASH_COMMANDS.find(([signature]) =>
-    signature.split(" ")[0].toLowerCase() === canonical);
-  if (!entry) return null;
-  const [signature, description, group] = entry;
-  const command = signature.split(" ")[0];
-  return `${signature}\nCategory: ${group}\n\n${description}\n` +
-    (COMMAND_DETAILS[command] || "");
+  const commandNames = [
+    ...SLASH_COMMANDS.map(([signature]) => signature.split(" ")[0]),
+    ...Object.keys(COMMAND_ALIASES),
+  ].sort();
+  let matches;
+  if (needle === "all") {
+    matches = commandNames;
+  } else if (needle.includes("*")) {
+    const pattern = new RegExp("^" +
+      needle.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$");
+    matches = commandNames.filter(command => pattern.test(command.slice(1)));
+  } else {
+    const requested = `/${needle}`;
+    matches = commandNames.includes(requested) ? [requested] : [];
+  }
+  if (!matches.length) return null;
+  return matches.map(requested => {
+    const canonical = COMMAND_ALIASES[requested] || requested;
+    const entry = SLASH_COMMANDS.find(([signature]) =>
+      signature.split(" ")[0].toLowerCase() === canonical);
+    if (!entry) return "";
+    const [signature, description, group] = entry;
+    const command = signature.split(" ")[0];
+    const shownSignature = requested === canonical
+      ? signature
+      : requested + signature.slice(command.length);
+    const alias = requested === canonical ? "" : `\nAlias for: ${canonical}`;
+    return `${shownSignature}\nCategory: ${group}${alias}\n\n${description}\n` +
+      COMMAND_DETAILS[command];
+  }).filter(Boolean).join("\n\n---\n\n");
 }
 
 function uzCommandName(value) {
@@ -1378,6 +1399,7 @@ const BRAND_STORAGE_KEY = "ubuntu-zombie.brandTitle";
 const DEFAULT_BRAND_TITLE = "Ubuntu Zombie";
 const PROMPT_STORAGE_KEY = "ubuntu-zombie.promptPlaceholder";
 const DEFAULT_PROMPT_PLACEHOLDER = "AI System Administrator";
+const FULLWIDTH_STORAGE_KEY = "ubuntu-zombie.fullWidth";
 
 function uzStorageGet(key) {
   try { return window.localStorage.getItem(key); }
@@ -1410,6 +1432,15 @@ function applyPromptPlaceholder(value, persist = true) {
     else uzStorageSet(PROMPT_STORAGE_KEY, placeholder);
   }
   promptEl.placeholder = placeholder;
+}
+
+function applyFullWidth(enabled, persist = true) {
+  fullWidthMode = Boolean(enabled);
+  if (persist) {
+    if (fullWidthMode) uzStorageSet(FULLWIDTH_STORAGE_KEY, "on");
+    else uzStorageRemove(FULLWIDTH_STORAGE_KEY);
+  }
+  document.body.classList.toggle("fullwidth", fullWidthMode);
 }
 
 function brandWordmark(title) {
@@ -1975,14 +2006,15 @@ async function handleSlashCommand(input) {
     case "/fullwidth": {
       addMessage("user", input);
       const want = arg.toLowerCase();
-      if (want === "on") fullWidthMode = true;
-      else if (want === "off") fullWidthMode = false;
-      else if (!want) fullWidthMode = !fullWidthMode;
+      let enabled;
+      if (want === "on") enabled = true;
+      else if (want === "off") enabled = false;
+      else if (!want) enabled = !fullWidthMode;
       else {
         addMessage("system", "Usage: /fullwidth [on|off]", { error: true });
         return true;
       }
-      document.body.classList.toggle("fullwidth", fullWidthMode);
+      applyFullWidth(enabled);
       addMessage("system",
         `Full-width display ${fullWidthMode ? "on" : "off"}.`);
       return true;
@@ -2744,6 +2776,7 @@ async function bootstrap() {
 applyBrandTitle(uzStorageGet(BRAND_STORAGE_KEY) || DEFAULT_BRAND_TITLE, false);
 applyPromptPlaceholder(
   uzStorageGet(PROMPT_STORAGE_KEY) || DEFAULT_PROMPT_PLACEHOLDER, false);
+applyFullWidth(uzStorageGet(FULLWIDTH_STORAGE_KEY) === "on", false);
 bootstrap();
 </script>
 </body>
