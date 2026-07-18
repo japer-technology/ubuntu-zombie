@@ -294,88 +294,41 @@
 </header>
 <main id="viewport">
 <div id="welcome" class="welcome">
-  <h2 id="welcome-title">Greetings</h2>
+  <h2 id="welcome-title">Greetings Human</h2>
   <div class="starter-actions" aria-label="Example prompts">
+  <button type="button" disabled>I can</button>
 
-<button type="button" data-starter="Perform a comprehensive health assessment of this computer. Analyse hardware, operating system, drivers, services, logs, performance, security, temperatures, storage and networking. Identify anything requiring attention and rank findings by urgency, impact and repair difficulty.">
-    System health
-  </button>
+  <button type="button" data-starter="Perform a comprehensive health assessment of this computer. Analyse hardware, operating system, drivers, services, logs, performance, security, temperatures, storage, networking and identify anything requiring attention, ordered by priority.">assess system health</button>
 
-  <button type="button" data-starter="Diagnose everything currently wrong with this computer. Correlate symptoms, logs, hardware status, resource usage and configuration problems to determine root causes. Present a prioritised repair plan and request approval before making significant changes.">
-    Find and fix problems
-  </button>
+  <button type="button" disabled>,</button>
 
-  <button type="button" data-starter="Analyse overall system performance. Identify CPU, GPU, memory, storage, thermal, application and network bottlenecks. Explain what is slowing the computer down and recommend the highest-impact safe improvements.">
-    Why is it slow?
-  </button>
+  <button type="button" data-starter="Analyse all storage devices. Show what is consuming disk space, identify duplicate, temporary and obsolete files, explain why space is being used, and recommend the safest ways to recover storage.">analyse disk usage</button>
 
-  <button type="button" data-starter="Analyse all storage devices. Show what is consuming disk space, identify duplicate, temporary, cached, abandoned and obsolete files, and recommend the safest ways to recover storage without removing anything important.">
-    Recover disk space
-  </button>
+  <button type="button" disabled>,</button>
 
-  <button type="button" data-starter="Review recent operating system, application, driver and hardware errors. Explain each issue in plain English, determine likely root causes, identify recurring patterns, estimate severity and recommend corrective actions.">
-    Recent errors
-  </button>
+  <button type="button" data-starter="Review recent operating system, application and hardware errors. Explain each issue in plain English, determine likely root causes, estimate severity, and recommend corrective actions.">investigate recent errors</button>
 
-  <button type="button" data-starter="Perform a complete security audit. Check operating system protections, firewall, antivirus, updates, user accounts, permissions, startup items, remote access, exposed services, suspicious activity and potential vulnerabilities. Prioritise all security risks.">
-    Security audit
-  </button>
+  <button type="button" disabled>,</button>
 
-  <button type="button" data-starter="Inspect this computer for suspicious processes, persistence mechanisms, unexpected network connections, altered security settings, unknown startup items and other indicators of malware or unauthorised access. Explain every finding before taking action.">
-    Malware investigation
-  </button>
+  <button type="button" data-starter="Analyse overall system performance. Identify CPU, GPU, memory, storage and network bottlenecks, explain why they occur, and recommend the highest-impact optimisations.">diagnose performance</button>
 
-  <button type="button" data-starter="Inspect installed hardware, firmware and drivers. Detect missing, outdated, incompatible or unstable drivers, firmware issues, hardware faults, incorrect configurations and components that are not operating at their expected capability.">
-    Hardware and drivers
-  </button>
+  <button type="button" disabled>,</button>
 
-  <button type="button" data-starter="Evaluate startup, login and shutdown behaviour. Identify slow startup causes, unnecessary applications, services, scheduled tasks and background processes. Recommend safe changes and estimate the likely improvement from each one.">
-    Faster startup
-  </button>
+  <button type="button" data-starter="Perform a complete security audit. Check operating system security, firewall, antivirus, updates, user accounts, startup items, remote access, exposed services and potential vulnerabilities.">audit security</button>
 
-  <button type="button" data-starter="Audit operating system, application, driver and firmware updates. Identify missing, failed, blocked or risky updates, explain their importance and produce the safest update sequence with rollback precautions.">
-    Update everything safely
-  </button>
+  <button type="button" disabled>,</button>
 
-  <button type="button" data-starter="Diagnose this computer's network and internet connection. Analyse adapters, Wi-Fi signal, Ethernet, DNS, routing, latency, packet loss, bandwidth, firewall rules and local network conflicts. Identify the cause of instability or poor performance.">
-    Network diagnosis
-  </button>
+  <button type="button" data-starter="Inspect installed hardware and drivers. Detect missing, outdated or unstable drivers, firmware issues, hardware faults, configuration problems and compatibility risks.">inspect hardware and drivers</button>
 
-  <button type="button" data-starter="Analyse all installed applications. Identify unused, duplicate, outdated, unsupported, resource-heavy, suspicious or unnecessary software. Explain what each questionable application does and recommend what should be retained, updated or removed.">
-    Software audit
-  </button>
+  <button type="button" disabled>,</button>
 
-  <button type="button" data-starter="Inspect running applications, processes, services and scheduled tasks. Explain what is active, which components consume the most resources, what appears unnecessary or abnormal, and which items can be safely stopped or disabled.">
-    Background activity
-  </button>
+  <button type="button" data-starter="Evaluate startup behaviour and background activity. Identify slow startup causes, unnecessary services, scheduled tasks, background applications and recommend safe optimisations.">analyse startup behaviour</button>
 
-  <button type="button" data-starter="Evaluate system temperatures, cooling, fan behaviour, thermal throttling and power consumption. Identify overheating, restricted airflow, failing cooling components or inefficient power settings and recommend corrective actions.">
-    Temperature and power
-  </button>
+  <button type="button" disabled>or</button>
 
-  <button type="button" data-starter="Assess the health and expected reliability of all storage devices using available diagnostic data, error logs and performance indicators. Identify warning signs of failure and recommend immediate protection or replacement actions.">
-    Drive health
-  </button>
+  <button type="button" data-starter="Produce a complete technical report of this computer. Summarise hardware, software, operating system, performance, security, health, storage, networking and prioritise all recommended improvements from most important to least important.">produce a full system report</button>
 
-  <button type="button" data-starter="Review user accounts, administrator privileges, file permissions, shared folders, remote access and authentication settings. Identify excessive access, abandoned accounts, weak configurations and opportunities to improve security without disrupting normal use.">
-    Accounts and permissions
-  </button>
-
-  <button type="button" data-starter="Evaluate the current backup and recovery configuration. Determine what is protected, what is missing, whether backups are recent and recoverable, and whether the computer could be restored after hardware failure, ransomware or accidental deletion.">
-    Backup and recovery
-  </button>
-
-  <button type="button" data-starter="Prepare this computer for maximum reliability. Check updates, storage health, backups, security, cooling, startup items, drivers, error history and maintenance requirements. Produce a preventative maintenance plan ordered by priority.">
-    Prevent future problems
-  </button>
-
-  <button type="button" data-starter="Determine whether this computer is suitable for its current workload. Compare its hardware, configuration and observed performance with the demands of its applications and recommend configuration changes, component upgrades or replacement priorities.">
-    Upgrade assessment
-  </button>
-
-  <button type="button" data-starter="Produce a complete technical report for this computer. Summarise hardware, software, operating system, performance, security, health, storage, networking, reliability and upgrade potential. Consolidate all findings into a prioritised action plan from critical to optional.">
-    Full system report
-  </button>
+  <button type="button" disabled>.</button>
   
 </div>
 <div id="log" role="log" aria-live="polite" aria-relevant="additions text"
