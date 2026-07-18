@@ -1732,6 +1732,9 @@ assert server._provider_banner("openai", "model gpt-4o") == "gpt-4o"
 assert server._provider_banner(
     "lmstudio", "model qwen3 at 192.0.2.10:1234"
 ) == "qwen3 at 192.0.2.10:1234"
+assert server._provider_banner(
+    "openrouter", "model not set (set ZOMBIE_MODEL)"
+) == "model not set (set ZOMBIE_MODEL)"
 assert server._provider_banner("none", "No provider configured") == (
     "No provider configured"
 )
