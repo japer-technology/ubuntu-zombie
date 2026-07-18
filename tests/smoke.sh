@@ -1207,6 +1207,13 @@ checked = server.version_info(check_latest=True)
 checked_components = {row["name"]: row for row in checked["components"]}
 assert checked_components["ubuntu-zombie"]["latest"] == "2099.1.2", checked
 assert checked_components["pi-mono"]["latest"] == "9.8.7", checked
+
+server.machine_facts = lambda: {"hostname": "test-host"}
+server.provider_status = lambda: ("none", "not configured")
+rendered = server._render_index(None).decode()
+assert f'id="app-version"' in rendered, rendered
+assert f'v{server.app_version()}' in rendered, rendered
+assert "{{VERSION}}" not in rendered, rendered
 PY
 
   echo "  server proof-of-life status"
@@ -3185,6 +3192,9 @@ PY
     && grep -Fq '(data.address ? ` at ${data.address}` : "")' \
       payload/agent/templates/index.html \
     || { echo "chat header must show model and local address only" >&2; exit 1; }
+  grep -q 'id="app-version"' payload/agent/templates/index.html \
+    && ! grep -q 'header h1::before' payload/agent/templates/index.html \
+    || { echo "chat footer must show the version without the green header dot" >&2; exit 1; }
   _MARKDOWN_TEST="$(mktemp)"
   python3 - "${_MARKDOWN_TEST}" <<'PY'
 import sys
