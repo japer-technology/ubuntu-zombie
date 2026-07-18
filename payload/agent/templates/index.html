@@ -1986,7 +1986,12 @@ async function handleSlashCommand(input) {
   const cmd = parts[0].toLowerCase();
   const arg = parts.slice(1).join(" ").trim();
   if (!cmd.startsWith("/")) return false;
-  switch (cmd) {
+  // Resolve aliases to their canonical command in one place so every
+  // alias in COMMAND_ALIASES dispatches correctly and the switch only
+  // needs canonical cases. ``cmd`` stays as the user typed it for
+  // display and usage messages; ``canonical`` drives dispatch.
+  const canonical = COMMAND_ALIASES[cmd] || cmd;
+  switch (canonical) {
     case "/help":
     case "/commands": {
       addMessage("user", input);
@@ -2046,8 +2051,7 @@ async function handleSlashCommand(input) {
       }
       return true;
     }
-    case "/new":
-    case "/reset": {
+    case "/new": {
       conversationId = null;
       uzClearLog();
       addMessage("system", "Started a new conversation.");
@@ -2416,9 +2420,7 @@ async function handleSlashCommand(input) {
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
-    case "/conversations":
-    case "/history":
-    case "/sessions": {
+    case "/conversations": {
       addMessage("user", input);
       try {
         const data = await uzFetchJson("/api/conversations");
@@ -2430,8 +2432,7 @@ async function handleSlashCommand(input) {
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
-    case "/load":
-    case "/resume": {
+    case "/load": {
       addMessage("user", input);
       const id = parseInt(arg, 10);
       if (!arg || isNaN(id)) {
@@ -2512,8 +2513,7 @@ async function handleSlashCommand(input) {
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
-    case "/export":
-    case "/save": {
+    case "/export": {
       addMessage("user", input);
       try {
         await uzExportConversation();
