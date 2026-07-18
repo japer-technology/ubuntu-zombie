@@ -3196,12 +3196,24 @@ commands_match = re.search(
 aliases_match = re.search(
     r"const COMMAND_ALIASES = \{(.*?)\n\};", text, re.DOTALL
 )
+details_match = re.search(
+    r"const COMMAND_DETAILS = \{(.*?)\n\};", text, re.DOTALL
+)
+if not details_match:
+    raise SystemExit("slash-command details registry not found")
 handler_start = text.index("async function handleSlashCommand")
 handler_end = text.index('\nform.addEventListener("submit"', handler_start)
 handler = text[handler_start:handler_end]
 documented = set(re.findall(r'\["(/[^ "\]]+)', commands_match.group(1)))
+described = set(re.findall(r'"(/[^"]+)":', details_match.group(1)))
 canonical_aliases = set(re.findall(r': "(/[^"]+)"', aliases_match.group(1)))
 handled = set(re.findall(r'case "(/[^"]+)"', handler))
+missing_detailed_help = documented - described
+if missing_detailed_help:
+    raise SystemExit(
+        "documented slash commands missing detailed help: "
+        + ", ".join(sorted(missing_detailed_help))
+    )
 missing = (documented | canonical_aliases) - handled
 if missing:
     raise SystemExit(
@@ -3213,12 +3225,58 @@ if "const cmd = COMMAND_ALIASES[parsed.cmd] || parsed.cmd;" not in handler:
 PY
   node "${_SLASH_PARSE_TEST}"
   rm -f "${_SLASH_PARSE_TEST}"
+  _REPROMPT_TEST="$(mktemp)"
+  python3 - "${_REPROMPT_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+limit_start = text.index("const MAX_PROMPT_PLACEHOLDER_CHARS")
+limit_end = text.index("\n", limit_start) + 1
+start = text.index("const BRAND_STORAGE_KEY")
+end = text.index("function brandWordmark", start)
+test = r'''
+const stored = new Map();
+const window = { localStorage: {
+  getItem: key => stored.has(key) ? stored.get(key) : null,
+  setItem: (key, value) => stored.set(key, value),
+  removeItem: key => stored.delete(key),
+} };
+const promptEl = {};
+'''
+test += text[limit_start:limit_end]
+test += text[start:end]
+test += r'''
+applyPromptPlaceholder("Ask the administrator");
+if (promptEl.placeholder !== "Ask the administrator" ||
+    stored.get(PROMPT_STORAGE_KEY) !== "Ask the administrator") {
+  throw new Error("/reprompt did not apply and persist its placeholder");
+}
+promptEl.placeholder = DEFAULT_PROMPT_PLACEHOLDER;
+applyPromptPlaceholder(uzStorageGet(PROMPT_STORAGE_KEY), false);
+if (promptEl.placeholder !== "Ask the administrator") {
+  throw new Error("/reprompt placeholder did not survive a reload");
+}
+applyPromptPlaceholder("");
+if (promptEl.placeholder !== DEFAULT_PROMPT_PLACEHOLDER ||
+    stored.has(PROMPT_STORAGE_KEY)) {
+  throw new Error("bare /reprompt did not restore and forget the default");
+}
+'''
+Path(sys.argv[1]).write_text(test)
+PY
+  node "${_REPROMPT_TEST}"
+  rm -f "${_REPROMPT_TEST}"
   grep -q 'uzFetchJson("/api/status")' payload/agent/templates/index.html \
     && grep -q '"Persistent usage"' payload/agent/templates/index.html \
     || { echo "/status must show comprehensive proof-of-life data" >&2; exit 1; }
   grep -q '"/rebrand \[title\]"' payload/agent/templates/index.html \
     && grep -q 'applyBrandTitle' payload/agent/templates/index.html \
     || { echo "chat UI must expose /rebrand branding controls" >&2; exit 1; }
+  grep -q '"/reprompt \[placeholder\]"' payload/agent/templates/index.html \
+    && grep -q 'applyPromptPlaceholder' payload/agent/templates/index.html \
+    && grep -q 'PROMPT_STORAGE_KEY' payload/agent/templates/index.html \
+    || { echo "chat UI must expose persistent /reprompt controls" >&2; exit 1; }
   ! grep -q '"/retitle' payload/agent/templates/index.html \
     || { echo "chat UI must not expose the old /retitle command" >&2; exit 1; }
   grep -q 'id="provider-status"' payload/agent/templates/index.html \

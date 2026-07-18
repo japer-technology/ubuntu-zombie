@@ -406,6 +406,7 @@ let transcriptPinnedToBottom = true;
 const CLIENT_TURN_TIMEOUT_MS = 720000;
 const QUEUED_PROMPT_PREVIEW_CHARS = 4000;
 const MAX_COMMAND_MENU_ITEMS = 8;
+const MAX_PROMPT_PLACEHOLDER_CHARS = 160;
 // Leave time for a pointer press on an option before textarea blur closes it.
 const COMMAND_MENU_BLUR_DELAY_MS = 100;
 
@@ -1031,6 +1032,7 @@ const SLASH_COMMANDS = [
   ["/profile", "Show the active local profile.", "Configuration"],
   ["/redraw", "Reload the current conversation from SQLite.", "Conversation"],
   ["/rebrand [title]", "Rebrand this browser's Ubuntu Zombie UI; omit title to reset.", "Configuration"],
+  ["/reprompt [placeholder]", "Replace this browser's prompt placeholder; omit text to reset.", "Configuration"],
   ["/retry", "Retry the last user turn in a new branch.", "Conversation"],
   ["/shortcuts", "Show keyboard shortcuts.", "Help"],
   ["/skills [name]", "List skills or preview one skill.", "Tools"],
@@ -1073,6 +1075,7 @@ const COMMAND_DETAILS = {
   "/profile": "Shows the active agent profile and loaded instruction metadata.",
   "/redraw": "Reloads the active conversation and tool events from local storage.",
   "/rebrand": "Changes this browser's interface branding or resets it to Ubuntu Zombie.",
+  "/reprompt": "Changes the prompt placeholder for this browser or resets it to the default.",
   "/retry": "Branches before the latest user turn and submits that prompt again.",
   "/shortcuts": "Lists keyboard shortcuts for sending, queueing, line breaks, and stopping.",
   "/skills": "Lists installed skills or previews one skill's triggers and instructions.",
@@ -1373,6 +1376,8 @@ function uzSafeName(value) {
 
 const BRAND_STORAGE_KEY = "ubuntu-zombie.brandTitle";
 const DEFAULT_BRAND_TITLE = "Ubuntu Zombie";
+const PROMPT_STORAGE_KEY = "ubuntu-zombie.promptPlaceholder";
+const DEFAULT_PROMPT_PLACEHOLDER = "AI System Administrator";
 
 function uzStorageGet(key) {
   try { return window.localStorage.getItem(key); }
@@ -1391,6 +1396,20 @@ function uzStorageRemove(key) {
 
 function cleanBrandTitle(value) {
   return String(value || "").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+function cleanPromptPlaceholder(value) {
+  return String(value || "").replace(/\s+/g, " ").trim()
+    .slice(0, MAX_PROMPT_PLACEHOLDER_CHARS);
+}
+
+function applyPromptPlaceholder(value, persist = true) {
+  const placeholder = cleanPromptPlaceholder(value) || DEFAULT_PROMPT_PLACEHOLDER;
+  if (persist) {
+    if (placeholder === DEFAULT_PROMPT_PLACEHOLDER) uzStorageRemove(PROMPT_STORAGE_KEY);
+    else uzStorageSet(PROMPT_STORAGE_KEY, placeholder);
+  }
+  promptEl.placeholder = placeholder;
 }
 
 function brandWordmark(title) {
@@ -1987,6 +2006,15 @@ async function handleSlashCommand(input) {
         applyBrandTitle(requested);
         addMessage("system", `Title set to ${brandTitle}.`);
       }
+      return true;
+    }
+    case "/reprompt": {
+      addMessage("user", input);
+      const requested = cleanPromptPlaceholder(arg);
+      applyPromptPlaceholder(requested);
+      addMessage("system", requested
+        ? `Prompt placeholder set to ${requested}.`
+        : `Prompt placeholder reset to ${DEFAULT_PROMPT_PLACEHOLDER}.`);
       return true;
     }
     case "/new": {
@@ -2714,6 +2742,8 @@ async function bootstrap() {
 }
 
 applyBrandTitle(uzStorageGet(BRAND_STORAGE_KEY) || DEFAULT_BRAND_TITLE, false);
+applyPromptPlaceholder(
+  uzStorageGet(PROMPT_STORAGE_KEY) || DEFAULT_PROMPT_PLACEHOLDER, false);
 bootstrap();
 </script>
 </body>

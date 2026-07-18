@@ -146,9 +146,11 @@ The chat command finder shows every command when the composer contains only
 `/`, then narrows the list as you type. `/help <command>` gives detailed
 usage and side-effect information for one command. `/rebrand <title>` changes
 the browser title, header, wordmark, login prompt, and tombstone label for the
-current browser; `/rebrand` resets those labels to Ubuntu Zombie. The chat
-header shows only the active model, plus its IP address when the provider is
-local. `/status`
+current browser; `/rebrand` resets those labels to Ubuntu Zombie.
+`/reprompt <placeholder>` changes and remembers the composer placeholder for
+the current browser; `/reprompt` resets it to `AI System Administrator`. The
+chat header shows only the active model, plus its IP address when the provider
+is local. `/status`
 makes a minimal completion against the selected provider to prove credentials and
 connectivity, so hosted providers may record a very small amount of usage.
 That probe is cached for 30 seconds to prevent rapid requests from multiplying
