@@ -2014,7 +2014,7 @@ async function handleSlashCommand(input) {
       applyPromptPlaceholder(requested);
       addMessage("system", requested
         ? `Prompt placeholder set to ${requested}.`
-        : "Prompt placeholder reset to AI System Administrator.");
+        : `Prompt placeholder reset to ${DEFAULT_PROMPT_PLACEHOLDER}.`);
       return true;
     }
     case "/new": {

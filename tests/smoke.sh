@@ -3225,6 +3225,48 @@ if "const cmd = COMMAND_ALIASES[parsed.cmd] || parsed.cmd;" not in handler:
 PY
   node "${_SLASH_PARSE_TEST}"
   rm -f "${_SLASH_PARSE_TEST}"
+  _REPROMPT_TEST="$(mktemp)"
+  python3 - "${_REPROMPT_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+limit_start = text.index("const MAX_PROMPT_PLACEHOLDER_CHARS")
+limit_end = text.index("\n", limit_start) + 1
+start = text.index("const BRAND_STORAGE_KEY")
+end = text.index("function brandWordmark", start)
+test = r'''
+const stored = new Map();
+const window = { localStorage: {
+  getItem: key => stored.has(key) ? stored.get(key) : null,
+  setItem: (key, value) => stored.set(key, value),
+  removeItem: key => stored.delete(key),
+} };
+const promptEl = {};
+'''
+test += text[limit_start:limit_end]
+test += text[start:end]
+test += r'''
+applyPromptPlaceholder("Ask the administrator");
+if (promptEl.placeholder !== "Ask the administrator" ||
+    stored.get(PROMPT_STORAGE_KEY) !== "Ask the administrator") {
+  throw new Error("/reprompt did not apply and persist its placeholder");
+}
+promptEl.placeholder = DEFAULT_PROMPT_PLACEHOLDER;
+applyPromptPlaceholder(uzStorageGet(PROMPT_STORAGE_KEY), false);
+if (promptEl.placeholder !== "Ask the administrator") {
+  throw new Error("/reprompt placeholder did not survive a reload");
+}
+applyPromptPlaceholder("");
+if (promptEl.placeholder !== DEFAULT_PROMPT_PLACEHOLDER ||
+    stored.has(PROMPT_STORAGE_KEY)) {
+  throw new Error("bare /reprompt did not restore and forget the default");
+}
+'''
+Path(sys.argv[1]).write_text(test)
+PY
+  node "${_REPROMPT_TEST}"
+  rm -f "${_REPROMPT_TEST}"
   grep -q 'uzFetchJson("/api/status")' payload/agent/templates/index.html \
     && grep -q '"Persistent usage"' payload/agent/templates/index.html \
     || { echo "/status must show comprehensive proof-of-life data" >&2; exit 1; }
