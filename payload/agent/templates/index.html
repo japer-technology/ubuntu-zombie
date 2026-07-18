@@ -281,7 +281,7 @@
 <body>
 <header>
   <h1 id="brand-heading" aria-label="Ubuntu Zombie on {{HOSTNAME}}, user {{USERNAME}}">
-    Ubuntu Zombie <span class="host">{{HOSTNAME}}[{{USERNAME}}]</span>
+    Ubuntu Zombie <span class="host">{{HOSTNAME}}</span>
   </h1>
   <div class="header-actions">
     <!-- Session control is hidden unless the password gate is active and
@@ -294,21 +294,89 @@
 </header>
 <main id="viewport">
 <div id="welcome" class="welcome">
-<pre id="brand-wordmark" class="wordmark" aria-hidden="true">╭──────────────────────────────────╮
-│  UBUNTU ZOMBIE                   │
-│  AI SYSTEMS ADMINISTRATOR        │
-╰──────────────────────────────────╯</pre>
   <h2 id="welcome-title">Greetings</h2>
-  <p>I am your root-capable AI Systems Administrator</p>
   <div class="starter-actions" aria-label="Example prompts">
-  <button type="button" data-starter="Perform a comprehensive health assessment of this computer. Analyse hardware, operating system, drivers, services, logs, performance, security, temperatures, storage, networking and identify anything requiring attention, ordered by priority.">System health</button>
-  <button type="button" data-starter="Analyse all storage devices. Show what is consuming disk space, identify duplicate, temporary and obsolete files, explain why space is being used, and recommend the safest ways to recover storage.">Disk usage</button>
-  <button type="button" data-starter="Review recent operating system, application and hardware errors. Explain each issue in plain English, determine likely root causes, estimate severity, and recommend corrective actions.">Recent errors</button>
-  <button type="button" data-starter="Analyse overall system performance. Identify CPU, GPU, memory, storage and network bottlenecks, explain why they occur, and recommend the highest-impact optimisations.">Performance</button>
-  <button type="button" data-starter="Perform a complete security audit. Check operating system security, firewall, antivirus, updates, user accounts, startup items, remote access, exposed services and potential vulnerabilities.">Security audit</button>
-  <button type="button" data-starter="Inspect installed hardware and drivers. Detect missing, outdated or unstable drivers, firmware issues, hardware faults, configuration problems and compatibility risks.">Hardware & drivers</button>
-  <button type="button" data-starter="Evaluate startup behaviour and background activity. Identify slow startup causes, unnecessary services, scheduled tasks, background applications and recommend safe optimisations.">Startup analysis</button>
-  <button type="button" data-starter="Produce a complete technical report of this computer. Summarise hardware, software, operating system, performance, security, health, storage, networking and prioritise all recommended improvements from most important to least important.">Full system report</button>  </div>
+
+<button type="button" data-starter="Perform a comprehensive health assessment of this computer. Analyse hardware, operating system, drivers, services, logs, performance, security, temperatures, storage and networking. Identify anything requiring attention and rank findings by urgency, impact and repair difficulty.">
+    System health
+  </button>
+
+  <button type="button" data-starter="Diagnose everything currently wrong with this computer. Correlate symptoms, logs, hardware status, resource usage and configuration problems to determine root causes. Present a prioritised repair plan and request approval before making significant changes.">
+    Find and fix problems
+  </button>
+
+  <button type="button" data-starter="Analyse overall system performance. Identify CPU, GPU, memory, storage, thermal, application and network bottlenecks. Explain what is slowing the computer down and recommend the highest-impact safe improvements.">
+    Why is it slow?
+  </button>
+
+  <button type="button" data-starter="Analyse all storage devices. Show what is consuming disk space, identify duplicate, temporary, cached, abandoned and obsolete files, and recommend the safest ways to recover storage without removing anything important.">
+    Recover disk space
+  </button>
+
+  <button type="button" data-starter="Review recent operating system, application, driver and hardware errors. Explain each issue in plain English, determine likely root causes, identify recurring patterns, estimate severity and recommend corrective actions.">
+    Recent errors
+  </button>
+
+  <button type="button" data-starter="Perform a complete security audit. Check operating system protections, firewall, antivirus, updates, user accounts, permissions, startup items, remote access, exposed services, suspicious activity and potential vulnerabilities. Prioritise all security risks.">
+    Security audit
+  </button>
+
+  <button type="button" data-starter="Inspect this computer for suspicious processes, persistence mechanisms, unexpected network connections, altered security settings, unknown startup items and other indicators of malware or unauthorised access. Explain every finding before taking action.">
+    Malware investigation
+  </button>
+
+  <button type="button" data-starter="Inspect installed hardware, firmware and drivers. Detect missing, outdated, incompatible or unstable drivers, firmware issues, hardware faults, incorrect configurations and components that are not operating at their expected capability.">
+    Hardware and drivers
+  </button>
+
+  <button type="button" data-starter="Evaluate startup, login and shutdown behaviour. Identify slow startup causes, unnecessary applications, services, scheduled tasks and background processes. Recommend safe changes and estimate the likely improvement from each one.">
+    Faster startup
+  </button>
+
+  <button type="button" data-starter="Audit operating system, application, driver and firmware updates. Identify missing, failed, blocked or risky updates, explain their importance and produce the safest update sequence with rollback precautions.">
+    Update everything safely
+  </button>
+
+  <button type="button" data-starter="Diagnose this computer's network and internet connection. Analyse adapters, Wi-Fi signal, Ethernet, DNS, routing, latency, packet loss, bandwidth, firewall rules and local network conflicts. Identify the cause of instability or poor performance.">
+    Network diagnosis
+  </button>
+
+  <button type="button" data-starter="Analyse all installed applications. Identify unused, duplicate, outdated, unsupported, resource-heavy, suspicious or unnecessary software. Explain what each questionable application does and recommend what should be retained, updated or removed.">
+    Software audit
+  </button>
+
+  <button type="button" data-starter="Inspect running applications, processes, services and scheduled tasks. Explain what is active, which components consume the most resources, what appears unnecessary or abnormal, and which items can be safely stopped or disabled.">
+    Background activity
+  </button>
+
+  <button type="button" data-starter="Evaluate system temperatures, cooling, fan behaviour, thermal throttling and power consumption. Identify overheating, restricted airflow, failing cooling components or inefficient power settings and recommend corrective actions.">
+    Temperature and power
+  </button>
+
+  <button type="button" data-starter="Assess the health and expected reliability of all storage devices using available diagnostic data, error logs and performance indicators. Identify warning signs of failure and recommend immediate protection or replacement actions.">
+    Drive health
+  </button>
+
+  <button type="button" data-starter="Review user accounts, administrator privileges, file permissions, shared folders, remote access and authentication settings. Identify excessive access, abandoned accounts, weak configurations and opportunities to improve security without disrupting normal use.">
+    Accounts and permissions
+  </button>
+
+  <button type="button" data-starter="Evaluate the current backup and recovery configuration. Determine what is protected, what is missing, whether backups are recent and recoverable, and whether the computer could be restored after hardware failure, ransomware or accidental deletion.">
+    Backup and recovery
+  </button>
+
+  <button type="button" data-starter="Prepare this computer for maximum reliability. Check updates, storage health, backups, security, cooling, startup items, drivers, error history and maintenance requirements. Produce a preventative maintenance plan ordered by priority.">
+    Prevent future problems
+  </button>
+
+  <button type="button" data-starter="Determine whether this computer is suitable for its current workload. Compare its hardware, configuration and observed performance with the demands of its applications and recommend configuration changes, component upgrades or replacement priorities.">
+    Upgrade assessment
+  </button>
+
+  <button type="button" data-starter="Produce a complete technical report for this computer. Summarise hardware, software, operating system, performance, security, health, storage, networking, reliability and upgrade potential. Consolidate all findings into a prioritised action plan from critical to optional.">
+    Full system report
+  </button>
+  
 </div>
 <div id="log" role="log" aria-live="polite" aria-relevant="additions text"
      aria-label="Chat transcript"></div>
@@ -495,7 +563,7 @@ function statsSummary(bucket) {
 function appendVerboseTally() {
   if (!verboseMode) return;
   log.appendChild(el("div", { class: "muted",
-    text: `Turn activity: ${statsSummary(netStats.turn)}` }));
+    text: `${statsSummary(netStats.turn)}` }));
   scrollLog();
 }
 
@@ -1048,49 +1116,51 @@ const SLASH_COMMANDS = [
 ];
 
 const COMMAND_DETAILS = {
-  "/audit": "Reads the 50 most recent local audit records. It does not contact the provider or change the audit log.",
-  "/approve": "Approves one pending privileged tool call. Supply its id and, when required, the displayed confirmation phrase; omitting the id lists pending calls.",
-  "/branch": "Copies the current conversation and its prior events into a new conversation, leaving the original unchanged. An optional name becomes the new title.",
-  "/clear": "Clears only the transcript currently displayed in this browser. Stored conversation history is not deleted.",
-  "/commands": "Lists commands with one-line descriptions. The optional filter searches command names, descriptions, and categories.",
-  "/compress": "Creates a deterministic local summary of the current conversation for future context. It spends no provider tokens and preserves the original transcript.",
-  "/config": "Shows redacted runtime paths and settings, provider selection, and whether secrets are configured. Secret values are never displayed.",
-  "/conversations": "Lists recent stored conversations and their ids. The aliases /history and /sessions provide the same list.",
-  "/copy": "Copies the nth most recent assistant response to the clipboard; the default is the latest response. It does not copy system or user messages.",
-  "/deny": "Rejects a pending privileged tool call by id so it cannot execute. Omitting the id lists pending calls.",
-  "/examples": "Displays the safe example prompts shipped with this installation without sending them to the model.",
-  "/export": "Downloads the current conversation as both Markdown and JSON. The /save alias performs the same local browser export.",
-  "/fullwidth": "Expands the transcript and composer to the browser width. Use on or off explicitly, or omit the argument to toggle it for this page.",
-  "/health": "Shows inexpensive local machine facts such as hostname, operating system, kernel, and architecture. It does not probe the provider.",
-  "/help": "Shows commands by category. Add a command name, for example /help version, to see its usage, behavior, aliases, and side effects.",
-  "/load": "Loads a stored conversation by numeric id into the transcript and makes it active. The /resume alias is equivalent.",
-  "/logout": "Invalidates this browser's chat session and returns to the password prompt when authentication is enabled.",
-  "/local": "Without an argument, discovers local OpenAI-compatible APIs. With a listed URL, it activates that API and its first advertised model.",
-  "/locals": "Scans the local IPv4 network and loopback for supported OpenAI-compatible API ports, then lists every server that advertises models.",
-  "/model": "Without an argument, lists models from the active provider. With an id, it selects that model for subsequent turns in this server process.",
-  "/models": "Lists the model catalogue exposed by the active provider and marks the currently selected model.",
-  "/new": "Starts a blank conversation in the browser. The /reset alias is equivalent and existing stored conversations remain available.",
-  "/password": "Sets the chat password after confirmation, or removes it when no value is supplied. Password changes invalidate existing browser sessions.",
-  "/policy": "Shows policy classes, approval requirements, tool mappings, rule counts, and per-turn safety budgets without modifying policy.",
-  "/profile": "Shows the active local agent profile and instruction-file metadata used to shape agent behavior.",
-  "/redraw": "Reloads the active conversation and its tool events from SQLite, replacing the current browser transcript.",
-  "/retitle": "Changes the browser title, header, wordmark, login prompt, and tombstone label for this browser. The title is stored locally; omit the title to reset to Ubuntu Zombie.",
-  "/retry": "Branches immediately before the latest user turn and submits that prompt again. The original conversation remains unchanged.",
-  "/shortcuts": "Lists keyboard controls for sending, inserting newlines, queueing a prompt, and stopping a running turn.",
-  "/skills": "Without an argument, lists installed skills. With a skill name, previews its local triggers, path, and instruction content.",
-  "/status": "Runs a proof-of-life report: provider connectivity and latency, provider/model, host and IP facts, resource health, lifecycle, runtime activity, and usage totals.",
-  "/stop": "Requests cancellation of the currently running model turn. It does not cancel a tool call that has already completed.",
-  "/title": "Sets the current stored conversation title to the supplied text without changing any messages.",
-  "/tools": "Lists the closed tool registry, including each tool's policy classification and description. It does not execute a tool.",
-  "/ttl": "Shows or changes the Time to Live kill switch. A duration extends it, reset replaces it after confirmation, and --die permanently trips it.",
-  "/undo": "Creates a branch rewound by the requested number of user turns, defaulting to one. The source conversation is preserved.",
-  "/verbose": "Shows or hides detailed per-turn API, stream, tool, byte, and timing activity. The setting and browser counters reset on page reload.",
-  "/version": "Shows installed Ubuntu Zombie, bridge, and runtime component versions, then checks fixed upstream release sources for the latest available versions.",
-  "/whoami": "Shows the local agent account, hostname, home directory, provider, model, and loaded instruction files without contacting the provider."
+  "/audit": "Shows the 50 latest local audit records without contacting the provider or changing the log.",
+  "/approve": "Approves a pending privileged tool call. Omit the id to list pending calls.",
+  "/branch": "Copies the current conversation into a new one while preserving the original.",
+  "/clear": "Clears the visible browser transcript without deleting stored history.",
+  "/commands": "Lists commands and descriptions. Add a filter to search them.",
+  "/compress": "Creates a local conversation summary without provider usage or changing the transcript.",
+  "/config": "Shows redacted runtime settings, paths, provider details, and secret status.",
+  "/conversations": "Lists recent stored conversations and their ids. Aliases: /history, /sessions.",
+  "/copy": "Copies an assistant response to the clipboard, defaulting to the latest.",
+  "/deny": "Rejects a pending privileged tool call. Omit the id to list pending calls.",
+  "/examples": "Shows bundled safe example prompts without sending them to the model.",
+  "/export": "Downloads the current conversation as Markdown and JSON. Alias: /save.",
+  "/fullwidth": "Toggles or explicitly sets full-width chat layout for this page.",
+  "/health": "Shows basic local system details without contacting the provider.",
+  "/help": "Shows command help by category or detailed help for one command.",
+  "/load": "Loads and activates a stored conversation by id. Alias: /resume.",
+  "/logout": "Ends the current browser session and returns to the login prompt.",
+  "/local": "Discovers local OpenAI-compatible APIs or activates a selected server.",
+  "/locals": "Scans the local network for supported OpenAI-compatible model servers.",
+  "/model": "Lists available models or selects one for future turns.",
+  "/models": "Shows the active provider's model catalogue and selected model.",
+  "/new": "Starts a blank conversation without deleting stored conversations. Alias: /reset.",
+  "/password": "Sets, changes, or removes the chat password and invalidates existing sessions.",
+  "/policy": "Shows tool policies, approvals, mappings, rule counts, and safety budgets.",
+  "/profile": "Shows the active agent profile and loaded instruction metadata.",
+  "/redraw": "Reloads the active conversation and tool events from local storage.",
+  "/retitle": "Changes this browser's interface branding or resets it to Ubuntu Zombie.",
+  "/retry": "Branches before the latest user turn and submits that prompt again.",
+  "/shortcuts": "Lists keyboard shortcuts for sending, queueing, line breaks, and stopping.",
+  "/skills": "Lists installed skills or previews one skill's triggers and instructions.",
+  "/status": "Shows provider, model, host, resource, runtime, latency, and usage status.",
+  "/stop": "Requests cancellation of the active model response.",
+  "/title": "Changes the stored title of the current conversation.",
+  "/tools": "Lists registered tools, descriptions, and policy classifications.",
+  "/ttl": "Shows or changes the Time to Live kill switch.",
+  "/undo": "Creates a preserved branch rewound by one or more user turns.",
+  "/verbose": "Toggles detailed API, streaming, tool, byte, and timing activity.",
+  "/version": "Shows installed component versions and checks for newer releases.",
+  "/whoami": "Shows the local agent identity, host, provider, model, and instructions."
 };
 
 const COMMAND_ALIASES = {
+  "/exit": "/logout",
   "/history": "/conversations",
+  "/quit": "/logout",
   "/reset": "/new",
   "/resume": "/load",
   "/save": "/export",
