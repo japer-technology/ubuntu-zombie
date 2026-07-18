@@ -1328,6 +1328,16 @@ function uzDetailedCommandHelp(query) {
     (COMMAND_DETAILS[command] || "");
 }
 
+function uzCommandName(value) {
+  return value.trim().split(/\s+/, 1)[0].toLowerCase();
+}
+
+function uzExactCommandIndex(entries, input) {
+  const typed = uzCommandName(input);
+  return entries.findIndex(([signature]) =>
+    uzCommandName(signature) === typed);
+}
+
 let commandMatches = [];
 let commandSelection = 0;
 let commandMenuBlurTimer = null;
@@ -1384,7 +1394,10 @@ function updateCommandMenu() {
     closeCommandMenu();
     return;
   }
-  commandSelection = Math.min(commandSelection, commandMatches.length - 1);
+  const exactSelection = uzExactCommandIndex(commandMatches, typed);
+  commandSelection = exactSelection >= 0
+    ? exactSelection
+    : Math.min(commandSelection, commandMatches.length - 1);
   commandMenu.replaceChildren();
   commandMatches.forEach((entry, index) => {
     const option = el("div", {
@@ -2591,7 +2604,7 @@ promptEl.addEventListener("focus", () => {
 promptEl.addEventListener("keydown", (event) => {
   if (!commandMenu.hidden) {
     const selectedCommand =
-      commandMatches[commandSelection][0].split(" ")[0].toLowerCase();
+      uzCommandName(commandMatches[commandSelection][0]);
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const direction = event.key === "ArrowDown" ? 1 : -1;

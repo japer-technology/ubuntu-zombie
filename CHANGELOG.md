@@ -42,6 +42,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   to Ubuntu Zombie.
 - **Compact model status:** the chat header now shows only the active model,
   with its IP address appended when the model server is local.
+- **Reliable exact slash commands:** exact command names such as
+  `/conversations` are selected ahead of longer autocomplete matches and
+  submit normally.
 
 ### Standalone llama.cpp
 
