@@ -25,6 +25,8 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   retaining private managed llama.cpp discovery on loopback port `58080`.
 - **Consistent transcript layout:** user questions now use the same transcript
   width and offset as assistant responses.
+- **Visible conversation output:** the chat transcript now remains visible when
+  the welcome panel is hidden after the first message.
 - **Optional full-width display:** `/fullwidth [on|off]` toggles or explicitly
   controls a full-width transcript and composer for the current page.
 - **Readable Markdown tables:** assistant table syntax now renders as

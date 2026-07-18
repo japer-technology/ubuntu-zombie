@@ -3070,6 +3070,36 @@ PY
     || { echo "chat UI must keep the queued-message affordance" >&2; exit 1; }
   grep -q 'aria-label="Chat transcript"' payload/agent/templates/index.html \
     || { echo "chat transcript must retain its accessible name" >&2; exit 1; }
+  python3 - <<'PY'
+from html.parser import HTMLParser
+from pathlib import Path
+
+
+class TranscriptNestingParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.divs = []
+        self.found_log = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "div":
+            return
+        element_id = dict(attrs).get("id")
+        if element_id == "log":
+            assert "welcome" not in self.divs, \
+                "chat transcript must not be nested inside the welcome panel"
+            self.found_log = True
+        self.divs.append(element_id)
+
+    def handle_endtag(self, tag):
+        if tag == "div":
+            self.divs.pop()
+
+
+parser = TranscriptNestingParser()
+parser.feed(Path("payload/agent/templates/index.html").read_text())
+assert parser.found_log, "chat transcript is missing"
+PY
   grep -q 'class="sr-only">Message the systems administrator' \
     payload/agent/templates/index.html \
     || { echo "chat composer must retain its accessible label" >&2; exit 1; }
