@@ -3208,11 +3208,11 @@ documented = set(re.findall(r'\["(/[^ "\]]+)', commands_match.group(1)))
 described = set(re.findall(r'"(/[^"]+)":', details_match.group(1)))
 canonical_aliases = set(re.findall(r': "(/[^"]+)"', aliases_match.group(1)))
 handled = set(re.findall(r'case "(/[^"]+)"', handler))
-undocumented_help = documented - described
-if undocumented_help:
+missing_detailed_help = documented - described
+if missing_detailed_help:
     raise SystemExit(
         "documented slash commands missing detailed help: "
-        + ", ".join(sorted(undocumented_help))
+        + ", ".join(sorted(missing_detailed_help))
     )
 missing = (documented | canonical_aliases) - handled
 if missing:
