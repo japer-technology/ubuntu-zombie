@@ -3121,6 +3121,56 @@ Path(sys.argv[1]).write_text(text[start:end] + test)
 PY
   node "${_COMMAND_TEST}"
   rm -f "${_COMMAND_TEST}"
+  _SLASH_PARSE_TEST="$(mktemp)"
+  python3 - "${_SLASH_PARSE_TEST}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+start = text.index("function uzParseSlashCommand")
+end = text.index("async function handleSlashCommand", start)
+test = r'''
+const parsed = uzParseSlashCommand("/password two  spaces\tand-a-tab");
+if (parsed.cmd !== "/password" ||
+    parsed.arg !== "two  spaces\tand-a-tab") {
+  throw new Error(`slash arguments were changed: ${JSON.stringify(parsed)}`);
+}
+if (uzParseSlashCommand("//etc/passwd") !== null) {
+  throw new Error("double slash must escape slash-command handling");
+}
+for (const invalid of ["", "0", "-1", "2.5", "3x", "9007199254740992"]) {
+  if (uzPositiveInteger(invalid) !== null) {
+    throw new Error(`accepted invalid positive integer: ${invalid}`);
+  }
+}
+if (uzPositiveInteger("42") !== 42) {
+  throw new Error("rejected a valid positive integer");
+}
+'''
+Path(sys.argv[1]).write_text(text[start:end] + test)
+
+commands_match = re.search(
+    r"const SLASH_COMMANDS = \[(.*?)\n\];", text, re.DOTALL
+)
+aliases_match = re.search(
+    r"const COMMAND_ALIASES = \{(.*?)\n\};", text, re.DOTALL
+)
+handler_start = text.index("async function handleSlashCommand")
+handler_end = text.index('\nform.addEventListener("submit"', handler_start)
+handler = text[handler_start:handler_end]
+documented = set(re.findall(r'\["(/[^ "\]]+)', commands_match.group(1)))
+aliases = set(re.findall(r'"(/[^"]+)":', aliases_match.group(1)))
+handled = set(re.findall(r'case "(/[^"]+)"', handler))
+missing = (documented | aliases) - handled
+if missing:
+    raise SystemExit(
+        "documented slash commands missing dispatcher cases: "
+        + ", ".join(sorted(missing))
+    )
+PY
+  node "${_SLASH_PARSE_TEST}"
+  rm -f "${_SLASH_PARSE_TEST}"
   grep -q 'uzFetchJson("/api/status")' payload/agent/templates/index.html \
     && grep -q '"Persistent usage"' payload/agent/templates/index.html \
     || { echo "/status must show comprehensive proof-of-life data" >&2; exit 1; }

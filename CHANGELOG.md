@@ -45,6 +45,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Reliable exact slash commands:** exact command names such as
   `/conversations` are selected ahead of longer autocomplete matches and
   submit normally.
+- **Reliable slash-command input:** command arguments retain internal
+  whitespace, numeric arguments reject malformed values, `/exit` and `/quit`
+  now log out as documented, and `//` sends a message beginning with `/`.
 
 ### Standalone llama.cpp
 
