@@ -613,7 +613,9 @@ if info.get("provider") != "openai" or info.get("current") != "gpt-4o-mini":
 if [m["id"] for m in info.get("models", [])] != ["gpt-4o-mini", "gpt-4o", "o3-mini"]:
     raise SystemExit(f"models_info models wrong: {info!r}")
 ok = app.set_model("gpt-4o")
-if ok != {"ok": True, "provider": "openai", "model": "gpt-4o"}:
+if ok != {
+    "ok": True, "provider": "openai", "model": "gpt-4o", "address": None
+}:
     raise SystemExit(f"App.set_model ok payload wrong: {ok!r}")
 bad = app.set_model("nope")
 if "error" not in bad:
@@ -641,6 +643,14 @@ if (
     or selected.get("url") != "http://127.0.0.1:1234/v1"
 ):
     raise SystemExit(f"App.set_local_api wrong: {selected!r}")
+local_model = app.set_model("llama-3.1-8b")
+if local_model != {
+    "ok": True,
+    "provider": "lmstudio",
+    "model": "llama-3.1-8b",
+    "address": "127.0.0.1:1234",
+}:
+    raise SystemExit(f"App.set_model local payload wrong: {local_model!r}")
 original_scan = _pr.scan_lmstudio
 try:
     _pr.scan_lmstudio = lambda *_args, **_kwargs: discovered
@@ -1713,8 +1723,22 @@ run_branding() {
   local first_line
   first_line='╭──────────────────────────────────╮'
   grep -Fq "$first_line" scripts/lib.sh
-  grep -Fq "$first_line" payload/bin/zombie-chat
-  grep -Fq "$first_line" payload/agent/templates/index.html
+  grep -Fq 'Ubuntu Zombie' payload/bin/zombie-chat
+  grep -Fq 'function brandWordmark' payload/agent/templates/index.html
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import server
+
+assert server._provider_banner("openai", "model gpt-4o") == "gpt-4o"
+assert server._provider_banner(
+    "lmstudio", "model qwen3 at 192.0.2.10:1234"
+) == "qwen3 at 192.0.2.10:1234"
+assert server._provider_banner(
+    "openrouter", "model not set (set ZOMBIE_MODEL)"
+) == "model not set (set ZOMBIE_MODEL)"
+assert server._provider_banner("none", "No provider configured") == (
+    "No provider configured"
+)
+PY
   local out
   out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run)"
   grep -Fq "$first_line" <<<"${out}"
@@ -3038,7 +3062,7 @@ PY
     && grep -q '\.md th, \.md td' payload/agent/templates/index.html \
     || { echo "Markdown tables must render with readable table styling" >&2; exit 1; }
   grep -q 'uzDetailedCommandHelp(arg)' payload/agent/templates/index.html \
-    && grep -q '"/version": "Shows installed Ubuntu Zombie' \
+    && grep -q '"/version": "Shows installed component versions' \
       payload/agent/templates/index.html \
     || { echo "/help <command> must provide detailed command help" >&2; exit 1; }
   grep -Fq 'typed === "/" ? matches' payload/agent/templates/index.html \
@@ -3046,9 +3070,15 @@ PY
   grep -q 'uzFetchJson("/api/status")' payload/agent/templates/index.html \
     && grep -q '"Persistent usage"' payload/agent/templates/index.html \
     || { echo "/status must show comprehensive proof-of-life data" >&2; exit 1; }
-  grep -q '"/retitle \[title\]"' payload/agent/templates/index.html \
+  grep -q '"/rebrand \[title\]"' payload/agent/templates/index.html \
     && grep -q 'applyBrandTitle' payload/agent/templates/index.html \
-    || { echo "chat UI must expose /retitle branding controls" >&2; exit 1; }
+    || { echo "chat UI must expose /rebrand branding controls" >&2; exit 1; }
+  ! grep -q '"/retitle' payload/agent/templates/index.html \
+    || { echo "chat UI must not expose the old /retitle command" >&2; exit 1; }
+  grep -q 'id="provider-status"' payload/agent/templates/index.html \
+    && grep -Fq '(data.address ? ` at ${data.address}` : "")' \
+      payload/agent/templates/index.html \
+    || { echo "chat header must show model and local address only" >&2; exit 1; }
   _MARKDOWN_TEST="$(mktemp)"
   python3 - "${_MARKDOWN_TEST}" <<'PY'
 import sys
