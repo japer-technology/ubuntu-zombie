@@ -1082,13 +1082,13 @@ const SLASH_COMMANDS = [
   ["/compress", "Create a local summary for future context.", "Conversation"],
   ["/config", "Show redacted runtime configuration.", "Configuration"],
   ["/conversations", "List recent conversations (aliases: /history, /sessions).", "Conversation"],
-  ["/copy [n]", "Copy the nth most recent assistant response.", "Conversation"],
+  ["/copy [n]", "Copy the nth most recent visible assistant response.", "Conversation"],
   ["/deny [id]", "Deny a pending tool call.", "Tools"],
   ["/examples", "Show safe example prompts.", "Help"],
   ["/export", "Download Markdown and JSON transcript files (alias: /save).", "Conversation"],
   ["/fullwidth [on|off]", "Toggle full-width chat display.", "Configuration"],
   ["/health", "Show basic machine facts.", "Diagnostics"],
-  ["/help", "List available commands.", "Help"],
+  ["/help [command]", "List commands or explain one command.", "Help"],
   ["/load <id>", "Load a past conversation (alias: /resume <id>).", "Conversation"],
   ["/logout", "Log out and ask for the chat password again.", "Session"],
   ["/local [url]", "List or switch the active local API.", "Configuration"],
@@ -1124,7 +1124,7 @@ const COMMAND_DETAILS = {
   "/compress": "Creates a local conversation summary without provider usage or changing the transcript.",
   "/config": "Shows redacted runtime settings, paths, provider details, and secret status.",
   "/conversations": "Lists recent stored conversations and their ids. Aliases: /history, /sessions.",
-  "/copy": "Copies an assistant response to the clipboard, defaulting to the latest.",
+  "/copy": "Copies a visible assistant response to the clipboard, defaulting to the latest.",
   "/deny": "Rejects a pending privileged tool call. Omit the id to list pending calls.",
   "/examples": "Shows bundled safe example prompts without sending them to the model.",
   "/export": "Downloads the current conversation as Markdown and JSON. Alias: /save.",
@@ -1981,17 +1981,24 @@ async function uzSendPrompt(prompt, convId = conversationId) {
   }
 }
 
+function uzParseSlashCommand(input) {
+  if (!input.startsWith("/") || input.startsWith("//")) return null;
+  const match = input.match(/^(\S+)(?:\s+([\s\S]*))?$/);
+  if (!match) return null;
+  return { cmd: match[1].toLowerCase(), arg: match[2] || "" };
+}
+
+function uzPositiveInteger(value) {
+  if (!/^[1-9]\d*$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
 async function handleSlashCommand(input) {
-  const parts = input.split(/\s+/);
-  const cmd = parts[0].toLowerCase();
-  const arg = parts.slice(1).join(" ").trim();
-  if (!cmd.startsWith("/")) return false;
-  // Resolve aliases to their canonical command in one place so every
-  // alias in COMMAND_ALIASES dispatches correctly and the switch only
-  // needs canonical cases. ``cmd`` stays as the user typed it for
-  // display and usage messages; ``canonical`` drives dispatch.
-  const canonical = COMMAND_ALIASES[cmd] || cmd;
-  switch (canonical) {
+  const parsed = uzParseSlashCommand(input);
+  if (!parsed) return false;
+  const { cmd, arg } = parsed;
+  switch (cmd) {
     case "/help":
     case "/commands": {
       addMessage("user", input);
@@ -2072,7 +2079,8 @@ async function handleSlashCommand(input) {
         "Enter - send the current message\n" +
         "Shift+Enter (or Ctrl/Cmd+Enter) - insert a newline\n" +
         "Enter during a running turn - queue one next message\n" +
-        "/stop - cancel the in-flight turn");
+        "/stop - cancel the in-flight turn\n" +
+        "//<text> - send a message that starts with a literal slash");
       return true;
     }
     case "/stop": {
@@ -2085,7 +2093,9 @@ async function handleSlashCommand(input) {
       }
       return true;
     }
-    case "/logout": {
+    case "/exit":
+    case "/logout":
+    case "/quit": {
       addMessage("user", input);
       await logoutChat(true);
       return true;
@@ -2434,8 +2444,8 @@ async function handleSlashCommand(input) {
     }
     case "/load": {
       addMessage("user", input);
-      const id = parseInt(arg, 10);
-      if (!arg || isNaN(id)) {
+      const id = uzPositiveInteger(arg);
+      if (id === null) {
         addMessage("system", `Usage: ${cmd} <id>`, { error: true });
         return true;
       }
@@ -2490,8 +2500,8 @@ async function handleSlashCommand(input) {
         addMessage("system", "No active conversation to undo.", { error: true });
         return true;
       }
-      const turns = arg ? parseInt(arg, 10) : 1;
-      if (isNaN(turns) || turns < 1) {
+      const turns = arg ? uzPositiveInteger(arg) : 1;
+      if (turns === null) {
         addMessage("system", "Usage: /undo [positive-turn-count]", { error: true });
         return true;
       }
@@ -2523,8 +2533,8 @@ async function handleSlashCommand(input) {
     }
     case "/copy": {
       addMessage("user", input);
-      const n = arg ? parseInt(arg, 10) : 1;
-      if (isNaN(n) || n < 1) {
+      const n = arg ? uzPositiveInteger(arg) : 1;
+      if (n === null) {
         addMessage("system", "Usage: /copy [positive-response-number]", { error: true });
         return true;
       }
@@ -2565,7 +2575,7 @@ async function handleSlashCommand(input) {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   closeCommandMenu();
-  const prompt = promptEl.value.trim();
+  let prompt = promptEl.value.trim();
   if (!prompt) return;
   if (await handleSlashCommand(prompt)) {
     promptEl.value = "";
@@ -2573,6 +2583,7 @@ form.addEventListener("submit", async (event) => {
     promptEl.focus();
     return;
   }
+  if (prompt.startsWith("//")) prompt = prompt.slice(1);
   if (turnBusy) {
     promptEl.value = "";
     resizePrompt();
