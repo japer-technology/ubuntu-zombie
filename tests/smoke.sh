@@ -3160,14 +3160,16 @@ handler_start = text.index("async function handleSlashCommand")
 handler_end = text.index('\nform.addEventListener("submit"', handler_start)
 handler = text[handler_start:handler_end]
 documented = set(re.findall(r'\["(/[^ "\]]+)', commands_match.group(1)))
-aliases = set(re.findall(r'"(/[^"]+)":', aliases_match.group(1)))
+canonical_aliases = set(re.findall(r': "(/[^"]+)"', aliases_match.group(1)))
 handled = set(re.findall(r'case "(/[^"]+)"', handler))
-missing = (documented | aliases) - handled
+missing = (documented | canonical_aliases) - handled
 if missing:
     raise SystemExit(
         "documented slash commands missing dispatcher cases: "
         + ", ".join(sorted(missing))
     )
+if "const cmd = COMMAND_ALIASES[parsed.cmd] || parsed.cmd;" not in handler:
+    raise SystemExit("slash-command aliases must route to canonical handlers")
 PY
   node "${_SLASH_PARSE_TEST}"
   rm -f "${_SLASH_PARSE_TEST}"
