@@ -37,9 +37,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Proof-of-life status:** `/status` now probes the configured LLM and reports
   latency, provider/model, host/IP/resources, lifecycle, runtime work, local
   conversation/tool totals, and browser-session activity.
-- **Browser-local retitling:** `/retitle <title>` rebrands the browser title,
-  header, wordmark, login prompt, and tombstone label; `/retitle` resets them
+- **Browser-local rebranding:** `/rebrand <title>` rebrands the browser title,
+  header, wordmark, login prompt, and tombstone label; `/rebrand` resets them
   to Ubuntu Zombie.
+- **Compact model status:** the chat header now shows only the active model,
+  with its IP address appended when the model server is local.
 
 ### Standalone llama.cpp
 

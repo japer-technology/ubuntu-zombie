@@ -290,7 +290,7 @@
     <button type="button" id="logout" title="Log out and secure the chat"
             aria-label="Log off and require the chat password again" hidden>Logoff</button>
   </div>
-  <div class="status">{{PROVIDER_STATUS}}</div>
+  <div id="provider-status" class="status">{{PROVIDER_STATUS}}</div>
 </header>
 <main id="viewport">
 <div id="welcome" class="welcome">
@@ -1100,7 +1100,7 @@ const SLASH_COMMANDS = [
   ["/policy", "Show policy classes and rule counts.", "Configuration"],
   ["/profile", "Show the active local profile.", "Configuration"],
   ["/redraw", "Reload the current conversation from SQLite.", "Conversation"],
-  ["/retitle [title]", "Retitle this browser's Ubuntu Zombie UI; omit title to reset.", "Configuration"],
+  ["/rebrand [title]", "Rebrand this browser's Ubuntu Zombie UI; omit title to reset.", "Configuration"],
   ["/retry", "Retry the last user turn in a new branch.", "Conversation"],
   ["/shortcuts", "Show keyboard shortcuts.", "Help"],
   ["/skills [name]", "List skills or preview one skill.", "Tools"],
@@ -1142,7 +1142,7 @@ const COMMAND_DETAILS = {
   "/policy": "Shows tool policies, approvals, mappings, rule counts, and safety budgets.",
   "/profile": "Shows the active agent profile and loaded instruction metadata.",
   "/redraw": "Reloads the active conversation and tool events from local storage.",
-  "/retitle": "Changes this browser's interface branding or resets it to Ubuntu Zombie.",
+  "/rebrand": "Changes this browser's interface branding or resets it to Ubuntu Zombie.",
   "/retry": "Branches before the latest user turn and submits that prompt again.",
   "/shortcuts": "Lists keyboard shortcuts for sending, queueing, line breaks, and stopping.",
   "/skills": "Lists installed skills or previews one skill's triggers and instructions.",
@@ -2021,7 +2021,7 @@ async function handleSlashCommand(input) {
       }
       return true;
     }
-    case "/retitle": {
+    case "/rebrand": {
       addMessage("user", input);
       const requested = cleanBrandTitle(arg);
       if (!requested) {
@@ -2311,9 +2311,10 @@ async function handleSlashCommand(input) {
       try {
         const data = await uzPostJson("/api/model", { model: arg });
         addMessage("system", `Model set to ${data.model} (provider ${data.provider}).`);
-        const banner = document.querySelector("header .status");
+        const banner = document.getElementById("provider-status");
         if (banner && data.provider && data.model) {
-          banner.textContent = `Provider: connected (${data.provider} - ${data.model})`;
+          banner.textContent = data.model +
+            (data.address ? ` at ${data.address}` : "");
         }
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
@@ -2350,10 +2351,10 @@ async function handleSlashCommand(input) {
         const data = await uzPostJson("/api/local", { url: arg });
         addMessage("system",
           `Local API set to ${data.url} with model ${data.model}.`);
-        const banner = document.querySelector("header .status");
+        const banner = document.getElementById("provider-status");
         if (banner) {
-          banner.textContent =
-            `Provider: connected (lmstudio - ${data.model} at ${data.address})`;
+          banner.textContent = data.model +
+            (data.address ? ` at ${data.address}` : "");
         }
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;

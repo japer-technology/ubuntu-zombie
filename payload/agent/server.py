@@ -1317,7 +1317,15 @@ class App:
         except ValueError as exc:
             return {"error": str(exc)}
         log_event("model_selected", provider=provider, model=chosen)
-        return {"ok": True, "provider": provider, "model": chosen}
+        return {
+            "ok": True,
+            "provider": provider,
+            "model": chosen,
+            "address": (
+                providers.lmstudio_address()
+                if provider == "lmstudio" else None
+            ),
+        }
 
     def provider_info(self) -> dict[str, Any]:
         """Return cheap provider status for the chat ``/status`` command."""
@@ -1568,16 +1576,18 @@ def _truncate_obs(result: Any, limit: int = 4000) -> Any:
 INDEX_HTML_PATH = HERE / "templates" / "index.html"
 
 
+def _provider_banner(name: str, status: str) -> str:
+    """Return the compact model label shown in the chat header."""
+    if name != "none" and status.startswith("model ") and "not set" not in status:
+        return status[len("model "):]
+    return status
+
+
 def _render_index(app: App) -> bytes:
     facts = machine_facts()
     # FIX-3-07: avoid constructing a fresh SDK client on every GET /.
     name, status = provider_status()
-    if name == "none":
-        banner = status
-    elif status.startswith("model ") and "not set" not in status:
-        banner = f"{name}({status[len('model '):]})"
-    else:
-        banner = f"{name}: {status}"
+    banner = _provider_banner(name, status)
     text = INDEX_HTML_PATH.read_text(encoding="utf-8")
     text = text.replace("{{HOSTNAME}}", html.escape(facts.get("hostname", "?")))
     text = text.replace("{{USERNAME}}", html.escape(AGENT_USER))
