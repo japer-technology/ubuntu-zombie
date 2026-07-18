@@ -57,7 +57,7 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Installer and upgrades
 
-- **Upgrades reload the chat service:** re-running `install` in place now
+- **Upgrades restart the chat service:** re-running `install` in place now
   restarts `ubuntu-zombie-chat.service` after deploying the agent tree instead
   of relying on `enable --now`, which leaves an already-running unit untouched.
   A stale process serving the freshly written `templates/index.html` was the
