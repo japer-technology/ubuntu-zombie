@@ -105,23 +105,32 @@ function localBaseUrl(provider) {
     if (envUrl) baseUrl = String(envUrl).trim();
   }
   if (!baseUrl) {
-    const path =
-      process.env.ZOMBIE_PI_MODELS_JSON ||
-      (process.env.HOME ? join(process.env.HOME, ".pi", "agent", "models.json") : "");
-    if (!path) return "";
-    let cfg;
-    try {
-      cfg = JSON.parse(readFileSync(path, "utf8"));
-    } catch {
-      return "";
-    }
-    const entry = cfg && cfg.providers && cfg.providers[provider];
+    const entry = customProviderEntry(provider);
     const fromCfg = entry && entry.baseUrl;
     baseUrl = typeof fromCfg === "string" ? fromCfg.trim() : "";
   }
   // Only an absolute http(s) URL can be queried; anything else (a
   // relative path, a bare host, an empty string) is unusable here.
   return /^https?:\/\//i.test(baseUrl) ? baseUrl : "";
+}
+
+// Read the provider's entry from ~/.pi/agent/models.json (the file
+// scripts/install.sh writes for local providers and pi-mono reads).
+// Returns the raw object ({ baseUrl, api, compat, ... }) or null when
+// the file or entry is missing/unparseable.
+function customProviderEntry(provider) {
+  const path =
+    process.env.ZOMBIE_PI_MODELS_JSON ||
+    (process.env.HOME ? join(process.env.HOME, ".pi", "agent", "models.json") : "");
+  if (!path) return null;
+  let cfg;
+  try {
+    cfg = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+  const entry = cfg && cfg.providers && cfg.providers[provider];
+  return entry && typeof entry === "object" ? entry : null;
 }
 
 // How long to wait for the local server's /models endpoint before giving
@@ -378,14 +387,53 @@ async function main() {
 
   const pi = await loadPiAi();
 
+  // pi-ai's getModel() reads only the static *built-in* catalogue; a
+  // local, OpenAI-compatible provider (lmstudio — the shipped llama.cpp
+  // default) and any model the catalogue has not caught up with resolve
+  // to undefined rather than throwing. Passing that undefined handle to
+  // complete() used to crash with the cryptic "Cannot read properties
+  // of undefined (reading 'api')", so treat both outcomes the same and
+  // synthesise a model handle from ~/.pi/agent/models.json instead.
   let modelHandle;
   try {
     modelHandle = pi.getModel(piProvider, model);
-  } catch (err) {
-    die(
-      `unknown model "${model}" for provider "${provider}": ${err.message}`,
-      "unknown_model",
-    );
+  } catch {
+    modelHandle = undefined;
+  }
+  let explicitApiKey;
+  if (!modelHandle) {
+    const baseUrl = localBaseUrl(provider);
+    if (!baseUrl) {
+      die(
+        `unknown model "${model}" for provider "${provider}": not in the ` +
+          "pi-ai catalogue and no local endpoint is configured in " +
+          "~/.pi/agent/models.json",
+        "unknown_model",
+      );
+    }
+    const entry = customProviderEntry(provider) || {};
+    modelHandle = {
+      id: model,
+      name: model,
+      api:
+        typeof entry.api === "string" && entry.api
+          ? entry.api
+          : "openai-completions",
+      provider: piProvider,
+      baseUrl,
+      reasoning: false,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 128000,
+      maxTokens: 4096,
+      ...(entry.compat && typeof entry.compat === "object"
+        ? { compat: entry.compat }
+        : {}),
+    };
+    // pi-ai's env key injection only knows built-in providers, so a
+    // synthesised model needs the key passed explicitly. Local servers
+    // accept any placeholder value.
+    explicitApiKey = keyEnv ? process.env[keyEnv] : undefined;
   }
 
   const context = {
@@ -396,9 +444,22 @@ async function main() {
 
   let result;
   try {
-    result = await pi.complete(modelHandle, context);
+    result = await pi.complete(
+      modelHandle,
+      context,
+      explicitApiKey ? { apiKey: explicitApiKey } : undefined,
+    );
   } catch (err) {
     die(`provider call failed: ${err.message || err}`, "provider_error");
+  }
+  // pi-ai reports provider-level failures in-band on the assistant
+  // message instead of throwing; surface those as errors too so the
+  // connectivity probe cannot mistake an errored turn for success.
+  if (result && result.stopReason === "error") {
+    die(
+      `provider call failed: ${result.errorMessage || "unknown provider error"}`,
+      "provider_error",
+    );
   }
 
   // pi-ai's complete() returns the assistant message. Concatenate text
