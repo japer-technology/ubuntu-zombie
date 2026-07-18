@@ -55,7 +55,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   place before dispatch, so every alias runs its canonical command — including
   `/exit` and `/quit`, which previously reported "Unknown command."
 
-### Standalone llama.cpp
+### Installer and upgrades
+
+- **Upgrades restart the chat service:** re-running `install` in place now
+  restarts `ubuntu-zombie-chat.service` after deploying the agent tree instead
+  of relying on `enable --now`, which leaves an already-running unit untouched.
+  A stale process serving the freshly written `templates/index.html` was the
+  cause of the literal `v{{VERSION}}` footer and the blank transcript reported
+  after upgrades; the newly deployed `server.py` and UI now run together.
 
 - **Independent PC-wide llama:** `install llama` now installs a pinned,
   checksum-verified CPU llama.cpp runtime and small default model on
