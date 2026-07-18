@@ -3131,9 +3131,9 @@ text = Path("payload/agent/templates/index.html").read_text()
 start = text.index("function uzParseSlashCommand")
 end = text.index("async function handleSlashCommand", start)
 test = r'''
-const parsed = uzParseSlashCommand("/password two  spaces\tand-a-tab");
+const parsed = uzParseSlashCommand("/PASSWORD Two  Spaces\tand-a-tab");
 if (parsed.cmd !== "/password" ||
-    parsed.arg !== "two  spaces\tand-a-tab") {
+    parsed.arg !== "Two  Spaces\tand-a-tab") {
   throw new Error(`slash arguments were changed: ${JSON.stringify(parsed)}`);
 }
 if (uzParseSlashCommand("//etc/passwd") !== null) {
