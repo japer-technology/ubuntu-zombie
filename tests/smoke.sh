@@ -3196,12 +3196,22 @@ commands_match = re.search(
 aliases_match = re.search(
     r"const COMMAND_ALIASES = \{(.*?)\n\};", text, re.DOTALL
 )
+details_match = re.search(
+    r"const COMMAND_DETAILS = \{(.*?)\n\};", text, re.DOTALL
+)
 handler_start = text.index("async function handleSlashCommand")
 handler_end = text.index('\nform.addEventListener("submit"', handler_start)
 handler = text[handler_start:handler_end]
 documented = set(re.findall(r'\["(/[^ "\]]+)', commands_match.group(1)))
+described = set(re.findall(r'"(/[^"]+)":', details_match.group(1)))
 canonical_aliases = set(re.findall(r': "(/[^"]+)"', aliases_match.group(1)))
 handled = set(re.findall(r'case "(/[^"]+)"', handler))
+undocumented_help = documented - described
+if undocumented_help:
+    raise SystemExit(
+        "documented slash commands missing detailed help: "
+        + ", ".join(sorted(undocumented_help))
+    )
 missing = (documented | canonical_aliases) - handled
 if missing:
     raise SystemExit(
@@ -3219,6 +3229,10 @@ PY
   grep -q '"/rebrand \[title\]"' payload/agent/templates/index.html \
     && grep -q 'applyBrandTitle' payload/agent/templates/index.html \
     || { echo "chat UI must expose /rebrand branding controls" >&2; exit 1; }
+  grep -q '"/reprompt \[placeholder\]"' payload/agent/templates/index.html \
+    && grep -q 'applyPromptPlaceholder' payload/agent/templates/index.html \
+    && grep -q 'PROMPT_STORAGE_KEY' payload/agent/templates/index.html \
+    || { echo "chat UI must expose persistent /reprompt controls" >&2; exit 1; }
   ! grep -q '"/retitle' payload/agent/templates/index.html \
     || { echo "chat UI must not expose the old /retitle command" >&2; exit 1; }
   grep -q 'id="provider-status"' payload/agent/templates/index.html \

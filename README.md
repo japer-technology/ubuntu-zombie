@@ -66,8 +66,10 @@ tables use bordered, high-contrast cells and scroll horizontally when wide.
 User questions and assistant responses share the same transcript width,
 while `/fullwidth [on|off]` expands or restores the transcript and composer.
 Use `/rebrand <title>` to rebrand the browser title, header, wordmark, and
-login/tombstone labels for this browser; `/rebrand` resets them. The header
-shows the active model and, for a local model server, its IP address.
+login/tombstone labels for this browser; `/rebrand` resets them. Use
+`/reprompt <placeholder>` to replace and remember the composer placeholder
+for this browser; `/reprompt` restores the default. The header shows the
+active model and, for a local model server, its IP address.
 
 `/status` runs a full proof-of-life check: it makes a tiny completion against
 the configured LLM provider (which can incur minimal provider usage), measures

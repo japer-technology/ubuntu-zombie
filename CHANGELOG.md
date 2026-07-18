@@ -42,6 +42,8 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Browser-local rebranding:** `/rebrand <title>` rebrands the browser title,
   header, wordmark, login prompt, and tombstone label; `/rebrand` resets them
   to Ubuntu Zombie.
+- **Browser-local prompt text:** `/reprompt <placeholder>` replaces and
+  remembers the composer placeholder; `/reprompt` restores the default.
 - **Compact model status:** the chat header now shows only the active model,
   with its IP address appended when the model server is local.
 - **Visible installed version:** the chat footer now shows the Ubuntu Zombie
