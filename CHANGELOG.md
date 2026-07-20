@@ -85,6 +85,18 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   tarball checksums, and migrated the provider bridge to pi-ai's compatibility
   entrypoint and assistant-message return shape.
 
+### Analysis notes
+
+- **Windows 11 port plan:** new
+  `docs/analysis/improvements-7-windows11-plan.md` analyses what a
+  Windows 11 version of Ubuntu Zombie would require — a PowerShell
+  sibling installer, Windows-native equivalents for the privileged
+  surfaces (hidden local Administrator account, Windows Service,
+  Scheduled Task, ACLs, winget), a Windows fail-closed policy rule
+  set, a portable-core/per-OS-adapter split of the agent tools, a
+  phased implementation plan, and open questions for maintainers.
+  Design analysis only; no behaviour change.
+
 ### Policy design notes
 
 - **Owner-centric superuser policy draft:** new `docs/policy-new-v2.yaml`
