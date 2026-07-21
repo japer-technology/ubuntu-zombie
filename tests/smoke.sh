@@ -3067,6 +3067,13 @@ PY
     || { echo "chat /help must keep compact grouped output" >&2; exit 1; }
   grep -q 'EventSource' payload/agent/templates/index.html \
     || { echo "chat UI must keep the SSE EventSource path" >&2; exit 1; }
+  grep -q 'if (!verboseMode)' payload/agent/templates/index.html \
+    && grep -q 'verbose-tool-activity' payload/agent/templates/index.html \
+    && grep -q 'Tool activity is hidden; approval prompts remain visible.' \
+      payload/agent/templates/index.html \
+    || { echo "chat UI must hide ordinary tool activity unless verbose" >&2; exit 1; }
+  grep -q '"args_summary": _summarize(cleaned)' payload/agent/server.py \
+    || { echo "verbose tool activity must include summarized arguments" >&2; exit 1; }
   grep -q 'Live stream interrupted' payload/agent/templates/index.html \
     || { echo "chat UI must keep the streaming fallback reload path" >&2; exit 1; }
   grep -q 'queued' payload/agent/templates/index.html \

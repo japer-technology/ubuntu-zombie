@@ -437,6 +437,7 @@ function byteLength(s) {
 }
 
 function tallyStat(field, n = 1) {
+  if (!verboseMode) return;
   if (!Number.isFinite(n) || n <= 0) return;
   netStats.session[field] += n;
   netStats.turn[field] += n;
@@ -875,7 +876,10 @@ function summarizeArgs(args) {
 }
 
 function renderToolCall(p) {
-  const wrap = el("div", { class: `proposal ${p.classification || "tool"}` });
+  const wrap = el("div", {
+    class: `proposal verbose-tool-activity ${p.classification || "tool"}`
+  });
+  wrap.hidden = !verboseMode;
   wrap.appendChild(el("div", { class: "class",
     text: `${p.tool} · ${p.classification || "?"} · ${p.decision || "?"}` }));
   const args = summarizeArgs(p.args);
@@ -885,7 +889,8 @@ function renderToolCall(p) {
 }
 
 function renderToolObservation(p) {
-  const wrap = el("div", { class: "result" });
+  const wrap = el("div", { class: "result verbose-tool-activity" });
+  wrap.hidden = !verboseMode;
   const header = `observation · ${p.tool}` +
                  (p.decision ? ` · ${p.decision}` : "");
   wrap.appendChild(el("div", { class: "role", text: header }));
@@ -968,14 +973,15 @@ function renderPendingToolCall(p) {
 }
 
 function renderTurnCounter(events) {
-  const total = events.length;
-  const elevated = events.filter(e =>
-    e.kind === "tool_call" &&
+  const calls = events.filter(e => e.kind === "tool_call");
+  const total = calls.length;
+  const elevated = calls.filter(e =>
     e.payload && e.payload.classification && e.payload.classification !== "read_only"
   ).length;
-  const wrap = el("div", { class: "system", text:
+  const wrap = el("div", { class: "system verbose-tool-activity", text:
     `Turn budget: ${total} tool call${total === 1 ? "" : "s"}` +
     ` (${elevated} elevated)` });
+  wrap.hidden = !verboseMode;
   return wrap;
 }
 
@@ -1085,7 +1091,7 @@ const COMMAND_DETAILS = {
   "/tools": "Lists registered tools, descriptions, and policy classifications.",
   "/ttl": "Shows or changes the Time to Live kill switch.",
   "/undo": "Creates a preserved branch rewound by one or more user turns.",
-  "/verbose": "Toggles detailed API, streaming, tool, byte, and timing activity.",
+  "/verbose": "Toggles detailed API, streaming, tool, byte, and timing activity; statistics start when verbose mode is enabled.",
   "/version": "Shows installed component versions and checks for newer releases.",
   "/whoami": "Shows the local agent identity, host, provider, model, and instructions."
 };
@@ -1584,7 +1590,9 @@ function applyTurnPayload(data) {
     addMessage("assistant", data.reply);
   }
   const events = data.events || [];
-  if (events.length) log.appendChild(renderTurnCounter(events));
+  if (events.some(ev => ev.kind === "tool_call")) {
+    log.appendChild(renderTurnCounter(events));
+  }
   // Render the error exactly once, after any transcript re-render (which
   // clears the log and would otherwise wipe an earlier error bubble).
   if (data.error) addMessage("system", data.error, { error: true });
@@ -1724,7 +1732,8 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     // per-tool stack — used when a tool_end has no matching tool_start,
     // so the orphan line cannot swallow a later result for the tool.
     const startToolLine = (name, note, track = true) => {
-      const line = el("div", { class: "act running" });
+      const line = el("div", { class: "act running verbose-tool-activity" });
+      line.hidden = !verboseMode;
       line.appendChild(el("span", { class: "icon", text: "⏳" }));
       line.appendChild(el("span", { text: note }));
       activity.appendChild(line);
@@ -1744,7 +1753,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const state = stateOverride || (ok === false ? "failed" : "done");
       const icons = { failed: "✗", warning: "!", done: "✓" };
       const icon = icons[state] || "✓";
-      line.className = `act ${state}`;
+      line.className = `act ${state} verbose-tool-activity`;
       line.replaceChildren(
         el("span", { class: "icon", text: icon }),
         el("span", { text: note }));
@@ -1842,6 +1851,10 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("toolCalls");
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
+      if (!verboseMode) {
+        setStatus("Working…");
+        return;
+      }
       const detail = (p.classification && p.classification !== "bridge")
         ? ` · ${p.classification}` : "";
       // Verbose mode accounts for the full call: the policy decision
@@ -1863,6 +1876,10 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const moved = (typeof p.stdout_bytes === "number" ? p.stdout_bytes : 0) +
                     (typeof p.stderr_bytes === "number" ? p.stderr_bytes : 0);
       tallyStat("toolOutputBytes", moved);
+      if (!verboseMode) {
+        setStatus("Working…");
+        return;
+      }
       if (isCommandStatusExit(p)) {
         endToolLine(tool, true, commandStatusNote(tool, p), "warning");
       } else if (p.ok === false) {
@@ -1885,7 +1902,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
-      endToolLine(tool, true, `${tool} — queued for operator approval`);
+      if (verboseMode) {
+        endToolLine(tool, true, `${tool} — queued for operator approval`);
+      }
       setStatus(`Approval required for ${tool}.`);
       log.appendChild(renderPendingToolCall(p));
       scrollLog();
@@ -2213,6 +2232,7 @@ async function handleSlashCommand(input) {
     case "/verbose": {
       addMessage("user", input);
       const want = arg.toLowerCase();
+      const wasVerbose = verboseMode;
       if (want === "on") verboseMode = true;
       else if (want === "off") verboseMode = false;
       else if (!want) verboseMode = !verboseMode;
@@ -2220,14 +2240,24 @@ async function handleSlashCommand(input) {
         addMessage("system", "Usage: /verbose [on|off]", { error: true });
         return true;
       }
+      if (verboseMode && !wasVerbose) {
+        netStats.session = newStatBucket();
+        netStats.turn = newStatBucket();
+      }
+      document.querySelectorAll(".verbose-tool-activity")
+        .forEach(node => { node.hidden = !verboseMode; });
+      if (!verboseMode) {
+        if (turnBusy) statusEl.textContent = "Agent is working…";
+      }
       addMessage("system",
         `Verbose mode ${verboseMode ? "on" : "off"}.` +
         (verboseMode
-          ? " Each turn now ends with its background-activity tally" +
-            " and tool lines include extra detail." +
+          ? " Tool activity is now tracked, logged in the transcript," +
+            " and shown with arguments, outcomes, timings, and byte counts." +
+            " Statistics start now, and each turn ends with a" +
+            " background-activity tally." +
             " Verbose resets to off when the page reloads."
-          : "") +
-        `\nSession activity so far: ${statsSummary(netStats.session)}`);
+          : " Tool activity is hidden; approval prompts remain visible."));
       return true;
     }
     case "/version": {

@@ -28,6 +28,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Chat discovery and layout
 
+- **Quiet tool activity by default:** with `/verbose` off, ordinary tool calls,
+  results, failures, counters, and live tool status are hidden from the chat
+  transcript. `/verbose on` enables tool tracking and detailed transcript
+  logging with arguments, policy decisions, outcomes, timings, output sizes,
+  and per-turn activity totals. Required approval prompts remain visible in
+  both modes, and security audit logging is unchanged.
 - **Broader local API discovery:** `/locals` now scans ports `1234`, `8080`,
   `11434`, and `51234` across the local IPv4 `/24` and on loopback, while
   retaining private managed llama.cpp discovery on loopback port `58080`.
