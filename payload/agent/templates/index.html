@@ -971,9 +971,9 @@ function renderPendingToolCall(p) {
 }
 
 function renderTurnCounter(events) {
-  const total = events.length;
-  const elevated = events.filter(e =>
-    e.kind === "tool_call" &&
+  const calls = events.filter(e => e.kind === "tool_call");
+  const total = calls.length;
+  const elevated = calls.filter(e =>
     e.payload && e.payload.classification && e.payload.classification !== "read_only"
   ).length;
   const wrap = el("div", { class: "system verbose-tool-activity", text:
@@ -1729,7 +1729,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     // per-tool stack — used when a tool_end has no matching tool_start,
     // so the orphan line cannot swallow a later result for the tool.
     const startToolLine = (name, note, track = true) => {
-      const line = el("div", { class: "act running" });
+      const line = el("div", { class: "act running verbose-tool-activity" });
       line.appendChild(el("span", { class: "icon", text: "⏳" }));
       line.appendChild(el("span", { text: note }));
       activity.appendChild(line);
@@ -1749,7 +1749,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const state = stateOverride || (ok === false ? "failed" : "done");
       const icons = { failed: "✗", warning: "!", done: "✓" };
       const icon = icons[state] || "✓";
-      line.className = `act ${state}`;
+      line.className = `act ${state} verbose-tool-activity`;
       line.replaceChildren(
         el("span", { class: "icon", text: icon }),
         el("span", { text: note }));
@@ -2242,6 +2242,7 @@ async function handleSlashCommand(input) {
       } else if (!verboseMode) {
         document.querySelectorAll(".verbose-tool-activity")
           .forEach(node => node.remove());
+        if (turnBusy) statusEl.textContent = "Agent is working…";
       }
       addMessage("system",
         `Verbose mode ${verboseMode ? "on" : "off"}.` +
