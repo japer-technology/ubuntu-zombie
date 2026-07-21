@@ -992,9 +992,9 @@ function renderSkillActive(p) {
 }
 
 function renderEvent(ev) {
-  const p = ev.payload || {};
   if (!verboseMode &&
       (ev.kind === "tool_call" || ev.kind === "tool_observation")) return null;
+  const p = ev.payload || {};
   if (ev.kind === "tool_call") return renderToolCall(p);
   if (ev.kind === "tool_observation") return renderToolObservation(p);
   if (ev.kind === "pending_tool_call") return renderPendingToolCall(p);
@@ -1090,7 +1090,7 @@ const COMMAND_DETAILS = {
   "/tools": "Lists registered tools, descriptions, and policy classifications.",
   "/ttl": "Shows or changes the Time to Live kill switch.",
   "/undo": "Creates a preserved branch rewound by one or more user turns.",
-  "/verbose": "Toggles detailed API, streaming, tool, byte, and timing activity.",
+  "/verbose": "Toggles detailed API, streaming, tool, byte, and timing activity; statistics start when verbose mode is enabled.",
   "/version": "Shows installed component versions and checks for newer releases.",
   "/whoami": "Shows the local agent identity, host, provider, model, and instructions."
 };
@@ -2249,7 +2249,8 @@ async function handleSlashCommand(input) {
         (verboseMode
           ? " Tool activity is now tracked, logged in the transcript," +
             " and shown with arguments, outcomes, timings, and byte counts." +
-            " Each turn ends with a background-activity tally." +
+            " Statistics start now, and each turn ends with a" +
+            " background-activity tally." +
             " Verbose resets to off when the page reloads."
           : " Tool activity is hidden; approval prompts remain visible."));
       return true;
