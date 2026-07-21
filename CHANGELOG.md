@@ -80,6 +80,15 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   place before dispatch, so every alias runs its canonical command — including
   `/exit` and `/quit`, which previously reported "Unknown command."
 
+### Documentation
+
+- **Forgejo install guide:** new `docs/FORGEJO.md` documents the
+  `install.sh` Forgejo component end to end — the loopback backend +
+  Caddy/Avahi LAN HTTPS architecture, every install phase, password
+  and secret handling, update/re-run safety gates, files installed,
+  lifecycle subcommands, exit codes, and troubleshooting.
+  `docs/CONFIGURATION.md` links to it from the Forgejo section.
+
 ### Installer and upgrades
 
 - **Upgrades restart the chat service:** re-running `install` in place now
