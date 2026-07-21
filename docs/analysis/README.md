@@ -22,6 +22,10 @@ ground without rediscovering it from scratch.
 - [`improvements-8-plan.md`](improvements-8-plan.md) — phased
   implementation plan addressing every improvements-8 finding
   (F1–F12), with work items, acceptance criteria, and sequencing.
+- [`mediation-diagrams/`](mediation-diagrams/README.md) — vertical
+  Mermaid diagrams comparing how the system works today (shipped
+  unmediated bridge path) with the restored mediation designs from
+  the improvements-8 plan.
 - [`reactivation-timer.md`](reactivation-timer.md) — design analysis for
   a timer-backed agent re-activation primitive and queued chat
   continuations.

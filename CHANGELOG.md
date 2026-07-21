@@ -106,6 +106,15 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Analysis notes
 
+- **Mediation diagrams:** new `docs/analysis/mediation-diagrams/`
+  folder with vertical Mermaid diagrams — `current-state.md` shows how
+  the system works today (installed shape, chat turn transport, the
+  shipped unmediated tool path, and the stub-only mediated path), and
+  `mediation.md` shows the restored mediation designs from the
+  improvements-8 plan (mediated tool-call lifecycle, Option A
+  `--mode rpc`, Option B custom tools, tripwire). Design analysis
+  only; no behaviour change. The analysis index in
+  `docs/analysis/README.md` now lists the folder.
 - **Improvements-8 remediation plan:** new
   `docs/analysis/improvements-8-plan.md` turns every finding of the
   external adversarial review (`docs/analysis/improvements-8.md`,
