@@ -34,6 +34,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   logging with arguments, policy decisions, outcomes, timings, output sizes,
   and per-turn activity totals. Required approval prompts remain visible in
   both modes, and security audit logging is unchanged.
+- **Persistent verbose diagnostics:** `/verbose` now retains statistics and
+  previously written activity for the full browser session. Every streamed tool
+  execution has an expandable record containing its call identifier,
+  arguments, policy metadata, outcome, timing, and output size; API requests
+  and turn phases are also recorded without exposing hidden model reasoning.
 - **Broader local API discovery:** `/locals` now scans ports `1234`, `8080`,
   `11434`, and `51234` across the local IPv4 `/24` and on loopback, while
   retaining private managed llama.cpp discovery on loopback port `58080`.

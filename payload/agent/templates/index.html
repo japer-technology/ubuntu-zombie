@@ -437,7 +437,6 @@ function byteLength(s) {
 }
 
 function tallyStat(field, n = 1) {
-  if (!verboseMode) return;
   if (!Number.isFinite(n) || n <= 0) return;
   netStats.session[field] += n;
   netStats.turn[field] += n;
@@ -494,9 +493,20 @@ function statsSummary(bucket) {
 // in the background ever goes unreported.
 function appendVerboseTally() {
   if (!verboseMode) return;
-  log.appendChild(el("div", { class: "muted",
-    text: `${statsSummary(netStats.turn)}` }));
+  log.appendChild(el("div", { class: "muted verbose-tool-activity",
+    text: `Turn activity snapshot: ${statsSummary(netStats.turn)}` }));
   scrollLog();
+}
+
+function appendVerboseActivity(text) {
+  const line = el("div", {
+    class: "muted verbose-tool-activity",
+    text,
+  });
+  line.hidden = !verboseMode;
+  log.appendChild(line);
+  scrollLog();
+  return line;
 }
 
 // Route every API call through one wrapper so verbose accounting sees
@@ -504,14 +514,31 @@ function appendVerboseTally() {
 // Content-Length header the local server always sets on JSON replies.
 const uzNativeFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
+  const startedAt = performance.now();
+  const method = String((init && init.method) || "GET").toUpperCase();
+  let target = String(input);
+  try { target = new URL(target, window.location.href).pathname; }
+  catch (_e) { /* retain the original local target */ }
   tallyStat("apiCalls");
   if (init && typeof init.body === "string") {
     tallyStat("bytesOut", byteLength(init.body));
   }
-  const r = await uzNativeFetch(input, init);
-  const len = Number(r.headers.get("content-length") || "");
-  tallyStat("bytesIn", len);
-  return r;
+  try {
+    const r = await uzNativeFetch(input, init);
+    const len = Number(r.headers.get("content-length") || "");
+    tallyStat("bytesIn", len);
+    appendVerboseActivity(
+      `API ${method} ${target} — HTTP ${r.status} · ` +
+      `${Math.round(performance.now() - startedAt)} ms · ${formatBytes(len)} received`
+    );
+    return r;
+  } catch (err) {
+    appendVerboseActivity(
+      `API ${method} ${target} — failed after ` +
+      `${Math.round(performance.now() - startedAt)} ms · ${String(err)}`
+    );
+    throw err;
+  }
 };
 
 function el(tag, attrs = {}, ...children) {
@@ -1579,18 +1606,18 @@ async function uzDecidePending(decision, arg) {
   if (result.result) log.appendChild(renderResult(result.result));
 }
 
-function applyTurnPayload(data) {
+function applyTurnPayload(data, preserveTranscript = false) {
   if (!data) return data;
   if (data.dead) showTombstone(data);
   conversationId = data.conversation_id ?? conversationId;
-  if (data.messages || data.events) {
+  if (!preserveTranscript && (data.messages || data.events)) {
     uzClearLog();
     renderConversation(data.messages || [], data.events || []);
-  } else if (data.reply) {
+  } else if (!preserveTranscript && data.reply) {
     addMessage("assistant", data.reply);
   }
   const events = data.events || [];
-  if (events.some(ev => ev.kind === "tool_call")) {
+  if (!preserveTranscript && events.some(ev => ev.kind === "tool_call")) {
     log.appendChild(renderTurnCounter(events));
   }
   // Render the error exactly once, after any transcript re-render (which
@@ -1723,40 +1750,48 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     const setStatus = (text) => { statusText = text; paintStatus(); };
     let liveTimer = setInterval(paintStatus, 1000);
     paintStatus();
-    // One activity line per tool execution, keyed by tool name (the
-    // stream reports starts and ends by name only). Lines flip from
-    // "running…" to done/failed in place instead of stacking empty
-    // proposal/observation boxes mid-turn.
+    // Keep one inspectable activity record per execution. The summary
+    // changes as the call advances, while its identifier, arguments and
+    // outcome remain in the expandable detail instead of being replaced.
     const toolLineStacks = new Map();
     // ``track: false`` renders a line without registering it in the
     // per-tool stack — used when a tool_end has no matching tool_start,
     // so the orphan line cannot swallow a later result for the tool.
-    const startToolLine = (name, note, track = true) => {
+    const startToolLine = (key, note, detail, track = true) => {
       const line = el("div", { class: "act running verbose-tool-activity" });
       line.hidden = !verboseMode;
       line.appendChild(el("span", { class: "icon", text: "⏳" }));
-      line.appendChild(el("span", { text: note }));
+      const label = el("span", { text: note });
+      line.appendChild(label);
+      const inspector = el("details", {});
+      inspector.appendChild(el("summary", { text: "Inspect tool call" }));
+      const detailBody = el("pre", { text: detail });
+      inspector.appendChild(detailBody);
+      line.appendChild(inspector);
       activity.appendChild(line);
+      const record = { line, label, detailBody };
       if (track) {
-        const stack = toolLineStacks.get(name) || [];
-        stack.push(line);
-        toolLineStacks.set(name, stack);
+        const stack = toolLineStacks.get(key) || [];
+        stack.push(record);
+        toolLineStacks.set(key, stack);
       }
       scrollLog();
-      return line;
+      return record;
     };
-    const endToolLine = (name, ok, note, stateOverride = null) => {
+    const endToolLine = (key, ok, note, detail, stateOverride = null) => {
       // A tool_end without a matching tool_start (out-of-order or
       // dropped frame) still gets a completed line so it is visible.
-      const stack = toolLineStacks.get(name);
-      const line = stack?.shift() || startToolLine(name, note, false);
+      const stack = toolLineStacks.get(key);
+      const record = stack?.shift() || startToolLine(
+        key, note, "Start event was not received.", false);
+      const { line, label, detailBody } = record;
       const state = stateOverride || (ok === false ? "failed" : "done");
       const icons = { failed: "✗", warning: "!", done: "✓" };
       const icon = icons[state] || "✓";
       line.className = `act ${state} verbose-tool-activity`;
-      line.replaceChildren(
-        el("span", { class: "icon", text: icon }),
-        el("span", { text: note }));
+      line.firstElementChild.textContent = icon;
+      label.textContent = note;
+      detailBody.textContent += `\n\nOutcome:\n${detail}`;
       scrollLog();
       return line;
     };
@@ -1796,7 +1831,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       completed = true;
       if (activeEventSource) activeEventSource.close();
       activeEventSource = null;
-      applyTurnPayload(payload);
+      applyTurnPayload(payload, true);
       completeUi();
     };
     const PHASE_LABELS = {
@@ -1821,7 +1856,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("sseEvents");
       tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
-      setStatus(PHASE_LABELS[p.phase] || "Working…");
+      const phase = PHASE_LABELS[p.phase] || "Working…";
+      setStatus(phase);
+      appendVerboseActivity(`Turn phase: ${p.phase || "unknown"} — ${phase}`);
     });
     activeEventSource.addEventListener("token", (ev) => {
       armTimeout();
@@ -1851,10 +1888,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("toolCalls");
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
-      if (!verboseMode) {
-        setStatus("Working…");
-        return;
-      }
+      const key = p.id || p.tool_call_id || tool;
       const detail = (p.classification && p.classification !== "bridge")
         ? ` · ${p.classification}` : "";
       // Verbose mode accounts for the full call: the policy decision
@@ -1864,8 +1898,14 @@ async function uzSendPrompt(prompt, convId = conversationId) {
         if (p.decision) verboseDetail += ` · ${p.decision}`;
         if (p.args_summary) verboseDetail += ` · ${p.args_summary}`;
       }
-      startToolLine(tool, `${tool}${detail}${verboseDetail} — running…`);
-      setStatus(`Running ${tool}…`);
+      startToolLine(
+        key,
+        `${tool}${detail} — running…`,
+        `Tool: ${tool}\nCall id: ${key}\nClassification: ` +
+        `${p.classification || "unknown"}\nDecision: ${p.decision || "unknown"}` +
+        `\nArguments: ${p.args_summary || "(none reported)"}`
+      );
+      setStatus(verboseMode ? `Running ${tool}…` : "Working…");
     });
     activeEventSource.addEventListener("tool_end", (ev) => {
       armTimeout();
@@ -1873,18 +1913,16 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
+      const key = p.id || p.tool_call_id || tool;
       const moved = (typeof p.stdout_bytes === "number" ? p.stdout_bytes : 0) +
                     (typeof p.stderr_bytes === "number" ? p.stderr_bytes : 0);
       tallyStat("toolOutputBytes", moved);
-      if (!verboseMode) {
-        setStatus("Working…");
-        return;
-      }
+      const outcome = JSON.stringify(p, null, 2);
       if (isCommandStatusExit(p)) {
-        endToolLine(tool, true, commandStatusNote(tool, p), "warning");
+        endToolLine(key, true, commandStatusNote(tool, p), outcome, "warning");
       } else if (p.ok === false) {
         tallyStat("toolFailures");
-        endToolLine(tool, false, `${tool} — ${p.error || "failed"}`);
+        endToolLine(key, false, `${tool} — ${p.error || "failed"}`, outcome);
       } else {
         const bits = [];
         if (p.exit_code !== undefined && p.exit_code !== null) bits.push(`exit ${p.exit_code}`);
@@ -1892,9 +1930,13 @@ async function uzSendPrompt(prompt, convId = conversationId) {
         // Verbose accounts for the output even when nothing moved, so
         // "done" is never the whole story.
         if (verboseMode) bits.push(`${formatBytes(moved)} output`);
-        endToolLine(tool, true, `${tool} — done${bits.length ? ` (${bits.join(" · ")})` : ""}`);
+        endToolLine(
+          key, true,
+          `${tool} — done${bits.length ? ` (${bits.join(" · ")})` : ""}`,
+          outcome
+        );
       }
-      setStatus(`Finished ${tool}.`);
+      setStatus(verboseMode ? `Finished ${tool}.` : "Working…");
     });
     activeEventSource.addEventListener("pending_approval", (ev) => {
       armTimeout();
@@ -1902,9 +1944,11 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
-      if (verboseMode) {
-        endToolLine(tool, true, `${tool} — queued for operator approval`);
-      }
+      const key = p.id || p.tool_call_id || tool;
+      endToolLine(
+        key, true, `${tool} — queued for operator approval`,
+        JSON.stringify(p, null, 2)
+      );
       setStatus(`Approval required for ${tool}.`);
       log.appendChild(renderPendingToolCall(p));
       scrollLog();
@@ -2240,10 +2284,6 @@ async function handleSlashCommand(input) {
         addMessage("system", "Usage: /verbose [on|off]", { error: true });
         return true;
       }
-      if (verboseMode && !wasVerbose) {
-        netStats.session = newStatBucket();
-        netStats.turn = newStatBucket();
-      }
       document.querySelectorAll(".verbose-tool-activity")
         .forEach(node => { node.hidden = !verboseMode; });
       if (!verboseMode) {
@@ -2254,7 +2294,7 @@ async function handleSlashCommand(input) {
         (verboseMode
           ? " Tool activity is now tracked, logged in the transcript," +
             " and shown with arguments, outcomes, timings, and byte counts." +
-            " Statistics start now, and each turn ends with a" +
+            " Activity already observed on this page is retained, and each turn ends with a" +
             " background-activity tally." +
             " Verbose resets to off when the page reloads."
           : " Tool activity is hidden; approval prompts remain visible."));

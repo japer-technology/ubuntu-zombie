@@ -3134,6 +3134,16 @@ PY
   grep -q 'body.innerHTML = renderMarkdown(liveMarkdown)' \
     payload/agent/templates/index.html \
     || { echo "streamed assistant replies must render as Markdown" >&2; exit 1; }
+  grep -q 'applyTurnPayload(payload, true)' payload/agent/templates/index.html \
+    && grep -q 'Inspect tool call' payload/agent/templates/index.html \
+    && grep -q 'Activity already observed on this page is retained' \
+      payload/agent/templates/index.html \
+    || { echo "verbose transcript activity must remain inspectable and persistent" >&2; exit 1; }
+  if grep -A3 'function tallyStat' payload/agent/templates/index.html \
+      | grep -q 'if (!verboseMode) return'; then
+    echo "verbose statistics must be retained before display is enabled" >&2
+    exit 1
+  fi
   grep -q 'class="table-wrap"' payload/agent/templates/index.html \
     && grep -q '\.md th, \.md td' payload/agent/templates/index.html \
     || { echo "Markdown tables must render with readable table styling" >&2; exit 1; }
