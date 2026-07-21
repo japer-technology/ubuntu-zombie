@@ -431,19 +431,23 @@ serving, and the `options/` plans ship or are planned.
 
 One focused PR:
 
-1. The stale parent-directory `AGENTS.md` (outside the repository, in
-   `Documents/`) cannot be fixed from this repo; record in the repo's
-   `AGENTS.md` that no out-of-tree agent guidance is authoritative,
-   and notify the owner to delete or update the external file.
+1. The stale `AGENTS.md` reported by the review lives in the owner's
+   local checkout parent directory (`Documents/`, outside this
+   repository) and cannot be fixed from this repo; record in the
+   repo's `AGENTS.md` that no out-of-tree agent guidance is
+   authoritative, and notify the owner to delete or update the
+   external file.
 2. Remove or repair the `docs/design-notes/` references in
    `AGENTS.md` and `docs/VISION.md` (the directory does not exist);
    either restore the directory or drop the references — do not leave
    the dangling paths.
 3. Reconcile the policy draft filenames: update `CHANGELOG.md`
-   references to the actual `docs/policy-*.yaml` names, and add a
-   header line to each draft stating it is a non-authoritative design
-   draft, naming `payload/etc/policy.yaml` as the live policy (or
-   delete drafts that no longer serve a purpose).
+   references (`docs/policy-new.yaml`, `docs/policy-new-v2.yaml`) to
+   the actual files (`docs/policy-new-v1-5.5-pro.yaml`,
+   `docs/policy-new-v2-fable-5.yaml`, `docs/policy-old.yaml`), and
+   add a header line to each draft stating it is a non-authoritative
+   design draft, naming `payload/etc/policy.yaml` as the live policy
+   (or delete drafts that no longer serve a purpose).
 4. Update `docs/analysis/README.md` to index every file in the
    directory, including this plan.
 5. Replace the blanket `CHANGELOG.md` exemption in
