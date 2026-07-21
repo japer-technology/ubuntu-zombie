@@ -19,6 +19,9 @@ ground without rediscovering it from scratch.
 - [`improvements-8.md`](improvements-8.md) — external adversarial
   review (2026-07-21): mediated-tool-path bypass (F1, critical), test
   coverage realism, auth fail-open, and a sequenced remediation plan.
+- [`improvements-8-plan.md`](improvements-8-plan.md) — phased
+  implementation plan addressing every improvements-8 finding
+  (F1–F12), with work items, acceptance criteria, and sequencing.
 
 If you are looking for how to *use* or *understand* Ubuntu Zombie,
 start at [`../README.md`](../README.md) (the documentation index)

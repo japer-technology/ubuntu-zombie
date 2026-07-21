@@ -106,6 +106,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Analysis notes
 
+- **Improvements-8 remediation plan:** new
+  `docs/analysis/improvements-8-plan.md` turns every finding of the
+  external adversarial review (`docs/analysis/improvements-8.md`,
+  F1–F12) into a phased implementation plan with work items,
+  acceptance criteria, and sequencing — restoring bridge tool
+  mediation first, then production-path testing, auth/TTL hardening,
+  turn ceilings and durable approvals, structural and supply-chain
+  hardening, and documentation/reference integrity. Design analysis
+  only; no behaviour change. The analysis index in
+  `docs/analysis/README.md` now lists the plan.
 - **Windows 11 port plan:** new
   `docs/analysis/improvements-7-windows11-plan.md` analyses what a
   Windows 11 version of Ubuntu Zombie would require — a PowerShell
