@@ -804,6 +804,7 @@ class App:
                 "tool": name,
                 "classification": classification,
                 "decision": ("queued" if requires_approval else "auto"),
+                "args_summary": _summarize(cleaned),
             })
 
             if requires_approval:
