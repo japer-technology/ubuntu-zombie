@@ -82,6 +82,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Documentation
 
+- **Vertical mermaid diagrams everywhere:** every diagram in the docs is
+  now a vertical (top-to-bottom) Mermaid diagram. ASCII-art flows in
+  `docs/FORGEJO.md`, `docs/ARCHITECTURE.md`,
+  `docs/research/REQUIREMENTS.md`, and `docs/analysis/improvements-4.md`
+  were converted to `flowchart TD`, and existing horizontal
+  (`flowchart LR`) diagrams in `docs/RELEASE-PLAN-123.md`,
+  `docs/research/ARCHITECTURE-IDEA.md`, and `payload/README.md` were
+  reoriented to `flowchart TD`.
 - **Forgejo install guide:** new `docs/FORGEJO.md` documents the
   `install.sh` Forgejo component end to end — the loopback backend +
   Caddy/Avahi LAN HTTPS architecture, every install phase, password
