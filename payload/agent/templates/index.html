@@ -1733,6 +1733,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     // so the orphan line cannot swallow a later result for the tool.
     const startToolLine = (name, note, track = true) => {
       const line = el("div", { class: "act running verbose-tool-activity" });
+      line.hidden = !verboseMode;
       line.appendChild(el("span", { class: "icon", text: "⏳" }));
       line.appendChild(el("span", { text: note }));
       activity.appendChild(line);
