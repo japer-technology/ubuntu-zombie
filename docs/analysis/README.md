@@ -22,6 +22,9 @@ ground without rediscovering it from scratch.
 - [`improvements-8-plan.md`](improvements-8-plan.md) — phased
   implementation plan addressing every improvements-8 finding
   (F1–F12), with work items, acceptance criteria, and sequencing.
+- [`reactivation-timer.md`](reactivation-timer.md) — design analysis for
+  a timer-backed agent re-activation primitive and queued chat
+  continuations.
 
 If you are looking for how to *use* or *understand* Ubuntu Zombie,
 start at [`../README.md`](../README.md) (the documentation index)
