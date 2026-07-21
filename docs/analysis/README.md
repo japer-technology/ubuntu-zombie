@@ -19,6 +19,14 @@ ground without rediscovering it from scratch.
 - [`improvements-8.md`](improvements-8.md) — external adversarial
   review (2026-07-21): mediated-tool-path bypass (F1, critical), test
   coverage realism, auth fail-open, and a sequenced remediation plan.
+- [`f1-option-more-control.md`](f1-option-more-control.md) — F1 fix
+  design: restore real mediation via a first-party
+  `zombie-policy-gate` pi extension (and why `--mode rpc` alone would
+  not mediate).
+- [`f1-option-less-control.md`](f1-option-less-control.md) — F1
+  alternative: accept the unmediated architecture, correct every
+  doc/promotion claim, and add compensating controls (auth, bridge-log
+  audit, blast-radius).
 
 If you are looking for how to *use* or *understand* Ubuntu Zombie,
 start at [`../README.md`](../README.md) (the documentation index)
