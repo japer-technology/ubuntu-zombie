@@ -8,7 +8,8 @@
 // Protocol (one JSON object per line, both directions):
 //
 //   stdin  ← {"type":"start", "prompt", "system", "history",
-//             "tools", "settings_path", "log_path", "max_tool_calls"}
+//             "tools", "settings_path", "log_path", "max_tool_calls",
+//             "idle_timeout_seconds"}
 //   stdout → {"type":"tool_call", "id", "name", "args"}
 //   stdin  ← {"type":"tool_result", "id", "ok": bool, "result"|"error": ...}
 //   stdout → {"type":"final", "text"}
@@ -300,7 +301,11 @@ async function run() {
   const idleTimeoutMs = (() => {
     const raw = Number(process.env.ZOMBIE_PI_MONO_IDLE_TIMEOUT);
     if (Number.isFinite(raw)) return raw * 1000;
-    return 660 * 1000; // generous: longer than the Python-side default (600s)
+    const driverSeconds = Number(start.idle_timeout_seconds);
+    if (Number.isFinite(driverSeconds) && driverSeconds > 0) {
+      return (driverSeconds + 60) * 1000;
+    }
+    return 86460 * 1000;
   })();
   let idleTimer = null;
   function clearIdle() {

@@ -8,6 +8,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Agent capacity
+
+- **Long-running local-model turns:** the shipped pi agent now allows up to
+  1,000 tool calls (250 elevated) per turn and waits up to 24 hours of
+  inactivity. Active turns may run longer because model and tool events reset
+  the watchdog. Python, bridge, and browser deadlines are aligned while all
+  elevated actions still pass through the policy approval gate.
+
 ### Policy gate
 
 - **Fail-closed policy restored:** the shipped `policy.yaml` again defaults

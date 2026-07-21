@@ -11,7 +11,8 @@ Protocol (Python ↔ bridge, one JSON object per line):
 
 * ``{"type":"start", "prompt": str, "system": str, "history": [...],
      "tools": [...], "settings_path": str, "log_path": str,
-     "max_tool_calls": int, "provider": str, "model": str}`` —
+     "max_tool_calls": int, "idle_timeout_seconds": float,
+     "provider": str, "model": str}`` —
   Python → bridge. ``provider`` (a pi-ai/``pi`` provider id such as
   ``openai`` or ``google``) and ``model`` are resolved from
   ``providers`` so the agent loop and chat surface select the same
@@ -69,7 +70,7 @@ DEFAULT_SETTINGS_PATH = Path(os.environ.get(
 # three layered deadlines and the smallest, so it fires first with a
 # clean error (Python < bridge ZOMBIE_PI_MONO_IDLE_TIMEOUT < client
 # CLIENT_TURN_TIMEOUT_MS). ``0`` disables the watchdog.
-DEFAULT_TURN_TIMEOUT = 600.0
+DEFAULT_TURN_TIMEOUT = 86400.0
 
 
 class BridgeError(RuntimeError):
@@ -125,7 +126,7 @@ def run_turn(
     history: Iterable[dict[str, Any]],
     on_tool_call: ToolCallback,
     tool_names: Iterable[str],
-    max_tool_calls: int = 8,
+    max_tool_calls: int = 1000,
     settings_path: Path | str | None = None,
     timeout: float | None = None,
     on_event: Callable[[dict[str, Any]], None] | None = None,
@@ -193,6 +194,7 @@ def run_turn(
         "settings_path": settings,
         "log_path": str(log),
         "max_tool_calls": max_tool_calls,
+        "idle_timeout_seconds": timeout,
         "provider": pi_provider,
         "model": model_id,
     }

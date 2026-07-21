@@ -95,11 +95,10 @@ class Policy:
     # (e.g. ``svc.status: read_only``). Empty dict = use the
     # registry-shipped defaults from ``tools.TOOL_REGISTRY``.
     tool_classes: dict[str, str] = field(default_factory=dict)
-    # Per-turn agent budgets that bound runaway loops. The 12 / 3
-    # defaults match the typical turn shape once parallel
-    # skill-driven tool calls are in play.
-    max_tool_calls_per_turn: int = 12
-    max_elevated_calls_per_turn: int = 3
+    # Per-turn agent budgets that bound runaway loops while leaving ample
+    # capacity for deep local-model tasks.
+    max_tool_calls_per_turn: int = 1000
+    max_elevated_calls_per_turn: int = 250
     # Wall-clock idle deadline (seconds) for a single agent turn. If the
     # model/provider produces no event for this long the turn is
     # terminated and the operator sees a clean error instead of an
@@ -108,7 +107,7 @@ class Policy:
     # does not slow normal turns. ``0`` disables the watchdog. Must stay
     # the smallest of the three layered idle deadlines (Python < bridge
     # ZOMBIE_PI_MONO_IDLE_TIMEOUT < client CLIENT_TURN_TIMEOUT_MS).
-    max_turn_seconds: int = 600
+    max_turn_seconds: int = 86400
 
     def classify(self, command: str | Iterable[str]) -> str:
         """Return the most-elevated class implied by ``command``.
@@ -646,9 +645,12 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
         default_class=str(settings.get("default_class", "destructive")),
         sudo_allow_list=sudo_allow_list,
         tool_classes=tool_classes,
-        max_tool_calls_per_turn=_coerce_int(agent_raw.get("max_tool_calls_per_turn"), 12),
-        max_elevated_calls_per_turn=_coerce_int(agent_raw.get("max_elevated_calls_per_turn"), 3),
-        max_turn_seconds=_coerce_int(agent_raw.get("max_turn_seconds"), 600, min_val=0),
+        max_tool_calls_per_turn=_coerce_int(
+            agent_raw.get("max_tool_calls_per_turn"), 1000),
+        max_elevated_calls_per_turn=_coerce_int(
+            agent_raw.get("max_elevated_calls_per_turn"), 250),
+        max_turn_seconds=_coerce_int(
+            agent_raw.get("max_turn_seconds"), 86400, min_val=0),
     )
     _cache = (key, policy)
     return policy
