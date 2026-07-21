@@ -749,7 +749,7 @@ class App:
                     "decision": "schema_rejected", "error": str(exc),
                 })
                 send_event("tool_end", {
-                    "tool": name, "ok": False,
+                    "tool": name, "tool_call_id": call_id, "ok": False,
                     "decision": "schema_rejected", "error": str(exc),
                 })
                 return {"ok": False, "error": f"schema_rejected: {exc}"}
@@ -780,7 +780,7 @@ class App:
                         "error": err,
                     })
                     send_event("tool_end", {
-                        "tool": name, "ok": False,
+                        "tool": name, "tool_call_id": call_id, "ok": False,
                         "decision": "budget_exceeded", "error": err,
                     })
                     return {"ok": False, "error": err}
@@ -802,6 +802,7 @@ class App:
             })
             send_event("tool_start", {
                 "tool": name,
+                "tool_call_id": call_id,
                 "classification": classification,
                 "decision": ("queued" if requires_approval else "auto"),
                 "args_summary": _summarize(cleaned),
@@ -868,6 +869,7 @@ class App:
 
                 send_event("tool_end", {
                     "tool": name,
+                    "tool_call_id": call_id,
                     "ok": True,
                     "exit_code": result.get("exit_code") if isinstance(result, dict) else None,
                     "duration_ms": result.get("duration_ms") if isinstance(result, dict) else None,
@@ -885,7 +887,8 @@ class App:
                               args_summary=_summarize(cleaned),
                               error=str(exc), conversation_id=conv_id)
                 send_event("tool_end", {
-                    "tool": name, "ok": False, "error": str(exc),
+                    "tool": name, "tool_call_id": call_id,
+                    "ok": False, "error": str(exc),
                 })
                 return {"ok": False, "error": str(exc)}
 
@@ -904,6 +907,9 @@ class App:
                         "tool": tool, "classification": "bridge",
                         "decision": "running",
                     }
+                    tool_id = event.get("id")
+                    if isinstance(tool_id, str) and tool_id:
+                        payload["tool_call_id"] = tool_id
                     args = event.get("args")
                     if isinstance(args, dict) and args:
                         payload["args_summary"] = _summarize(args)
@@ -914,6 +920,9 @@ class App:
                     # verbose mode shows more than a bare "done".
                     payload = {"tool": tool,
                                "ok": event.get("ok", True) is not False}
+                    tool_id = event.get("id")
+                    if isinstance(tool_id, str) and tool_id:
+                        payload["tool_call_id"] = tool_id
                     duration = event.get("duration_ms")
                     if isinstance(duration, (int, float)):
                         payload["duration_ms"] = int(duration)
