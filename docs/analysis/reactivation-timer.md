@@ -141,6 +141,11 @@ The UI can render the synthetic user message with a distinct badge such as
 
 There are two natural storage choices.
 
+Default recommendation: add a table to `conversations.db` for the first
+implementation. Re-activation is conversation-scoped, and SQLite gives the
+server one transactional place to clear the pending record and insert the
+synthetic queued user request.
+
 ### Add a table to `conversations.db`
 
 The existing SQLite history database already stores conversations,
