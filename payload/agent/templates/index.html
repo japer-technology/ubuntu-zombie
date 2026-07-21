@@ -879,6 +879,7 @@ function renderToolCall(p) {
   const wrap = el("div", {
     class: `proposal verbose-tool-activity ${p.classification || "tool"}`
   });
+  wrap.hidden = !verboseMode;
   wrap.appendChild(el("div", { class: "class",
     text: `${p.tool} · ${p.classification || "?"} · ${p.decision || "?"}` }));
   const args = summarizeArgs(p.args);
@@ -889,6 +890,7 @@ function renderToolCall(p) {
 
 function renderToolObservation(p) {
   const wrap = el("div", { class: "result verbose-tool-activity" });
+  wrap.hidden = !verboseMode;
   const header = `observation · ${p.tool}` +
                  (p.decision ? ` · ${p.decision}` : "");
   wrap.appendChild(el("div", { class: "role", text: header }));
@@ -979,6 +981,7 @@ function renderTurnCounter(events) {
   const wrap = el("div", { class: "system verbose-tool-activity", text:
     `Turn budget: ${total} tool call${total === 1 ? "" : "s"}` +
     ` (${elevated} elevated)` });
+  wrap.hidden = !verboseMode;
   return wrap;
 }
 
@@ -992,8 +995,6 @@ function renderSkillActive(p) {
 }
 
 function renderEvent(ev) {
-  if (!verboseMode &&
-      (ev.kind === "tool_call" || ev.kind === "tool_observation")) return null;
   const p = ev.payload || {};
   if (ev.kind === "tool_call") return renderToolCall(p);
   if (ev.kind === "tool_observation") return renderToolObservation(p);
@@ -1589,7 +1590,9 @@ function applyTurnPayload(data) {
     addMessage("assistant", data.reply);
   }
   const events = data.events || [];
-  if (verboseMode && events.length) log.appendChild(renderTurnCounter(events));
+  if (events.some(ev => ev.kind === "tool_call")) {
+    log.appendChild(renderTurnCounter(events));
+  }
   // Render the error exactly once, after any transcript re-render (which
   // clears the log and would otherwise wipe an earlier error bubble).
   if (data.error) addMessage("system", data.error, { error: true });
@@ -2239,9 +2242,10 @@ async function handleSlashCommand(input) {
       if (verboseMode && !wasVerbose) {
         netStats.session = newStatBucket();
         netStats.turn = newStatBucket();
-      } else if (!verboseMode) {
-        document.querySelectorAll(".verbose-tool-activity")
-          .forEach(node => node.remove());
+      }
+      document.querySelectorAll(".verbose-tool-activity")
+        .forEach(node => { node.hidden = !verboseMode; });
+      if (!verboseMode) {
         if (turnBusy) statusEl.textContent = "Agent is working…";
       }
       addMessage("system",
