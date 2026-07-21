@@ -1835,6 +1835,8 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       if (activeEventSource) activeEventSource.close();
       activeEventSource = null;
       if (typeof payload.reply === "string") liveMarkdown = payload.reply;
+      // Keep the live tool inspectors, phase records and stat snapshots;
+      // rebuilding from stored history would discard display-only details.
       applyTurnPayload(payload, true);
       completeUi();
     };
