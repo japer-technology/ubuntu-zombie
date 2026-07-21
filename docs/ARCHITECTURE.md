@@ -7,17 +7,18 @@ runs everything behind a local policy gate and audit log.
 
 ## Installed shape
 
-```text
-scripts/install.sh
-  -> /opt/ai-zombie/
-       agent/                Python chat service and pi bridges
-       bin/                  operator helpers
-       etc/policy.yaml       default action policy
-       pi/                   rendered pi-mono settings and prompt prelude
-       state/                conversations, lifecycle, logs
-  -> /etc/ubuntu-zombie/     operator-editable policy/skills overlays
-  -> /etc/systemd/system/    chat service and health timer
-  -> /etc/sudoers.d/         passwordless sudo for the agent account
+```mermaid
+flowchart TD
+    installer["scripts/install.sh"]
+    installer --> opt["/opt/ai-zombie/"]
+    opt --> agent["agent/<br/>Python chat service and pi bridges"]
+    opt --> bin["bin/<br/>operator helpers"]
+    opt --> etc["etc/policy.yaml<br/>default action policy"]
+    opt --> pi["pi/<br/>rendered pi-mono settings and prompt prelude"]
+    opt --> state["state/<br/>conversations, lifecycle, logs"]
+    installer --> overlay["/etc/ubuntu-zombie/<br/>operator-editable policy/skills overlays"]
+    installer --> systemd["/etc/systemd/system/<br/>chat service and health timer"]
+    installer --> sudoers["/etc/sudoers.d/<br/>passwordless sudo for the agent account"]
 ```
 
 The default install does **not** provision SSH, Tailscale, VNC, Docker,

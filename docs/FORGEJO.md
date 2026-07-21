@@ -17,16 +17,14 @@ reference and post-install tuning see `docs/CONFIGURATION.md`
 
 ## The shape of the result
 
-```text
-LAN client ── https://<hostname>.local/ (443, Caddy internal CA)
-                     │
-                Caddy reverse proxy          Avahi mDNS advertisement
-                     │
-             127.0.0.1:3000  Forgejo (loopback-only backend)
-                     │
-             127.0.0.1:5432  PostgreSQL
-                     │ (optional)
-             forgejo-runner ── Docker executor (loopback registration)
+```mermaid
+flowchart TD
+    client["LAN client"] -->|"https://&lt;hostname&gt;.local/<br/>(443, Caddy internal CA)"| caddy["Caddy reverse proxy"]
+    avahi["Avahi mDNS advertisement"] -.->|"announces _https._tcp :443"| client
+    caddy --> forgejo["127.0.0.1:3000<br/>Forgejo (loopback-only backend)"]
+    forgejo --> postgres["127.0.0.1:5432<br/>PostgreSQL"]
+    forgejo -.->|"optional"| runner["forgejo-runner"]
+    runner --> docker["Docker executor<br/>(loopback registration)"]
 ```
 
 - **Forgejo binds only to loopback** (`HTTP_ADDR = 127.0.0.1`, port
