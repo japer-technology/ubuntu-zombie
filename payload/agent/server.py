@@ -713,7 +713,8 @@ class App:
                       name=skill.name, path=str(skill.path))
 
         policy = load_policy()
-        max_calls = int(getattr(policy, "max_tool_calls_per_turn", 12) or 12)
+        max_calls = int(
+            getattr(policy, "max_tool_calls_per_turn", 1000) or 1000)
         # Also enforce the elevated (non ``read_only``) per-turn
         # budget. Read-only tools auto-run and are cheap; elevated
         # tools queue an operator prompt and mutate state, so they
@@ -723,11 +724,12 @@ class App:
         # ``payload/etc/policy.yaml``) so the model ends the turn
         # cleanly.
         max_elevated = int(
-            getattr(policy, "max_elevated_calls_per_turn", 3) or 3
+            getattr(policy, "max_elevated_calls_per_turn", 250) or 250
         )
         # Per-turn idle deadline so a wedged provider cannot leave the
         # operator's request pending forever (see ``pi_mono.run_turn``).
-        turn_timeout = float(getattr(policy, "max_turn_seconds", 120) or 0)
+        turn_timeout = float(
+            getattr(policy, "max_turn_seconds", 86400) or 0)
         elevated_calls = 0
         turn_events: list[dict[str, Any]] = []
 

@@ -288,8 +288,9 @@ tool_classes:
   pkg.install: system_change
 
 agent:
-  max_tool_calls_per_turn: 12        # total tool calls per user message
-  max_elevated_calls_per_turn: 3     # cap on non read_only calls
+  max_tool_calls_per_turn: 1000      # total tool calls per user message
+  max_elevated_calls_per_turn: 250   # cap on non read_only calls
+  max_turn_seconds: 86400            # idle limit; active turns reset it
 ```
 
 Budget enforcement:
@@ -303,6 +304,14 @@ Budget enforcement:
   agent sees the same synthetic observation so it ends the turn
   cleanly. The same counter drives the operator-facing per-turn
   budget badge in the UI.
+- `max_turn_seconds` is an inactivity watchdog, not a total-duration
+  ceiling. Each model event or tool result resets it, so an active task can
+  run longer than 24 hours. The bridge and browser deadlines sit slightly
+  above it so the Python driver reports stalled turns cleanly first.
+
+These shipped defaults deliberately favour capable local models. Operators
+can still tune all three values in `/opt/ai-zombie/etc/policy.yaml`; elevated
+calls continue to require the configured approvals regardless of budget.
 
 ### pi-mono runtime
 

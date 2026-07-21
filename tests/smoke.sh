@@ -107,6 +107,9 @@ if p.default_class != "destructive":
 # An unknown command must require operator approval.
 if not p.requires_approval(p.classify("foozle --bar")):
     raise SystemExit("fail-closed default no longer requires approval")
+assert p.max_tool_calls_per_turn == 1000, p.max_tool_calls_per_turn
+assert p.max_elevated_calls_per_turn == 250, p.max_elevated_calls_per_turn
+assert p.max_turn_seconds == 86400, p.max_turn_seconds
 
 # The legacy extract_commands / fenced-bash workflow has been removed;
 # commands now arrive as structured pi-mono tool calls. The policy

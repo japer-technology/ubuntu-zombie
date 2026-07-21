@@ -629,9 +629,9 @@ rules:
 # names from payload/agent/tools.py.
 tool_classes: {}
 
-# Larger budgets support complete multi-step device administration while still
-# bounding runaway loops and repeated elevated operations.
+# Generous budgets let local models complete deep, multi-step administration
+# while the policy gate and explicit approvals still protect elevated actions.
 agent:
-  max_tool_calls_per_turn: 40
-  max_elevated_calls_per_turn: 20
-  max_turn_seconds: 900
+  max_tool_calls_per_turn: 1000
+  max_elevated_calls_per_turn: 250
+  max_turn_seconds: 86400
