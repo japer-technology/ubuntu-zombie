@@ -231,9 +231,9 @@ Recommended UI elements:
 - a distinct synthetic user bubble when the timer fires;
 - a visible assistant note when a continuation was accepted or rejected.
 
-The problem statement's idea of a pi-inserted queued request maps well to
-this model: the UI should present the fired record as a queued request
-inserted by the agent runtime, not as a hidden background process.
+The problem statement's idea of a runtime-inserted queued request maps
+well to this model: the UI should present the fired record as a queued
+request inserted by the agent runtime, not as a hidden background process.
 
 ## Failure modes and safeguards
 
