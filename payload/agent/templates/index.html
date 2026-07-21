@@ -102,8 +102,11 @@
   /* A turn with no tool calls must not draw a blank strip in the
      bubble: collapse the activity block entirely while it is empty. */
   .live-activity:empty { display: none; margin: 0; }
-  .live-activity .act { display: flex; align-items: center; gap: .45rem; }
+  .live-activity .act { display: flex; align-items: center; flex-wrap: wrap;
+    gap: .45rem; }
   .live-activity .act .icon { width: 1rem; text-align: center; flex: none; }
+  .live-activity .act details { flex-basis: 100%; margin-left: 1.45rem; }
+  .live-activity .act details pre { margin-top: .35rem; white-space: pre-wrap; }
   .live-activity .act.done { opacity: .75; }
   .live-activity .act.done .icon { color: #2ecc71; }
   .live-activity .act.warning { color: #f5a623; }
@@ -1831,6 +1834,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       completed = true;
       if (activeEventSource) activeEventSource.close();
       activeEventSource = null;
+      if (typeof payload.reply === "string") liveMarkdown = payload.reply;
       applyTurnPayload(payload, true);
       completeUi();
     };
@@ -1888,16 +1892,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("toolCalls");
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
-      const key = p.id || p.tool_call_id || tool;
+      const key = p.tool_call_id || p.id || tool;
       const detail = (p.classification && p.classification !== "bridge")
         ? ` · ${p.classification}` : "";
-      // Verbose mode accounts for the full call: the policy decision
-      // and the (already summarised) arguments the tool was given.
-      let verboseDetail = "";
-      if (verboseMode) {
-        if (p.decision) verboseDetail += ` · ${p.decision}`;
-        if (p.args_summary) verboseDetail += ` · ${p.args_summary}`;
-      }
       startToolLine(
         key,
         `${tool}${detail} — running…`,
@@ -1913,7 +1910,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
-      const key = p.id || p.tool_call_id || tool;
+      const key = p.tool_call_id || p.id || tool;
       const moved = (typeof p.stdout_bytes === "number" ? p.stdout_bytes : 0) +
                     (typeof p.stderr_bytes === "number" ? p.stderr_bytes : 0);
       tallyStat("toolOutputBytes", moved);
@@ -1929,7 +1926,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
         if (typeof p.duration_ms === "number") bits.push(`${p.duration_ms} ms`);
         // Verbose accounts for the output even when nothing moved, so
         // "done" is never the whole story.
-        if (verboseMode) bits.push(`${formatBytes(moved)} output`);
+        bits.push(`${formatBytes(moved)} output`);
         endToolLine(
           key, true,
           `${tool} — done${bits.length ? ` (${bits.join(" · ")})` : ""}`,
@@ -1944,7 +1941,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
-      const key = p.id || p.tool_call_id || tool;
+      const key = p.tool_call_id || p.id || tool;
       endToolLine(
         key, true, `${tool} — queued for operator approval`,
         JSON.stringify(p, null, 2)
@@ -2276,7 +2273,6 @@ async function handleSlashCommand(input) {
     case "/verbose": {
       addMessage("user", input);
       const want = arg.toLowerCase();
-      const wasVerbose = verboseMode;
       if (want === "on") verboseMode = true;
       else if (want === "off") verboseMode = false;
       else if (!want) verboseMode = !verboseMode;
