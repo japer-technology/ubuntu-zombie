@@ -16,6 +16,9 @@ ground without rediscovering it from scratch.
   standalone Forgejo, component registry and manifest).
 - [`install-enhancement-1.md`](install-enhancement-1.md) — focused
   analysis of installer UX and robustness enhancements.
+- [`improvements-8.md`](improvements-8.md) — external adversarial
+  review (2026-07-21): mediated-tool-path bypass (F1, critical), test
+  coverage realism, auth fail-open, and a sequenced remediation plan.
 
 If you are looking for how to *use* or *understand* Ubuntu Zombie,
 start at [`../README.md`](../README.md) (the documentation index)
