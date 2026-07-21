@@ -11,10 +11,6 @@ reference and post-install tuning see `docs/CONFIGURATION.md`
 ("Forgejo server"); for the overall system design see
 `docs/ARCHITECTURE.md`.
 
-> **Warning** — run the installer only on a disposable Ubuntu Desktop
-> LTS machine (or VM) you are prepared to wipe. It creates users,
-> installs packages, and enables system services.
-
 ## The shape of the result
 
 ```mermaid
