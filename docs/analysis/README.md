@@ -22,6 +22,11 @@ ground without rediscovering it from scratch.
 - [`improvements-8-plan.md`](improvements-8-plan.md) — phased
   implementation plan addressing every improvements-8 finding
   (F1–F12), with work items, acceptance criteria, and sequencing.
+- [`improvements-8-plan-phase-1-option-a.md`](improvements-8-plan-phase-1-option-a.md)
+  — deep implementation analysis of Phase 1 Option A (`--mode rpc`
+  mediation via a shipped pi extension), including the router
+  on/off operator control, chat-UX truth in `/verbose`, a
+  full-dump `/export`, and documentation-truthfulness sequencing.
 - [`mediation-diagrams/`](mediation-diagrams/README.md) — vertical
   Mermaid diagrams comparing how the system works today (shipped
   unmediated bridge path) with the restored mediation designs from
