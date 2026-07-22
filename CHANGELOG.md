@@ -123,6 +123,17 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Analysis notes
 
+- **Phase 1 Option A deep analysis:** new
+  `docs/analysis/improvements-8-plan-phase-1-option-a.md` analyses
+  the best implementation of Phase 1 Option A of the improvements-8
+  plan against the pinned pi 0.80.10 upstream contract: `--mode rpc`
+  plus a shipped fail-closed mediation extension (gate-in-place),
+  an operator-controlled router on/off mode with audited toggling,
+  honest per-call telemetry in the chat UX (`/verbose`), a
+  server-assembled full-dump `/export` (events, audit slice, bridge
+  logs, policy digest), and a docs-truthful-at-every-commit delivery
+  sequence. Design analysis only; no behaviour change. The analysis
+  index in `docs/analysis/README.md` now lists the document.
 - **Mediation diagrams:** new `docs/analysis/mediation-diagrams/`
   folder with vertical Mermaid diagrams — `current-state.md` shows how
   the system works today (installed shape, chat turn transport, the
