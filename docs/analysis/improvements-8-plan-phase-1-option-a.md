@@ -301,9 +301,9 @@ Small, single-purpose, shipped and pinned alongside the bridge:
      history events — never leave a zombie turn;
    - restart handling stays with Phase 4b (F8): orphaned pendings
      expire.
-   Keep the existing queue-then-`server.approve`-executes path
-   *only* as the fallback for the timeout case is not needed —
-   after a hold-open deny the model has already been told; delete
+   The existing queue-then-`server.approve`-executes path is no
+   longer needed as a fallback: after a hold-open deny (including the
+   operator-absent timeout) the model has already been told. Delete
    the post-hoc `dispatch` execution path once hold-open lands so
    there is exactly one way an approved tool runs (through pi,
    mediated). This is a real semantics improvement over today and
