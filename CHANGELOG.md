@@ -8,6 +8,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Agent reactivation
+
+- **Durable `timer.reactivation`:** pi can schedule one bounded future
+  continuation in the same conversation. The authenticated chat shows the
+  upcoming request and lets the operator cancel it; `/reactivation` and
+  `/reactivate` control durable enablement and delay bounds. Due requests start
+  ordinary policy-gated turns, remain subject to TTL, and are fully audited.
+
 ### Agent capacity
 
 - **Long-running local-model turns:** the shipped pi agent now allows up to

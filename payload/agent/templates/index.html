@@ -172,6 +172,14 @@
                          box-shadow: 0 0 0 1px #e74c3c55, 0 8px 40px #0008; }
   .overlay.tomb h2 { color: #e74c3c; }
   .composer { max-width: 60rem; margin: 0 auto; }
+  .reactivation-banner { max-width: 60rem; margin: 0 auto .65rem;
+                         padding: .65rem .8rem; border: 1px solid #ac43d9;
+                         border-radius: .65rem; background: #ac43d915;
+                         display: flex; gap: .75rem; align-items: center;
+                         justify-content: space-between; }
+  .reactivation-banner[hidden] { display: none; }
+  .reactivation-banner strong { color: #ac43d9; }
+  .reactivation-banner .detail { color: var(--text-muted); font-size: .82rem; }
   .composer form { display: flex; gap: .5rem; align-items: end; }
   .prompt-wrap { position: relative; flex: 1; min-width: 0; }
   .prompt-wrap textarea { width: 100%; display: block; }
@@ -316,6 +324,14 @@
 </main>
 <pre id="examples" hidden>{{EXAMPLES}}</pre>
 <footer>
+  <div id="reactivation-banner" class="reactivation-banner" role="status"
+       aria-live="polite" hidden>
+    <div>
+      <strong>Reactivation queued</strong>
+      <div id="reactivation-detail" class="detail"></div>
+    </div>
+    <button type="button" id="cancel-reactivation" class="danger">Cancel</button>
+  </div>
   <div class="composer">
     <form id="form">
       <label for="prompt" class="sr-only">Message the systems administrator</label>
@@ -379,6 +395,9 @@ const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
 const logoutBtn = document.getElementById("logout");
 const statusEl = document.getElementById("status");
+const reactivationBanner = document.getElementById("reactivation-banner");
+const reactivationDetail = document.getElementById("reactivation-detail");
+const cancelReactivationBtn = document.getElementById("cancel-reactivation");
 const welcomeEl = document.getElementById("welcome");
 const commandMenu = document.getElementById("command-menu");
 let visibleMessages = [];
@@ -568,7 +587,7 @@ function addMessage(role, content, opts = {}) {
   const wrap = el("div", attrs);
   const head = el("div", { class: "msg-head" });
   head.appendChild(el("div", { class: "role",
-    text: opts.error ? "error" : role }));
+    text: opts.error ? "error" : (opts.label || role) }));
   if (role === "assistant" && content && !opts.error) {
     const copy = el("button", {
       type: "button", class: "icon-button", text: "Copy",
@@ -1161,6 +1180,7 @@ const SLASH_COMMANDS = [
   ["/profile", "Show the active local profile.", "Configuration"],
   ["/purpose", "Show the starter purpose buttons inline in this chat.", "Help"],
   ["/redraw", "Reload the current conversation from SQLite.", "Conversation"],
+  ["/reactivation [on|off|cancel|minimum <duration>|maximum <duration>]", "Show or configure agent reactivation (alias: /reactivate).", "Session"],
   ["/rebrand [title]", "Rebrand this browser's Ubuntu Zombie UI; omit title to reset.", "Configuration"],
   ["/reprompt [placeholder]", "Replace this browser's prompt placeholder; omit text to reset.", "Configuration"],
   ["/retry", "Retry the last user turn in a new branch.", "Conversation"],
@@ -1205,6 +1225,7 @@ const COMMAND_DETAILS = {
   "/profile": "Shows the active agent profile and loaded instruction metadata.",
   "/purpose": "Shows the starter purpose buttons inline so more prompts can be picked in the same conversation.",
   "/redraw": "Reloads the active conversation and tool events from local storage.",
+  "/reactivation": "Shows the single upcoming agent continuation, enables or disables scheduling, cancels it, or configures bounded minimum and maximum delays. Alias: /reactivate.",
   "/rebrand": "Changes this browser's interface branding or resets it to Ubuntu Zombie.",
   "/reprompt": "Changes the prompt placeholder for this browser or resets it to the default.",
   "/retry": "Branches before the latest user turn and submits that prompt again.",
@@ -1226,6 +1247,7 @@ const COMMAND_ALIASES = {
   "/history": "/conversations",
   "/quit": "/logout",
   "/reset": "/new",
+  "/reactivate": "/reactivation",
   "/resume": "/load",
   "/save": "/export",
   "/sessions": "/conversations"
@@ -1254,7 +1276,12 @@ function renderConversation(messages, events) {
       // would paint a blank bubble — an empty line in the transcript —
       // so skip it entirely.
       if (!m.content || !String(m.content).trim()) continue;
-      items.push({ at: m.created_at, seq: seq++, node: () => addMessage(m.role, m.content) });
+      const auto = m.role === "user" && m.meta && m.meta.auto_reactivation;
+      items.push({ at: m.created_at, seq: seq++, node: () =>
+        addMessage(m.role, m.content, {
+          label: auto ? "queued by reactivation timer" : undefined,
+        })
+      });
     }
   }
   for (const ev of events || []) {
@@ -1342,6 +1369,49 @@ async function uzPostJson(path, body = {}) {
   if (!r.ok || data.error) throw new Error(data.error || `${path} -> HTTP ${r.status}`);
   return data;
 }
+
+function uzFormatSeconds(value) {
+  const seconds = Math.max(0, Number(value) || 0);
+  if (seconds < 60) return `${Math.ceil(seconds)}s`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
+  return `${Math.ceil(seconds / 3600)}h`;
+}
+
+async function refreshReactivation() {
+  try {
+    const data = await uzFetchJson("/api/reactivation");
+    const pending = data.pending;
+    if (!pending) {
+      reactivationBanner.hidden = true;
+      reactivationDetail.textContent = "";
+      return data;
+    }
+    const when = new Date(Number(pending.fire_at) * 1000);
+    const preview = String(pending.prompt || "").replace(/\s+/g, " ").slice(0, 100);
+    reactivationDetail.textContent =
+      `${pending.reason} · ${when.toLocaleString()} ` +
+      `(${uzFormatSeconds(pending.remaining_seconds)}) · ${preview}`;
+    reactivationBanner.hidden = false;
+    return data;
+  } catch (_err) {
+    reactivationBanner.hidden = true;
+    return null;
+  }
+}
+
+cancelReactivationBtn.addEventListener("click", async () => {
+  cancelReactivationBtn.disabled = true;
+  try {
+    const data = await uzPostJson("/api/reactivation", { cancel: true });
+    reactivationBanner.hidden = true;
+    if (data.cancelled) addMessage("system", "Upcoming reactivation cancelled.");
+  } catch (err) {
+    addMessage("system", String(err), { error: true });
+  } finally {
+    cancelReactivationBtn.disabled = false;
+    await refreshReactivation();
+  }
+});
 
 function uzCommandEntries(filter = "") {
   const needle = filter.trim().toLowerCase();
@@ -2469,6 +2539,47 @@ async function handleSlashCommand(input) {
       } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
+    case "/reactivation": {
+      addMessage("user", input);
+      try {
+        const match = arg.match(/^(\S+)(?:\s+([\s\S]+))?$/);
+        const action = match ? match[1].toLowerCase() : "status";
+        const value = match ? (match[2] || "").trim() : "";
+        let data;
+        if (action === "status") {
+          data = await uzFetchJson("/api/reactivation");
+        } else if (action === "on" || action === "off") {
+          data = await uzPostJson("/api/reactivation",
+            { enabled: action === "on" });
+        } else if (action === "cancel") {
+          data = await uzPostJson("/api/reactivation", { cancel: true });
+        } else if (action === "minimum" || action === "maximum") {
+          if (!value) throw new Error(`${action} requires a duration`);
+          data = await uzPostJson("/api/reactivation", { [action]: value });
+        } else {
+          throw new Error(
+            "Usage: /reactivation [on|off|cancel|minimum <duration>|maximum <duration>]"
+          );
+        }
+        const state = await refreshReactivation() || data;
+        const lines = [
+          `Reactivation: ${state.enabled ? "on" : "off"}.`,
+          `Delay bounds: ${uzFormatSeconds(state.minimum_seconds)} to ` +
+            `${uzFormatSeconds(state.maximum_seconds)}.`,
+        ];
+        if (state.pending) {
+          lines.push(
+            `Upcoming #${state.pending.id.slice(0, 8)}: ` +
+            `${state.pending.reason} at ` +
+            `${new Date(state.pending.fire_at * 1000).toLocaleString()}.`
+          );
+        } else {
+          lines.push("No reactivation is queued.");
+        }
+        addMessage("system", lines.join("\n"));
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
     case "/ttl": {
       addMessage("user", input);
       try {
@@ -2960,6 +3071,7 @@ loginForm.addEventListener("submit", async (event) => {
       loginPassword.value = "";
       setAuthState(true, true);
       showLogin(false);
+      await refreshReactivation();
       promptEl.focus();
       return;
     }
@@ -3006,6 +3118,8 @@ async function bootstrap() {
     }
     if (data.required && !data.authenticated) {
       showLogin(true);
+    } else {
+      await refreshReactivation();
     }
   } catch (_err) {
     // Network/parse failure: leave the UI usable; the first prompt
@@ -3018,6 +3132,7 @@ applyPromptPlaceholder(
   uzStorageGet(PROMPT_STORAGE_KEY) || DEFAULT_PROMPT_PLACEHOLDER, false);
 applyFullWidth(uzStorageGet(FULLWIDTH_STORAGE_KEY) === "on", false);
 bootstrap();
+setInterval(() => { void refreshReactivation(); }, 5000);
 </script>
 </body>
 </html>
