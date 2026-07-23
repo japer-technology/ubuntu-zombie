@@ -227,10 +227,11 @@
   .md a { color: #4a90e2; }
   .md blockquote { margin: .5rem 0; padding: .2rem .8rem;
                    border-left: 3px solid #8886; opacity: .85; }
-  .md .table-wrap { margin: .75rem 0; overflow-x: auto;
+  .md .table-wrap { width: fit-content; max-width: 100%; margin: .75rem 0;
+                    overflow-x: auto;
                     border: 1px solid var(--border); border-radius: .55rem;
                     background: var(--surface); box-shadow: 0 1px 2px #0001; }
-  .md table { width: 100%; min-width: max-content; border-collapse: collapse;
+  .md table { width: max-content; border-collapse: collapse;
               font-size: .9rem; line-height: 1.4; }
   .md th, .md td { padding: .65rem .8rem; text-align: left;
                    vertical-align: top; border-right: 1px solid var(--border); }
@@ -241,6 +242,8 @@
   .md tbody tr:nth-child(even) { background: var(--surface-raised); }
   .md .align-center { text-align: center; }
   .md .align-right { text-align: right; }
+  .md .math { font-family: "STIX Two Math", "Cambria Math", serif;
+              white-space: nowrap; }
   .result { margin-top: .5rem; }
   .result pre { background: #0003; padding: .4rem .6rem;
                 border-radius: .3rem; max-height: 16rem; overflow: auto;
@@ -637,6 +640,35 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
+const MATH_SYMBOLS = Object.freeze({
+  leftarrow: "\u2190", uparrow: "\u2191", rightarrow: "\u2192",
+  downarrow: "\u2193", leftrightarrow: "\u2194", Leftarrow: "\u21d0",
+  Uparrow: "\u21d1", Rightarrow: "\u21d2", Downarrow: "\u21d3",
+  Leftrightarrow: "\u21d4", mapsto: "\u21a6", to: "\u2192",
+  alpha: "\u03b1", beta: "\u03b2", gamma: "\u03b3", delta: "\u03b4",
+  epsilon: "\u03b5", theta: "\u03b8", lambda: "\u03bb", mu: "\u03bc",
+  pi: "\u03c0", rho: "\u03c1", sigma: "\u03c3", phi: "\u03c6",
+  omega: "\u03c9", Gamma: "\u0393", Delta: "\u0394", Theta: "\u0398",
+  Lambda: "\u039b", Pi: "\u03a0", Sigma: "\u03a3", Phi: "\u03a6",
+  Omega: "\u03a9", times: "\u00d7", div: "\u00f7", pm: "\u00b1",
+  cdot: "\u22c5", le: "\u2264", leq: "\u2264", ge: "\u2265",
+  geq: "\u2265", ne: "\u2260", neq: "\u2260", approx: "\u2248",
+  in: "\u2208", notin: "\u2209", subset: "\u2282", subseteq: "\u2286",
+  supset: "\u2283", supseteq: "\u2287", cup: "\u222a", cap: "\u2229",
+  forall: "\u2200", exists: "\u2203", emptyset: "\u2205",
+  infinity: "\u221e", infty: "\u221e", partial: "\u2202",
+  nabla: "\u2207", sum: "\u2211", prod: "\u220f", int: "\u222b",
+  sqrt: "\u221a", therefore: "\u2234", because: "\u2235"
+});
+
+function renderMath(escaped) {
+  return escaped.replace(/\\([A-Za-z]+)|\\([{}_$%#&])/g,
+    (match, command, literal) =>
+      literal || Object.prototype.hasOwnProperty.call(MATH_SYMBOLS, command)
+        ? (literal || MATH_SYMBOLS[command])
+        : match);
+}
+
 function renderInline(escaped) {
   // ``escaped`` is already HTML-escaped. Protect inline code spans from
   // further substitution by stashing them behind placeholders.
@@ -644,6 +676,13 @@ function renderInline(escaped) {
   let out = escaped.replace(/`([^`]+)`/g, (_m, c) => {
     codes.push(c);
     return `\u0000CODE${codes.length - 1}\u0000`;
+  });
+  // Render dependency-free LaTeX-style symbols in dollar-delimited math.
+  // Requiring a backslash command avoids treating ordinary currency as math.
+  const maths = [];
+  out = out.replace(/\$([^$\n]*\\[A-Za-z]+[^$\n]*)\$/g, (_m, body) => {
+    maths.push(`<span class="math" role="math">${renderMath(body)}</span>`);
+    return `\u0000MATH${maths.length - 1}\u0000`;
   });
   // Links: only http(s); the URL was escaped above so quotes are safe.
   // Stash rendered links behind placeholders too, so the emphasis
@@ -661,6 +700,7 @@ function renderInline(escaped) {
   out = out.replace(/(^|[^*])\*([^*\s](?:[^*]*[^*\s])?)\*/g, "$1<em>$2</em>");
   out = out.replace(/(^|[^_\w])_([^_\s](?:[^_]*[^_\s])?)_/g, "$1<em>$2</em>");
   out = out.replace(/\u0000LINK(\d+)\u0000/g, (_m, i) => links[Number(i)]);
+  out = out.replace(/\u0000MATH(\d+)\u0000/g, (_m, i) => maths[Number(i)]);
   out = out.replace(/\u0000CODE(\d+)\u0000/g,
     (_m, i) => `<code>${codes[Number(i)]}</code>`);
   return out;

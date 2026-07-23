@@ -3432,14 +3432,25 @@ start = text.index("function escapeHtml")
 end = text.index("function showThinking")
 test = r'''
 const output = renderMarkdown(
-  "| Name | State |\n| :--- | ---: |\n| api | **online** |"
+  "| Name | State |\n| :--- | ---: |\n| api | **online** $\\rightarrow$ |"
 );
 if (!output.includes("<table>") ||
     !output.includes('<th class="align-left">Name</th>') ||
     !output.includes(
-      '<td class="align-right"><strong>online</strong></td>'
+      '<td class="align-right"><strong>online</strong> ' +
+      '<span class="math" role="math">→</span></td>'
     )) {
   throw new Error(output);
+}
+const math = renderMarkdown(
+  "$\\leftarrow$ $\\Rightarrow$ $\\alpha$ $\\leq$ `\\rightarrow`"
+);
+if (!math.includes('<span class="math" role="math">←</span>') ||
+    !math.includes('<span class="math" role="math">⇒</span>') ||
+    !math.includes('<span class="math" role="math">α</span>') ||
+    !math.includes('<span class="math" role="math">≤</span>') ||
+    !math.includes("<code>\\rightarrow</code>")) {
+  throw new Error(math);
 }
 '''
 Path(sys.argv[1]).write_text(text[start:end] + test)
