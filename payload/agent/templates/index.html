@@ -945,6 +945,12 @@ function summarizeArgs(args) {
   catch (_e) { return String(args); }
 }
 
+function toolArgumentPayload(p) {
+  // Live bridge frames carry the audit-safe ``args_summary`` field;
+  // stored history keeps the same summary under ``args``.
+  return p.args_summary ?? p.args;
+}
+
 function formatToolArguments(args) {
   if (args === null || args === undefined || args === "") return "";
   if (typeof args === "string") return args;
@@ -983,7 +989,7 @@ function renderToolCall(p) {
   wrap.hidden = !verboseMode;
   wrap.appendChild(el("div", { class: "class",
     text: `${p.tool} · ${p.classification || "?"} · ${p.decision || "?"}` }));
-  const args = summarizeArgs(p.args);
+  const args = formatToolArguments(toolArgumentPayload(p));
   if (args) wrap.appendChild(el("code", { text: args }));
   if (p.error) wrap.appendChild(el("div", { class: "system error", text: p.error }));
   return wrap;
@@ -1833,20 +1839,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     // ``track: false`` renders a line without registering it in the
     // per-tool stack — used when a tool_end has no matching tool_start,
     // so the orphan line cannot swallow a later result for the tool.
-    const toolInputByteStacks = new Map();
-    const pushToolInputBytes = (key, bytes) => {
-      const stack = toolInputByteStacks.get(key) || [];
-      stack.push(bytes);
-      toolInputByteStacks.set(key, stack);
-    };
-    const consumeToolInputBytes = (key) => {
-      const stack = toolInputByteStacks.get(key);
-      if (!stack || !stack.length) return 0;
-      const bytes = stack.shift() || 0;
-      if (!stack.length) toolInputByteStacks.delete(key);
-      return bytes;
-    };
-    const startToolLine = (key, note, detail, track = true) => {
+    const startToolLine = (key, note, detail, track = true, inputBytes = 0) => {
       const line = el("div", { class: "act running verbose-tool-activity" });
       line.hidden = !verboseMode;
       line.appendChild(el("span", { class: "icon", text: "⏳" }));
@@ -1858,7 +1851,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       inspector.appendChild(detailBody);
       line.appendChild(inspector);
       activity.appendChild(line);
-      const record = { line, label, detailBody };
+      const record = { line, label, detailBody, inputBytes };
       if (track) {
         const stack = toolLineStacks.get(key) || [];
         stack.push(record);
@@ -1879,7 +1872,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const icon = icons[state] || "✓";
       line.className = `act ${state} verbose-tool-activity`;
       line.firstElementChild.textContent = icon;
-      label.textContent = note;
+      label.textContent = typeof note === "function" ? note(record) : note;
       detailBody.textContent += `\n\nOutcome:\n${detail}`;
       scrollLog();
       return line;
@@ -1982,16 +1975,17 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const key = p.tool_call_id || p.id || tool;
       const detail = (p.classification && p.classification !== "bridge")
         ? ` · ${p.classification}` : "";
-      const args = p.args_summary ?? p.args;
+      const args = toolArgumentPayload(p);
       const argsText = formatToolArguments(args);
       const inputBytes = toolArgumentBytes(args);
-      pushToolInputBytes(key, inputBytes);
       startToolLine(
         key,
         `${tool}${detail} — running…`,
         `Tool: ${tool}\nCall id: ${key}\nClassification: ` +
         `${p.classification || "unknown"}\nDecision: ${p.decision || "unknown"}` +
-        (argsText ? `\nArguments:\n${argsText}` : "\nArguments: (none reported)")
+        (argsText ? `\nArguments:\n${argsText}` : "\nArguments: (none reported)"),
+        true,
+        inputBytes
       );
       setStatus(verboseMode ? `Running ${tool}…` : "Working…");
     });
@@ -2002,7 +1996,6 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const p = JSON.parse(ev.data || "{}");
       const tool = p.tool || "tool";
       const key = p.tool_call_id || p.id || tool;
-      const inputBytes = consumeToolInputBytes(key);
       const moved = (typeof p.stdout_bytes === "number" ? p.stdout_bytes : 0) +
                     (typeof p.stderr_bytes === "number" ? p.stderr_bytes : 0);
       tallyStat("toolOutputBytes", moved);
@@ -2013,16 +2006,20 @@ async function uzSendPrompt(prompt, convId = conversationId) {
         tallyStat("toolFailures");
         endToolLine(key, false, `${tool} — ${p.error || "failed"}`, outcome);
       } else {
-        const bits = [];
-        if (p.exit_code !== undefined && p.exit_code !== null) bits.push(`exit ${p.exit_code}`);
-        if (typeof p.duration_ms === "number") bits.push(`${p.duration_ms} ms`);
-        if (inputBytes > 0) bits.push(`${formatBytes(inputBytes)} in`);
         // Verbose accounts for the output even when nothing moved, so
         // "done" is never the whole story.
-        bits.push(`${formatBytes(moved)} out`);
         endToolLine(
           key, true,
-          formatToolDoneNote(tool, "done", bits),
+          record => {
+            const scopedBits = [];
+            if (p.exit_code !== undefined && p.exit_code !== null) {
+              scopedBits.push(`exit ${p.exit_code}`);
+            }
+            if (typeof p.duration_ms === "number") scopedBits.push(`${p.duration_ms} ms`);
+            if (record.inputBytes > 0) scopedBits.push(`${formatBytes(record.inputBytes)} in`);
+            scopedBits.push(`${formatBytes(moved)} out`);
+            return formatToolDoneNote(tool, "done", scopedBits);
+          },
           outcome
         );
       }

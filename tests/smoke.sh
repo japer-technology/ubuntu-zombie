@@ -3159,6 +3159,25 @@ const args = { command };
 if (formatToolArguments(args) !== command) {
   throw new Error("command arguments must render as readable text");
 }
+const mixed = { command, cwd: "/tmp/example" };
+if (formatToolArguments(mixed) !== `${command}\n{\n  "cwd": "/tmp/example"\n}`) {
+  throw new Error("command arguments with metadata must include both sections");
+}
+if (formatToolArguments({ cwd: "/tmp/example" }) !== '{\n  "cwd": "/tmp/example"\n}') {
+  throw new Error("non-command arguments must render as JSON");
+}
+if (formatToolArguments(null) !== "" ||
+    formatToolArguments(undefined) !== "" ||
+    formatToolArguments("") !== "") {
+  throw new Error("empty arguments must render as an empty string");
+}
+if (formatToolArguments(42) !== "42") {
+  throw new Error("non-object arguments must render as strings");
+}
+if (toolArgumentPayload({ args_summary: args, args: { command: "fallback" } }) !== args ||
+    toolArgumentPayload({ args }) !== args) {
+  throw new Error("tool argument payload must prefer args_summary and fallback to args");
+}
 if (toolArgumentBytes(args) !== byteLength(JSON.stringify(args))) {
   throw new Error("tool input bytes must count serialized arguments");
 }
