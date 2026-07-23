@@ -1988,10 +1988,10 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       pushToolInputBytes(key, inputBytes);
       startToolLine(
         key,
-        `${tool}${detail} · running…`,
+        `${tool}${detail} — running…`,
         `Tool: ${tool}\nCall id: ${key}\nClassification: ` +
         `${p.classification || "unknown"}\nDecision: ${p.decision || "unknown"}` +
-        `\nArguments:\n${argsText || "(none reported)"}`
+        (argsText ? `\nArguments:\n${argsText}` : "\nArguments: (none reported)")
       );
       setStatus(verboseMode ? `Running ${tool}…` : "Working…");
     });
