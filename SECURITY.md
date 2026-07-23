@@ -32,6 +32,7 @@ Treat these credentials with root-level care:
 The chat service sends to the provider:
 
 - the operator's typed prompts;
+- visible synthetic prompts previously scheduled by `timer.reactivation`;
 - the current conversation history;
 - selected local context (e.g. `uname`, package versions, summarised
   command output) that the assistant explicitly chose to include.
@@ -40,6 +41,14 @@ The provider may see, in summarised form, the **output** of commands
 the assistant runs on the machine. Treat the provider as a third
 party with read access to whatever local state the assistant decides
 to share with it.
+
+The agent can schedule one future continuation. It is bounded by the configured
+minimum and maximum delay and the remaining TTL, appears in the authenticated
+chat UI with a cancel control, and starts a normal policy-gated turn. Scheduling
+does not execute tools, inherit approvals, bypass authentication, or bypass the
+TTL. A malicious prompt or file could still persuade the model to request a
+future turn, so operators should cancel unexpected reactivations or disable the
+feature with `/reactivation off`.
 
 The provider does not see:
 

@@ -121,6 +121,7 @@ import tools as _t
 assert set(_t.tool_names()) == {
     "shell.run", "fs.read", "fs.list", "fs.write", "pkg.query", "pkg.install",
     "svc.status", "svc.control", "net.status", "skill.list", "skill.load",
+    "timer.reactivation",
 }, _t.tool_names()
 # Per-tool default classifications come from the registry; shell.run
 # is computed per-argv via the existing classify() path.
@@ -130,6 +131,12 @@ if p.classify_tool("pkg.install", {"names": ["curl"]}) != "system_change":
     raise SystemExit("pkg.install should be system_change")
 if p.classify_tool("svc.control", {"unit": "cron", "action": "restart"}) != "system_change":
     raise SystemExit("svc.control should be system_change")
+if p.classify_tool("timer.reactivation", {
+    "delay_seconds": 30, "prompt": "continue"
+}) != "chat_schedule":
+    raise SystemExit("timer.reactivation should use chat_schedule")
+if p.requires_approval("chat_schedule"):
+    raise SystemExit("chat_schedule should auto-run within its server-enforced bounds")
 if p.classify_tool("shell.run", {"argv": ["ls", "-la"]}) != "read_only":
     raise SystemExit("shell.run ls should be read_only via classify()")
 if p.classify_tool("shell.run", {"command": "sudo apt-get install -y curl"}) != "system_change":
@@ -365,6 +372,101 @@ finally:
         else:
             os.environ[k] = v
 PY
+
+  echo "  durable timer reactivation"
+  _REACTIVATION_TMP="$(mktemp -d)"
+  ZOMBIE_HISTORY_DB="${_REACTIVATION_TMP}/conversations.db" \
+  ZOMBIE_LIFECYCLE_STATE="${_REACTIVATION_TMP}/lifecycle.json" \
+  ZOMBIE_AUDIT_LOG="${_REACTIVATION_TMP}/audit.jsonl" \
+  ZOMBIE_POLICY=payload/etc/policy.yaml \
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import json
+import os
+import time
+from pathlib import Path
+
+Path(os.environ["ZOMBIE_LIFECYCLE_STATE"]).write_text(json.dumps({
+    "created_at": time.time(),
+    "expires_at": time.time() + 3600,
+    "dead": False,
+}))
+
+import server
+
+app = server.App()
+conversation_id = app.history.create_conversation("timer test")
+settings = app.reactivation_info()
+assert settings["enabled"] is True, settings
+assert settings["minimum_seconds"] == 30, settings
+assert settings["maximum_seconds"] == 86400, settings
+
+accepted = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=30,
+    prompt="Continue the test.",
+    reason="Smoke test",
+)
+assert accepted["status"] == "accepted", accepted
+pending = app.reactivation_info()["pending"]
+assert pending and pending["conversation_id"] == conversation_id, pending
+
+rejected = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=30,
+    prompt="Do not replace.",
+    reason="Second timer",
+)
+assert rejected["status"] == "rejected_pending_exists", rejected
+
+replaced = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=40,
+    prompt="Replacement.",
+    reason="Replacement timer",
+    replace_existing=True,
+)
+assert replaced["status"] == "replaced", replaced
+assert app.cancel_reactivation()["cancelled"]["id"] == \
+    replaced["reactivation"]["id"]
+assert app.reactivation_info()["pending"] is None
+
+disabled = app.configure_reactivation(enabled=False)
+assert disabled["enabled"] is False, disabled
+rejected = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=30,
+    prompt="Disabled.",
+    reason="Disabled timer",
+)
+assert rejected["status"] == "rejected_disabled", rejected
+
+invalid = app.configure_reactivation(minimum_seconds=4)
+assert "error" in invalid, invalid
+invalid = app.configure_reactivation(maximum_seconds=86401)
+assert "error" in invalid, invalid
+
+app.configure_reactivation(enabled=True)
+fired = []
+app.start_streaming_message = lambda cid, prompt, user_meta=None: (
+    fired.append((cid, prompt, user_meta)) or
+    {"turn_id": "smoke-turn", "conversation_id": cid}
+)
+due, existing = app.history.schedule_reactivation(
+    conversation_id,
+    time.time() - 1,
+    "Fire now.",
+    "Due timer",
+)
+assert due and existing is None
+app._reactivation_wakeup.set()
+deadline = time.time() + 2
+while not fired and time.time() < deadline:
+    time.sleep(0.02)
+assert fired, "due reactivation did not fire"
+assert fired[0][2]["auto_reactivation"] is True, fired
+assert app.history.pending_reactivation() is None
+PY
+  rm -rf "${_REACTIVATION_TMP}"
 
   # Stubbed end-to-end run of pi_mono.run_turn against
   # tests/fixtures/stub-pi-mono.mjs. Verifies the bridge protocol,

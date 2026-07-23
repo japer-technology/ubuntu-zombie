@@ -13,6 +13,7 @@ import shutil
 import sqlite3
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ DB_PATH = Path(os.environ.get(
     "ZOMBIE_HISTORY_DB", "/opt/ai-zombie/state/conversations.db"
 ))
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -51,6 +52,32 @@ CREATE TABLE IF NOT EXISTS events (
 
 CREATE INDEX IF NOT EXISTS events_by_conv
     ON events(conversation_id, id);
+
+CREATE TABLE IF NOT EXISTS reactivation_settings (
+    singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    minimum_seconds INTEGER NOT NULL DEFAULT 30,
+    maximum_seconds INTEGER NOT NULL DEFAULT 86400
+);
+
+INSERT OR IGNORE INTO reactivation_settings(singleton) VALUES (1);
+
+CREATE TABLE IF NOT EXISTS reactivations (
+    id              TEXT PRIMARY KEY,
+    conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    created_at      REAL NOT NULL,
+    fire_at         REAL NOT NULL,
+    reason          TEXT NOT NULL,
+    prompt          TEXT NOT NULL,
+    status          TEXT NOT NULL,
+    actor           TEXT NOT NULL,
+    error           TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_pending_reactivation
+    ON reactivations(status) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS reactivations_due
+    ON reactivations(status, fire_at);
 """
 
 
@@ -164,6 +191,188 @@ class History:
                 (conversation_id,),
             ).fetchone()
         return row is not None
+
+    # ------------------------------------------------------------------
+    # Timer reactivation
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _reactivation_row(row: tuple[Any, ...] | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        return {
+            "id": row[0],
+            "conversation_id": row[1],
+            "created_at": row[2],
+            "fire_at": row[3],
+            "reason": row[4],
+            "prompt": row[5],
+            "status": row[6],
+            "actor": row[7],
+            "error": row[8],
+        }
+
+    def reactivation_settings(self) -> dict[str, Any]:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT enabled, minimum_seconds, maximum_seconds "
+                "FROM reactivation_settings WHERE singleton = 1"
+            ).fetchone()
+        return {
+            "enabled": bool(row[0]),
+            "minimum_seconds": int(row[1]),
+            "maximum_seconds": int(row[2]),
+        }
+
+    def update_reactivation_settings(
+        self,
+        *,
+        enabled: bool | None = None,
+        minimum_seconds: int | None = None,
+        maximum_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        current = self.reactivation_settings()
+        values = (
+            int(current["enabled"] if enabled is None else enabled),
+            int(current["minimum_seconds"] if minimum_seconds is None else minimum_seconds),
+            int(current["maximum_seconds"] if maximum_seconds is None else maximum_seconds),
+        )
+        self._execute(
+            "UPDATE reactivation_settings SET enabled = ?, minimum_seconds = ?, "
+            "maximum_seconds = ? WHERE singleton = 1",
+            values,
+        )
+        return self.reactivation_settings()
+
+    def pending_reactivation(self) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, conversation_id, created_at, fire_at, reason, prompt, "
+                "status, actor, error FROM reactivations "
+                "WHERE status = 'pending' ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        return self._reactivation_row(row)
+
+    def schedule_reactivation(
+        self,
+        conversation_id: int,
+        fire_at: float,
+        prompt: str,
+        reason: str,
+        *,
+        actor: str = "agent",
+        replace_existing: bool = False,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Create the one global pending timer, optionally replacing it."""
+        with self._lock:
+            existing_row = self._conn.execute(
+                "SELECT id, conversation_id, created_at, fire_at, reason, prompt, "
+                "status, actor, error FROM reactivations WHERE status = 'pending' "
+                "LIMIT 1"
+            ).fetchone()
+            existing = self._reactivation_row(existing_row)
+            if existing is not None and not replace_existing:
+                return None, existing
+            if existing is not None:
+                self._conn.execute(
+                    "UPDATE reactivations SET status = 'cancelled', "
+                    "error = 'replaced' WHERE id = ? AND status = 'pending'",
+                    (existing["id"],),
+                )
+            reactivation_id = uuid.uuid4().hex
+            created_at = time.time()
+            self._conn.execute(
+                "INSERT INTO reactivations("
+                "id, conversation_id, created_at, fire_at, reason, prompt, status, actor"
+                ") VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
+                (reactivation_id, conversation_id, created_at, fire_at,
+                 reason, prompt, actor),
+            )
+            self._conn.commit()
+        return {
+            "id": reactivation_id,
+            "conversation_id": conversation_id,
+            "created_at": created_at,
+            "fire_at": fire_at,
+            "reason": reason,
+            "prompt": prompt,
+            "status": "pending",
+            "actor": actor,
+            "error": None,
+        }, existing
+
+    def claim_due_reactivation(self, now: float) -> dict[str, Any] | None:
+        """Atomically claim a due timer so it can never fire twice."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, conversation_id, created_at, fire_at, reason, prompt, "
+                "status, actor, error FROM reactivations "
+                "WHERE status = 'pending' AND fire_at <= ? "
+                "ORDER BY fire_at LIMIT 1",
+                (now,),
+            ).fetchone()
+            item = self._reactivation_row(row)
+            if item is None:
+                return None
+            cur = self._conn.execute(
+                "UPDATE reactivations SET status = 'firing' "
+                "WHERE id = ? AND status = 'pending'",
+                (item["id"],),
+            )
+            self._conn.commit()
+            if cur.rowcount != 1:
+                return None
+        item["status"] = "firing"
+        return item
+
+    def finish_reactivation(
+        self, reactivation_id: str, status: str, error: str | None = None
+    ) -> bool:
+        if status not in {"fired", "cancelled", "failed"}:
+            raise ValueError(f"invalid terminal reactivation status: {status}")
+        cur = self._execute(
+            "UPDATE reactivations SET status = ?, error = ? "
+            "WHERE id = ? AND status IN ('pending', 'firing')",
+            (status, error, reactivation_id),
+        )
+        return cur.rowcount == 1
+
+    def fail_orphaned_reactivations(self) -> list[dict[str, Any]]:
+        """Mark timers claimed by a previous server process as failed."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, conversation_id, created_at, fire_at, reason, prompt, "
+                "status, actor, error FROM reactivations WHERE status = 'firing'"
+            ).fetchall()
+            self._conn.execute(
+                "UPDATE reactivations SET status = 'failed', "
+                "error = 'server restarted while firing' "
+                "WHERE status = 'firing'"
+            )
+            self._conn.commit()
+        return [
+            item for row in rows
+            if (item := self._reactivation_row(row)) is not None
+        ]
+
+    def cancel_pending_reactivation(self, reason: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, conversation_id, created_at, fire_at, reason, prompt, "
+                "status, actor, error FROM reactivations "
+                "WHERE status = 'pending' LIMIT 1"
+            ).fetchone()
+            item = self._reactivation_row(row)
+            if item is None:
+                return None
+            self._conn.execute(
+                "UPDATE reactivations SET status = 'cancelled', error = ? "
+                "WHERE id = ? AND status = 'pending'",
+                (reason, item["id"]),
+            )
+            self._conn.commit()
+        item["status"] = "cancelled"
+        item["error"] = reason
+        return item
 
     def set_title(self, conversation_id: int, title: str) -> bool:
         cur = self._execute(

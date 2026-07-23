@@ -281,6 +281,10 @@ classes:
     approval: auto
     description: Inspection, diagnostics and non-mutating queries.
 
+  chat_schedule:
+    approval: auto
+    description: Bounded, visible scheduling of one future ordinary chat turn.
+
   user_change:
     approval: required
     description: Mutations limited to user-owned workspaces, caches or files.

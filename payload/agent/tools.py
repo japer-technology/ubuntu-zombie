@@ -313,6 +313,12 @@ def _shim_skill_load(args: dict[str, Any]) -> dict[str, Any]:
     raise SchemaError(f"skill.load: skill {name!r} not found")
 
 
+def _shim_timer_reactivation(_args: dict[str, Any]) -> dict[str, Any]:
+    raise SchemaError(
+        "timer.reactivation requires an active conversation runtime"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -465,6 +471,24 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         shim=_shim_skill_load,
+    ),
+    "timer.reactivation": _t(
+        classification="chat_schedule",
+        description=(
+            "Schedule one bounded, visible continuation in the current conversation."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "delay_seconds": {"type": "integer"},
+                "prompt": {"type": "string"},
+                "reason": {"type": "string"},
+                "replace_existing": {"type": "boolean"},
+            },
+            "required": ["delay_seconds", "prompt"],
+            "additionalProperties": False,
+        },
+        shim=_shim_timer_reactivation,
     ),
 }
 

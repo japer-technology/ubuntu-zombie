@@ -29,6 +29,7 @@ POLICY_PATH = Path(os.environ.get("ZOMBIE_POLICY", "/etc/ubuntu-zombie/policy.ya
 # Ordered low → high severity. ``_max_class`` exploits the index.
 CLASS_ORDER = (
     "read_only",
+    "chat_schedule",
     "user_change",
     "system_change",
     "network_change",
@@ -668,6 +669,7 @@ def _default_policy() -> Policy:
     return Policy(
         classes={
             "read_only": ClassDef("read_only", approval="auto"),
+            "chat_schedule": ClassDef("chat_schedule", approval="auto"),
             "user_change": ClassDef("user_change"),
             "system_change": ClassDef("system_change"),
             "network_change": ClassDef("network_change"),

@@ -10,7 +10,9 @@ essay about why the sky is blue." Rather than pretending the response is
 complete, the agent should be able to schedule a non-terminal continuation
 that the local chat daemon later injects back into the same conversation.
 
-The analysis is design-only. It does not change the shipped runtime.
+Implementation status: shipped. The runtime follows this design with one
+global pending timer, durable SQLite settings, authenticated UI visibility and
+cancellation, policy and audit mediation, and ordinary same-conversation turns.
 
 ## Problem statement
 
