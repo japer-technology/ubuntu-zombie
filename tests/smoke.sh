@@ -1300,6 +1300,7 @@ PY
   PYTHONPATH=payload/agent python3 - <<'PY'
 import json
 import server
+import time
 
 info = server.version_info()
 # The payload version must resolve from the repo-root VERSION file
@@ -1330,7 +1331,10 @@ def fake_urlopen(request, timeout):
     return Response({"version": "9.8.7"})
 
 server.urlopen = fake_urlopen
-server._version_cache = (0.0, {})
+server._version_cache = (
+    time.monotonic() - server.VERSION_CACHE_SECONDS - 1,
+    {},
+)
 checked = server.version_info(check_latest=True)
 checked_components = {row["name"]: row for row in checked["components"]}
 assert checked_components["ubuntu-zombie"]["latest"] == "2099.1.2", checked
