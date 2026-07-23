@@ -3142,6 +3142,35 @@ PY
     && grep -q 'Activity already observed on this page is retained' \
       payload/agent/templates/index.html \
     || { echo "verbose transcript activity must remain inspectable and persistent" >&2; exit 1; }
+  _TOOL_DETAIL_TEST="$(mktemp)"
+  python3 - "${_TOOL_DETAIL_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+stats_start = text.index("const uzTextEncoder")
+stats_end = text.index("function formatDuration", stats_start)
+args_start = text.index("function summarizeArgs")
+args_end = text.index("function renderToolCall", args_start)
+test = r'''
+const command = "sudo sed -i 's/^#\\?X11Forwarding.*/X11Forwarding no/' /etc/ssh/sshd_config\n" +
+  "sudo systemctl restart ssh";
+const args = { command };
+if (formatToolArguments(args) !== command) {
+  throw new Error("command arguments must render as readable text");
+}
+if (toolArgumentBytes(args) !== byteLength(JSON.stringify(args))) {
+  throw new Error("tool input bytes must count serialized arguments");
+}
+const note = formatToolDoneNote("bash", "done", ["58 ms", "287 B in", "11.9 kB out"]);
+if (note !== "bash · done · 58 ms · 287 B in · 11.9 kB out") {
+  throw new Error(`unexpected tool done note: ${note}`);
+}
+'''
+Path(sys.argv[1]).write_text(text[stats_start:stats_end] + text[args_start:args_end] + test)
+PY
+  node "${_TOOL_DETAIL_TEST}"
+  rm -f "${_TOOL_DETAIL_TEST}"
   if grep -A3 'function tallyStat' payload/agent/templates/index.html \
       | grep -q 'if (!verboseMode) return'; then
     echo "verbose statistics must be retained before display is enabled" >&2
