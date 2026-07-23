@@ -58,7 +58,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   the current browser.
 - **Readable Markdown tables:** assistant table syntax now renders as
   accessible, high-contrast tables with padded cells, borders, alignment,
-  striping, and horizontal overflow for narrow screens.
+  striping, content-sized columns, and horizontal overflow for narrow screens.
+- **Readable Markdown math symbols:** common LaTeX-style symbols inside dollar
+  delimiters, such as `$\rightarrow$`, now display as mathematical glyphs
+  without requiring an online rendering dependency.
 - **Deeper command discovery:** a bare `/` shows every command;
   `/help <command>` explains canonical commands and aliases, `/help <pattern*>`
   gives full pages for matches, and `/help all` shows every full help page.
