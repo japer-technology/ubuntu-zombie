@@ -3115,6 +3115,9 @@ PY
     || { echo "chat composer must retain its accessible label" >&2; exit 1; }
   grep -q 'data-starter=' payload/agent/templates/index.html \
     || { echo "chat welcome must retain its starter prompts" >&2; exit 1; }
+  grep -q 'case "/purpose"' payload/agent/templates/index.html \
+    && grep -q '"#welcome \[data-starter\]"' payload/agent/templates/index.html \
+    || { echo "/purpose must re-show the welcome starter buttons inline" >&2; exit 1; }
   grep -q '@media (max-width: 640px)' payload/agent/templates/index.html \
     || { echo "chat UI must retain its mobile layout" >&2; exit 1; }
   grep -q 'text: "Copy"' payload/agent/templates/index.html \
@@ -3209,6 +3212,20 @@ for (const invalid of ["", "0", "-1", "2.5", "3x", "9007199254740992"]) {
 }
 if (uzPositiveInteger("42") !== 42) {
   throw new Error("rejected a valid positive integer");
+}
+const lastLoad = uzParseLoadArgs("LAST");
+if (!lastLoad || lastLoad.last !== true) {
+  throw new Error("/load last must target the newest conversation");
+}
+const multiLoad = uzParseLoadArgs(" 3  1\t7 ");
+if (!multiLoad || multiLoad.last ||
+    JSON.stringify(multiLoad.ids) !== "[3,1,7]") {
+  throw new Error("/load must accept several whitespace-separated ids");
+}
+for (const invalid of ["", "last 2", "1 zero", "0 1", "1 -2"]) {
+  if (uzParseLoadArgs(invalid) !== null) {
+    throw new Error(`accepted invalid /load arguments: ${invalid}`);
+  }
 }
 '''
 Path(sys.argv[1]).write_text(text[start:end] + test)
