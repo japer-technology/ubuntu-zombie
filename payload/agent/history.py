@@ -21,6 +21,9 @@ DB_PATH = Path(os.environ.get(
     "ZOMBIE_HISTORY_DB", "/opt/ai-zombie/state/conversations.db"
 ))
 
+# Version 2 is an additive migration. ``History.__init__`` snapshots a v1
+# database in ``_migrate`` and then runs the idempotent schema below, which
+# creates the reactivation tables and indexes without rewriting existing data.
 SCHEMA_VERSION = 2
 
 _SCHEMA = """

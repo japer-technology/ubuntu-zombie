@@ -2227,15 +2227,9 @@ class Handler(BaseHTTPRequestHandler):
                 value = data.get(name)
                 if value is None:
                     return None
-                if isinstance(value, bool):
+                if isinstance(value, bool) or not isinstance(value, int):
                     raise ValueError(f"{name} must be an integer")
-                try:
-                    seconds = int(value)
-                except (TypeError, ValueError) as exc:
-                    raise ValueError(f"{name} must be an integer") from exc
-                if seconds != value:
-                    raise ValueError(f"{name} must be an integer")
-                return seconds
+                return value
 
             try:
                 minimum = optional_seconds("minimum_seconds")

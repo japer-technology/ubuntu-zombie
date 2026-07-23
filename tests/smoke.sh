@@ -375,6 +375,7 @@ PY
 
   echo "  durable timer reactivation"
   _REACTIVATION_TMP="$(mktemp -d)"
+  trap 'rm -rf "${_REACTIVATION_TMP:-}"' EXIT
   ZOMBIE_HISTORY_DB="${_REACTIVATION_TMP}/conversations.db" \
   ZOMBIE_LIFECYCLE_STATE="${_REACTIVATION_TMP}/lifecycle.json" \
   ZOMBIE_AUDIT_LOG="${_REACTIVATION_TMP}/audit.jsonl" \
@@ -467,6 +468,7 @@ assert fired[0][2]["auto_reactivation"] is True, fired
 assert app.history.pending_reactivation() is None
 PY
   rm -rf "${_REACTIVATION_TMP}"
+  trap - EXIT
 
   # Stubbed end-to-end run of pi_mono.run_turn against
   # tests/fixtures/stub-pi-mono.mjs. Verifies the bridge protocol,
