@@ -28,6 +28,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Chat discovery and layout
 
+- **`/load last` and multi-conversation `/load`:** `/load last` opens the
+  newest stored conversation, and `/load <id> <id> ...` renders several
+  conversations into one transcript in the order given, with the last id
+  becoming the active conversation for new messages.
+- **New `/purpose` command:** re-shows the welcome starter purpose buttons
+  inline in the transcript, so more starter questions can be asked without
+  leaving the current conversation.
 - **Quiet tool activity by default:** with `/verbose` off, ordinary tool calls,
   results, failures, counters, and live tool status are hidden from the chat
   transcript. `/verbose on` enables tool tracking and detailed transcript

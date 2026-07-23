@@ -1056,7 +1056,7 @@ const SLASH_COMMANDS = [
   ["/fullwidth [on|off]", "Toggle full-width chat display.", "Configuration"],
   ["/health", "Show basic machine facts.", "Diagnostics"],
   ["/help [command]", "List commands or explain one command.", "Help"],
-  ["/load <id>", "Load a past conversation (alias: /resume <id>).", "Conversation"],
+  ["/load <id...>|last", "Load one, several, or the latest conversation (alias: /resume).", "Conversation"],
   ["/logout", "Log out and ask for the chat password again.", "Session"],
   ["/local [url]", "List or switch the active local API.", "Configuration"],
   ["/locals", "List discovered local API URLs.", "Configuration"],
@@ -1066,6 +1066,7 @@ const SLASH_COMMANDS = [
   ["/password [new password]", "Set or remove the chat password after confirmation.", "Session"],
   ["/policy", "Show policy classes and rule counts.", "Configuration"],
   ["/profile", "Show the active local profile.", "Configuration"],
+  ["/purpose", "Show the starter purpose buttons inline in this chat.", "Help"],
   ["/redraw", "Reload the current conversation from SQLite.", "Conversation"],
   ["/rebrand [title]", "Rebrand this browser's Ubuntu Zombie UI; omit title to reset.", "Configuration"],
   ["/reprompt [placeholder]", "Replace this browser's prompt placeholder; omit text to reset.", "Configuration"],
@@ -1099,7 +1100,7 @@ const COMMAND_DETAILS = {
   "/fullwidth": "Toggles or explicitly sets full-width chat layout for this page.",
   "/health": "Shows basic local system details without contacting the provider.",
   "/help": "Shows command help by category or detailed help for one command.",
-  "/load": "Loads and activates a stored conversation by id. Alias: /resume.",
+  "/load": "Loads stored conversations: one id, several ids shown in order with the last made active, or last for the newest. Alias: /resume.",
   "/logout": "Ends the current browser session and returns to the login prompt.",
   "/local": "Discovers local OpenAI-compatible APIs or activates a selected server.",
   "/locals": "Scans the local network for supported OpenAI-compatible model servers.",
@@ -1109,6 +1110,7 @@ const COMMAND_DETAILS = {
   "/password": "Sets, changes, or removes the chat password and invalidates existing sessions.",
   "/policy": "Shows tool policies, approvals, mappings, rule counts, and safety budgets.",
   "/profile": "Shows the active agent profile and loaded instruction metadata.",
+  "/purpose": "Shows the starter purpose buttons inline so more prompts can be picked in the same conversation.",
   "/redraw": "Reloads the active conversation and tool events from local storage.",
   "/rebrand": "Changes this browser's interface branding or resets it to Ubuntu Zombie.",
   "/reprompt": "Changes the prompt placeholder for this browser or resets it to the default.",
@@ -2036,6 +2038,23 @@ function uzPositiveInteger(value) {
   return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
+function uzParseLoadArgs(arg) {
+  // "/load last" targets the newest stored conversation; otherwise the
+  // argument is one or more whitespace-separated conversation ids.
+  const tokens = String(arg || "").trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return null;
+  if (tokens.length === 1 && tokens[0].toLowerCase() === "last") {
+    return { last: true, ids: [] };
+  }
+  const ids = [];
+  for (const token of tokens) {
+    const id = uzPositiveInteger(token);
+    if (id === null) return null;
+    ids.push(id);
+  }
+  return { last: false, ids };
+}
+
 async function handleSlashCommand(input) {
   const parsed = uzParseSlashCommand(input);
   if (!parsed) return false;
@@ -2123,6 +2142,30 @@ async function handleSlashCommand(input) {
       addMessage("system", pre && pre.textContent.trim()
         ? pre.textContent
         : "No example prompts are available.");
+      return true;
+    }
+    case "/purpose": {
+      addMessage("user", input);
+      const starters = document.querySelectorAll("#welcome [data-starter]");
+      if (!starters.length) {
+        addMessage("system", "No starter purposes are available.", { error: true });
+        return true;
+      }
+      const wrap = addMessage("system",
+        "Pick a purpose to prefill the prompt - the conversation continues here.");
+      const actions = el("div", { class: "starter-actions" });
+      for (const source of starters) {
+        const prompt = source.dataset.starter || "";
+        const button = el("button", { type: "button", text: source.textContent });
+        button.addEventListener("click", () => {
+          promptEl.value = prompt;
+          resizePrompt();
+          promptEl.focus();
+        });
+        actions.appendChild(button);
+      }
+      wrap.appendChild(actions);
+      scrollLog();
       return true;
     }
     case "/shortcuts": {
@@ -2503,13 +2546,42 @@ async function handleSlashCommand(input) {
     }
     case "/load": {
       addMessage("user", input);
-      const id = uzPositiveInteger(arg);
-      if (id === null) {
-        addMessage("system", `Usage: ${cmd} <id>`, { error: true });
+      const request = uzParseLoadArgs(arg);
+      if (!request) {
+        addMessage("system", `Usage: ${cmd} <id> [id ...] or ${cmd} last`, { error: true });
         return true;
       }
-      try { await uzLoadConversation(id); }
-      catch (err) { addMessage("system", String(err), { error: true }); }
+      try {
+        let ids = request.ids;
+        if (request.last) {
+          const data = await uzFetchJson("/api/conversations");
+          const convs = data.conversations || [];
+          if (!convs.length) {
+            addMessage("system", "No stored conversations to load.", { error: true });
+            return true;
+          }
+          ids = [convs[0].id];
+        }
+        if (ids.length === 1) {
+          await uzLoadConversation(ids[0]);
+          return true;
+        }
+        // Fetch every conversation before touching the transcript so a
+        // bad id fails without wiping the current view.
+        const loaded = [];
+        for (const id of ids) {
+          loaded.push({ id, data: await uzFetchJson(`/api/conversation/${id}`) });
+        }
+        uzClearLog();
+        for (const entry of loaded) {
+          addMessage("system", `Loaded conversation #${entry.id}.`);
+          renderConversation(entry.data.messages, entry.data.events);
+        }
+        conversationId = ids[ids.length - 1];
+        addMessage("system",
+          `Conversation #${conversationId} is now active; new messages continue it.`);
+        scrollLogToBottom();
+      } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
     case "/title": {
