@@ -3155,8 +3155,8 @@ stats_end = text.index("function formatDuration", stats_start)
 args_start = text.index("function summarizeArgs")
 args_end = text.index("function renderToolCall", args_start)
 test = r'''
-const command = "printf 'hello world\\n'\n" +
-  "wc -c ./README.md";
+const command = `printf 'hello world\\n'
+wc -c ./README.md`;
 const args = { command };
 if (formatToolArguments(args) !== command) {
   throw new Error("command arguments must render as readable text");

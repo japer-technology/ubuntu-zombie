@@ -960,7 +960,7 @@ function serializedToolArguments(args, pretty = false) {
 }
 
 function formatToolArguments(args) {
-  if (args == null || args === "") return "";
+  if (args === null || args === undefined || args === "") return "";
   if (typeof args === "string") return args;
   if (typeof args !== "object") return String(args);
   // ``command`` is the operator-facing payload for shell-style tools;
