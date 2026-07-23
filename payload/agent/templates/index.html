@@ -1860,7 +1860,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       scrollLog();
       return record;
     };
-    const endToolLine = (key, ok, note, detail, stateOverride = null) => {
+    const endToolLine = (key, ok, noteOrBuilder, detail, stateOverride = null) => {
       // A tool_end without a matching tool_start (out-of-order or
       // dropped frame) still gets a completed line so it is visible.
       const stack = toolLineStacks.get(key);
@@ -1872,7 +1872,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const icon = icons[state] || "✓";
       line.className = `act ${state} verbose-tool-activity`;
       line.firstElementChild.textContent = icon;
-      label.textContent = typeof note === "function" ? note(record) : note;
+      label.textContent = typeof noteOrBuilder === "function"
+        ? noteOrBuilder(record)
+        : noteOrBuilder;
       detailBody.textContent += `\n\nOutcome:\n${detail}`;
       scrollLog();
       return line;
@@ -2011,14 +2013,14 @@ async function uzSendPrompt(prompt, convId = conversationId) {
         endToolLine(
           key, true,
           record => {
-            const scopedBits = [];
+            const metricParts = [];
             if (p.exit_code !== undefined && p.exit_code !== null) {
-              scopedBits.push(`exit ${p.exit_code}`);
+              metricParts.push(`exit ${p.exit_code}`);
             }
-            if (typeof p.duration_ms === "number") scopedBits.push(`${p.duration_ms} ms`);
-            if (record.inputBytes > 0) scopedBits.push(`${formatBytes(record.inputBytes)} in`);
-            scopedBits.push(`${formatBytes(moved)} out`);
-            return formatToolDoneNote(tool, "done", scopedBits);
+            if (typeof p.duration_ms === "number") metricParts.push(`${p.duration_ms} ms`);
+            if (record.inputBytes > 0) metricParts.push(`${formatBytes(record.inputBytes)} in`);
+            metricParts.push(`${formatBytes(moved)} out`);
+            return formatToolDoneNote(tool, "done", metricParts);
           },
           outcome
         );
