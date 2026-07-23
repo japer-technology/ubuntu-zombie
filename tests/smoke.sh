@@ -466,6 +466,27 @@ while not fired and time.time() < deadline:
 assert fired, "due reactivation did not fire"
 assert fired[0][2]["auto_reactivation"] is True, fired
 assert app.history.pending_reactivation() is None
+
+visible, request, error = server._agent_reactivation_request(
+    "I need another turn.\n"
+    '<ubuntu-zombie-reactivation>{"delay_seconds":30,'
+    '"prompt":"Continue the test.","reason":"More work remains.",'
+    '"replace_existing":false}</ubuntu-zombie-reactivation>'
+)
+assert visible == "I need another turn.", visible
+assert error is None, error
+assert request is not None
+self_scheduled = app._consume_agent_reactivation(conversation_id, request)
+assert self_scheduled["status"] == "accepted", self_scheduled
+assert app.reactivation_info()["pending"]["prompt"] == "Continue the test."
+app.cancel_reactivation()
+
+visible, request, error = server._agent_reactivation_request(
+    "Visible reply\n<ubuntu-zombie-reactivation>{bad json}"
+)
+assert visible == "Visible reply", visible
+assert request is None
+assert error, error
 PY
   rm -rf "${_REACTIVATION_TMP}"
   trap - EXIT
@@ -1279,6 +1300,7 @@ PY
   PYTHONPATH=payload/agent python3 - <<'PY'
 import json
 import server
+import time
 
 info = server.version_info()
 # The payload version must resolve from the repo-root VERSION file
@@ -1309,7 +1331,10 @@ def fake_urlopen(request, timeout):
     return Response({"version": "9.8.7"})
 
 server.urlopen = fake_urlopen
-server._version_cache = (0.0, {})
+server._version_cache = (
+    time.monotonic() - server.VERSION_CACHE_SECONDS - 1,
+    {},
+)
 checked = server.version_info(check_latest=True)
 checked_components = {row["name"]: row for row in checked["components"]}
 assert checked_components["ubuntu-zombie"]["latest"] == "2099.1.2", checked

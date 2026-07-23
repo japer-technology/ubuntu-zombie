@@ -15,6 +15,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   upcoming request and lets the operator cancel it; `/reactivation` and
   `/reactivate` control durable enablement and delay bounds. Due requests start
   ordinary policy-gated turns, remain subject to TTL, and are fully audited.
+- **Agent-initiated continuations:** the shipped pi bridge now gives the model
+  a structured, runtime-consumed self-reactivation request instead of exposing
+  only the operator controls. Streamed completion frames also omit redundant
+  full-history data so long command transcripts do not remain stuck at
+  “Finalising the reply”.
 
 ### Agent capacity
 

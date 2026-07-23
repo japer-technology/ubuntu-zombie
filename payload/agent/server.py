@@ -78,6 +78,8 @@ REACTIVATION_HARD_MIN_SECONDS = 5
 REACTIVATION_HARD_MAX_SECONDS = 86400
 REACTIVATION_PROMPT_MAX_CHARS = 2000
 REACTIVATION_REASON_MAX_CHARS = 160
+AGENT_REACTIVATION_OPEN = "<ubuntu-zombie-reactivation>"
+AGENT_REACTIVATION_CLOSE = "</ubuntu-zombie-reactivation>"
 _VERSION_SOURCES = {
     "ubuntu-zombie": (
         "https://api.github.com/repos/japer-technology/"
@@ -146,6 +148,15 @@ Always *use these tools* to carry out a request rather than describing
 the tool call in text — for example, to list the home directory call the
 `ls` tool, do not print a tool-call string.
 
+If useful work must continue in a later model turn, you can reactivate
+yourself. Append exactly one structured request as the final thing in your
+reply:
+<ubuntu-zombie-reactivation>{{"delay_seconds":30,"prompt":"Continue the prior task.","reason":"More work remains.","replace_existing":false}}</ubuntu-zombie-reactivation>
+The runtime removes this block from the visible reply and schedules an
+ordinary future turn in the same conversation. Use it only when another turn
+is genuinely needed; obey the configured delay bounds and do not invoke it
+through `bash`.
+
 Style:
 - Be concise. Prefer one short paragraph over many.
 - Quote tool output you have already received rather than guessing.
@@ -160,6 +171,28 @@ def render_append_system(facts: str) -> str:
     """Render the system-prompt suffix that pi-mono receives via
     ``--append-system-prompt``."""
     return APPEND_SYSTEM_TEMPLATE.format(agent_user=AGENT_USER, facts=facts)
+
+
+def _agent_reactivation_request(
+    reply: str,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Remove and decode one trailing agent reactivation request."""
+    stripped = reply.rstrip()
+    start = stripped.rfind(AGENT_REACTIVATION_OPEN)
+    if start < 0:
+        return reply, None, None
+    visible = stripped[:start].rstrip()
+    encoded = stripped[start + len(AGENT_REACTIVATION_OPEN):]
+    if not encoded.endswith(AGENT_REACTIVATION_CLOSE):
+        return visible, None, "structured reactivation request is not closed"
+    encoded = encoded[:-len(AGENT_REACTIVATION_CLOSE)].strip()
+    try:
+        request = json.loads(encoded)
+    except json.JSONDecodeError as exc:
+        return visible, None, f"invalid structured reactivation JSON: {exc.msg}"
+    if not isinstance(request, dict):
+        return visible, None, "structured reactivation request must be an object"
+    return visible, request, None
 
 
 # ---------------------------------------------------------------------------
@@ -990,17 +1023,94 @@ class App:
 
         send_event("phase", {"phase": "finalising"})
         reply = turn.get("final") or ""
+        reply, reactivation_request, reactivation_error = (
+            _agent_reactivation_request(reply)
+        )
+        if reactivation_request is not None:
+            reactivation_result = self._consume_agent_reactivation(
+                conv_id, reactivation_request
+            )
+            status = str(reactivation_result.get("status") or "rejected")
+            reply = (
+                reply.rstrip()
+                + f"\n\n_Reactivation request: {status.replace('_', ' ')}._"
+            )
+        elif reactivation_error is not None:
+            log_event(
+                "reactivation_rejected",
+                conversation_id=conv_id,
+                reason="invalid_structured_request",
+                error=reactivation_error,
+            )
+            reply = (
+                reply.rstrip()
+                + f"\n\n_Reactivation request rejected: {reactivation_error}._"
+            )
         self.history.add_message(conv_id, "assistant", reply,
                                  {"engine": "pi-mono",
                                   "log_path": turn.get("log_path")})
         payload = {
             "conversation_id": conv_id,
             "reply": reply,
-            "events": self.history.get_events(conv_id),
-            "messages": self.history.get_messages(conv_id),
         }
+        # The live transcript already contains this turn. Avoid serialising
+        # the entire conversation into the terminal SSE frame: large command
+        # histories otherwise leave the browser apparently stuck in the
+        # finalising phase while an unnecessary payload is written.
+        if emit is None:
+            payload["events"] = self.history.get_events(conv_id)
+            payload["messages"] = self.history.get_messages(conv_id)
         send_event("turn_done", payload)
         return payload
+
+    def _consume_agent_reactivation(
+        self, conversation_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Validate, policy-check, and execute a structured agent request."""
+        tool = "timer.reactivation"
+        call_id = f"reactivation-{uuid.uuid4().hex}"
+        try:
+            cleaned = tools_mod.validate_args(tool, args)
+        except tools_mod.SchemaError as exc:
+            result = {"ok": False, "status": "rejected_schema", "error": str(exc)}
+            decision = "schema_rejected"
+            classification = "unknown"
+        else:
+            policy = load_policy()
+            classification = policy.classify_tool(tool, cleaned)
+            if policy.requires_approval(classification):
+                result = {
+                    "ok": False,
+                    "status": "rejected_policy",
+                    "error": "timer.reactivation requires operator approval",
+                }
+                decision = "approval_required"
+            else:
+                result = self._dispatch_tool(tool, cleaned, conversation_id)
+                decision = "executed" if result.get("ok") else "rejected"
+        self.history.add_event(conversation_id, "tool_call", {
+            "tool_call_id": call_id,
+            "tool": tool,
+            "args": _summarize(args),
+            "classification": classification,
+            "decision": decision,
+        })
+        self.history.add_event(conversation_id, "tool_observation", {
+            "tool_call_id": call_id,
+            "tool": tool,
+            "ok": bool(result.get("ok")),
+            "result": _truncate_obs(result),
+        })
+        log_tool_call(
+            tool=tool,
+            classification=classification,
+            decision=decision,
+            args_summary=_summarize(args),
+            error=str(result.get("error") or "") or None,
+            conversation_id=conversation_id,
+            tool_call_id=call_id,
+        )
+        return result
 
     def _dispatch_tool(
         self, name: str, args: dict[str, Any], conversation_id: int
