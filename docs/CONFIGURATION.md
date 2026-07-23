@@ -374,6 +374,14 @@ time, reason, prompt preview, and a **Cancel** button. When it fires, a visibly
 labelled synthetic user request starts an ordinary turn in the same
 conversation; all tool policy and approval checks run again.
 
+The shipped pi bridge presents this capability through a structured
+`<ubuntu-zombie-reactivation>` request at the end of the agent's reply. The
+server removes that machine-readable block before saving the visible answer,
+validates it against the closed `timer.reactivation` schema and policy class,
+and reports whether the request was accepted. This lets the AI reactivate
+itself; `/reactivation` is the operator control for the capability, not the
+mechanism that schedules each continuation.
+
 Reactivation is enabled by default with a 30-second minimum and 24-hour
 maximum delay. Both limits and the enabled state are durable in
 `conversations.db`. The hard safety bounds are 5 seconds and 24 hours, and no

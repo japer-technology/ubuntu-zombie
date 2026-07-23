@@ -106,6 +106,9 @@ Built-in skills ship under `/opt/ai-zombie/skills/` and currently cover
 `timer.reactivation` lets pi schedule one future continuation in the same
 conversation. The server stores a single global pending timer in
 `conversations.db`; a new request must explicitly replace the existing one.
+A trailing structured agent request is stripped from the visible reply,
+validated against the closed tool schema and `chat_schedule` policy class,
+then dispatched to the timer runtime.
 A server-owned timer thread atomically claims a due record, checks the TTL and
 conversation, and starts an ordinary turn with fresh policy decisions. It
 never executes a tool directly or carries an approval into the new turn.
