@@ -3166,6 +3166,8 @@ if (formatToolArguments(mixed) !== `${command}\n{\n  "cwd": "/tmp/example"\n}`) 
   throw new Error("command arguments with metadata must include both sections");
 }
 const special = { command: 'echo "test"', cwd: "/path/with\\backslash" };
+// The expected value is a JavaScript string containing JSON, so the
+// backslash is escaped once for the source literal and once for JSON.
 if (formatToolArguments(special) !== 'echo "test"\n{\n  "cwd": "/path/with\\\\backslash"\n}') {
   throw new Error("special characters in tool arguments must remain readable");
 }

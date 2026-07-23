@@ -989,7 +989,7 @@ function formatToolDoneNote(tool, status, bits) {
 
 function buildToolMetricParts(payload, inputBytes = 0, outputBytes = null) {
   const metricParts = [];
-  if (payload.exit_code !== undefined && payload.exit_code !== null) {
+  if (payload.exit_code != null) {
     metricParts.push(`exit ${payload.exit_code}`);
   }
   if (typeof payload.duration_ms === "number") metricParts.push(`${payload.duration_ms} ms`);
@@ -1876,7 +1876,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       scrollLog();
       return record;
     };
-    const endToolLine = (key, ok, noteProvider, detail, stateOverride = null) => {
+    const endToolLine = (key, ok, noteOrProvider, detail, stateOverride = null) => {
       // A tool_end without a matching tool_start (out-of-order or
       // dropped frame) still gets a completed line so it is visible.
       const stack = toolLineStacks.get(key);
@@ -1888,9 +1888,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const icon = icons[state] || "✓";
       line.className = `act ${state} verbose-tool-activity`;
       line.firstElementChild.textContent = icon;
-      label.textContent = typeof noteProvider === "function"
-        ? noteProvider(record)
-        : noteProvider;
+      label.textContent = typeof noteOrProvider === "function"
+        ? noteOrProvider(record)
+        : noteOrProvider;
       detailBody.textContent += `\n\nOutcome:\n${detail}`;
       scrollLog();
       return line;
