@@ -3163,6 +3163,10 @@ const mixed = { command, cwd: "/tmp/example" };
 if (formatToolArguments(mixed) !== `${command}\n{\n  "cwd": "/tmp/example"\n}`) {
   throw new Error("command arguments with metadata must include both sections");
 }
+const special = { command: 'echo "test"', cwd: "/path/with\\backslash" };
+if (formatToolArguments(special) !== 'echo "test"\n{\n  "cwd": "/path/with\\\\backslash"\n}') {
+  throw new Error("special characters in tool arguments must remain readable");
+}
 if (formatToolArguments({ cwd: "/tmp/example" }) !== '{\n  "cwd": "/tmp/example"\n}') {
   throw new Error("non-command arguments must render as JSON");
 }
@@ -3184,6 +3188,9 @@ if (toolArgumentBytes(args) !== byteLength(JSON.stringify(args))) {
 const note = formatToolDoneNote("bash", "done", ["58 ms", "287 B in", "11.9 kB out"]);
 if (note !== "bash · done · 58 ms · 287 B in · 11.9 kB out") {
   throw new Error(`unexpected tool done note: ${note}`);
+}
+if (formatToolDoneNote("tool", "status", []) !== "tool · status") {
+  throw new Error("empty tool metric list must not add a trailing separator");
 }
 '''
 Path(sys.argv[1]).write_text(text[stats_start:stats_end] + text[args_start:args_end] + test)

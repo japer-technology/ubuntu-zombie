@@ -951,8 +951,16 @@ function toolArgumentPayload(p) {
   return p.args_summary ?? p.args;
 }
 
-function formatToolArguments(args) {
+function serializedToolArguments(args, pretty = false) {
   if (args === null || args === undefined || args === "") return "";
+  if (typeof args === "string") return args;
+  if (typeof args !== "object") return String(args);
+  try { return JSON.stringify(args, null, pretty ? 2 : 0); }
+  catch (_e) { return String(args); }
+}
+
+function formatToolArguments(args) {
+  if (args == null || args === "") return "";
   if (typeof args === "string") return args;
   if (typeof args !== "object") return String(args);
   const command = typeof args.command === "string" ? args.command : "";
@@ -962,24 +970,30 @@ function formatToolArguments(args) {
   }
   let restText = "";
   if (Object.keys(rest).length) {
-    try { restText = JSON.stringify(rest, null, 2); }
-    catch (_e) { restText = String(rest); }
+    restText = serializedToolArguments(rest, true);
   }
   if (command && restText) return `${command}\n${restText}`;
   if (command) return command;
-  try { return JSON.stringify(args, null, 2); }
-  catch (_e) { return String(args); }
+  return serializedToolArguments(args, true);
 }
 
 function toolArgumentBytes(args) {
-  if (args === null || args === undefined || args === "") return 0;
-  if (typeof args === "string") return byteLength(args);
-  try { return byteLength(JSON.stringify(args)); }
-  catch (_e) { return byteLength(String(args)); }
+  return byteLength(serializedToolArguments(args));
 }
 
 function formatToolDoneNote(tool, status, bits) {
   return `${tool} · ${status}` + (bits.length ? ` · ${bits.join(" · ")}` : "");
+}
+
+function buildToolMetricParts(payload, inputBytes = 0, outputBytes = null) {
+  const metricParts = [];
+  if (payload.exit_code !== undefined && payload.exit_code !== null) {
+    metricParts.push(`exit ${payload.exit_code}`);
+  }
+  if (typeof payload.duration_ms === "number") metricParts.push(`${payload.duration_ms} ms`);
+  if (inputBytes > 0) metricParts.push(`${formatBytes(inputBytes)} in`);
+  if (outputBytes !== null) metricParts.push(`${formatBytes(outputBytes)} out`);
+  return metricParts;
 }
 
 function renderToolCall(p) {
@@ -1930,12 +1944,11 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       return payload && payload.command_status === true && payload.ok === false;
     };
     const commandStatusNote = (tool, payload) => {
-      const bits = [];
-      if (payload.exit_code != null) {
-        bits.push(`exit ${payload.exit_code}`);
-      }
-      if (typeof payload.duration_ms === "number") bits.push(`${payload.duration_ms} ms`);
-      return formatToolDoneNote(tool, "completed with non-zero status", bits);
+      return formatToolDoneNote(
+        tool,
+        "completed with non-zero status",
+        buildToolMetricParts(payload)
+      );
     };
     activeEventSource.addEventListener("phase", (ev) => {
       armTimeout();
@@ -2013,14 +2026,11 @@ async function uzSendPrompt(prompt, convId = conversationId) {
         endToolLine(
           key, true,
           record => {
-            const metricParts = [];
-            if (p.exit_code !== undefined && p.exit_code !== null) {
-              metricParts.push(`exit ${p.exit_code}`);
-            }
-            if (typeof p.duration_ms === "number") metricParts.push(`${p.duration_ms} ms`);
-            if (record.inputBytes > 0) metricParts.push(`${formatBytes(record.inputBytes)} in`);
-            metricParts.push(`${formatBytes(moved)} out`);
-            return formatToolDoneNote(tool, "done", metricParts);
+            return formatToolDoneNote(
+              tool,
+              "done",
+              buildToolMetricParts(p, record.inputBytes, moved)
+            );
           },
           outcome
         );
