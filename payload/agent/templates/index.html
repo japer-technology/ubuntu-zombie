@@ -963,6 +963,8 @@ function formatToolArguments(args) {
   if (args == null || args === "") return "";
   if (typeof args === "string") return args;
   if (typeof args !== "object") return String(args);
+  // ``command`` is the operator-facing payload for shell-style tools;
+  // other keys stay JSON-formatted metadata below it.
   const command = typeof args.command === "string" ? args.command : "";
   const rest = {};
   for (const [key, value] of Object.entries(args)) {
@@ -1874,7 +1876,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       scrollLog();
       return record;
     };
-    const endToolLine = (key, ok, noteOrBuilder, detail, stateOverride = null) => {
+    const endToolLine = (key, ok, noteProvider, detail, stateOverride = null) => {
       // A tool_end without a matching tool_start (out-of-order or
       // dropped frame) still gets a completed line so it is visible.
       const stack = toolLineStacks.get(key);
@@ -1886,9 +1888,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const icon = icons[state] || "✓";
       line.className = `act ${state} verbose-tool-activity`;
       line.firstElementChild.textContent = icon;
-      label.textContent = typeof noteOrBuilder === "function"
-        ? noteOrBuilder(record)
-        : noteOrBuilder;
+      label.textContent = typeof noteProvider === "function"
+        ? noteProvider(record)
+        : noteProvider;
       detailBody.textContent += `\n\nOutcome:\n${detail}`;
       scrollLog();
       return line;

@@ -3142,6 +3142,8 @@ PY
     && grep -q 'Activity already observed on this page is retained' \
       payload/agent/templates/index.html \
     || { echo "verbose transcript activity must remain inspectable and persistent" >&2; exit 1; }
+  command -v node >/dev/null \
+    || { echo "node is required for chat UI smoke tests" >&2; exit 1; }
   _TOOL_DETAIL_TEST="$(mktemp)"
   python3 - "${_TOOL_DETAIL_TEST}" <<'PY'
 import sys
