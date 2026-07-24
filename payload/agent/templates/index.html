@@ -409,6 +409,9 @@ let fullWidthMode = false;
 let brandTitle = "Ubuntu Zombie";
 let activeReactivation = null;
 let pendingReactivation = null;
+// turn_id of the fired reactivation continuation currently being streamed
+// live into the transcript, so the poller never attaches to it twice.
+let reactivationLiveTurnId = null;
 
 // In-flight turn state. ``turnController`` lets the operator (or a
 // client-side timeout) abort a request that the server is taking too
@@ -899,6 +902,9 @@ function abortTurn(reason) {
       liveTurnCleanup("Stopped — the agent may still finish in the background.");
     }
   }
+  // A stopped stream must release the reactivation attach guard so a later
+  // fired continuation can be streamed live again.
+  reactivationLiveTurnId = null;
   // Reset uniformly for both the streaming and the sync fallback path,
   // and keep the abort reason visible even though the sync path's
   // `finally` calls setBusy(false) after this runs.
@@ -1390,6 +1396,39 @@ function uzFormatSeconds(value) {
   return `${Math.ceil(seconds / 3600)}h`;
 }
 
+// Stream a fired reactivation continuation live into the transcript. The
+// daemon already started the turn server-side; here the browser syncs the
+// conversation (so the synthetic queued-user bubble and prior history are
+// present) and then attaches to the running turn's SSE stream, reusing the
+// same live renderer as operator sends so tools and tokens appear in real
+// time instead of only after the turn finishes.
+async function uzStreamReactivationTurn(active) {
+  // Already streaming this continuation, or another turn currently owns the
+  // live stream: leave it running rather than attaching twice.
+  if (reactivationLiveTurnId === active.turn_id) return;
+  if (activeEventSource) return;
+  reactivationLiveTurnId = active.turn_id;
+  try {
+    await uzLoadConversation(active.conversation_id,
+      `Reactivation started for conversation #${active.conversation_id}.`);
+  } catch (_err) {
+    // A reload failure must not stop us from attaching to the live turn.
+  }
+  setBusy(true);
+  uzStreamLiveTurn(active.turn_id, {
+    finalize: () => {
+      reactivationLiveTurnId = null;
+      // Clear the tracked active turn so the completion branch does not
+      // reload and discard the freshly streamed transcript.
+      activeReactivation = null;
+      setBusy(false);
+      // A continuation may already be queued; surface it (and stream the
+      // next fired turn) without waiting for the slow poll interval.
+      void refreshReactivation();
+    },
+  });
+}
+
 async function refreshReactivation() {
   try {
     const data = await uzFetchJson("/api/reactivation");
@@ -1404,10 +1443,7 @@ async function refreshReactivation() {
         activeReactivation = active;
         pendingReactivation = null;
         if (Number(active.conversation_id) === Number(conversationId)) {
-          await uzLoadConversation(active.conversation_id,
-            `Reactivation started for conversation #${active.conversation_id}.`);
-          addMessage("system", "Processing scheduled reactivation…");
-          scrollLogToBottom();
+          await uzStreamReactivationTurn(active);
         }
       }
       return data;
@@ -1894,47 +1930,12 @@ async function uzSendPromptSync(prompt, convId = conversationId) {
   }
 }
 
-async function uzSendPrompt(prompt, convId = conversationId) {
-  if (!window.EventSource) return uzSendPromptSync(prompt, convId);
-  netStats.turn = newStatBucket();
-  addMessage("user", prompt);
-  scrollLogToBottom();
-  setBusy(true);
-  thinkingEl = showThinking();
-  turnController = new AbortController();
+// Render one already-started turn live into the transcript: a compact
+// tool-activity feed plus the streamed reply text, driven entirely by the
+// turn's SSE stream. Shared by operator sends and fired reactivation
+// continuations so both surface tools and tokens as they happen.
+function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} } = {}) {
   let completed = false;
-  const armTimeout = () => {
-    if (turnTimeoutId !== null) clearTimeout(turnTimeoutId);
-    turnTimeoutId = setTimeout(
-      () => abortTurn(`No response after ${Math.round(CLIENT_TURN_TIMEOUT_MS / 1000)}s - giving up.`),
-      CLIENT_TURN_TIMEOUT_MS);
-  };
-  armTimeout();
-  try {
-    const r = await fetch("/api/message", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, conversation_id: convId, stream: true }),
-      signal: turnController.signal,
-    });
-    const data = await r.json().catch(() => ({}));
-    if (r.status === 401) {
-      clearThinking();
-      setAuthState(true, false);
-      showLogin(true);
-      return data;
-    }
-    if (r.status === 410 || data.dead) {
-      clearThinking();
-      showTombstone(data);
-      return data;
-    }
-    if (!r.ok || data.error || !data.turn_id) {
-      clearThinking();
-      return applyTurnPayload(data);
-    }
-    conversationId = data.conversation_id ?? conversationId;
-    clearThinking();
     // Live turn bubble: a compact activity feed (tool lines updated in
     // place), the streamed reply text (thinking dots until the first
     // token arrives) and a status row with a spinner plus an elapsed
@@ -2036,15 +2037,11 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       else status.remove();
     };
     liveTurnCleanup = settleLive;
-    activeEventSource = new EventSource(`/api/stream/${encodeURIComponent(data.turn_id)}`);
+    activeEventSource = new EventSource(`/api/stream/${encodeURIComponent(turnId)}`);
 
     const completeUi = (finalStatus = null) => {
       settleLive(finalStatus);
-      if (turnTimeoutId !== null) { clearTimeout(turnTimeoutId); turnTimeoutId = null; }
-      turnController = null;
-      setBusy(false);
-      promptEl.focus();
-      drainQueuedPrompt();
+      finalize();
     };
     const finish = (payload) => {
       completed = true;
@@ -2222,6 +2219,58 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       }
       completeUi();
     };
+}
+
+async function uzSendPrompt(prompt, convId = conversationId) {
+  if (!window.EventSource) return uzSendPromptSync(prompt, convId);
+  netStats.turn = newStatBucket();
+  addMessage("user", prompt);
+  scrollLogToBottom();
+  setBusy(true);
+  thinkingEl = showThinking();
+  turnController = new AbortController();
+  const armTimeout = () => {
+    if (turnTimeoutId !== null) clearTimeout(turnTimeoutId);
+    turnTimeoutId = setTimeout(
+      () => abortTurn(`No response after ${Math.round(CLIENT_TURN_TIMEOUT_MS / 1000)}s - giving up.`),
+      CLIENT_TURN_TIMEOUT_MS);
+  };
+  armTimeout();
+  try {
+    const r = await fetch("/api/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, conversation_id: convId, stream: true }),
+      signal: turnController.signal,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) {
+      clearThinking();
+      setAuthState(true, false);
+      showLogin(true);
+      return data;
+    }
+    if (r.status === 410 || data.dead) {
+      clearThinking();
+      showTombstone(data);
+      return data;
+    }
+    if (!r.ok || data.error || !data.turn_id) {
+      clearThinking();
+      return applyTurnPayload(data);
+    }
+    conversationId = data.conversation_id ?? conversationId;
+    clearThinking();
+    uzStreamLiveTurn(data.turn_id, {
+      armTimeout,
+      finalize: () => {
+        if (turnTimeoutId !== null) { clearTimeout(turnTimeoutId); turnTimeoutId = null; }
+        turnController = null;
+        setBusy(false);
+        promptEl.focus();
+        drainQueuedPrompt();
+      },
+    });
     return data;
   } catch (err) {
     clearThinking();
@@ -3181,7 +3230,27 @@ applyPromptPlaceholder(
   uzStorageGet(PROMPT_STORAGE_KEY) || DEFAULT_PROMPT_PLACEHOLDER, false);
 applyFullWidth(uzStorageGet(FULLWIDTH_STORAGE_KEY) === "on", false);
 bootstrap();
-setInterval(() => { void refreshReactivation(); }, 5000);
+// Poll reactivation state on a steady cadence, but tighten to ~1s while a
+// continuation is queued and about to fire or a fired turn is streaming, so
+// the browser attaches to the live turn early enough to show tools and text
+// arriving rather than only the finished result.
+let reactivationPollTimer = null;
+function scheduleReactivationPoll(delayMs = 5000) {
+  if (reactivationPollTimer !== null) clearTimeout(reactivationPollTimer);
+  reactivationPollTimer = setTimeout(async () => {
+    let next = 5000;
+    try {
+      const data = await refreshReactivation();
+      if (data && (data.active ||
+          (data.pending && Number(data.pending.remaining_seconds) <= 8))) {
+        next = 1000;
+      }
+    } finally {
+      scheduleReactivationPoll(next);
+    }
+  }, delayMs);
+}
+scheduleReactivationPoll(5000);
 </script>
 </body>
 </html>
