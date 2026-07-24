@@ -447,21 +447,30 @@ assert "error" in invalid, invalid
 invalid = app.configure_reactivation(maximum_seconds=3601)
 assert "error" in invalid, invalid
 
-migration_path = Path(os.environ["ZOMBIE_HISTORY_DB"]).with_name("migration.db")
-with sqlite3.connect(migration_path) as connection:
-    connection.execute(
-        "CREATE TABLE reactivation_settings ("
-        "singleton INTEGER PRIMARY KEY, enabled INTEGER NOT NULL, "
-        "minimum_seconds INTEGER NOT NULL, maximum_seconds INTEGER NOT NULL)"
-    )
-    connection.execute(
-        "INSERT INTO reactivation_settings VALUES (1, 1, 30, 86400)"
-    )
-    connection.execute("PRAGMA user_version = 2")
 from history import History
-migrated = History(migration_path).reactivation_settings()
-assert migrated["minimum_seconds"] == 1, migrated
-assert migrated["maximum_seconds"] == 3600, migrated
+for name, old_minimum, old_maximum, expected_minimum, expected_maximum in (
+    ("defaults", 30, 86400, 1, 3600),
+    ("custom", 10, 1800, 10, 1800),
+    ("low", 0, 120, 1, 120),
+    ("high", 10, 7200, 10, 3600),
+):
+    migration_path = Path(os.environ["ZOMBIE_HISTORY_DB"]).with_name(
+        f"migration-{name}.db"
+    )
+    with sqlite3.connect(migration_path) as connection:
+        connection.execute(
+            "CREATE TABLE reactivation_settings ("
+            "singleton INTEGER PRIMARY KEY, enabled INTEGER NOT NULL, "
+            "minimum_seconds INTEGER NOT NULL, maximum_seconds INTEGER NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO reactivation_settings VALUES (1, 1, ?, ?)",
+            (old_minimum, old_maximum),
+        )
+        connection.execute("PRAGMA user_version = 2")
+    migrated = History(migration_path).reactivation_settings()
+    assert migrated["minimum_seconds"] == expected_minimum, (name, migrated)
+    assert migrated["maximum_seconds"] == expected_maximum, (name, migrated)
 
 app.configure_reactivation(enabled=True)
 fired = []
