@@ -3244,33 +3244,6 @@ EOF
     && grep -q 'ubuntu-zombie-reactivation' \
       payload/agent/templates/index.html \
     || { echo "structured reactivation requests must stay out of live chat" >&2; exit 1; }
-  _REACTIVATION_UI_TEST="$(mktemp)"
-  python3 - "${_REACTIVATION_UI_TEST}" <<'PY'
-import sys
-from pathlib import Path
-
-text = Path("payload/agent/templates/index.html").read_text()
-start = text.index("function visibleReactivationReply")
-end = text.index("async function uzStreamReactivationTurn", start)
-test = r'''
-const marker = "<ubuntu-zombie-reactivation>";
-const REACTIVATION_REQUEST_MARKER = marker;
-if (visibleReactivationReply("Visible reply") !== "Visible reply") {
-  throw new Error("ordinary streamed replies must remain visible");
-}
-if (visibleReactivationReply("Visible reply\n" + marker + '{"delay_seconds":1}') !==
-    "Visible reply") {
-  throw new Error("complete structured requests must be hidden");
-}
-if (visibleReactivationReply("Visible reply\n<ubuntu-zombie-react") !==
-    "Visible reply") {
-  throw new Error("partial structured request markers must be hidden");
-}
-'''
-Path(sys.argv[1]).write_text(text[start:end] + test)
-PY
-  node "${_REACTIVATION_UI_TEST}"
-  rm -f "${_REACTIVATION_UI_TEST}"
   python3 payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
 import importlib.machinery
@@ -3514,7 +3487,24 @@ from pathlib import Path
 text = Path("payload/agent/templates/index.html").read_text()
 start = text.index("function uzCommandName")
 end = text.index("let commandMatches", start)
+reactivation_start = text.index("function visibleReactivationReply")
+reactivation_end = text.index(
+    "async function uzStreamReactivationTurn", reactivation_start
+)
 test = r'''
+const marker = "<ubuntu-zombie-reactivation>";
+const REACTIVATION_REQUEST_MARKER = marker;
+if (visibleReactivationReply("Visible reply") !== "Visible reply") {
+  throw new Error("ordinary streamed replies must remain visible");
+}
+if (visibleReactivationReply("Visible reply\n" + marker + '{"delay_seconds":1}') !==
+    "Visible reply") {
+  throw new Error("complete structured requests must be hidden");
+}
+if (visibleReactivationReply("Visible reply\n<ubuntu-zombie-react") !==
+    "Visible reply") {
+  throw new Error("partial structured request markers must be hidden");
+}
 const entries = [
   ["/local [url]"],
   ["/locals"],
@@ -3530,7 +3520,9 @@ if (uzExactCommandIndex(entries, "/loc") !== -1) {
   throw new Error("partial commands must remain autocomplete candidates");
 }
 '''
-Path(sys.argv[1]).write_text(text[start:end] + test)
+Path(sys.argv[1]).write_text(
+    text[reactivation_start:reactivation_end] + text[start:end] + test
+)
 PY
   node "${_COMMAND_TEST}"
   rm -f "${_COMMAND_TEST}"

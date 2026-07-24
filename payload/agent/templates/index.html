@@ -1448,9 +1448,9 @@ function visibleReactivationReply(markdown) {
   const markerAt = markdown.indexOf(marker);
   if (markerAt >= 0) return markdown.slice(0, markerAt).replace(/\s+$/, "");
   const limit = Math.min(markdown.length, marker.length - 1);
-  for (let count = limit; count > 0; count--) {
-    if (marker.startsWith(markdown.slice(-count))) {
-      return markdown.slice(0, -count).replace(/\s+$/, "");
+  for (let suffixLength = limit; suffixLength > 0; suffixLength--) {
+    if (marker.startsWith(markdown.slice(-suffixLength))) {
+      return markdown.slice(0, -suffixLength).replace(/\s+$/, "");
     }
   }
   return markdown;
