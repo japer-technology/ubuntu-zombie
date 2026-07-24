@@ -25,6 +25,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Preserved-policy compatibility:** installations upgraded from releases
   before `chat_schedule` existed now retain automatic approval for bounded
   reactivations unless the operator explicitly overrides that class.
+- **Visible reactivation progress:** queued reactivations now respect
+  `/fullwidth`, and firing, processing, and completion appear in the active
+  chat. Agent-selected timers prefer the configured minimum delay unless a
+  longer wait is specifically needed.
+- **Accurate turn completion:** successful streamed turns now finish with
+  “Done.” instead of leaving “Finalising the reply…” visible.
 
 ### Agent capacity
 

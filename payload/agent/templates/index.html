@@ -59,7 +59,8 @@
   header .header-actions { justify-self: center; }
   main { flex: 1; overflow-y: auto; padding: 1rem; max-width: 60rem;
          width: 100%; margin: 0 auto; }
-  body.fullwidth main, body.fullwidth .composer { max-width: none; }
+  body.fullwidth main, body.fullwidth .composer,
+  body.fullwidth .reactivation-banner { max-width: none; }
   .welcome { margin: clamp(1rem, 8vh, 5rem) auto 2rem; text-align: center;
              max-width: 44rem; }
   .welcome[hidden] { display: none; }
@@ -327,7 +328,7 @@
   <div id="reactivation-banner" class="reactivation-banner" role="status"
        aria-live="polite" hidden>
     <div>
-      <strong>Reactivation queued</strong>
+      <strong id="reactivation-title">Reactivation queued</strong>
       <div id="reactivation-detail" class="detail"></div>
     </div>
     <button type="button" id="cancel-reactivation" class="danger">Cancel</button>
@@ -396,6 +397,7 @@ const stopBtn = document.getElementById("stop");
 const logoutBtn = document.getElementById("logout");
 const statusEl = document.getElementById("status");
 const reactivationBanner = document.getElementById("reactivation-banner");
+const reactivationTitle = document.getElementById("reactivation-title");
 const reactivationDetail = document.getElementById("reactivation-detail");
 const cancelReactivationBtn = document.getElementById("cancel-reactivation");
 const welcomeEl = document.getElementById("welcome");
@@ -405,6 +407,7 @@ let authRequired = false;
 let chatDisabled = false;
 let fullWidthMode = false;
 let brandTitle = "Ubuntu Zombie";
+let activeReactivation = null;
 
 // In-flight turn state. ``turnController`` lets the operator (or a
 // client-side timeout) abort a request that the server is taking too
@@ -1136,12 +1139,24 @@ function renderSkillActive(p) {
   return wrap;
 }
 
+function renderReactivationEvent(kind, p) {
+  if (kind !== "reactivation_fired") return null;
+  const detail = p.reason ? ` — ${p.reason}` : "";
+  return el("div", {
+    class: "system",
+    text: `Reactivation started${detail}.`,
+  });
+}
+
 function renderEvent(ev) {
   const p = ev.payload || {};
   if (ev.kind === "tool_call") return renderToolCall(p);
   if (ev.kind === "tool_observation") return renderToolObservation(p);
   if (ev.kind === "pending_tool_call") return renderPendingToolCall(p);
   if (ev.kind === "skill_active") return renderSkillActive(p);
+  if (ev.kind.startsWith("reactivation_")) {
+    return renderReactivationEvent(ev.kind, p);
+  }
   return null;
 }
 
@@ -1381,16 +1396,43 @@ async function refreshReactivation() {
   try {
     const data = await uzFetchJson("/api/reactivation");
     const pending = data.pending;
+    const active = data.active;
+    if (active) {
+      reactivationTitle.textContent = "Reactivation processing";
+      reactivationDetail.textContent = active.reason || "Scheduled continuation";
+      cancelReactivationBtn.hidden = true;
+      reactivationBanner.hidden = false;
+      if (active.turn_id !== activeReactivation?.turn_id) {
+        activeReactivation = active;
+        if (Number(active.conversation_id) === Number(conversationId)) {
+          await uzLoadConversation(active.conversation_id,
+            `Reactivation started for conversation #${active.conversation_id}.`);
+          addMessage("system", "Processing scheduled reactivation…");
+          scrollLogToBottom();
+        }
+      }
+      return data;
+    }
+    if (activeReactivation) {
+      const completed = activeReactivation;
+      activeReactivation = null;
+      if (Number(completed.conversation_id) === Number(conversationId)) {
+        await uzLoadConversation(completed.conversation_id,
+          "Reactivation finished.");
+      }
+    }
     if (!pending) {
       reactivationBanner.hidden = true;
       reactivationDetail.textContent = "";
       return data;
     }
+    reactivationTitle.textContent = "Reactivation queued";
     const when = new Date(Number(pending.fire_at) * 1000);
     const preview = String(pending.prompt || "").replace(/\s+/g, " ").slice(0, 100);
     reactivationDetail.textContent =
       `${pending.reason} · ${when.toLocaleString()} ` +
       `(${uzFormatSeconds(pending.remaining_seconds)}) · ${preview}`;
+    cancelReactivationBtn.hidden = false;
     reactivationBanner.hidden = false;
     return data;
   } catch (_err) {
@@ -1990,7 +2032,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     activeEventSource = new EventSource(`/api/stream/${encodeURIComponent(data.turn_id)}`);
 
     const completeUi = () => {
-      settleLive(null);
+      settleLive("Done.");
       if (turnTimeoutId !== null) { clearTimeout(turnTimeoutId); turnTimeoutId = null; }
       turnController = null;
       setBusy(false);

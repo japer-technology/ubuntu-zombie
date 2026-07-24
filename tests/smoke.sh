@@ -443,6 +443,9 @@ settings = app.reactivation_info()
 assert settings["enabled"] is True, settings
 assert settings["minimum_seconds"] == 1, settings
 assert settings["maximum_seconds"] == 3600, settings
+system_prompt = server.render_append_system("test facts", 10, 120)
+assert '"delay_seconds":10' in system_prompt, system_prompt
+assert "minimum delay of\n10 seconds" in system_prompt, system_prompt
 
 accepted = app.schedule_reactivation(
     conversation_id=conversation_id,
@@ -533,6 +536,21 @@ while not fired and time.time() < deadline:
 assert fired, "due reactivation did not fire"
 assert fired[0][2]["auto_reactivation"] is True, fired
 assert app.history.pending_reactivation() is None
+
+active = server.TurnStream(
+    "active-turn", conversation_id, "active-reactivation", "Active test"
+)
+with app._lock:
+    app.turns[active.turn_id] = active
+active_info = app.reactivation_info()["active"]
+assert active_info == {
+    "id": "active-reactivation",
+    "conversation_id": conversation_id,
+    "turn_id": "active-turn",
+    "reason": "Active test",
+}, active_info
+active.done_at = time.monotonic()
+assert app.reactivation_info()["active"] is None
 
 visible, request, error = server._agent_reactivation_request(
     "I need another turn.\n"
@@ -3176,9 +3194,17 @@ EOF
     || { echo "/locals must probe standard API ports across the LAN" >&2; exit 1; }
   grep -q '\["/fullwidth \[on|off\]"' payload/agent/templates/index.html \
     || { echo "chat must expose /fullwidth with optional on/off" >&2; exit 1; }
-  grep -q 'body.fullwidth main, body.fullwidth .composer' \
+  grep -q 'body.fullwidth main, body.fullwidth .composer,' \
     payload/agent/templates/index.html \
     || { echo "/fullwidth must widen the transcript and composer" >&2; exit 1; }
+  grep -q 'body.fullwidth .reactivation-banner' \
+    payload/agent/templates/index.html \
+    || { echo "/fullwidth must widen the reactivation banner" >&2; exit 1; }
+  grep -q 'settleLive("Done.")' payload/agent/templates/index.html \
+    || { echo "completed streamed turns must display Done" >&2; exit 1; }
+  grep -q 'Processing scheduled reactivation' \
+    payload/agent/templates/index.html \
+    || { echo "reactivation processing must be visible in chat" >&2; exit 1; }
   python3 payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
 import importlib.machinery
