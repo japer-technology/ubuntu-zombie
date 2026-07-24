@@ -3200,7 +3200,7 @@ EOF
   grep -q 'body.fullwidth .reactivation-banner' \
     payload/agent/templates/index.html \
     || { echo "/fullwidth must widen the reactivation banner" >&2; exit 1; }
-  grep -q 'settleLive("Done.")' payload/agent/templates/index.html \
+  grep -q 'completeUi("Done.")' payload/agent/templates/index.html \
     || { echo "completed streamed turns must display Done" >&2; exit 1; }
   grep -q 'Processing scheduled reactivation' \
     payload/agent/templates/index.html \
