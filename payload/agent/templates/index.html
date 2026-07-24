@@ -3234,23 +3234,29 @@ bootstrap();
 // continuation is queued and about to fire or a fired turn is streaming, so
 // the browser attaches to the live turn early enough to show tools and text
 // arriving rather than only the finished result.
+const REACTIVATION_POLL_IDLE_MS = 5000;
+const REACTIVATION_POLL_ACTIVE_MS = 1000;
+// When a pending continuation is within this many seconds of firing, poll
+// quickly so the browser is ready to attach to the live turn as it starts.
+const REACTIVATION_POLL_TIGHTEN_THRESHOLD_SECONDS = 8;
 let reactivationPollTimer = null;
-function scheduleReactivationPoll(delayMs = 5000) {
+function scheduleReactivationPoll(delayMs = REACTIVATION_POLL_IDLE_MS) {
   if (reactivationPollTimer !== null) clearTimeout(reactivationPollTimer);
   reactivationPollTimer = setTimeout(async () => {
-    let next = 5000;
+    let next = REACTIVATION_POLL_IDLE_MS;
     try {
       const data = await refreshReactivation();
       if (data && (data.active ||
-          (data.pending && Number(data.pending.remaining_seconds) <= 8))) {
-        next = 1000;
+          (data.pending && Number(data.pending.remaining_seconds) <=
+            REACTIVATION_POLL_TIGHTEN_THRESHOLD_SECONDS))) {
+        next = REACTIVATION_POLL_ACTIVE_MS;
       }
     } finally {
       scheduleReactivationPoll(next);
     }
   }, delayMs);
 }
-scheduleReactivationPoll(5000);
+scheduleReactivationPoll(REACTIVATION_POLL_IDLE_MS);
 </script>
 </body>
 </html>
