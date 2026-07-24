@@ -59,6 +59,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Chat discovery and layout
 
+- **Tighter verbose tool lines:** each streamed tool line now shows the
+  first few words of its arguments inline, the inspector is a bare
+  disclosure arrow at the end of the line (labelled "Inspect tool call"
+  for assistive technology), and byte counts moved into the
+  click-to-expand detail alongside the raw outcome payload.
+- **Quieter verbose API accounting:** frequent API request lines (for
+  example reactivation polling) are no longer logged or shown by
+  default; `/verbose api` toggles API-call display within verbose mode.
+- **New `/verbose none`:** suppresses all tool information, including
+  tool names in the status line, while approval prompts stay visible.
 - **`/load last` and multi-conversation `/load`:** `/load last` opens the
   newest stored conversation, and `/load <id> <id> ...` renders several
   conversations into one transcript in the order given, with the last id
