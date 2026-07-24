@@ -37,6 +37,7 @@ CLASS_ORDER = (
 )
 
 _CLASS_RANK = {name: idx for idx, name in enumerate(CLASS_ORDER)}
+_AUTO_APPROVAL_CLASSES = frozenset({"read_only", "chat_schedule"})
 
 # ``sudo`` flags that consume the following argv token (``sudo -u root cmd``
 # strips both ``-u`` and ``root`` before the real target is reached).
@@ -612,7 +613,10 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
             spec = {}
         classes[name] = ClassDef(
             name=name,
-            approval=str(spec.get("approval", "required" if name != "read_only" else "auto")),
+            approval=str(spec.get(
+                "approval",
+                "auto" if name in _AUTO_APPROVAL_CLASSES else "required",
+            )),
             confirm_phrase=bool(spec.get("confirm_phrase", name == "destructive")),
             description=str(spec.get("description", "")),
         )

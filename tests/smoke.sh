@@ -61,6 +61,8 @@ run_python() {
   PYTHONPATH=payload/agent ZOMBIE_POLICY=payload/etc/policy.yaml python3 - <<'PY'
 import policy
 import server
+import tempfile
+from pathlib import Path
 
 p = policy.load_policy()
 
@@ -137,6 +139,45 @@ if p.classify_tool("timer.reactivation", {
     raise SystemExit("timer.reactivation should use chat_schedule")
 if p.requires_approval("chat_schedule"):
     raise SystemExit("chat_schedule should auto-run within its server-enforced bounds")
+# Install upgrades preserve operator policy.yaml files. Policies created before
+# chat_schedule existed must inherit its safe built-in default, while an
+# explicit operator override must still be honoured.
+with tempfile.TemporaryDirectory() as directory:
+    legacy_path = Path(directory) / "policy.yaml"
+    legacy_path.write_text(
+        """\
+settings:
+  default_class: destructive
+classes:
+  read_only:
+    approval: auto
+""",
+        encoding="utf-8",
+    )
+    legacy = policy.load_policy(legacy_path)
+    reactivation_args = {
+        "delay_seconds": 10,
+        "prompt": "Why is the sky blue?",
+    }
+    if legacy.requires_approval(
+        legacy.classify_tool("timer.reactivation", reactivation_args)
+    ):
+        raise SystemExit("legacy policies should auto-run timer.reactivation")
+    legacy_path.write_text(
+        """\
+settings:
+  default_class: destructive
+classes:
+  read_only:
+    approval: auto
+  chat_schedule:
+    approval: required
+""",
+        encoding="utf-8",
+    )
+    overridden = policy.load_policy(legacy_path)
+    if not overridden.requires_approval("chat_schedule"):
+        raise SystemExit("explicit chat_schedule approval override was ignored")
 if p.classify_tool("shell.run", {"argv": ["ls", "-la"]}) != "read_only":
     raise SystemExit("shell.run ls should be read_only via classify()")
 if p.classify_tool("shell.run", {"command": "sudo apt-get install -y curl"}) != "system_change":
