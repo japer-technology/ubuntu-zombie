@@ -1148,6 +1148,7 @@ PY
     PYTHONPATH=payload/agent \
       python3 - <<'PY'
 import time
+import threading
 import pi_mono, tools
 
 def on_tool_call(call_id, name, args):
@@ -1171,6 +1172,27 @@ except pi_mono.BridgeError as exc:
         raise SystemExit(f"watchdog took too long to fire: {elapsed:.1f}s")
 else:
     raise SystemExit("expected a BridgeError from the idle watchdog")
+
+cancel = threading.Event()
+cancel.set()
+started = time.monotonic()
+try:
+    pi_mono.run_turn(
+        prompt="Stop me",
+        system_prompt="stub",
+        history=[],
+        on_tool_call=on_tool_call,
+        tool_names=tools.tool_names(),
+        timeout=60.0,
+        cancel_event=cancel,
+    )
+except pi_mono.BridgeError as exc:
+    if "stopped by the operator" not in str(exc):
+        raise SystemExit(f"unexpected cancellation BridgeError: {exc}")
+    if time.monotonic() - started > 5:
+        raise SystemExit("operator cancellation took too long")
+else:
+    raise SystemExit("expected a BridgeError from operator cancellation")
 PY
 
     # Real bridge against pi's actual `--mode json` event schema. This
@@ -3373,7 +3395,7 @@ PY
     || { echo "installer must retain separated deployment phases" >&2; exit 1; }
   grep -q 'transcriptPinnedToBottom' payload/agent/templates/index.html \
     || { echo "chat transcript must retain sticky tail tracking" >&2; exit 1; }
-  grep -q 'body.innerHTML = renderMarkdown(liveMarkdown)' \
+  grep -q 'body.innerHTML = renderMarkdown(visibleLiveMarkdown())' \
     payload/agent/templates/index.html \
     || { echo "streamed assistant replies must render as Markdown" >&2; exit 1; }
   grep -q 'applyTurnPayload(payload, true)' payload/agent/templates/index.html \
