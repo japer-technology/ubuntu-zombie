@@ -1445,7 +1445,7 @@ function uzFormatSeconds(value) {
 
 function visibleReactivationReply(markdown) {
   const marker = REACTIVATION_REQUEST_MARKER;
-  const markerAt = markdown.lastIndexOf(marker);
+  const markerAt = markdown.indexOf(marker);
   if (markerAt >= 0) return markdown.slice(0, markerAt).replace(/\s+$/, "");
   const limit = Math.min(markdown.length, marker.length - 1);
   for (let count = limit; count > 0; count--) {
