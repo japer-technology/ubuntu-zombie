@@ -20,6 +20,8 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   only the operator controls. Streamed completion frames also omit redundant
   full-history data so long command transcripts do not remain stuck at
   “Finalising the reply”.
+- **Shorter reactivation bounds:** continuations may be scheduled from 1 second
+  up to 1 hour in the future. Existing durable defaults are migrated safely.
 
 ### Agent capacity
 

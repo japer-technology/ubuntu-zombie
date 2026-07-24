@@ -382,10 +382,10 @@ and reports whether the request was accepted. This lets the AI reactivate
 itself; `/reactivation` is the operator control for the capability, not the
 mechanism that schedules each continuation.
 
-Reactivation is enabled by default with a 30-second minimum and 24-hour
-maximum delay. Both limits and the enabled state are durable in
-`conversations.db`. The hard safety bounds are 5 seconds and 24 hours, and no
-timer may outlive the remaining TTL.
+Reactivation is enabled by default with a 1-second minimum and 1-hour maximum
+delay. Both limits and the enabled state are durable in `conversations.db`.
+These defaults are also the hard safety bounds, and no timer may outlive the
+remaining TTL.
 
 | Command | Effect |
 | ------- | ------ |

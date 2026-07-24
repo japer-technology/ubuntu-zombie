@@ -383,6 +383,7 @@ PY
   PYTHONPATH=payload/agent python3 - <<'PY'
 import json
 import os
+import sqlite3
 import time
 from pathlib import Path
 
@@ -398,12 +399,12 @@ app = server.App()
 conversation_id = app.history.create_conversation("timer test")
 settings = app.reactivation_info()
 assert settings["enabled"] is True, settings
-assert settings["minimum_seconds"] == 30, settings
-assert settings["maximum_seconds"] == 86400, settings
+assert settings["minimum_seconds"] == 1, settings
+assert settings["maximum_seconds"] == 3600, settings
 
 accepted = app.schedule_reactivation(
     conversation_id=conversation_id,
-    delay_seconds=30,
+    delay_seconds=1,
     prompt="Continue the test.",
     reason="Smoke test",
 )
@@ -441,10 +442,26 @@ rejected = app.schedule_reactivation(
 )
 assert rejected["status"] == "rejected_disabled", rejected
 
-invalid = app.configure_reactivation(minimum_seconds=4)
+invalid = app.configure_reactivation(minimum_seconds=0)
 assert "error" in invalid, invalid
-invalid = app.configure_reactivation(maximum_seconds=86401)
+invalid = app.configure_reactivation(maximum_seconds=3601)
 assert "error" in invalid, invalid
+
+migration_path = Path(os.environ["ZOMBIE_HISTORY_DB"]).with_name("migration.db")
+with sqlite3.connect(migration_path) as connection:
+    connection.execute(
+        "CREATE TABLE reactivation_settings ("
+        "singleton INTEGER PRIMARY KEY, enabled INTEGER NOT NULL, "
+        "minimum_seconds INTEGER NOT NULL, maximum_seconds INTEGER NOT NULL)"
+    )
+    connection.execute(
+        "INSERT INTO reactivation_settings VALUES (1, 1, 30, 86400)"
+    )
+    connection.execute("PRAGMA user_version = 2")
+from history import History
+migrated = History(migration_path).reactivation_settings()
+assert migrated["minimum_seconds"] == 1, migrated
+assert migrated["maximum_seconds"] == 3600, migrated
 
 app.configure_reactivation(enabled=True)
 fired = []
@@ -469,7 +486,7 @@ assert app.history.pending_reactivation() is None
 
 visible, request, error = server._agent_reactivation_request(
     "I need another turn.\n"
-    '<ubuntu-zombie-reactivation>{"delay_seconds":30,'
+    '<ubuntu-zombie-reactivation>{"delay_seconds":1,'
     '"prompt":"Continue the test.","reason":"More work remains.",'
     '"replace_existing":false}</ubuntu-zombie-reactivation>'
 )
