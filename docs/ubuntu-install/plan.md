@@ -376,8 +376,9 @@ logic.
 - Make rerunning the bootstrap idempotent and avoid deprecated global
   `apt-key` trust.
 
-The production bootstrap URL must not be documented until DNS, TLS,
-repository signing, and publication ownership are operational.
+The production bootstrap URL must not appear in `README.md`,
+`docs/QUICKSTART.md`, or the eventual package-installation guide until DNS,
+TLS, repository signing, and publication ownership are operational.
 
 ### Phase 8: documentation and migration guidance
 
