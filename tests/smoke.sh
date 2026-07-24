@@ -3240,10 +3240,36 @@ EOF
     && grep -q '/api/turn/${encodeURIComponent(activeReactivation.turn_id)}/stop' \
       payload/agent/templates/index.html \
     || { echo "active reactivations must expose pause and stop controls" >&2; exit 1; }
-  grep -q 'visibleLiveMarkdown' payload/agent/templates/index.html \
+  grep -q 'visibleReactivationReply' payload/agent/templates/index.html \
     && grep -q 'ubuntu-zombie-reactivation' \
       payload/agent/templates/index.html \
     || { echo "structured reactivation requests must stay out of live chat" >&2; exit 1; }
+  _REACTIVATION_UI_TEST="$(mktemp)"
+  python3 - "${_REACTIVATION_UI_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+start = text.index("function visibleReactivationReply")
+end = text.index("async function uzStreamReactivationTurn", start)
+test = r'''
+const marker = "<ubuntu-zombie-reactivation>";
+if (visibleReactivationReply("Visible reply") !== "Visible reply") {
+  throw new Error("ordinary streamed replies must remain visible");
+}
+if (visibleReactivationReply("Visible reply\n" + marker + '{"delay_seconds":1}') !==
+    "Visible reply") {
+  throw new Error("complete structured requests must be hidden");
+}
+if (visibleReactivationReply("Visible reply\n<ubuntu-zombie-react") !==
+    "Visible reply") {
+  throw new Error("partial structured request markers must be hidden");
+}
+'''
+Path(sys.argv[1]).write_text(text[start:end] + test)
+PY
+  node "${_REACTIVATION_UI_TEST}"
+  rm -f "${_REACTIVATION_UI_TEST}"
   python3 payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
 import importlib.machinery
@@ -3395,7 +3421,7 @@ PY
     || { echo "installer must retain separated deployment phases" >&2; exit 1; }
   grep -q 'transcriptPinnedToBottom' payload/agent/templates/index.html \
     || { echo "chat transcript must retain sticky tail tracking" >&2; exit 1; }
-  grep -q 'body.innerHTML = renderMarkdown(visibleLiveMarkdown())' \
+  grep -q 'body.innerHTML = renderMarkdown(visibleReactivationReply(liveMarkdown))' \
     payload/agent/templates/index.html \
     || { echo "streamed assistant replies must render as Markdown" >&2; exit 1; }
   grep -q 'applyTurnPayload(payload, true)' payload/agent/templates/index.html \

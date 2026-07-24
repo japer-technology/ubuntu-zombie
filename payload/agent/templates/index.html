@@ -1442,6 +1442,19 @@ function uzFormatSeconds(value) {
   return `${Math.ceil(seconds / 3600)}h`;
 }
 
+function visibleReactivationReply(markdown) {
+  const marker = "<ubuntu-zombie-reactivation>";
+  const markerAt = markdown.lastIndexOf(marker);
+  if (markerAt >= 0) return markdown.slice(0, markerAt).replace(/\s+$/, "");
+  const limit = Math.min(markdown.length, marker.length - 1);
+  for (let count = limit; count > 0; count--) {
+    if (marker.startsWith(markdown.slice(-count))) {
+      return markdown.slice(0, -count).replace(/\s+$/, "");
+    }
+  }
+  return markdown;
+}
+
 // Stream a fired reactivation continuation live into the transcript. The
 // daemon already started the turn server-side; here the browser syncs the
 // conversation (so the synthetic queued-user bubble and prior history are
@@ -1475,6 +1488,10 @@ async function uzStreamReactivationTurn(active) {
       void refreshReactivation();
     },
   });
+}
+
+async function uzResumeReactivationStream() {
+  if (activeReactivation) await uzStreamReactivationTurn(activeReactivation);
 }
 
 async function refreshReactivation() {
@@ -1556,7 +1573,7 @@ cancelReactivationBtn.addEventListener("click", async () => {
 pauseReactivationBtn.addEventListener("click", async () => {
   if (!activeReactivation) return;
   if (reactivationStreamPaused) {
-    await uzStreamReactivationTurn(activeReactivation);
+    await uzResumeReactivationStream();
     return;
   }
   reactivationStreamPaused = true;
@@ -2036,18 +2053,6 @@ function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} }
     const body = el("div", { class: "md" });
     live.appendChild(body);
     let liveMarkdown = "";
-    const reactivationMarker = "<ubuntu-zombie-reactivation>";
-    const visibleLiveMarkdown = () => {
-      const markerAt = liveMarkdown.lastIndexOf(reactivationMarker);
-      if (markerAt >= 0) return liveMarkdown.slice(0, markerAt).replace(/\s+$/, "");
-      const limit = Math.min(liveMarkdown.length, reactivationMarker.length - 1);
-      for (let count = limit; count > 0; count--) {
-        if (reactivationMarker.startsWith(liveMarkdown.slice(-count))) {
-          return liveMarkdown.slice(0, -count).replace(/\s+$/, "");
-        }
-      }
-      return liveMarkdown;
-    };
     let livePaintPending = null;
     const dots = el("div", { class: "thinking" },
       el("div", { class: "dots" }, el("i", {}), el("i", {}), el("i", {})));
@@ -2135,7 +2140,7 @@ function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} }
       // Streamed replies routinely end with a trailing newline; inside
       // a pre-wrap bubble that paints as an extra blank line, so trim it.
       liveMarkdown = liveMarkdown.replace(/\s+$/, "");
-      body.innerHTML = renderMarkdown(visibleLiveMarkdown());
+      body.innerHTML = renderMarkdown(visibleReactivationReply(liveMarkdown));
       if (finalStatus === null) return;
       if (!liveMarkdown && !activity.childElementCount) {
         live.remove();
@@ -2198,7 +2203,7 @@ function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} }
       if (livePaintPending === null) {
         livePaintPending = requestAnimationFrame(() => {
           livePaintPending = null;
-          body.innerHTML = renderMarkdown(visibleLiveMarkdown());
+          body.innerHTML = renderMarkdown(visibleReactivationReply(liveMarkdown));
           scrollLog();
         });
       }
