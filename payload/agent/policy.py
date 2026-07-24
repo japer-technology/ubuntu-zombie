@@ -612,7 +612,10 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
             spec = {}
         classes[name] = ClassDef(
             name=name,
-            approval=str(spec.get("approval", "required" if name != "read_only" else "auto")),
+            approval=str(spec.get(
+                "approval",
+                "auto" if name in {"read_only", "chat_schedule"} else "required",
+            )),
             confirm_phrase=bool(spec.get("confirm_phrase", name == "destructive")),
             description=str(spec.get("description", "")),
         )

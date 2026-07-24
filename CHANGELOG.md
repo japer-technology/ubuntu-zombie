@@ -22,6 +22,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   “Finalising the reply”.
 - **Shorter reactivation bounds:** continuations may be scheduled from 1 second
   up to 1 hour in the future. Existing durable defaults are migrated safely.
+- **Preserved-policy compatibility:** installations upgraded from releases
+  before `chat_schedule` existed now retain automatic approval for bounded
+  reactivations unless the operator explicitly overrides that class.
 
 ### Agent capacity
 
