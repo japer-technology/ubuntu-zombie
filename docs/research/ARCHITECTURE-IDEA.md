@@ -577,7 +577,7 @@ The chat service runs as `AGENT_USER`, which has **passwordless
 action follows the same path:
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["tool_call"] --> B["tools.validate_args"]
     B --> C["policy.classify_tool"]
     C --> D["operator approval<br/>(UI, +phrase for destructive)"]

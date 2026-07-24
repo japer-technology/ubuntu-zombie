@@ -504,7 +504,9 @@ removing downloaded models and state.
 A self-hosted [Forgejo](https://forgejo.org/) git forge backed by
 PostgreSQL, with LAN discovery and HTTPS provided by Avahi and Caddy.
 An optional co-located Forgejo Actions runner uses the standard Docker
-executor.
+executor. `docs/FORGEJO.md` documents the install path itself
+(phases, update behaviour, files installed, lifecycle subcommands) in
+depth.
 
 Forgejo itself binds only to `127.0.0.1`. Caddy is the LAN-facing entry
 point on HTTPS port `443`, uses its internal certificate authority, and

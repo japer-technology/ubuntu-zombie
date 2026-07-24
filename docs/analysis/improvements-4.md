@@ -75,18 +75,14 @@ The existing optional local-LLM plan remains valid. Its purpose is to install an
 
 The provider hierarchy is:
 
-```text
-Selected primary provider
-        │
-        ├── OpenAI, Anthropic, Gemini, etc.
-        ├── operator-managed Ollama or llama.cpp
-        └── operator-managed LAN model
-        │
-        ▼
-Zombie Floor Model
-        │
-        ▼
-Deterministic commands, help and lifecycle reporting
+```mermaid
+flowchart TD
+    primary["Selected primary provider"]
+    primary --> cloud["OpenAI, Anthropic, Gemini, etc."]
+    primary --> local["operator-managed Ollama or llama.cpp"]
+    primary --> lan["operator-managed LAN model"]
+    primary --> floor["Zombie Floor Model"]
+    floor --> deterministic["Deterministic commands, help and lifecycle reporting"]
 ```
 
 ## 3. Meaning of “hardwired”
@@ -413,21 +409,20 @@ The installer must never accept an arbitrary model name from this manifest path.
 
 The normal baseline installation sequence becomes:
 
-```text
-Install Zombie baseline
-        │
-        ├── install chat, agent, policy and audit runtime
-        ├── detect hardware
-        ├── install pinned CPU llama.cpp runtime
-        ├── install and verify CPU minimum model
-        ├── configure CPU floor
-        ├── probe usable GPU backends
-        ├── select highest safe approved tier
-        ├── optionally install raised runtime/model
-        ├── perform local test inference
-        ├── activate raised tier or retain CPU tier
-        ├── start floor service
-        └── verify provider routing
+```mermaid
+flowchart TD
+    baseline["Install Zombie baseline"] --> runtime["install chat, agent, policy and audit runtime"]
+    runtime --> hw["detect hardware"]
+    hw --> cpu_runtime["install pinned CPU llama.cpp runtime"]
+    cpu_runtime --> cpu_model["install and verify CPU minimum model"]
+    cpu_model --> cpu_floor["configure CPU floor"]
+    cpu_floor --> gpu["probe usable GPU backends"]
+    gpu --> tier["select highest safe approved tier"]
+    tier --> raised["optionally install raised runtime/model"]
+    raised --> test["perform local test inference"]
+    test --> activate["activate raised tier or retain CPU tier"]
+    activate --> start["start floor service"]
+    start --> verify["verify provider routing"]
 ```
 
 ### 9.1 Public configuration

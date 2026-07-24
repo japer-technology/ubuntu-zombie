@@ -22,7 +22,7 @@ manual releases are still accepted only when the requested tag matches
 `VERSION`.
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["Signed files<br/>tarball · deb · SHA256SUMS<br/>SBOM · cosign"] --> B["Step 1<br/>SLSA provenance"]
     B --> C["Step 2<br/>verify-release command"]
     C --> D["Step 3<br/>checksum-pin bridges"]
@@ -123,7 +123,7 @@ trustworthy. Together they complete Phase 1 of the roadmap and set up the
 package split (Phase 2) and APT distribution (Phase 3).
 
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph P1["Phase 1 — Harden release"]
         direction TB
         S1["Step 1 · provenance"] --> S2["Step 2 · verify-release"] --> S3["Step 3 · pin bridges"]

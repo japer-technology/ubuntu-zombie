@@ -20,25 +20,16 @@ brain is the Node CLI **`pi`** from
 [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 ("pi-mono"), driven by a Python chat service. A turn flows like this:
 
-```
-browser (loopback)                     ── HTTP ──▶  server.py  (chat service)
-  │                                                    │
-  │  POST /api/message {prompt, conversation_id}       │ renders system prompt + skills
-  │                                                    ▼
-  │                                          pi_mono.run_turn()
-  │                                                    │ spawns: node pi-mono-bridge.mjs
-  │                                                    ▼
-  │                                          pi-mono-bridge.mjs
-  │                                                    │ spawns: pi --mode json --no-builtin-tools …
-  │                                                    ▼
-  │                                              pi  (the model loop)  ──HTTPS──▶ LLM provider
-  │                                                    │  emits tool_call events
-  │                                                    ▼
-  │                                          tools.py (closed registry)
-  │                                                    │ classify → policy gate → (approve) → runner.run()
-  │                                                    ▼
-  │                                          bash / sudo / apt / systemctl / docker / xdotool …
-  └────────────  reply + events + audit  ◀────────────┘
+```mermaid
+flowchart TD
+    browser["browser (loopback)"] -->|"HTTP<br/>POST /api/message {prompt, conversation_id}"| server["server.py (chat service)"]
+    server -->|"renders system prompt + skills"| turn["pi_mono.run_turn()"]
+    turn -->|"spawns: node pi-mono-bridge.mjs"| bridge["pi-mono-bridge.mjs"]
+    bridge -->|"spawns: pi --mode json --no-builtin-tools …"| pi["pi (the model loop)"]
+    pi -->|"HTTPS"| provider["LLM provider"]
+    pi -->|"emits tool_call events"| tools["tools.py (closed registry)"]
+    tools -->|"classify → policy gate → (approve) → runner.run()"| exec["bash / sudo / apt / systemctl / docker / xdotool …"]
+    exec -->|"reply + events + audit"| browser
 ```
 
 For this whole chain to work end-to-end ("full functionality"), the

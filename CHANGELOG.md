@@ -80,6 +80,23 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   place before dispatch, so every alias runs its canonical command — including
   `/exit` and `/quit`, which previously reported "Unknown command."
 
+### Documentation
+
+- **Vertical mermaid diagrams everywhere:** every diagram in the docs is
+  now a vertical (top-to-bottom) Mermaid diagram. ASCII-art flows in
+  `docs/FORGEJO.md`, `docs/ARCHITECTURE.md`,
+  `docs/research/REQUIREMENTS.md`, and `docs/analysis/improvements-4.md`
+  were converted to `flowchart TD`, and existing horizontal
+  (`flowchart LR`) diagrams in `docs/RELEASE-PLAN-123.md`,
+  `docs/research/ARCHITECTURE-IDEA.md`, and `payload/README.md` were
+  reoriented to `flowchart TD`.
+- **Forgejo install guide:** new `docs/FORGEJO.md` documents the
+  `install.sh` Forgejo component end to end — the loopback backend +
+  Caddy/Avahi LAN HTTPS architecture, every install phase, password
+  and secret handling, update/re-run safety gates, files installed,
+  lifecycle subcommands, exit codes, and troubleshooting.
+  `docs/CONFIGURATION.md` links to it from the Forgejo section.
+
 ### Installer and upgrades
 
 - **Upgrades restart the chat service:** re-running `install` in place now
@@ -106,6 +123,25 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Analysis notes
 
+- **Mediation diagrams:** new `docs/analysis/mediation-diagrams/`
+  folder with vertical Mermaid diagrams — `current-state.md` shows how
+  the system works today (installed shape, chat turn transport, the
+  shipped unmediated tool path, and the stub-only mediated path), and
+  `mediation.md` shows the restored mediation designs from the
+  improvements-8 plan (mediated tool-call lifecycle, Option A
+  `--mode rpc`, Option B custom tools, tripwire). Design analysis
+  only; no behaviour change. The analysis index in
+  `docs/analysis/README.md` now lists the folder.
+- **Improvements-8 remediation plan:** new
+  `docs/analysis/improvements-8-plan.md` turns every finding of the
+  external adversarial review (`docs/analysis/improvements-8.md`,
+  F1–F12) into a phased implementation plan with work items,
+  acceptance criteria, and sequencing — restoring bridge tool
+  mediation first, then production-path testing, auth/TTL hardening,
+  turn ceilings and durable approvals, structural and supply-chain
+  hardening, and documentation/reference integrity. Design analysis
+  only; no behaviour change. The analysis index in
+  `docs/analysis/README.md` now lists the plan.
 - **Windows 11 port plan:** new
   `docs/analysis/improvements-7-windows11-plan.md` analyses what a
   Windows 11 version of Ubuntu Zombie would require — a PowerShell

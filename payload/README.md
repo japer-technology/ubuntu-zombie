@@ -28,7 +28,7 @@ Nothing here is executed from the repository on the target — it is
 *deployed* first, then run from its destination.
 
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph repo["payload/ (this directory, in the repo)"]
         agent_src["agent/"]
         bin_src["bin/"]
@@ -202,7 +202,7 @@ flowchart TB
 `read_only` runs without an approval prompt.
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["read_only<br/>(auto-run)"] --> B["user_change"]
     B --> C["system_change"]
     C --> D["network_change"]
