@@ -549,6 +549,9 @@ assert active_info == {
     "turn_id": "active-turn",
     "reason": "Active test",
 }, active_info
+stopped = app.stop_turn("active-turn")
+assert stopped == {"ok": True, "turn_id": "active-turn"}, stopped
+assert active.cancel_event.is_set()
 active.done_at = time.monotonic()
 assert app.reactivation_info()["active"] is None
 
@@ -1145,6 +1148,7 @@ PY
     PYTHONPATH=payload/agent \
       python3 - <<'PY'
 import time
+import threading
 import pi_mono, tools
 
 def on_tool_call(call_id, name, args):
@@ -1168,6 +1172,27 @@ except pi_mono.BridgeError as exc:
         raise SystemExit(f"watchdog took too long to fire: {elapsed:.1f}s")
 else:
     raise SystemExit("expected a BridgeError from the idle watchdog")
+
+cancel = threading.Event()
+cancel.set()
+started = time.monotonic()
+try:
+    pi_mono.run_turn(
+        prompt="Stop me",
+        system_prompt="stub",
+        history=[],
+        on_tool_call=on_tool_call,
+        tool_names=tools.tool_names(),
+        timeout=60.0,
+        cancel_event=cancel,
+    )
+except pi_mono.BridgeError as exc:
+    if "stopped by the operator" not in str(exc):
+        raise SystemExit(f"unexpected cancellation BridgeError: {exc}")
+    if time.monotonic() - started > 5:
+        raise SystemExit("operator cancellation took too long")
+else:
+    raise SystemExit("expected a BridgeError from operator cancellation")
 PY
 
     # Real bridge against pi's actual `--mode json` event schema. This
@@ -3210,6 +3235,15 @@ EOF
   grep -q 'Reactivation started for conversation' \
     payload/agent/templates/index.html \
     || { echo "reactivation processing must be visible in chat" >&2; exit 1; }
+  grep -q 'id="pause-reactivation"' payload/agent/templates/index.html \
+    && grep -q 'id="stop-reactivation"' payload/agent/templates/index.html \
+    && grep -q '/api/turn/${encodeURIComponent(activeReactivation.turn_id)}/stop' \
+      payload/agent/templates/index.html \
+    || { echo "active reactivations must expose pause and stop controls" >&2; exit 1; }
+  grep -q 'visibleReactivationReply' payload/agent/templates/index.html \
+    && grep -q 'ubuntu-zombie-reactivation' \
+      payload/agent/templates/index.html \
+    || { echo "structured reactivation requests must stay out of live chat" >&2; exit 1; }
   python3 payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
 import importlib.machinery
@@ -3361,7 +3395,7 @@ PY
     || { echo "installer must retain separated deployment phases" >&2; exit 1; }
   grep -q 'transcriptPinnedToBottom' payload/agent/templates/index.html \
     || { echo "chat transcript must retain sticky tail tracking" >&2; exit 1; }
-  grep -q 'body.innerHTML = renderMarkdown(liveMarkdown)' \
+  grep -q 'body.innerHTML = renderMarkdown(visibleReactivationReply(liveMarkdown))' \
     payload/agent/templates/index.html \
     || { echo "streamed assistant replies must render as Markdown" >&2; exit 1; }
   grep -q 'applyTurnPayload(payload, true)' payload/agent/templates/index.html \
@@ -3453,7 +3487,24 @@ from pathlib import Path
 text = Path("payload/agent/templates/index.html").read_text()
 start = text.index("function uzCommandName")
 end = text.index("let commandMatches", start)
+reactivation_start = text.index("function visibleReactivationReply")
+reactivation_end = text.index(
+    "async function uzStreamReactivationTurn", reactivation_start
+)
 test = r'''
+const marker = "<ubuntu-zombie-reactivation>";
+const REACTIVATION_REQUEST_MARKER = marker;
+if (visibleReactivationReply("Visible reply") !== "Visible reply") {
+  throw new Error("ordinary streamed replies must remain visible");
+}
+if (visibleReactivationReply("Visible reply\n" + marker + '{"delay_seconds":1}') !==
+    "Visible reply") {
+  throw new Error("complete structured requests must be hidden");
+}
+if (visibleReactivationReply("Visible reply\n<ubuntu-zombie-react") !==
+    "Visible reply") {
+  throw new Error("partial structured request markers must be hidden");
+}
 const entries = [
   ["/local [url]"],
   ["/locals"],
@@ -3469,7 +3520,9 @@ if (uzExactCommandIndex(entries, "/loc") !== -1) {
   throw new Error("partial commands must remain autocomplete candidates");
 }
 '''
-Path(sys.argv[1]).write_text(text[start:end] + test)
+Path(sys.argv[1]).write_text(
+    text[reactivation_start:reactivation_end] + text[start:end] + test
+)
 PY
   node "${_COMMAND_TEST}"
   rm -f "${_COMMAND_TEST}"

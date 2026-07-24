@@ -186,6 +186,7 @@
   .reactivation-banner[hidden] { display: none; }
   .reactivation-banner strong { color: #ac43d9; }
   .reactivation-banner .detail { color: var(--text-muted); font-size: .82rem; }
+  .reactivation-actions { display: flex; gap: .5rem; }
   .composer form { display: flex; gap: .5rem; align-items: end; }
   .prompt-wrap { position: relative; flex: 1; min-width: 0; }
   .prompt-wrap textarea { width: 100%; display: block; }
@@ -336,7 +337,11 @@
       <strong id="reactivation-title">Reactivation queued</strong>
       <div id="reactivation-detail" class="detail"></div>
     </div>
-    <button type="button" id="cancel-reactivation" class="danger">Cancel</button>
+    <div class="reactivation-actions">
+      <button type="button" id="pause-reactivation" hidden>Pause</button>
+      <button type="button" id="stop-reactivation" class="danger" hidden>Stop</button>
+      <button type="button" id="cancel-reactivation" class="danger">Cancel</button>
+    </div>
   </div>
   <div class="composer">
     <form id="form">
@@ -405,6 +410,8 @@ const reactivationBanner = document.getElementById("reactivation-banner");
 const reactivationTitle = document.getElementById("reactivation-title");
 const reactivationDetail = document.getElementById("reactivation-detail");
 const cancelReactivationBtn = document.getElementById("cancel-reactivation");
+const pauseReactivationBtn = document.getElementById("pause-reactivation");
+const stopReactivationBtn = document.getElementById("stop-reactivation");
 const welcomeEl = document.getElementById("welcome");
 const commandMenu = document.getElementById("command-menu");
 let visibleMessages = [];
@@ -417,6 +424,8 @@ let pendingReactivation = null;
 // turn_id of the fired reactivation continuation currently being streamed
 // live into the transcript, so the poller never attaches to it twice.
 let reactivationLiveTurnId = null;
+let reactivationStreamPaused = false;
+const REACTIVATION_REQUEST_MARKER = "<ubuntu-zombie-reactivation>";
 
 // In-flight turn state. ``turnController`` lets the operator (or a
 // client-side timeout) abort a request that the server is taking too
@@ -1434,6 +1443,19 @@ function uzFormatSeconds(value) {
   return `${Math.ceil(seconds / 3600)}h`;
 }
 
+function visibleReactivationReply(markdown) {
+  const marker = REACTIVATION_REQUEST_MARKER;
+  const markerAt = markdown.indexOf(marker);
+  if (markerAt >= 0) return markdown.slice(0, markerAt).replace(/\s+$/, "");
+  const limit = Math.min(markdown.length, marker.length - 1);
+  for (let suffixLength = limit; suffixLength > 0; suffixLength--) {
+    if (marker.startsWith(markdown.slice(-suffixLength))) {
+      return markdown.slice(0, -suffixLength).replace(/\s+$/, "");
+    }
+  }
+  return markdown;
+}
+
 // Stream a fired reactivation continuation live into the transcript. The
 // daemon already started the turn server-side; here the browser syncs the
 // conversation (so the synthetic queued-user bubble and prior history are
@@ -1446,6 +1468,7 @@ async function uzStreamReactivationTurn(active) {
   if (reactivationLiveTurnId === active.turn_id) return;
   if (activeEventSource) return;
   reactivationLiveTurnId = active.turn_id;
+  reactivationStreamPaused = false;
   try {
     await uzLoadConversation(active.conversation_id,
       `Reactivation started for conversation #${active.conversation_id}.`);
@@ -1456,6 +1479,7 @@ async function uzStreamReactivationTurn(active) {
   uzStreamLiveTurn(active.turn_id, {
     finalize: () => {
       reactivationLiveTurnId = null;
+      reactivationStreamPaused = false;
       // Clear the tracked active turn so the completion branch does not
       // reload and discard the freshly streamed transcript.
       activeReactivation = null;
@@ -1467,6 +1491,10 @@ async function uzStreamReactivationTurn(active) {
   });
 }
 
+async function uzResumeReactivationStream() {
+  if (activeReactivation) await uzStreamReactivationTurn(activeReactivation);
+}
+
 async function refreshReactivation() {
   try {
     const data = await uzFetchJson("/api/reactivation");
@@ -1476,6 +1504,9 @@ async function refreshReactivation() {
       reactivationTitle.textContent = "Reactivation processing";
       reactivationDetail.textContent = active.reason || "Scheduled continuation";
       cancelReactivationBtn.hidden = true;
+      pauseReactivationBtn.hidden = false;
+      pauseReactivationBtn.textContent = reactivationStreamPaused ? "Resume" : "Pause";
+      stopReactivationBtn.hidden = false;
       reactivationBanner.hidden = false;
       if (active.turn_id !== activeReactivation?.turn_id) {
         activeReactivation = active;
@@ -1504,6 +1535,8 @@ async function refreshReactivation() {
     if (!pending) {
       reactivationBanner.hidden = true;
       reactivationDetail.textContent = "";
+      pauseReactivationBtn.hidden = true;
+      stopReactivationBtn.hidden = true;
       return data;
     }
     reactivationTitle.textContent = "Reactivation queued";
@@ -1514,6 +1547,8 @@ async function refreshReactivation() {
       `${pending.reason} · ${when.toLocaleString()} ` +
       `(${uzFormatSeconds(pending.remaining_seconds)}) · ${preview}`;
     cancelReactivationBtn.hidden = false;
+    pauseReactivationBtn.hidden = true;
+    stopReactivationBtn.hidden = true;
     reactivationBanner.hidden = false;
     return data;
   } catch (_err) {
@@ -1532,6 +1567,40 @@ cancelReactivationBtn.addEventListener("click", async () => {
     addMessage("system", String(err), { error: true });
   } finally {
     cancelReactivationBtn.disabled = false;
+    await refreshReactivation();
+  }
+});
+
+pauseReactivationBtn.addEventListener("click", async () => {
+  if (!activeReactivation) return;
+  if (reactivationStreamPaused) {
+    await uzResumeReactivationStream();
+    return;
+  }
+  reactivationStreamPaused = true;
+  pauseReactivationBtn.textContent = "Resume";
+  if (activeEventSource) {
+    activeEventSource.close();
+    activeEventSource = null;
+  }
+  if (liveTurnCleanup) {
+    liveTurnCleanup("Paused — reactivation continues in the background.");
+  }
+  reactivationLiveTurnId = null;
+  setBusy(false);
+});
+
+stopReactivationBtn.addEventListener("click", async () => {
+  if (!activeReactivation) return;
+  stopReactivationBtn.disabled = true;
+  try {
+    await uzPostJson(
+      `/api/turn/${encodeURIComponent(activeReactivation.turn_id)}/stop`, {});
+    abortTurn("Reactivation stopped.");
+  } catch (err) {
+    addMessage("system", String(err), { error: true });
+  } finally {
+    stopReactivationBtn.disabled = false;
     await refreshReactivation();
   }
 });
@@ -2072,7 +2141,7 @@ function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} }
       // Streamed replies routinely end with a trailing newline; inside
       // a pre-wrap bubble that paints as an extra blank line, so trim it.
       liveMarkdown = liveMarkdown.replace(/\s+$/, "");
-      body.innerHTML = renderMarkdown(liveMarkdown);
+      body.innerHTML = renderMarkdown(visibleReactivationReply(liveMarkdown));
       if (finalStatus === null) return;
       if (!liveMarkdown && !activity.childElementCount) {
         live.remove();
@@ -2135,7 +2204,7 @@ function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} }
       if (livePaintPending === null) {
         livePaintPending = requestAnimationFrame(() => {
           livePaintPending = null;
-          body.innerHTML = renderMarkdown(liveMarkdown);
+          body.innerHTML = renderMarkdown(visibleReactivationReply(liveMarkdown));
           scrollLog();
         });
       }
