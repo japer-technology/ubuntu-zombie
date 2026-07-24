@@ -101,9 +101,17 @@ _version_cache_lock = threading.Lock()
 
 
 class TurnStream:
-    def __init__(self, turn_id: str, conversation_id: int) -> None:
+    def __init__(
+        self,
+        turn_id: str,
+        conversation_id: int,
+        reactivation_id: str | None = None,
+        reactivation_reason: str | None = None,
+    ) -> None:
         self.turn_id = turn_id
         self.conversation_id = conversation_id
+        self.reactivation_id = reactivation_id
+        self.reactivation_reason = reactivation_reason
         self.queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue(
             maxsize=STREAM_QUEUE_MAX
         )
@@ -151,11 +159,13 @@ the tool call in text — for example, to list the home directory call the
 If useful work must continue in a later model turn, you can reactivate
 yourself. Append exactly one structured request as the final thing in your
 reply:
-<ubuntu-zombie-reactivation>{{"delay_seconds":30,"prompt":"Continue the prior task.","reason":"More work remains.","replace_existing":false}}</ubuntu-zombie-reactivation>
+<ubuntu-zombie-reactivation>{{"delay_seconds":{reactivation_minimum_seconds},"prompt":"Continue the prior task.","reason":"More work remains.","replace_existing":false}}</ubuntu-zombie-reactivation>
 The runtime removes this block from the visible reply and schedules an
 ordinary future turn in the same conversation. Use it only when another turn
-is genuinely needed; obey the configured delay bounds and do not invoke it
-through `bash`.
+is genuinely needed. Use the configured minimum delay of
+{reactivation_minimum_seconds} seconds unless a specific need requires longer;
+never exceed the configured maximum of {reactivation_maximum_seconds} seconds,
+and do not invoke it through `bash`.
 
 Style:
 - Be concise. Prefer one short paragraph over many.
@@ -167,10 +177,19 @@ Machine facts (auto-collected): {facts}
 """
 
 
-def render_append_system(facts: str) -> str:
+def render_append_system(
+    facts: str,
+    reactivation_minimum_seconds: int = REACTIVATION_HARD_MIN_SECONDS,
+    reactivation_maximum_seconds: int = REACTIVATION_HARD_MAX_SECONDS,
+) -> str:
     """Render the system-prompt suffix that pi-mono receives via
     ``--append-system-prompt``."""
-    return APPEND_SYSTEM_TEMPLATE.format(agent_user=AGENT_USER, facts=facts)
+    return APPEND_SYSTEM_TEMPLATE.format(
+        agent_user=AGENT_USER,
+        facts=facts,
+        reactivation_minimum_seconds=reactivation_minimum_seconds,
+        reactivation_maximum_seconds=reactivation_maximum_seconds,
+    )
 
 
 def _agent_reactivation_request(
@@ -649,7 +668,14 @@ class App:
         if not conv_id:
             conv_id = self.history.create_conversation()
         turn_id = uuid.uuid4().hex
-        state = TurnStream(turn_id, conv_id)
+        state = TurnStream(
+            turn_id,
+            conv_id,
+            str(user_meta.get("reactivation_id")) if user_meta
+            and user_meta.get("reactivation_id") else None,
+            str(user_meta.get("reason")) if user_meta
+            and user_meta.get("reason") else None,
+        )
         with self._lock:
             self._sweep_turns()
             self.turns[turn_id] = state
@@ -736,7 +762,12 @@ class App:
         self.history.add_message(conv_id, "user", prompt, user_meta)
 
         facts = ", ".join(f"{k}={v}" for k, v in machine_facts().items())
-        system_prompt = render_append_system(facts)
+        reactivation_settings = self.history.reactivation_settings()
+        system_prompt = render_append_system(
+            facts,
+            reactivation_settings["minimum_seconds"],
+            reactivation_settings["maximum_seconds"],
+        )
         summary = self.history.latest_summary(conv_id)
         if summary:
             system_prompt = (
@@ -1275,7 +1306,24 @@ class App:
             pending["remaining_seconds"] = max(
                 0, int(pending["fire_at"] - time.time())
             )
-        return {"ok": True, **settings, "pending": pending}
+        with self._lock:
+            self._sweep_turns()
+            active_turns = [
+                turn for turn in self.turns.values()
+                if turn.reactivation_id is not None and turn.done_at is None
+            ]
+            active_turn = max(
+                active_turns, key=lambda turn: turn.created_at, default=None
+            )
+        active = None
+        if active_turn is not None:
+            active = {
+                "id": active_turn.reactivation_id,
+                "conversation_id": active_turn.conversation_id,
+                "turn_id": active_turn.turn_id,
+                "reason": active_turn.reactivation_reason,
+            }
+        return {"ok": True, **settings, "pending": pending, "active": active}
 
     def configure_reactivation(
         self,
