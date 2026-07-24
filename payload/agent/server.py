@@ -119,6 +119,7 @@ class TurnStream:
         self.done_at: float | None = None
         self.attached = False
         self.final_payload: dict[str, Any] | None = None
+        self.cancel_event = threading.Event()
 
 
 def _agent_account() -> str:
@@ -689,7 +690,11 @@ class App:
         def worker() -> None:
             try:
                 result = self.post_message(
-                    conv_id, prompt, emit=emit, user_meta=user_meta
+                    conv_id,
+                    prompt,
+                    emit=emit,
+                    user_meta=user_meta,
+                    cancel_event=state.cancel_event,
                 )
                 if state.done_at is None:
                     terminal = "turn_error" if result.get("error") and not result.get("reply") else "turn_done"
@@ -733,12 +738,29 @@ class App:
             if state is not None:
                 state.attached = False
 
+    def stop_turn(self, turn_id: str) -> dict[str, Any]:
+        with self._lock:
+            state = self.turns.get(turn_id)
+            if state is None:
+                return {"error": "unknown turn"}
+            if state.done_at is not None:
+                return {"error": "turn already finished"}
+            state.cancel_event.set()
+        log_event(
+            "turn_stopped",
+            conversation_id=state.conversation_id,
+            turn_id=turn_id,
+            reactivation_id=state.reactivation_id,
+        )
+        return {"ok": True, "turn_id": turn_id}
+
     def post_message(
         self,
         conv_id: int | None,
         prompt: str,
         emit: Callable[[str, dict[str, Any]], None] | None = None,
         user_meta: dict[str, Any] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         def send_event(event: str, payload: dict[str, Any]) -> None:
             if emit is not None:
@@ -1036,6 +1058,7 @@ class App:
                 max_tool_calls=max_calls,
                 timeout=turn_timeout,
                 on_event=on_bridge_event,
+                cancel_event=cancel_event,
             )
         except pi_mono.BridgeError as exc:
             err = str(exc)
@@ -2405,6 +2428,10 @@ class Handler(BaseHTTPRequestHandler):
                 maximum_seconds=maximum,
             )
             self._send_json(result, 400 if result.get("error") else 200)
+            return
+        if len(parts) == 4 and parts[:2] == ["api", "turn"] and parts[3] == "stop":
+            result = self.app.stop_turn(parts[2])
+            self._send_json(result, 404 if result.get("error") else 200)
             return
         if self.path == "/api/password":
             data = self._read_json()

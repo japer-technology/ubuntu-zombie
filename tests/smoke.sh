@@ -549,6 +549,9 @@ assert active_info == {
     "turn_id": "active-turn",
     "reason": "Active test",
 }, active_info
+stopped = app.stop_turn("active-turn")
+assert stopped == {"ok": True, "turn_id": "active-turn"}, stopped
+assert active.cancel_event.is_set()
 active.done_at = time.monotonic()
 assert app.reactivation_info()["active"] is None
 
@@ -3210,6 +3213,15 @@ EOF
   grep -q 'Reactivation started for conversation' \
     payload/agent/templates/index.html \
     || { echo "reactivation processing must be visible in chat" >&2; exit 1; }
+  grep -q 'id="pause-reactivation"' payload/agent/templates/index.html \
+    && grep -q 'id="stop-reactivation"' payload/agent/templates/index.html \
+    && grep -q '/api/turn/${encodeURIComponent(activeReactivation.turn_id)}/stop' \
+      payload/agent/templates/index.html \
+    || { echo "active reactivations must expose pause and stop controls" >&2; exit 1; }
+  grep -q 'visibleLiveMarkdown' payload/agent/templates/index.html \
+    && grep -q 'ubuntu-zombie-reactivation' \
+      payload/agent/templates/index.html \
+    || { echo "structured reactivation requests must stay out of live chat" >&2; exit 1; }
   python3 payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
 import importlib.machinery

@@ -130,6 +130,7 @@ def run_turn(
     settings_path: Path | str | None = None,
     timeout: float | None = None,
     on_event: Callable[[dict[str, Any]], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> dict[str, Any]:
     """Run one pi-mono turn.
 
@@ -241,6 +242,7 @@ def run_turn(
     # event (and after each operator-mediated tool result) so a long but
     # *active* turn — many tool calls — is never killed prematurely.
     timed_out = threading.Event()
+    cancelled = threading.Event()
     stop_watchdog = threading.Event()
     activity_lock = threading.Lock()
     last_activity = time.monotonic()
@@ -252,6 +254,13 @@ def run_turn(
 
     def _watchdog() -> None:
         while not stop_watchdog.wait(0.5):
+            if cancel_event is not None and cancel_event.is_set():
+                cancelled.set()
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                return
             with activity_lock:
                 idle = time.monotonic() - last_activity
             if idle >= timeout:
@@ -263,7 +272,7 @@ def run_turn(
                 return
 
     watchdog: threading.Thread | None = None
-    if timeout and timeout > 0:
+    if (timeout and timeout > 0) or cancel_event is not None:
         watchdog = threading.Thread(
             target=_watchdog, name="pi-mono-watchdog", daemon=True)
         watchdog.start()
@@ -278,6 +287,8 @@ def run_turn(
         while True:
             line = proc.stdout.readline()
             if not line:
+                if cancelled.is_set():
+                    raise BridgeError("pi-mono turn was stopped by the operator")
                 if timed_out.is_set():
                     raise BridgeError(
                         f"pi-mono turn timed out after {timeout:.0f}s of "

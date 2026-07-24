@@ -38,6 +38,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   show the live activity.
 - **Accurate turn completion:** successful streamed turns now finish with
   “Done.” instead of leaving “Finalising the reply…” visible.
+- **Controllable reactivation turns:** processing reactivations now always show
+  pause and stop controls. Stop terminates the active bridge turn, while pause
+  detaches the live view for later resumption. Structured reactivation data is
+  hidden from streamed replies and remains available to the server for
+  scheduling.
 
 ### Agent capacity
 
