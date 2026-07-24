@@ -1,7 +1,12 @@
 # 01 — Current state of the delivery mechanism
 
 Before multiplying anything, be precise about what exists and works
-today. Everything below is verifiable in this repository.
+today. Everything below is verifiable in this repository. **This
+document is the blueprint**: the fully functional mechanism described
+here — portable core, platform shell, two-stage delivery, and the
+invariants table — is exactly what the rest of this series
+([`02`](02-portable-core.md)–[`07`](07-roadmap.md)) multiplies across
+packages, platforms, and delivery channels.
 
 ## What the product is
 
