@@ -145,11 +145,13 @@ if p.requires_approval("chat_schedule"):
 with tempfile.TemporaryDirectory() as directory:
     legacy_path = Path(directory) / "policy.yaml"
     legacy_path.write_text(
-        "settings:\n"
-        "  default_class: destructive\n"
-        "classes:\n"
-        "  read_only:\n"
-        "    approval: auto\n",
+        """\
+settings:
+  default_class: destructive
+classes:
+  read_only:
+    approval: auto
+""",
         encoding="utf-8",
     )
     legacy = policy.load_policy(legacy_path)
@@ -160,9 +162,15 @@ with tempfile.TemporaryDirectory() as directory:
     ):
         raise SystemExit("legacy policies should auto-run timer.reactivation")
     legacy_path.write_text(
-        legacy_path.read_text(encoding="utf-8")
-        + "  chat_schedule:\n"
-        + "    approval: required\n",
+        """\
+settings:
+  default_class: destructive
+classes:
+  read_only:
+    approval: auto
+  chat_schedule:
+    approval: required
+""",
         encoding="utf-8",
     )
     overridden = policy.load_policy(legacy_path)
