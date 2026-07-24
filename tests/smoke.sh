@@ -386,6 +386,7 @@ import os
 import sqlite3
 import time
 from pathlib import Path
+from history import History
 
 Path(os.environ["ZOMBIE_LIFECYCLE_STATE"]).write_text(json.dumps({
     "created_at": time.time(),
@@ -447,7 +448,6 @@ assert "error" in invalid, invalid
 invalid = app.configure_reactivation(maximum_seconds=3601)
 assert "error" in invalid, invalid
 
-from history import History
 for name, old_minimum, old_maximum, expected_minimum, expected_maximum in (
     ("defaults", 30, 86400, 1, 3600),
     ("custom", 10, 1800, 10, 1800),
