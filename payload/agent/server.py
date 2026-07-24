@@ -2431,7 +2431,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if len(parts) == 4 and parts[:2] == ["api", "turn"] and parts[3] == "stop":
             result = self.app.stop_turn(parts[2])
-            self._send_json(result, 404 if result.get("error") else 200)
+            status = 404 if result.get("error") == "unknown turn" else (
+                409 if result.get("error") else 200
+            )
+            self._send_json(result, status)
             return
         if self.path == "/api/password":
             data = self._read_json()
