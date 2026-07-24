@@ -254,6 +254,7 @@ def run_turn(
 
     def _watchdog() -> None:
         while not stop_watchdog.wait(0.5):
+            # An explicit operator stop wins if it races the idle deadline.
             if cancel_event is not None and cancel_event.is_set():
                 cancelled.set()
                 try:

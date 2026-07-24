@@ -745,6 +745,8 @@ class App:
                 return {"error": "unknown turn"}
             if state.done_at is not None:
                 return {"error": "turn already finished"}
+            if state.cancel_event.is_set():
+                return {"error": "turn stop already requested"}
             state.cancel_event.set()
         log_event(
             "turn_stopped",

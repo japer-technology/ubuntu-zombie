@@ -425,6 +425,7 @@ let pendingReactivation = null;
 // live into the transcript, so the poller never attaches to it twice.
 let reactivationLiveTurnId = null;
 let reactivationStreamPaused = false;
+const REACTIVATION_REQUEST_MARKER = "<ubuntu-zombie-reactivation>";
 
 // In-flight turn state. ``turnController`` lets the operator (or a
 // client-side timeout) abort a request that the server is taking too
@@ -1443,7 +1444,7 @@ function uzFormatSeconds(value) {
 }
 
 function visibleReactivationReply(markdown) {
-  const marker = "<ubuntu-zombie-reactivation>";
+  const marker = REACTIVATION_REQUEST_MARKER;
   const markerAt = markdown.lastIndexOf(marker);
   if (markerAt >= 0) return markdown.slice(0, markerAt).replace(/\s+$/, "");
   const limit = Math.min(markdown.length, marker.length - 1);

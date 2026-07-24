@@ -3254,6 +3254,7 @@ start = text.index("function visibleReactivationReply")
 end = text.index("async function uzStreamReactivationTurn", start)
 test = r'''
 const marker = "<ubuntu-zombie-reactivation>";
+const REACTIVATION_REQUEST_MARKER = marker;
 if (visibleReactivationReply("Visible reply") !== "Visible reply") {
   throw new Error("ordinary streamed replies must remain visible");
 }
