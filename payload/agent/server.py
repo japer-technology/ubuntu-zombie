@@ -74,6 +74,12 @@ VERSION_CHECK_TIMEOUT_SECONDS = 4.0
 VERSION_CACHE_SECONDS = 900.0
 STATUS_PROBE_CACHE_SECONDS = 30.0
 MAX_VERSION_RESPONSE_BYTES = 1024 * 1024
+REACTIVATION_HARD_MIN_SECONDS = 1
+REACTIVATION_HARD_MAX_SECONDS = 3600
+REACTIVATION_PROMPT_MAX_CHARS = 2000
+REACTIVATION_REASON_MAX_CHARS = 160
+AGENT_REACTIVATION_OPEN = "<ubuntu-zombie-reactivation>"
+AGENT_REACTIVATION_CLOSE = "</ubuntu-zombie-reactivation>"
 _VERSION_SOURCES = {
     "ubuntu-zombie": (
         "https://api.github.com/repos/japer-technology/"
@@ -95,9 +101,17 @@ _version_cache_lock = threading.Lock()
 
 
 class TurnStream:
-    def __init__(self, turn_id: str, conversation_id: int) -> None:
+    def __init__(
+        self,
+        turn_id: str,
+        conversation_id: int,
+        reactivation_id: str | None = None,
+        reactivation_reason: str | None = None,
+    ) -> None:
         self.turn_id = turn_id
         self.conversation_id = conversation_id
+        self.reactivation_id = reactivation_id
+        self.reactivation_reason = reactivation_reason
         self.queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue(
             maxsize=STREAM_QUEUE_MAX
         )
@@ -105,6 +119,7 @@ class TurnStream:
         self.done_at: float | None = None
         self.attached = False
         self.final_payload: dict[str, Any] | None = None
+        self.cancel_event = threading.Event()
 
 
 def _agent_account() -> str:
@@ -142,6 +157,17 @@ Always *use these tools* to carry out a request rather than describing
 the tool call in text — for example, to list the home directory call the
 `ls` tool, do not print a tool-call string.
 
+If useful work must continue in a later model turn, you can reactivate
+yourself. Append exactly one structured request as the final thing in your
+reply:
+<ubuntu-zombie-reactivation>{{"delay_seconds":{reactivation_minimum_seconds},"prompt":"Continue the prior task.","reason":"More work remains.","replace_existing":false}}</ubuntu-zombie-reactivation>
+The runtime removes this block from the visible reply and schedules an
+ordinary future turn in the same conversation. Use it only when another turn
+is genuinely needed. Use the configured minimum delay of
+{reactivation_minimum_seconds} seconds unless a specific need requires longer;
+never exceed the configured maximum of {reactivation_maximum_seconds} seconds,
+and do not invoke it through `bash`.
+
 Style:
 - Be concise. Prefer one short paragraph over many.
 - Quote tool output you have already received rather than guessing.
@@ -152,10 +178,41 @@ Machine facts (auto-collected): {facts}
 """
 
 
-def render_append_system(facts: str) -> str:
+def render_append_system(
+    facts: str,
+    reactivation_minimum_seconds: int = REACTIVATION_HARD_MIN_SECONDS,
+    reactivation_maximum_seconds: int = REACTIVATION_HARD_MAX_SECONDS,
+) -> str:
     """Render the system-prompt suffix that pi-mono receives via
     ``--append-system-prompt``."""
-    return APPEND_SYSTEM_TEMPLATE.format(agent_user=AGENT_USER, facts=facts)
+    return APPEND_SYSTEM_TEMPLATE.format(
+        agent_user=AGENT_USER,
+        facts=facts,
+        reactivation_minimum_seconds=reactivation_minimum_seconds,
+        reactivation_maximum_seconds=reactivation_maximum_seconds,
+    )
+
+
+def _agent_reactivation_request(
+    reply: str,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Remove and decode one trailing agent reactivation request."""
+    stripped = reply.rstrip()
+    start = stripped.rfind(AGENT_REACTIVATION_OPEN)
+    if start < 0:
+        return reply, None, None
+    visible = stripped[:start].rstrip()
+    encoded = stripped[start + len(AGENT_REACTIVATION_OPEN):]
+    if not encoded.endswith(AGENT_REACTIVATION_CLOSE):
+        return visible, None, "structured reactivation request is not closed"
+    encoded = encoded[:-len(AGENT_REACTIVATION_CLOSE)].strip()
+    try:
+        request = json.loads(encoded)
+    except json.JSONDecodeError as exc:
+        return visible, None, f"invalid structured reactivation JSON: {exc.msg}"
+    if not isinstance(request, dict):
+        return visible, None, "structured reactivation request must be an object"
+    return visible, request, None
 
 
 # ---------------------------------------------------------------------------
@@ -437,6 +494,19 @@ class App:
         self._lock = threading.Lock()
         self._lmstudio_lock = threading.Lock()
         self._status_probe_lock = threading.Lock()
+        self._reactivation_wakeup = threading.Event()
+        for orphaned in self.history.fail_orphaned_reactivations():
+            log_event(
+                "reactivation_failed",
+                conversation_id=orphaned["conversation_id"],
+                reactivation_id=orphaned["id"],
+                error="server restarted while firing",
+            )
+        threading.Thread(
+            target=self._reactivation_supervisor,
+            name="reactivation-timer",
+            daemon=True,
+        ).start()
 
     # ---- authentication + lifecycle ----
     def login(self, password: str) -> dict[str, Any] | None:
@@ -580,8 +650,12 @@ class App:
         for tid in expired:
             self.turns.pop(tid, None)
 
-    def start_streaming_message(self, conv_id: int | None,
-                                prompt: str) -> dict[str, Any]:
+    def start_streaming_message(
+        self,
+        conv_id: int | None,
+        prompt: str,
+        user_meta: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         life = lifecycle.status()
         if life["dead"]:
             return {
@@ -595,7 +669,14 @@ class App:
         if not conv_id:
             conv_id = self.history.create_conversation()
         turn_id = uuid.uuid4().hex
-        state = TurnStream(turn_id, conv_id)
+        state = TurnStream(
+            turn_id,
+            conv_id,
+            str(user_meta.get("reactivation_id")) if user_meta
+            and user_meta.get("reactivation_id") else None,
+            str(user_meta.get("reason")) if user_meta
+            and user_meta.get("reason") else None,
+        )
         with self._lock:
             self._sweep_turns()
             self.turns[turn_id] = state
@@ -608,7 +689,13 @@ class App:
 
         def worker() -> None:
             try:
-                result = self.post_message(conv_id, prompt, emit=emit)
+                result = self.post_message(
+                    conv_id,
+                    prompt,
+                    emit=emit,
+                    user_meta=user_meta,
+                    cancel_event=state.cancel_event,
+                )
                 if state.done_at is None:
                     terminal = "turn_error" if result.get("error") and not result.get("reply") else "turn_done"
                     self._finish_turn(state, result, terminal)
@@ -651,11 +738,31 @@ class App:
             if state is not None:
                 state.attached = False
 
+    def stop_turn(self, turn_id: str) -> dict[str, Any]:
+        with self._lock:
+            state = self.turns.get(turn_id)
+            if state is None:
+                return {"error": "unknown turn"}
+            if state.done_at is not None:
+                return {"error": "turn already finished"}
+            if state.cancel_event.is_set():
+                return {"error": "turn stop already requested"}
+            state.cancel_event.set()
+        log_event(
+            "turn_stopped",
+            conversation_id=state.conversation_id,
+            turn_id=turn_id,
+            reactivation_id=state.reactivation_id,
+        )
+        return {"ok": True, "turn_id": turn_id}
+
     def post_message(
         self,
         conv_id: int | None,
         prompt: str,
         emit: Callable[[str, dict[str, Any]], None] | None = None,
+        user_meta: dict[str, Any] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         def send_event(event: str, payload: dict[str, Any]) -> None:
             if emit is not None:
@@ -676,10 +783,15 @@ class App:
         if not conv_id:
             conv_id = self.history.create_conversation()
         log_event("prompt", conversation_id=conv_id, prompt=prompt)
-        self.history.add_message(conv_id, "user", prompt)
+        self.history.add_message(conv_id, "user", prompt, user_meta)
 
         facts = ", ".join(f"{k}={v}" for k, v in machine_facts().items())
-        system_prompt = render_append_system(facts)
+        reactivation_settings = self.history.reactivation_settings()
+        system_prompt = render_append_system(
+            facts,
+            reactivation_settings["minimum_seconds"],
+            reactivation_settings["maximum_seconds"],
+        )
         summary = self.history.latest_summary(conv_id)
         if summary:
             system_prompt = (
@@ -841,9 +953,10 @@ class App:
                         "error": ("operator_approval_required: this call has "
                                   "been queued for human review; do not retry.")}
 
-            # Auto-approved (read_only): execute now.
+            # Auto-approved by policy (normally read_only or chat_schedule):
+            # execute now.
             try:
-                result = tools_mod.dispatch(name, cleaned)
+                result = self._dispatch_tool(name, cleaned, conv_id)
                 self.history.add_event(conv_id, "tool_observation", {
                     "tool_call_id": call_id, "tool": name,
                     "ok": True, "result": _truncate_obs(result),
@@ -947,6 +1060,7 @@ class App:
                 max_tool_calls=max_calls,
                 timeout=turn_timeout,
                 on_event=on_bridge_event,
+                cancel_event=cancel_event,
             )
         except pi_mono.BridgeError as exc:
             err = str(exc)
@@ -965,18 +1079,439 @@ class App:
 
         send_event("phase", {"phase": "finalising"})
         reply = turn.get("final") or ""
+        reply, reactivation_request, reactivation_error = (
+            _agent_reactivation_request(reply)
+        )
+        if reactivation_request is not None:
+            reactivation_result = self._consume_agent_reactivation(
+                conv_id, reactivation_request
+            )
+            status = str(reactivation_result.get("status") or "rejected")
+            reply = (
+                reply.rstrip()
+                + f"\n\n_Reactivation request: {status.replace('_', ' ')}._"
+            )
+        elif reactivation_error is not None:
+            log_event(
+                "reactivation_rejected",
+                conversation_id=conv_id,
+                reason="invalid_structured_request",
+                error=reactivation_error,
+            )
+            reply = (
+                reply.rstrip()
+                + f"\n\n_Reactivation request rejected: {reactivation_error}._"
+            )
         self.history.add_message(conv_id, "assistant", reply,
                                  {"engine": "pi-mono",
                                   "log_path": turn.get("log_path")})
         payload = {
             "conversation_id": conv_id,
             "reply": reply,
-            "events": self.history.get_events(conv_id),
-            "messages": self.history.get_messages(conv_id),
         }
+        # The live transcript already contains this turn. Avoid serialising
+        # the entire conversation into the terminal SSE frame: large command
+        # histories otherwise leave the browser apparently stuck in the
+        # finalising phase while an unnecessary payload is written.
+        if emit is None:
+            payload["events"] = self.history.get_events(conv_id)
+            payload["messages"] = self.history.get_messages(conv_id)
         send_event("turn_done", payload)
         return payload
 
+    def _consume_agent_reactivation(
+        self, conversation_id: int, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Validate, policy-check, and execute a structured agent request."""
+        tool = "timer.reactivation"
+        call_id = f"reactivation-{uuid.uuid4().hex}"
+        try:
+            cleaned = tools_mod.validate_args(tool, args)
+        except tools_mod.SchemaError as exc:
+            result = {"ok": False, "status": "rejected_schema", "error": str(exc)}
+            decision = "schema_rejected"
+            classification = "unknown"
+        else:
+            policy = load_policy()
+            classification = policy.classify_tool(tool, cleaned)
+            if policy.requires_approval(classification):
+                result = {
+                    "ok": False,
+                    "status": "rejected_policy",
+                    "error": "timer.reactivation requires operator approval",
+                }
+                decision = "approval_required"
+            else:
+                result = self._dispatch_tool(tool, cleaned, conversation_id)
+                decision = "executed" if result.get("ok") else "rejected"
+        self.history.add_event(conversation_id, "tool_call", {
+            "tool_call_id": call_id,
+            "tool": tool,
+            "args": _summarize(args),
+            "classification": classification,
+            "decision": decision,
+        })
+        self.history.add_event(conversation_id, "tool_observation", {
+            "tool_call_id": call_id,
+            "tool": tool,
+            "ok": bool(result.get("ok")),
+            "result": _truncate_obs(result),
+        })
+        log_tool_call(
+            tool=tool,
+            classification=classification,
+            decision=decision,
+            args_summary=_summarize(args),
+            error=str(result.get("error") or "") or None,
+            conversation_id=conversation_id,
+            tool_call_id=call_id,
+        )
+        return result
+
+    def _dispatch_tool(
+        self, name: str, args: dict[str, Any], conversation_id: int
+    ) -> dict[str, Any]:
+        if name == "timer.reactivation":
+            return self.schedule_reactivation(
+                conversation_id=conversation_id,
+                delay_seconds=int(args["delay_seconds"]),
+                prompt=str(args["prompt"]),
+                reason=str(args.get("reason") or "Continue the current task."),
+                replace_existing=bool(args.get("replace_existing", False)),
+            )
+        return tools_mod.dispatch(name, args)
+
+    def schedule_reactivation(
+        self,
+        *,
+        conversation_id: int,
+        delay_seconds: int,
+        prompt: str,
+        reason: str,
+        replace_existing: bool = False,
+    ) -> dict[str, Any]:
+        settings = self.history.reactivation_settings()
+        if not settings["enabled"]:
+            log_event(
+                "reactivation_rejected",
+                conversation_id=conversation_id,
+                reason="disabled",
+            )
+            return {"ok": False, "status": "rejected_disabled"}
+        if not self.history.conversation_exists(conversation_id):
+            return {"ok": False, "status": "rejected_conversation_missing"}
+        if (
+            delay_seconds < settings["minimum_seconds"]
+            or delay_seconds > settings["maximum_seconds"]
+        ):
+            log_event(
+                "reactivation_rejected",
+                conversation_id=conversation_id,
+                reason="delay_out_of_bounds",
+                delay_seconds=delay_seconds,
+            )
+            return {
+                "ok": False,
+                "status": "rejected_policy",
+                "error": (
+                    f"delay_seconds must be between "
+                    f"{settings['minimum_seconds']} and "
+                    f"{settings['maximum_seconds']}"
+                ),
+            }
+        cleaned_prompt = prompt.strip()
+        cleaned_reason = " ".join(reason.strip().split())
+        if not cleaned_prompt or len(cleaned_prompt) > REACTIVATION_PROMPT_MAX_CHARS:
+            return {
+                "ok": False,
+                "status": "rejected_policy",
+                "error": (
+                    "prompt must contain 1 to "
+                    f"{REACTIVATION_PROMPT_MAX_CHARS} characters"
+                ),
+            }
+        if not cleaned_reason:
+            cleaned_reason = "Continue the current task."
+        if len(cleaned_reason) > REACTIVATION_REASON_MAX_CHARS:
+            return {
+                "ok": False,
+                "status": "rejected_policy",
+                "error": (
+                    "reason must contain at most "
+                    f"{REACTIVATION_REASON_MAX_CHARS} characters"
+                ),
+            }
+        life = lifecycle.status()
+        if life["dead"] or delay_seconds >= int(life["remaining_seconds"]):
+            log_event(
+                "reactivation_rejected",
+                conversation_id=conversation_id,
+                reason="ttl",
+                delay_seconds=delay_seconds,
+            )
+            return {
+                "ok": False,
+                "status": "rejected_policy",
+                "error": "reactivation must fire before the remaining TTL expires",
+            }
+        item, replaced = self.history.schedule_reactivation(
+            conversation_id,
+            time.time() + delay_seconds,
+            cleaned_prompt,
+            cleaned_reason,
+            replace_existing=replace_existing,
+        )
+        if item is None:
+            return {
+                "ok": False,
+                "status": "rejected_pending_exists",
+                "pending": self._public_reactivation(replaced),
+            }
+        if replaced is not None:
+            log_event(
+                "reactivation_replaced",
+                conversation_id=conversation_id,
+                reactivation_id=item["id"],
+                replaced_id=replaced["id"],
+                fire_at=item["fire_at"],
+                reason=cleaned_reason,
+                prompt_chars=len(cleaned_prompt),
+            )
+            status = "replaced"
+        else:
+            log_event(
+                "reactivation_scheduled",
+                conversation_id=conversation_id,
+                reactivation_id=item["id"],
+                fire_at=item["fire_at"],
+                reason=cleaned_reason,
+                prompt_chars=len(cleaned_prompt),
+            )
+            status = "accepted"
+        self.history.add_event(
+            conversation_id,
+            "reactivation_scheduled",
+            {
+                "id": item["id"],
+                "fire_at": item["fire_at"],
+                "reason": cleaned_reason,
+                "status": status,
+            },
+        )
+        self._reactivation_wakeup.set()
+        return {
+            "ok": True,
+            "status": status,
+            "reactivation": self._public_reactivation(item),
+        }
+
+    @staticmethod
+    def _public_reactivation(
+        item: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if item is None:
+            return None
+        return {
+            "id": item["id"],
+            "conversation_id": item["conversation_id"],
+            "created_at": item["created_at"],
+            "fire_at": item["fire_at"],
+            "reason": item["reason"],
+            "prompt": item["prompt"],
+            "status": item["status"],
+            "actor": item["actor"],
+        }
+
+    def reactivation_info(self) -> dict[str, Any]:
+        settings = self.history.reactivation_settings()
+        pending = self._public_reactivation(
+            self.history.pending_reactivation()
+        )
+        if pending is not None:
+            pending["remaining_seconds"] = max(
+                0, int(pending["fire_at"] - time.time())
+            )
+        with self._lock:
+            self._sweep_turns()
+            active_turns = [
+                turn for turn in self.turns.values()
+                if turn.reactivation_id is not None and turn.done_at is None
+            ]
+            active_turn = max(
+                active_turns, key=lambda turn: turn.created_at, default=None
+            )
+        active = None
+        if active_turn is not None:
+            active = {
+                "id": active_turn.reactivation_id,
+                "conversation_id": active_turn.conversation_id,
+                "turn_id": active_turn.turn_id,
+                "reason": active_turn.reactivation_reason,
+            }
+        return {"ok": True, **settings, "pending": pending, "active": active}
+
+    def configure_reactivation(
+        self,
+        *,
+        enabled: bool | None = None,
+        minimum_seconds: int | None = None,
+        maximum_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        current = self.history.reactivation_settings()
+        minimum = (
+            current["minimum_seconds"]
+            if minimum_seconds is None else minimum_seconds
+        )
+        maximum = (
+            current["maximum_seconds"]
+            if maximum_seconds is None else maximum_seconds
+        )
+        if minimum < REACTIVATION_HARD_MIN_SECONDS:
+            return {
+                "error": (
+                    f"minimum must be at least "
+                    f"{REACTIVATION_HARD_MIN_SECONDS} seconds"
+                )
+            }
+        if maximum > REACTIVATION_HARD_MAX_SECONDS:
+            return {
+                "error": (
+                    f"maximum must not exceed "
+                    f"{REACTIVATION_HARD_MAX_SECONDS} seconds"
+                )
+            }
+        if minimum > maximum:
+            return {"error": "minimum must not exceed maximum"}
+        settings = self.history.update_reactivation_settings(
+            enabled=enabled,
+            minimum_seconds=minimum_seconds,
+            maximum_seconds=maximum_seconds,
+        )
+        cancelled = None
+        if enabled is False:
+            cancelled = self.cancel_reactivation(actor="operator", reason="disabled")
+        log_event("reactivation_settings_changed", **settings)
+        self._reactivation_wakeup.set()
+        return {"ok": True, **settings, "cancelled": cancelled.get("cancelled")
+                if cancelled else None}
+
+    def cancel_reactivation(
+        self, *, actor: str = "operator", reason: str = "cancelled"
+    ) -> dict[str, Any]:
+        item = self.history.cancel_pending_reactivation(reason)
+        if item is None:
+            return {"ok": True, "cancelled": None}
+        log_event(
+            "reactivation_cancelled",
+            actor=actor,
+            conversation_id=item["conversation_id"],
+            reactivation_id=item["id"],
+            reason=reason,
+        )
+        self.history.add_event(
+            item["conversation_id"],
+            "reactivation_cancelled",
+            {"id": item["id"], "actor": actor, "reason": reason},
+        )
+        self._reactivation_wakeup.set()
+        return {"ok": True, "cancelled": self._public_reactivation(item)}
+
+    def _reactivation_supervisor(self) -> None:
+        while True:
+            try:
+                self._reactivation_daemon()
+            except Exception as exc:  # noqa: BLE001
+                log_event(
+                    "reactivation_daemon_error",
+                    error=f"{exc.__class__.__name__}: {exc}",
+                )
+                self._reactivation_wakeup.wait(1.0)
+                self._reactivation_wakeup.clear()
+
+    def _reactivation_daemon(self) -> None:
+        while True:
+            pending = self.history.pending_reactivation()
+            if pending is None:
+                timeout = 30.0
+            else:
+                timeout = max(0.0, min(30.0, pending["fire_at"] - time.time()))
+            self._reactivation_wakeup.wait(timeout)
+            self._reactivation_wakeup.clear()
+            if pending is not None and pending["fire_at"] <= time.time():
+                with self._lock:
+                    conversation_busy = any(
+                        turn.conversation_id == pending["conversation_id"]
+                        and turn.done_at is None
+                        for turn in self.turns.values()
+                    )
+                if conversation_busy:
+                    self._reactivation_wakeup.wait(1.0)
+                    self._reactivation_wakeup.clear()
+                    continue
+            item = self.history.claim_due_reactivation(time.time())
+            if item is None:
+                continue
+            if not self.history.reactivation_settings()["enabled"]:
+                self.history.finish_reactivation(
+                    item["id"], "cancelled", "disabled"
+                )
+                log_event(
+                    "reactivation_cancelled",
+                    actor="system",
+                    conversation_id=item["conversation_id"],
+                    reactivation_id=item["id"],
+                    reason="disabled",
+                )
+                continue
+            life = lifecycle.status()
+            if life["dead"] or not self.history.conversation_exists(
+                item["conversation_id"]
+            ):
+                error = "TTL expired" if life["dead"] else "conversation missing"
+                self.history.finish_reactivation(item["id"], "failed", error)
+                log_event(
+                    "reactivation_failed",
+                    conversation_id=item["conversation_id"],
+                    reactivation_id=item["id"],
+                    error=error,
+                )
+                continue
+            result = self.start_streaming_message(
+                item["conversation_id"],
+                item["prompt"],
+                user_meta={
+                    "auto_reactivation": True,
+                    "reactivation_id": item["id"],
+                    "reason": item["reason"],
+                },
+            )
+            if result.get("error"):
+                error = str(result["error"])
+                self.history.finish_reactivation(item["id"], "failed", error)
+                log_event(
+                    "reactivation_failed",
+                    conversation_id=item["conversation_id"],
+                    reactivation_id=item["id"],
+                    error=error,
+                )
+                continue
+            self.history.finish_reactivation(item["id"], "fired")
+            self.history.add_event(
+                item["conversation_id"],
+                "reactivation_fired",
+                {
+                    "id": item["id"],
+                    "fire_at": item["fire_at"],
+                    "reason": item["reason"],
+                    "turn_id": result["turn_id"],
+                },
+            )
+            log_event(
+                "reactivation_fired",
+                conversation_id=item["conversation_id"],
+                reactivation_id=item["id"],
+                turn_id=result["turn_id"],
+            )
     def approve(self, tool_call_id: str, decision: str,
                 phrase: str | None = None) -> dict[str, Any]:
         with self._lock:
@@ -1032,7 +1567,7 @@ class App:
         if pop_pending() is None:
             return {"error": "Unknown or already-handled tool call."}
         try:
-            result = tools_mod.dispatch(tool, args)
+            result = self._dispatch_tool(tool, args, conv_id)
             self.history.add_event(conv_id, "tool_observation", {
                 "tool_call_id": call_id, "tool": tool,
                 "ok": True, "result": _truncate_obs(result),
@@ -1750,6 +2285,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/ttl":
             self._send_json(self.app.ttl_status())
             return
+        if self.path == "/api/reactivation":
+            self._send_json(self.app.reactivation_info())
+            return
         if self.path == "/api/health":
             self._send_json({
                 "ok": True,
@@ -1857,6 +2395,48 @@ class Handler(BaseHTTPRequestHandler):
             )
             self._send_json(result, 410 if result.get("dead") and
                             result.get("error") else 200)
+            return
+        if self.path == "/api/reactivation":
+            data = self._read_json()
+            if data.get("cancel") is True:
+                self._send_json(self.app.cancel_reactivation())
+                return
+            enabled = data.get("enabled")
+            if enabled is not None and not isinstance(enabled, bool):
+                self._send_json({"error": "enabled must be true or false"}, 400)
+                return
+
+            def optional_seconds(name: str) -> int | None:
+                value = data.get(name)
+                if value is None:
+                    return None
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ValueError(f"{name} must be an integer")
+                return value
+
+            try:
+                minimum = optional_seconds("minimum_seconds")
+                maximum = optional_seconds("maximum_seconds")
+                if data.get("minimum") is not None:
+                    minimum = int(lifecycle.parse_duration(str(data["minimum"])))
+                if data.get("maximum") is not None:
+                    maximum = int(lifecycle.parse_duration(str(data["maximum"])))
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, 400)
+                return
+            result = self.app.configure_reactivation(
+                enabled=enabled,
+                minimum_seconds=minimum,
+                maximum_seconds=maximum,
+            )
+            self._send_json(result, 400 if result.get("error") else 200)
+            return
+        if len(parts) == 4 and parts[:2] == ["api", "turn"] and parts[3] == "stop":
+            result = self.app.stop_turn(parts[2])
+            status = 404 if result.get("error") == "unknown turn" else (
+                409 if result.get("error") else 200
+            )
+            self._send_json(result, status)
             return
         if self.path == "/api/password":
             data = self._read_json()

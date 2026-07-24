@@ -59,7 +59,8 @@
   header .header-actions { justify-self: center; }
   main { flex: 1; overflow-y: auto; padding: 1rem; max-width: 60rem;
          width: 100%; margin: 0 auto; }
-  body.fullwidth main, body.fullwidth .composer { max-width: none; }
+  body.fullwidth main, body.fullwidth .composer,
+  body.fullwidth .reactivation-banner { max-width: none; }
   .welcome { margin: clamp(1rem, 8vh, 5rem) auto 2rem; text-align: center;
              max-width: 44rem; }
   .welcome[hidden] { display: none; }
@@ -105,7 +106,12 @@
   .live-activity .act { display: flex; align-items: center; flex-wrap: wrap;
     gap: .45rem; }
   .live-activity .act .icon { width: 1rem; text-align: center; flex: none; }
-  .live-activity .act details { flex-basis: 100%; margin-left: 1.45rem; }
+  .live-activity .act details { margin-left: auto; flex: none;
+    text-align: right; }
+  .live-activity .act details summary { cursor: pointer;
+    color: var(--text-muted); list-style-position: outside; }
+  .live-activity .act details[open] { flex-basis: 100%; margin-left: 1.45rem;
+    text-align: left; }
   .live-activity .act details pre { margin-top: .35rem; white-space: pre-wrap; }
   .live-activity .act.done { opacity: .75; }
   .live-activity .act.done .icon { color: #2ecc71; }
@@ -172,6 +178,15 @@
                          box-shadow: 0 0 0 1px #e74c3c55, 0 8px 40px #0008; }
   .overlay.tomb h2 { color: #e74c3c; }
   .composer { max-width: 60rem; margin: 0 auto; }
+  .reactivation-banner { max-width: 60rem; margin: 0 auto .65rem;
+                         padding: .65rem .8rem; border: 1px solid #ac43d9;
+                         border-radius: .65rem; background: #ac43d915;
+                         display: flex; gap: .75rem; align-items: center;
+                         justify-content: space-between; }
+  .reactivation-banner[hidden] { display: none; }
+  .reactivation-banner strong { color: #ac43d9; }
+  .reactivation-banner .detail { color: var(--text-muted); font-size: .82rem; }
+  .reactivation-actions { display: flex; gap: .5rem; }
   .composer form { display: flex; gap: .5rem; align-items: end; }
   .prompt-wrap { position: relative; flex: 1; min-width: 0; }
   .prompt-wrap textarea { width: 100%; display: block; }
@@ -227,10 +242,11 @@
   .md a { color: #4a90e2; }
   .md blockquote { margin: .5rem 0; padding: .2rem .8rem;
                    border-left: 3px solid #8886; opacity: .85; }
-  .md .table-wrap { margin: .75rem 0; overflow-x: auto;
+  .md .table-wrap { width: fit-content; max-width: 100%; margin: .75rem 0;
+                    overflow-x: auto;
                     border: 1px solid var(--border); border-radius: .55rem;
                     background: var(--surface); box-shadow: 0 1px 2px #0001; }
-  .md table { width: 100%; min-width: max-content; border-collapse: collapse;
+  .md table { width: max-content; border-collapse: collapse;
               font-size: .9rem; line-height: 1.4; }
   .md th, .md td { padding: .65rem .8rem; text-align: left;
                    vertical-align: top; border-right: 1px solid var(--border); }
@@ -241,6 +257,8 @@
   .md tbody tr:nth-child(even) { background: var(--surface-raised); }
   .md .align-center { text-align: center; }
   .md .align-right { text-align: right; }
+  .md .math { font-family: "STIX Two Math", "Cambria Math", serif;
+              white-space: nowrap; }
   .result { margin-top: .5rem; }
   .result pre { background: #0003; padding: .4rem .6rem;
                 border-radius: .3rem; max-height: 16rem; overflow: auto;
@@ -313,6 +331,18 @@
 </main>
 <pre id="examples" hidden>{{EXAMPLES}}</pre>
 <footer>
+  <div id="reactivation-banner" class="reactivation-banner" role="status"
+       aria-live="polite" hidden>
+    <div>
+      <strong id="reactivation-title">Reactivation queued</strong>
+      <div id="reactivation-detail" class="detail"></div>
+    </div>
+    <div class="reactivation-actions">
+      <button type="button" id="pause-reactivation" hidden>Pause</button>
+      <button type="button" id="stop-reactivation" class="danger" hidden>Stop</button>
+      <button type="button" id="cancel-reactivation" class="danger">Cancel</button>
+    </div>
+  </div>
   <div class="composer">
     <form id="form">
       <label for="prompt" class="sr-only">Message the systems administrator</label>
@@ -376,6 +406,12 @@ const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
 const logoutBtn = document.getElementById("logout");
 const statusEl = document.getElementById("status");
+const reactivationBanner = document.getElementById("reactivation-banner");
+const reactivationTitle = document.getElementById("reactivation-title");
+const reactivationDetail = document.getElementById("reactivation-detail");
+const cancelReactivationBtn = document.getElementById("cancel-reactivation");
+const pauseReactivationBtn = document.getElementById("pause-reactivation");
+const stopReactivationBtn = document.getElementById("stop-reactivation");
 const welcomeEl = document.getElementById("welcome");
 const commandMenu = document.getElementById("command-menu");
 let visibleMessages = [];
@@ -383,6 +419,13 @@ let authRequired = false;
 let chatDisabled = false;
 let fullWidthMode = false;
 let brandTitle = "Ubuntu Zombie";
+let activeReactivation = null;
+let pendingReactivation = null;
+// turn_id of the fired reactivation continuation currently being streamed
+// live into the transcript, so the poller never attaches to it twice.
+let reactivationLiveTurnId = null;
+let reactivationStreamPaused = false;
+const REACTIVATION_REQUEST_MARKER = "<ubuntu-zombie-reactivation>";
 
 // In-flight turn state. ``turnController`` lets the operator (or a
 // client-side timeout) abort a request that the server is taking too
@@ -424,6 +467,14 @@ const COMMAND_MENU_BLUR_DELAY_MS = 100;
 // deliberately not restored from storage, so a reload returns the UI
 // to its quiet default.
 let verboseMode = false;
+// API request lines fire so often (polling, streaming attach) that they
+// pollute the transcript; they are opt-in inside verbose via
+// ``/verbose api`` and are only recorded while that display is enabled,
+// so background polling never grows the DOM unbounded.
+let verboseApi = false;
+// ``/verbose none`` suppresses every trace of tool information,
+// including tool names in the status line.
+let verboseSuppressAll = false;
 
 function newStatBucket() {
   return { startedAt: Date.now(),
@@ -512,6 +563,20 @@ function appendVerboseActivity(text) {
   return line;
 }
 
+// API call lines are only recorded while ``/verbose api`` display is
+// active: appending a hidden line for every poll would grow the DOM
+// without bound and pollute the UX once verbose turns on.
+function appendVerboseApiActivity(text) {
+  if (!verboseMode || !verboseApi) return null;
+  const line = el("div", {
+    class: "muted verbose-api-activity",
+    text,
+  });
+  log.appendChild(line);
+  scrollLog();
+  return line;
+}
+
 // Route every API call through one wrapper so verbose accounting sees
 // each request exactly once. The response size comes from the
 // Content-Length header the local server always sets on JSON replies.
@@ -530,13 +595,13 @@ window.fetch = async (input, init) => {
     const r = await uzNativeFetch(input, init);
     const len = Number(r.headers.get("content-length") || "");
     tallyStat("bytesIn", len);
-    appendVerboseActivity(
+    appendVerboseApiActivity(
       `API ${method} ${target} — HTTP ${r.status} · ` +
       `${Math.round(performance.now() - startedAt)} ms · ${formatBytes(len)} received`
     );
     return r;
   } catch (err) {
-    appendVerboseActivity(
+    appendVerboseApiActivity(
       `API ${method} ${target} — failed after ` +
       `${Math.round(performance.now() - startedAt)} ms · ${String(err)}`
     );
@@ -565,7 +630,7 @@ function addMessage(role, content, opts = {}) {
   const wrap = el("div", attrs);
   const head = el("div", { class: "msg-head" });
   head.appendChild(el("div", { class: "role",
-    text: opts.error ? "error" : role }));
+    text: opts.error ? "error" : (opts.label || role) }));
   if (role === "assistant" && content && !opts.error) {
     const copy = el("button", {
       type: "button", class: "icon-button", text: "Copy",
@@ -637,6 +702,35 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
+const MATH_SYMBOLS = Object.freeze({
+  leftarrow: "\u2190", uparrow: "\u2191", rightarrow: "\u2192",
+  downarrow: "\u2193", leftrightarrow: "\u2194", Leftarrow: "\u21d0",
+  Uparrow: "\u21d1", Rightarrow: "\u21d2", Downarrow: "\u21d3",
+  Leftrightarrow: "\u21d4", mapsto: "\u21a6", to: "\u2192",
+  alpha: "\u03b1", beta: "\u03b2", gamma: "\u03b3", delta: "\u03b4",
+  epsilon: "\u03b5", theta: "\u03b8", lambda: "\u03bb", mu: "\u03bc",
+  pi: "\u03c0", rho: "\u03c1", sigma: "\u03c3", phi: "\u03c6",
+  omega: "\u03c9", Gamma: "\u0393", Delta: "\u0394", Theta: "\u0398",
+  Lambda: "\u039b", Pi: "\u03a0", Sigma: "\u03a3", Phi: "\u03a6",
+  Omega: "\u03a9", times: "\u00d7", div: "\u00f7", pm: "\u00b1",
+  cdot: "\u22c5", le: "\u2264", leq: "\u2264", ge: "\u2265",
+  geq: "\u2265", ne: "\u2260", neq: "\u2260", approx: "\u2248",
+  in: "\u2208", notin: "\u2209", subset: "\u2282", subseteq: "\u2286",
+  supset: "\u2283", supseteq: "\u2287", cup: "\u222a", cap: "\u2229",
+  forall: "\u2200", exists: "\u2203", emptyset: "\u2205",
+  infinity: "\u221e", infty: "\u221e", partial: "\u2202",
+  nabla: "\u2207", sum: "\u2211", prod: "\u220f", int: "\u222b",
+  sqrt: "\u221a", therefore: "\u2234", because: "\u2235"
+});
+
+function renderMath(escaped) {
+  return escaped.replace(/\\([A-Za-z]+)|\\([{}_$%#&])/g,
+    (match, command, literal) =>
+      literal || Object.prototype.hasOwnProperty.call(MATH_SYMBOLS, command)
+        ? (literal || MATH_SYMBOLS[command])
+        : match);
+}
+
 function renderInline(escaped) {
   // ``escaped`` is already HTML-escaped. Protect inline code spans from
   // further substitution by stashing them behind placeholders.
@@ -644,6 +738,13 @@ function renderInline(escaped) {
   let out = escaped.replace(/`([^`]+)`/g, (_m, c) => {
     codes.push(c);
     return `\u0000CODE${codes.length - 1}\u0000`;
+  });
+  // Render dependency-free LaTeX-style symbols in dollar-delimited math.
+  // Requiring a backslash command avoids treating ordinary currency as math.
+  const maths = [];
+  out = out.replace(/\$([^$\n]*\\[A-Za-z]+[^$\n]*)\$/g, (_m, body) => {
+    maths.push(`<span class="math" role="math">${renderMath(body)}</span>`);
+    return `\u0000MATH${maths.length - 1}\u0000`;
   });
   // Links: only http(s); the URL was escaped above so quotes are safe.
   // Stash rendered links behind placeholders too, so the emphasis
@@ -661,6 +762,7 @@ function renderInline(escaped) {
   out = out.replace(/(^|[^*])\*([^*\s](?:[^*]*[^*\s])?)\*/g, "$1<em>$2</em>");
   out = out.replace(/(^|[^_\w])_([^_\s](?:[^_]*[^_\s])?)_/g, "$1<em>$2</em>");
   out = out.replace(/\u0000LINK(\d+)\u0000/g, (_m, i) => links[Number(i)]);
+  out = out.replace(/\u0000MATH(\d+)\u0000/g, (_m, i) => maths[Number(i)]);
   out = out.replace(/\u0000CODE(\d+)\u0000/g,
     (_m, i) => `<code>${codes[Number(i)]}</code>`);
   return out;
@@ -836,6 +938,9 @@ function abortTurn(reason) {
       liveTurnCleanup("Stopped — the agent may still finish in the background.");
     }
   }
+  // A stopped stream must release the reactivation attach guard so a later
+  // fired continuation can be streamed live again.
+  reactivationLiveTurnId = null;
   // Reset uniformly for both the streaming and the sync fallback path,
   // and keep the abort reason visible even though the sync path's
   // `finally` calls setBusy(false) after this runs.
@@ -905,6 +1010,70 @@ function summarizeArgs(args) {
   catch (_e) { return String(args); }
 }
 
+function toolArgumentPayload(p) {
+  // Live bridge frames carry the audit-safe ``args_summary`` field;
+  // stored history keeps the same summary under ``args``.
+  return p.args_summary ?? p.args;
+}
+
+function serializedToolArguments(args, pretty = false) {
+  if (args === null || args === undefined || args === "") return "";
+  if (typeof args === "string") return args;
+  if (typeof args !== "object") return String(args);
+  try { return JSON.stringify(args, null, pretty ? 2 : 0); }
+  catch (_e) { return String(args); }
+}
+
+function formatToolArguments(args) {
+  if (args === null || args === undefined || args === "") return "";
+  if (typeof args === "string") return args;
+  if (typeof args !== "object") return String(args);
+  // ``command`` is the operator-facing payload for shell-style tools;
+  // other keys stay JSON-formatted metadata below it.
+  const command = typeof args.command === "string" ? args.command : "";
+  const rest = {};
+  for (const [key, value] of Object.entries(args)) {
+    if (key !== "command") rest[key] = value;
+  }
+  let restText = "";
+  if (Object.keys(rest).length) {
+    restText = serializedToolArguments(rest, true);
+  }
+  if (command && restText) return `${command}\n${restText}`;
+  if (command) return command;
+  return serializedToolArguments(args, true);
+}
+
+function toolArgumentBytes(args) {
+  return byteLength(serializedToolArguments(args));
+}
+
+// The first few words of the arguments, shown inline on the tool line
+// so the operator can tell calls apart without opening the inspector.
+function toolArgumentPreview(args, maxWords = 6, maxChars = 48) {
+  const text = formatToolArguments(args).replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  let preview = text.split(" ").slice(0, maxWords).join(" ");
+  if (preview.length > maxChars) preview = preview.slice(0, maxChars);
+  return preview + (preview.length < text.length ? "…" : "");
+}
+
+function formatToolDoneNote(tool, status, bits, preview = "") {
+  return `${tool}` + (preview ? ` · ${preview}` : "") + ` · ${status}` +
+    (bits.length ? ` · ${bits.join(" · ")}` : "");
+}
+
+function buildToolMetricParts(payload, inputBytes = 0, outputBytes = null) {
+  const metricParts = [];
+  if (payload.exit_code != null) {
+    metricParts.push(`exit ${payload.exit_code}`);
+  }
+  if (typeof payload.duration_ms === "number") metricParts.push(`${payload.duration_ms} ms`);
+  if (inputBytes > 0) metricParts.push(`${formatBytes(inputBytes)} in`);
+  if (outputBytes !== null) metricParts.push(`${formatBytes(outputBytes)} out`);
+  return metricParts;
+}
+
 function renderToolCall(p) {
   const wrap = el("div", {
     class: `proposal verbose-tool-activity ${p.classification || "tool"}`
@@ -912,7 +1081,7 @@ function renderToolCall(p) {
   wrap.hidden = !verboseMode;
   wrap.appendChild(el("div", { class: "class",
     text: `${p.tool} · ${p.classification || "?"} · ${p.decision || "?"}` }));
-  const args = summarizeArgs(p.args);
+  const args = formatToolArguments(toolArgumentPayload(p));
   if (args) wrap.appendChild(el("code", { text: args }));
   if (p.error) wrap.appendChild(el("div", { class: "system error", text: p.error }));
   return wrap;
@@ -1024,12 +1193,21 @@ function renderSkillActive(p) {
   return wrap;
 }
 
+function renderReactivationFiredEvent(p) {
+  const detail = p.reason ? ` — ${p.reason}` : "";
+  return el("div", {
+    class: "system",
+    text: `Reactivation started${detail}.`,
+  });
+}
+
 function renderEvent(ev) {
   const p = ev.payload || {};
   if (ev.kind === "tool_call") return renderToolCall(p);
   if (ev.kind === "tool_observation") return renderToolObservation(p);
   if (ev.kind === "pending_tool_call") return renderPendingToolCall(p);
   if (ev.kind === "skill_active") return renderSkillActive(p);
+  if (ev.kind === "reactivation_fired") return renderReactivationFiredEvent(p);
   return null;
 }
 
@@ -1056,7 +1234,7 @@ const SLASH_COMMANDS = [
   ["/fullwidth [on|off]", "Toggle full-width chat display.", "Configuration"],
   ["/health", "Show basic machine facts.", "Diagnostics"],
   ["/help [command]", "List commands or explain one command.", "Help"],
-  ["/load <id>", "Load a past conversation (alias: /resume <id>).", "Conversation"],
+  ["/load <id...>|last", "Load one, several, or the latest conversation (alias: /resume).", "Conversation"],
   ["/logout", "Log out and ask for the chat password again.", "Session"],
   ["/local [url]", "List or switch the active local API.", "Configuration"],
   ["/locals", "List discovered local API URLs.", "Configuration"],
@@ -1066,7 +1244,9 @@ const SLASH_COMMANDS = [
   ["/password [new password]", "Set or remove the chat password after confirmation.", "Session"],
   ["/policy", "Show policy classes and rule counts.", "Configuration"],
   ["/profile", "Show the active local profile.", "Configuration"],
+  ["/purpose", "Show the starter purpose buttons inline in this chat.", "Help"],
   ["/redraw", "Reload the current conversation from SQLite.", "Conversation"],
+  ["/reactivation [on|off|cancel|minimum <duration>|maximum <duration>]", "Show or configure agent reactivation (alias: /reactivate).", "Session"],
   ["/rebrand [title]", "Rebrand this browser's Ubuntu Zombie UI; omit title to reset.", "Configuration"],
   ["/reprompt [placeholder]", "Replace this browser's prompt placeholder; omit text to reset.", "Configuration"],
   ["/retry", "Retry the last user turn in a new branch.", "Conversation"],
@@ -1078,7 +1258,7 @@ const SLASH_COMMANDS = [
   ["/tools", "List the closed tool registry.", "Tools"],
   ["/ttl [duration|reset [duration]|--die]", "Show, extend, reset, or trip the Time to Live.", "Session"],
   ["/undo [n]", "Rewind n user turns in a new branch.", "Conversation"],
-  ["/verbose [on|off]", "Toggle background-activity detail: API calls, tool calls, bytes moved. Off by default; resets on reload.", "Diagnostics"],
+  ["/verbose [on|off|none|api]", "Toggle background-activity detail: tool calls, bytes moved. \"api\" toggles API-call display; \"none\" also suppresses tool info in statuses. Off by default; resets on reload.", "Diagnostics"],
   ["/version", "Show Ubuntu Zombie and bridge versions.", "Diagnostics"],
   ["/whoami", "Show the active agent identity.", "Configuration"]
 ];
@@ -1099,7 +1279,7 @@ const COMMAND_DETAILS = {
   "/fullwidth": "Toggles or explicitly sets full-width chat layout for this page.",
   "/health": "Shows basic local system details without contacting the provider.",
   "/help": "Shows command help by category or detailed help for one command.",
-  "/load": "Loads and activates a stored conversation by id. Alias: /resume.",
+  "/load": "Loads stored conversations: one id, several ids shown in order with the last made active, or last for the newest. Alias: /resume.",
   "/logout": "Ends the current browser session and returns to the login prompt.",
   "/local": "Discovers local OpenAI-compatible APIs or activates a selected server.",
   "/locals": "Scans the local network for supported OpenAI-compatible model servers.",
@@ -1109,7 +1289,9 @@ const COMMAND_DETAILS = {
   "/password": "Sets, changes, or removes the chat password and invalidates existing sessions.",
   "/policy": "Shows tool policies, approvals, mappings, rule counts, and safety budgets.",
   "/profile": "Shows the active agent profile and loaded instruction metadata.",
+  "/purpose": "Shows the starter purpose buttons inline so more prompts can be picked in the same conversation.",
   "/redraw": "Reloads the active conversation and tool events from local storage.",
+  "/reactivation": "Shows the single upcoming agent continuation, enables or disables scheduling, cancels it, or configures bounded minimum and maximum delays. Alias: /reactivate.",
   "/rebrand": "Changes this browser's interface branding or resets it to Ubuntu Zombie.",
   "/reprompt": "Changes the prompt placeholder for this browser or resets it to the default.",
   "/retry": "Branches before the latest user turn and submits that prompt again.",
@@ -1121,7 +1303,7 @@ const COMMAND_DETAILS = {
   "/tools": "Lists registered tools, descriptions, and policy classifications.",
   "/ttl": "Shows or changes the Time to Live kill switch.",
   "/undo": "Creates a preserved branch rewound by one or more user turns.",
-  "/verbose": "Toggles detailed API, streaming, tool, byte, and timing activity; statistics start when verbose mode is enabled.",
+  "/verbose": "Toggles detailed streaming, tool, byte, and timing activity; statistics start when verbose mode is enabled. \"/verbose api\" toggles API-call display within verbose; \"/verbose none\" suppresses all tool information, including in statuses.",
   "/version": "Shows installed component versions and checks for newer releases.",
   "/whoami": "Shows the local agent identity, host, provider, model, and instructions."
 };
@@ -1131,6 +1313,7 @@ const COMMAND_ALIASES = {
   "/history": "/conversations",
   "/quit": "/logout",
   "/reset": "/new",
+  "/reactivate": "/reactivation",
   "/resume": "/load",
   "/save": "/export",
   "/sessions": "/conversations"
@@ -1159,7 +1342,12 @@ function renderConversation(messages, events) {
       // would paint a blank bubble — an empty line in the transcript —
       // so skip it entirely.
       if (!m.content || !String(m.content).trim()) continue;
-      items.push({ at: m.created_at, seq: seq++, node: () => addMessage(m.role, m.content) });
+      const auto = m.role === "user" && m.meta && m.meta.auto_reactivation;
+      items.push({ at: m.created_at, seq: seq++, node: () =>
+        addMessage(m.role, m.content, {
+          label: auto ? "queued by reactivation timer" : undefined,
+        })
+      });
     }
   }
   for (const ev of events || []) {
@@ -1247,6 +1435,175 @@ async function uzPostJson(path, body = {}) {
   if (!r.ok || data.error) throw new Error(data.error || `${path} -> HTTP ${r.status}`);
   return data;
 }
+
+function uzFormatSeconds(value) {
+  const seconds = Math.max(0, Number(value) || 0);
+  if (seconds < 60) return `${Math.ceil(seconds)}s`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
+  return `${Math.ceil(seconds / 3600)}h`;
+}
+
+function visibleReactivationReply(markdown) {
+  const marker = REACTIVATION_REQUEST_MARKER;
+  const markerAt = markdown.indexOf(marker);
+  if (markerAt >= 0) return markdown.slice(0, markerAt).replace(/\s+$/, "");
+  const limit = Math.min(markdown.length, marker.length - 1);
+  for (let suffixLength = limit; suffixLength > 0; suffixLength--) {
+    if (marker.startsWith(markdown.slice(-suffixLength))) {
+      return markdown.slice(0, -suffixLength).replace(/\s+$/, "");
+    }
+  }
+  return markdown;
+}
+
+// Stream a fired reactivation continuation live into the transcript. The
+// daemon already started the turn server-side; here the browser syncs the
+// conversation (so the synthetic queued-user bubble and prior history are
+// present) and then attaches to the running turn's SSE stream, reusing the
+// same live renderer as operator sends so tools and tokens appear in real
+// time instead of only after the turn finishes.
+async function uzStreamReactivationTurn(active) {
+  // Already streaming this continuation, or another turn currently owns the
+  // live stream: leave it running rather than attaching twice.
+  if (reactivationLiveTurnId === active.turn_id) return;
+  if (activeEventSource) return;
+  reactivationLiveTurnId = active.turn_id;
+  reactivationStreamPaused = false;
+  try {
+    await uzLoadConversation(active.conversation_id,
+      `Reactivation started for conversation #${active.conversation_id}.`);
+  } catch (_err) {
+    // A reload failure must not stop us from attaching to the live turn.
+  }
+  setBusy(true);
+  uzStreamLiveTurn(active.turn_id, {
+    finalize: () => {
+      reactivationLiveTurnId = null;
+      reactivationStreamPaused = false;
+      // Clear the tracked active turn so the completion branch does not
+      // reload and discard the freshly streamed transcript.
+      activeReactivation = null;
+      setBusy(false);
+      // A continuation may already be queued; surface it (and stream the
+      // next fired turn) without waiting for the slow poll interval.
+      void refreshReactivation();
+    },
+  });
+}
+
+async function uzResumeReactivationStream() {
+  if (activeReactivation) await uzStreamReactivationTurn(activeReactivation);
+}
+
+async function refreshReactivation() {
+  try {
+    const data = await uzFetchJson("/api/reactivation");
+    const pending = data.pending;
+    const active = data.active;
+    if (active) {
+      reactivationTitle.textContent = "Reactivation processing";
+      reactivationDetail.textContent = active.reason || "Scheduled continuation";
+      cancelReactivationBtn.hidden = true;
+      pauseReactivationBtn.hidden = false;
+      pauseReactivationBtn.textContent = reactivationStreamPaused ? "Resume" : "Pause";
+      stopReactivationBtn.hidden = false;
+      reactivationBanner.hidden = false;
+      if (active.turn_id !== activeReactivation?.turn_id) {
+        activeReactivation = active;
+        pendingReactivation = null;
+        if (Number(active.conversation_id) === Number(conversationId)) {
+          await uzStreamReactivationTurn(active);
+        }
+      }
+      return data;
+    }
+    if (activeReactivation) {
+      const completed = activeReactivation;
+      activeReactivation = null;
+      if (Number(completed.conversation_id) === Number(conversationId)) {
+        await uzLoadConversation(completed.conversation_id,
+          "Reactivation finished.");
+      }
+    } else if (!pending && pendingReactivation) {
+      const completed = pendingReactivation;
+      pendingReactivation = null;
+      if (Number(completed.conversation_id) === Number(conversationId)) {
+        await uzLoadConversation(completed.conversation_id,
+          "Reactivation finished.");
+      }
+    }
+    if (!pending) {
+      reactivationBanner.hidden = true;
+      reactivationDetail.textContent = "";
+      pauseReactivationBtn.hidden = true;
+      stopReactivationBtn.hidden = true;
+      return data;
+    }
+    reactivationTitle.textContent = "Reactivation queued";
+    pendingReactivation = pending;
+    const when = new Date(Number(pending.fire_at) * 1000);
+    const preview = String(pending.prompt || "").replace(/\s+/g, " ").slice(0, 100);
+    reactivationDetail.textContent =
+      `${pending.reason} · ${when.toLocaleString()} ` +
+      `(${uzFormatSeconds(pending.remaining_seconds)}) · ${preview}`;
+    cancelReactivationBtn.hidden = false;
+    pauseReactivationBtn.hidden = true;
+    stopReactivationBtn.hidden = true;
+    reactivationBanner.hidden = false;
+    return data;
+  } catch (_err) {
+    reactivationBanner.hidden = true;
+    return null;
+  }
+}
+
+cancelReactivationBtn.addEventListener("click", async () => {
+  cancelReactivationBtn.disabled = true;
+  try {
+    const data = await uzPostJson("/api/reactivation", { cancel: true });
+    reactivationBanner.hidden = true;
+    if (data.cancelled) addMessage("system", "Upcoming reactivation cancelled.");
+  } catch (err) {
+    addMessage("system", String(err), { error: true });
+  } finally {
+    cancelReactivationBtn.disabled = false;
+    await refreshReactivation();
+  }
+});
+
+pauseReactivationBtn.addEventListener("click", async () => {
+  if (!activeReactivation) return;
+  if (reactivationStreamPaused) {
+    await uzResumeReactivationStream();
+    return;
+  }
+  reactivationStreamPaused = true;
+  pauseReactivationBtn.textContent = "Resume";
+  if (activeEventSource) {
+    activeEventSource.close();
+    activeEventSource = null;
+  }
+  if (liveTurnCleanup) {
+    liveTurnCleanup("Paused — reactivation continues in the background.");
+  }
+  reactivationLiveTurnId = null;
+  setBusy(false);
+});
+
+stopReactivationBtn.addEventListener("click", async () => {
+  if (!activeReactivation) return;
+  stopReactivationBtn.disabled = true;
+  try {
+    await uzPostJson(
+      `/api/turn/${encodeURIComponent(activeReactivation.turn_id)}/stop`, {});
+    abortTurn("Reactivation stopped.");
+  } catch (err) {
+    addMessage("system", String(err), { error: true });
+  } finally {
+    stopReactivationBtn.disabled = false;
+    await refreshReactivation();
+  }
+});
 
 function uzCommandEntries(filter = "") {
   const needle = filter.trim().toLowerCase();
@@ -1680,47 +2037,12 @@ async function uzSendPromptSync(prompt, convId = conversationId) {
   }
 }
 
-async function uzSendPrompt(prompt, convId = conversationId) {
-  if (!window.EventSource) return uzSendPromptSync(prompt, convId);
-  netStats.turn = newStatBucket();
-  addMessage("user", prompt);
-  scrollLogToBottom();
-  setBusy(true);
-  thinkingEl = showThinking();
-  turnController = new AbortController();
+// Render one already-started turn live into the transcript: a compact
+// tool-activity feed plus the streamed reply text, driven entirely by the
+// turn's SSE stream. Shared by operator sends and fired reactivation
+// continuations so both surface tools and tokens as they happen.
+function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} } = {}) {
   let completed = false;
-  const armTimeout = () => {
-    if (turnTimeoutId !== null) clearTimeout(turnTimeoutId);
-    turnTimeoutId = setTimeout(
-      () => abortTurn(`No response after ${Math.round(CLIENT_TURN_TIMEOUT_MS / 1000)}s - giving up.`),
-      CLIENT_TURN_TIMEOUT_MS);
-  };
-  armTimeout();
-  try {
-    const r = await fetch("/api/message", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, conversation_id: convId, stream: true }),
-      signal: turnController.signal,
-    });
-    const data = await r.json().catch(() => ({}));
-    if (r.status === 401) {
-      clearThinking();
-      setAuthState(true, false);
-      showLogin(true);
-      return data;
-    }
-    if (r.status === 410 || data.dead) {
-      clearThinking();
-      showTombstone(data);
-      return data;
-    }
-    if (!r.ok || data.error || !data.turn_id) {
-      clearThinking();
-      return applyTurnPayload(data);
-    }
-    conversationId = data.conversation_id ?? conversationId;
-    clearThinking();
     // Live turn bubble: a compact activity feed (tool lines updated in
     // place), the streamed reply text (thinking dots until the first
     // token arrives) and a status row with a spinner plus an elapsed
@@ -1760,19 +2082,25 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     // ``track: false`` renders a line without registering it in the
     // per-tool stack — used when a tool_end has no matching tool_start,
     // so the orphan line cannot swallow a later result for the tool.
-    const startToolLine = (key, note, detail, track = true) => {
+    const startToolLine = (key, note, detail, track = true, inputBytes = 0,
+                           preview = "") => {
       const line = el("div", { class: "act running verbose-tool-activity" });
       line.hidden = !verboseMode;
       line.appendChild(el("span", { class: "icon", text: "⏳" }));
       const label = el("span", { text: note });
       line.appendChild(label);
       const inspector = el("details", {});
-      inspector.appendChild(el("summary", { text: "Inspect tool call" }));
+      // The disclosure arrow at the end of the line is the whole
+      // affordance; assistive tech still hears "Inspect tool call".
+      inspector.appendChild(el("summary", {
+        text: "", title: "Inspect tool call",
+        "aria-label": "Inspect tool call",
+      }));
       const detailBody = el("pre", { text: detail });
       inspector.appendChild(detailBody);
       line.appendChild(inspector);
       activity.appendChild(line);
-      const record = { line, label, detailBody };
+      const record = { line, label, detailBody, inputBytes, preview };
       if (track) {
         const stack = toolLineStacks.get(key) || [];
         stack.push(record);
@@ -1781,7 +2109,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       scrollLog();
       return record;
     };
-    const endToolLine = (key, ok, note, detail, stateOverride = null) => {
+    const endToolLine = (key, ok, noteOrProvider, detail, stateOverride = null) => {
       // A tool_end without a matching tool_start (out-of-order or
       // dropped frame) still gets a completed line so it is visible.
       const stack = toolLineStacks.get(key);
@@ -1793,8 +2121,11 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const icon = icons[state] || "✓";
       line.className = `act ${state} verbose-tool-activity`;
       line.firstElementChild.textContent = icon;
-      label.textContent = note;
-      detailBody.textContent += `\n\nOutcome:\n${detail}`;
+      label.textContent = typeof noteOrProvider === "function"
+        ? noteOrProvider(record)
+        : noteOrProvider;
+      detailBody.textContent += "\n\nOutcome:\n" +
+        (typeof detail === "function" ? detail(record) : detail);
       scrollLog();
       return line;
     };
@@ -1810,7 +2141,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       // Streamed replies routinely end with a trailing newline; inside
       // a pre-wrap bubble that paints as an extra blank line, so trim it.
       liveMarkdown = liveMarkdown.replace(/\s+$/, "");
-      body.innerHTML = renderMarkdown(liveMarkdown);
+      body.innerHTML = renderMarkdown(visibleReactivationReply(liveMarkdown));
       if (finalStatus === null) return;
       if (!liveMarkdown && !activity.childElementCount) {
         live.remove();
@@ -1820,15 +2151,11 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       else status.remove();
     };
     liveTurnCleanup = settleLive;
-    activeEventSource = new EventSource(`/api/stream/${encodeURIComponent(data.turn_id)}`);
+    activeEventSource = new EventSource(`/api/stream/${encodeURIComponent(turnId)}`);
 
-    const completeUi = () => {
-      settleLive(null);
-      if (turnTimeoutId !== null) { clearTimeout(turnTimeoutId); turnTimeoutId = null; }
-      turnController = null;
-      setBusy(false);
-      promptEl.focus();
-      drainQueuedPrompt();
+    const completeUi = (finalStatus = null) => {
+      settleLive(finalStatus);
+      finalize();
     };
     const finish = (payload) => {
       completed = true;
@@ -1838,7 +2165,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       // Keep the live tool inspectors, phase records and stat snapshots;
       // rebuilding from stored history would discard display-only details.
       applyTurnPayload(payload, true);
-      completeUi();
+      completeUi("Done.");
     };
     const PHASE_LABELS = {
       model: "Model is thinking…",
@@ -1848,14 +2175,11 @@ async function uzSendPrompt(prompt, convId = conversationId) {
     const isCommandStatusExit = (payload) => {
       return payload && payload.command_status === true && payload.ok === false;
     };
-    const commandStatusNote = (tool, payload) => {
-      const bits = [];
-      if (payload.exit_code != null) {
-        bits.push(`exit ${payload.exit_code}`);
-      }
-      if (typeof payload.duration_ms === "number") bits.push(`${payload.duration_ms} ms`);
-      return `${tool} — completed with non-zero status` +
-             (bits.length ? ` (${bits.join(" · ")})` : "");
+    // ``/verbose none`` keeps even the status line free of tool
+    // information; ordinary mode stays generic unless verbose is on.
+    const toolStatus = (verboseText, quietText = "Working…") => {
+      if (verboseSuppressAll) return "Working…";
+      return verboseMode ? verboseText : quietText;
     };
     activeEventSource.addEventListener("phase", (ev) => {
       armTimeout();
@@ -1863,7 +2187,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       tallyStat("bytesIn", byteLength(ev.data || ""));
       const p = JSON.parse(ev.data || "{}");
       const phase = PHASE_LABELS[p.phase] || "Working…";
-      setStatus(phase);
+      setStatus(p.phase === "tools" && verboseSuppressAll ? "Working…" : phase);
       appendVerboseActivity(`Turn phase: ${p.phase || "unknown"} — ${phase}`);
     });
     activeEventSource.addEventListener("token", (ev) => {
@@ -1880,7 +2204,7 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       if (livePaintPending === null) {
         livePaintPending = requestAnimationFrame(() => {
           livePaintPending = null;
-          body.innerHTML = renderMarkdown(liveMarkdown);
+          body.innerHTML = renderMarkdown(visibleReactivationReply(liveMarkdown));
           scrollLog();
         });
       }
@@ -1897,14 +2221,21 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       const key = p.tool_call_id || p.id || tool;
       const detail = (p.classification && p.classification !== "bridge")
         ? ` · ${p.classification}` : "";
+      const args = toolArgumentPayload(p);
+      const argsText = formatToolArguments(args);
+      const inputBytes = toolArgumentBytes(args);
+      const preview = toolArgumentPreview(args);
       startToolLine(
         key,
-        `${tool}${detail} — running…`,
+        `${tool}${detail}${preview ? ` · ${preview}` : ""} — running…`,
         `Tool: ${tool}\nCall id: ${key}\nClassification: ` +
         `${p.classification || "unknown"}\nDecision: ${p.decision || "unknown"}` +
-        `\nArguments: ${p.args_summary || "(none reported)"}`
+        (argsText ? `\nArguments:\n${argsText}` : "\nArguments: (none reported)"),
+        true,
+        inputBytes,
+        preview
       );
-      setStatus(verboseMode ? `Running ${tool}…` : "Working…");
+      setStatus(toolStatus(`Running ${tool}…`));
     });
     activeEventSource.addEventListener("tool_end", (ev) => {
       armTimeout();
@@ -1917,25 +2248,41 @@ async function uzSendPrompt(prompt, convId = conversationId) {
                     (typeof p.stderr_bytes === "number" ? p.stderr_bytes : 0);
       tallyStat("toolOutputBytes", moved);
       const outcome = JSON.stringify(p, null, 2);
+      // Byte accounting stays out of the tool line to keep it tight;
+      // it is viewable on click alongside the raw outcome payload.
+      const outcomeWithBytes = (record) => outcome +
+        `\n\nBytes moved: ${formatBytes(record.inputBytes)} in · ` +
+        `${formatBytes(moved)} out`;
       if (isCommandStatusExit(p)) {
-        endToolLine(key, true, commandStatusNote(tool, p), outcome, "warning");
-      } else if (p.ok === false) {
-        tallyStat("toolFailures");
-        endToolLine(key, false, `${tool} — ${p.error || "failed"}`, outcome);
-      } else {
-        const bits = [];
-        if (p.exit_code !== undefined && p.exit_code !== null) bits.push(`exit ${p.exit_code}`);
-        if (typeof p.duration_ms === "number") bits.push(`${p.duration_ms} ms`);
-        // Verbose accounts for the output even when nothing moved, so
-        // "done" is never the whole story.
-        bits.push(`${formatBytes(moved)} output`);
         endToolLine(
           key, true,
-          `${tool} — done${bits.length ? ` (${bits.join(" · ")})` : ""}`,
-          outcome
+          record => formatToolDoneNote(
+            tool, "completed with non-zero status",
+            buildToolMetricParts(p), record.preview),
+          outcomeWithBytes, "warning");
+      } else if (p.ok === false) {
+        tallyStat("toolFailures");
+        endToolLine(key, false,
+          record => `${tool}${record.preview ? ` · ${record.preview}` : ""}` +
+            ` — ${p.error || "failed"}`,
+          outcomeWithBytes);
+      } else {
+        // Verbose accounts for the output even when nothing moved, so
+        // "done" is never the whole story.
+        endToolLine(
+          key, true,
+          record => {
+            return formatToolDoneNote(
+              tool,
+              "done",
+              buildToolMetricParts(p),
+              record.preview
+            );
+          },
+          outcomeWithBytes
         );
       }
-      setStatus(verboseMode ? `Finished ${tool}.` : "Working…");
+      setStatus(toolStatus(`Finished ${tool}.`));
     });
     activeEventSource.addEventListener("pending_approval", (ev) => {
       armTimeout();
@@ -1948,7 +2295,9 @@ async function uzSendPrompt(prompt, convId = conversationId) {
         key, true, `${tool} — queued for operator approval`,
         JSON.stringify(p, null, 2)
       );
-      setStatus(`Approval required for ${tool}.`);
+      setStatus(verboseSuppressAll
+        ? "Approval required."
+        : `Approval required for ${tool}.`);
       log.appendChild(renderPendingToolCall(p));
       scrollLog();
     });
@@ -2001,6 +2350,58 @@ async function uzSendPrompt(prompt, convId = conversationId) {
       }
       completeUi();
     };
+}
+
+async function uzSendPrompt(prompt, convId = conversationId) {
+  if (!window.EventSource) return uzSendPromptSync(prompt, convId);
+  netStats.turn = newStatBucket();
+  addMessage("user", prompt);
+  scrollLogToBottom();
+  setBusy(true);
+  thinkingEl = showThinking();
+  turnController = new AbortController();
+  const armTimeout = () => {
+    if (turnTimeoutId !== null) clearTimeout(turnTimeoutId);
+    turnTimeoutId = setTimeout(
+      () => abortTurn(`No response after ${Math.round(CLIENT_TURN_TIMEOUT_MS / 1000)}s - giving up.`),
+      CLIENT_TURN_TIMEOUT_MS);
+  };
+  armTimeout();
+  try {
+    const r = await fetch("/api/message", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt, conversation_id: convId, stream: true }),
+      signal: turnController.signal,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.status === 401) {
+      clearThinking();
+      setAuthState(true, false);
+      showLogin(true);
+      return data;
+    }
+    if (r.status === 410 || data.dead) {
+      clearThinking();
+      showTombstone(data);
+      return data;
+    }
+    if (!r.ok || data.error || !data.turn_id) {
+      clearThinking();
+      return applyTurnPayload(data);
+    }
+    conversationId = data.conversation_id ?? conversationId;
+    clearThinking();
+    uzStreamLiveTurn(data.turn_id, {
+      armTimeout,
+      finalize: () => {
+        if (turnTimeoutId !== null) { clearTimeout(turnTimeoutId); turnTimeoutId = null; }
+        turnController = null;
+        setBusy(false);
+        promptEl.focus();
+        drainQueuedPrompt();
+      },
+    });
     return data;
   } catch (err) {
     clearThinking();
@@ -2034,6 +2435,23 @@ function uzPositiveInteger(value) {
   if (!/^[1-9]\d*$/.test(value)) return null;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function uzParseLoadArgs(arg) {
+  // "/load last" targets the newest stored conversation; otherwise the
+  // argument is one or more whitespace-separated conversation ids.
+  const tokens = String(arg || "").trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return null;
+  if (tokens.length === 1 && tokens[0].toLowerCase() === "last") {
+    return { last: true, ids: [] };
+  }
+  const ids = [];
+  for (const token of tokens) {
+    const id = uzPositiveInteger(token);
+    if (id === null) return null;
+    ids.push(id);
+  }
+  return { last: false, ids };
 }
 
 async function handleSlashCommand(input) {
@@ -2123,6 +2541,30 @@ async function handleSlashCommand(input) {
       addMessage("system", pre && pre.textContent.trim()
         ? pre.textContent
         : "No example prompts are available.");
+      return true;
+    }
+    case "/purpose": {
+      addMessage("user", input);
+      const starters = document.querySelectorAll("#welcome [data-starter]");
+      if (!starters.length) {
+        addMessage("system", "No starter purposes are available.", { error: true });
+        return true;
+      }
+      const wrap = addMessage("system",
+        "Pick a purpose to prefill the prompt - the conversation continues here.");
+      const actions = el("div", { class: "starter-actions" });
+      for (const source of starters) {
+        const prompt = source.dataset.starter || "";
+        const button = el("button", { type: "button", text: source.textContent });
+        button.addEventListener("click", () => {
+          promptEl.value = prompt;
+          resizePrompt();
+          promptEl.focus();
+        });
+        actions.appendChild(button);
+      }
+      wrap.appendChild(actions);
+      scrollLog();
       return true;
     }
     case "/shortcuts": {
@@ -2275,17 +2717,38 @@ async function handleSlashCommand(input) {
     case "/verbose": {
       addMessage("user", input);
       const want = arg.toLowerCase();
-      if (want === "on") verboseMode = true;
-      else if (want === "off") verboseMode = false;
-      else if (!want) verboseMode = !verboseMode;
+      if (want === "api") {
+        verboseApi = !verboseApi;
+        document.querySelectorAll(".verbose-api-activity")
+          .forEach(node => { node.hidden = !(verboseMode && verboseApi); });
+        addMessage("system",
+          `Verbose API display ${verboseApi ? "on" : "off"}.` +
+          (verboseApi
+            ? " API calls will now be logged while verbose mode is on."
+            : " API calls are no longer logged or shown."));
+        return true;
+      }
+      if (want === "on") { verboseMode = true; verboseSuppressAll = false; }
+      else if (want === "off") { verboseMode = false; verboseSuppressAll = false; }
+      else if (want === "none") { verboseMode = false; verboseSuppressAll = true; }
+      else if (!want) { verboseMode = !verboseMode; verboseSuppressAll = false; }
       else {
-        addMessage("system", "Usage: /verbose [on|off]", { error: true });
+        addMessage("system", "Usage: /verbose [on|off|none|api]", { error: true });
         return true;
       }
       document.querySelectorAll(".verbose-tool-activity")
         .forEach(node => { node.hidden = !verboseMode; });
+      document.querySelectorAll(".verbose-api-activity")
+        .forEach(node => { node.hidden = !(verboseMode && verboseApi); });
       if (!verboseMode) {
         if (turnBusy) statusEl.textContent = "Agent is working…";
+      }
+      if (verboseSuppressAll) {
+        addMessage("system",
+          "Verbose mode none. All tool information is suppressed," +
+          " including tool names in the status line." +
+          " Approval prompts remain visible.");
+        return true;
       }
       addMessage("system",
         `Verbose mode ${verboseMode ? "on" : "off"}.` +
@@ -2294,6 +2757,7 @@ async function handleSlashCommand(input) {
             " and shown with arguments, outcomes, timings, and byte counts." +
             " Activity already observed on this page is retained, and each turn ends with a" +
             " background-activity tally." +
+            " API calls stay hidden unless /verbose api is on." +
             " Verbose resets to off when the page reloads."
           : " Tool activity is hidden; approval prompts remain visible."));
       return true;
@@ -2321,6 +2785,47 @@ async function handleSlashCommand(input) {
               : component.source;
             lines.push(`${component.name}: ${component.installed} (${suffix})`);
           }
+        }
+        addMessage("system", lines.join("\n"));
+      } catch (err) { addMessage("system", String(err), { error: true }); }
+      return true;
+    }
+    case "/reactivation": {
+      addMessage("user", input);
+      try {
+        const match = arg.match(/^(\S+)(?:\s+([\s\S]+))?$/);
+        const action = match ? match[1].toLowerCase() : "status";
+        const value = match ? (match[2] || "").trim() : "";
+        let data;
+        if (action === "status") {
+          data = await uzFetchJson("/api/reactivation");
+        } else if (action === "on" || action === "off") {
+          data = await uzPostJson("/api/reactivation",
+            { enabled: action === "on" });
+        } else if (action === "cancel") {
+          data = await uzPostJson("/api/reactivation", { cancel: true });
+        } else if (action === "minimum" || action === "maximum") {
+          if (!value) throw new Error(`${action} requires a duration`);
+          data = await uzPostJson("/api/reactivation", { [action]: value });
+        } else {
+          throw new Error(
+            "Usage: /reactivation [on|off|cancel|minimum <duration>|maximum <duration>]"
+          );
+        }
+        const state = await refreshReactivation() || data;
+        const lines = [
+          `Reactivation: ${state.enabled ? "on" : "off"}.`,
+          `Delay bounds: ${uzFormatSeconds(state.minimum_seconds)} to ` +
+            `${uzFormatSeconds(state.maximum_seconds)}.`,
+        ];
+        if (state.pending) {
+          lines.push(
+            `Upcoming #${state.pending.id.slice(0, 8)}: ` +
+            `${state.pending.reason} at ` +
+            `${new Date(state.pending.fire_at * 1000).toLocaleString()}.`
+          );
+        } else {
+          lines.push("No reactivation is queued.");
         }
         addMessage("system", lines.join("\n"));
       } catch (err) { addMessage("system", String(err), { error: true }); }
@@ -2503,13 +3008,42 @@ async function handleSlashCommand(input) {
     }
     case "/load": {
       addMessage("user", input);
-      const id = uzPositiveInteger(arg);
-      if (id === null) {
-        addMessage("system", `Usage: ${cmd} <id>`, { error: true });
+      const request = uzParseLoadArgs(arg);
+      if (!request) {
+        addMessage("system", `Usage: ${cmd} <id> [id ...] or ${cmd} last`, { error: true });
         return true;
       }
-      try { await uzLoadConversation(id); }
-      catch (err) { addMessage("system", String(err), { error: true }); }
+      try {
+        let ids = request.ids;
+        if (request.last) {
+          const data = await uzFetchJson("/api/conversations");
+          const convs = data.conversations || [];
+          if (!convs.length) {
+            addMessage("system", "No stored conversations to load.", { error: true });
+            return true;
+          }
+          ids = [convs[0].id];
+        }
+        if (ids.length === 1) {
+          await uzLoadConversation(ids[0]);
+          return true;
+        }
+        // Fetch every conversation before touching the transcript so a
+        // bad id fails without wiping the current view.
+        const loaded = [];
+        for (const id of ids) {
+          loaded.push({ id, data: await uzFetchJson(`/api/conversation/${id}`) });
+        }
+        uzClearLog();
+        for (const entry of loaded) {
+          addMessage("system", `Loaded conversation #${entry.id}.`);
+          renderConversation(entry.data.messages, entry.data.events);
+        }
+        conversationId = ids[ids.length - 1];
+        addMessage("system",
+          `Conversation #${conversationId} is now active; new messages continue it.`);
+        scrollLogToBottom();
+      } catch (err) { addMessage("system", String(err), { error: true }); }
       return true;
     }
     case "/title": {
@@ -2788,6 +3322,7 @@ loginForm.addEventListener("submit", async (event) => {
       loginPassword.value = "";
       setAuthState(true, true);
       showLogin(false);
+      await refreshReactivation();
       promptEl.focus();
       return;
     }
@@ -2834,6 +3369,8 @@ async function bootstrap() {
     }
     if (data.required && !data.authenticated) {
       showLogin(true);
+    } else {
+      await refreshReactivation();
     }
   } catch (_err) {
     // Network/parse failure: leave the UI usable; the first prompt
@@ -2846,6 +3383,33 @@ applyPromptPlaceholder(
   uzStorageGet(PROMPT_STORAGE_KEY) || DEFAULT_PROMPT_PLACEHOLDER, false);
 applyFullWidth(uzStorageGet(FULLWIDTH_STORAGE_KEY) === "on", false);
 bootstrap();
+// Poll reactivation state on a steady cadence, but tighten to ~1s while a
+// continuation is queued and about to fire or a fired turn is streaming, so
+// the browser attaches to the live turn early enough to show tools and text
+// arriving rather than only the finished result.
+const REACTIVATION_POLL_IDLE_MS = 5000;
+const REACTIVATION_POLL_ACTIVE_MS = 1000;
+// When a pending continuation is within this many seconds of firing, poll
+// quickly so the browser is ready to attach to the live turn as it starts.
+const REACTIVATION_POLL_TIGHTEN_THRESHOLD_SECONDS = 8;
+let reactivationPollTimer = null;
+function scheduleReactivationPoll(delayMs = REACTIVATION_POLL_IDLE_MS) {
+  if (reactivationPollTimer !== null) clearTimeout(reactivationPollTimer);
+  reactivationPollTimer = setTimeout(async () => {
+    let next = REACTIVATION_POLL_IDLE_MS;
+    try {
+      const data = await refreshReactivation();
+      if (data && (data.active ||
+          (data.pending && Number(data.pending.remaining_seconds) <=
+            REACTIVATION_POLL_TIGHTEN_THRESHOLD_SECONDS))) {
+        next = REACTIVATION_POLL_ACTIVE_MS;
+      }
+    } finally {
+      scheduleReactivationPoll(next);
+    }
+  }, delayMs);
+}
+scheduleReactivationPoll(REACTIVATION_POLL_IDLE_MS);
 </script>
 </body>
 </html>

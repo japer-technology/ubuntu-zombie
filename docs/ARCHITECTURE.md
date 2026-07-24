@@ -37,10 +37,12 @@ component adds only a loopback listener on port `8080`.
   `progress` events are forwarded as live UI hints; the final persisted
   conversation remains authoritative.
 - `tools.py` defines the closed tool registry: shell, filesystem,
-  package, service, network status, and skill loading tools.
+  package, service, network status, skill loading, and the bounded
+  `timer.reactivation` tool.
 - `policy.py` classifies commands and tool calls before execution.
 - `audit.py` writes JSON-lines audit records with secret redaction.
-- `history.py` persists conversations and tool events in SQLite.
+- `history.py` persists conversations, tool events, and the single pending
+  reactivation timer in SQLite.
 - `lifecycle.py` enforces the Time to Live state.
 
 ## Trust boundaries
@@ -89,6 +91,7 @@ Action classes are:
 | Class | Meaning |
 | ----- | ------- |
 | `read_only` | Inspection only; can auto-run. |
+| `chat_schedule` | Bounded scheduling of one visible future chat turn; can auto-run. |
 | `user_change` | Changes within user-owned state. |
 | `system_change` | Package, service, or privileged file mutation. |
 | `network_change` | Firewall or interface mutation. |
@@ -97,6 +100,24 @@ Action classes are:
 Built-in skills ship under `/opt/ai-zombie/skills/` and currently cover
 `apt` and `systemd`. Operators may add local skill briefs under
 `/etc/ubuntu-zombie/skills.d/`.
+
+## Agent reactivation
+
+`timer.reactivation` lets pi schedule one future continuation in the same
+conversation. The server stores a single global pending timer in
+`conversations.db`; a new request must explicitly replace the existing one.
+A trailing structured agent request is stripped from the visible reply,
+validated against the closed tool schema and `chat_schedule` policy class,
+then dispatched to the timer runtime.
+A server-owned timer thread atomically claims a due record, checks the TTL and
+conversation, and starts an ordinary turn with fresh policy decisions. It
+never executes a tool directly or carries an approval into the new turn.
+
+The authenticated UI polls the pending state, shows its reason, prompt preview,
+and fire time, and gives the operator a cancel control. The injected user
+message is marked `auto_reactivation` in history and rendered as queued by the
+timer. Scheduling, replacement, cancellation, firing, and failure are written
+to the audit log.
 
 ## Optional components
 

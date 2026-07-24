@@ -8,6 +8,42 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Agent reactivation
+
+- **Durable `timer.reactivation`:** pi can schedule one bounded future
+  continuation in the same conversation. The authenticated chat shows the
+  upcoming request and lets the operator cancel it; `/reactivation` and
+  `/reactivate` control durable enablement and delay bounds. Due requests start
+  ordinary policy-gated turns, remain subject to TTL, and are fully audited.
+- **Agent-initiated continuations:** the shipped pi bridge now gives the model
+  a structured, runtime-consumed self-reactivation request instead of exposing
+  only the operator controls. Streamed completion frames also omit redundant
+  full-history data so long command transcripts do not remain stuck at
+  “Finalising the reply”.
+- **Shorter reactivation bounds:** continuations may be scheduled from 1 second
+  up to 1 hour in the future. Existing durable defaults are migrated safely.
+- **Preserved-policy compatibility:** installations upgraded from releases
+  before `chat_schedule` existed now retain automatic approval for bounded
+  reactivations unless the operator explicitly overrides that class.
+- **Visible reactivation progress:** queued reactivations now respect
+  `/fullwidth`, and firing, processing, and completion appear in the active
+  chat. Agent-selected timers prefer the configured minimum delay unless a
+  longer wait is specifically needed.
+- **Live reactivation turns:** fired continuations now stream into the active
+  conversation exactly like operator sends — tools and reply text appear in
+  real time instead of only after the turn finishes — so a multi-turn task
+  (for example a long essay written across several reactivations) is visibly
+  chained. The browser polls reactivation state more tightly while a
+  continuation is about to fire or streaming so it attaches early enough to
+  show the live activity.
+- **Accurate turn completion:** successful streamed turns now finish with
+  “Done.” instead of leaving “Finalising the reply…” visible.
+- **Controllable reactivation turns:** processing reactivations now always show
+  pause and stop controls. Stop terminates the active bridge turn, while pause
+  detaches the live view for later resumption. Structured reactivation data is
+  hidden from streamed replies and remains available to the server for
+  scheduling.
+
 ### Agent capacity
 
 - **Long-running local-model turns:** the shipped pi agent now allows up to
@@ -28,6 +64,23 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Chat discovery and layout
 
+- **Tighter verbose tool lines:** each streamed tool line now shows the
+  first few words of its arguments inline, the inspector is a bare
+  disclosure arrow at the end of the line (labelled "Inspect tool call"
+  for assistive technology), and byte counts moved into the
+  click-to-expand detail alongside the raw outcome payload.
+- **Quieter verbose API accounting:** frequent API request lines (for
+  example reactivation polling) are no longer logged or shown by
+  default; `/verbose api` toggles API-call display within verbose mode.
+- **New `/verbose none`:** suppresses all tool information, including
+  tool names in the status line, while approval prompts stay visible.
+- **`/load last` and multi-conversation `/load`:** `/load last` opens the
+  newest stored conversation, and `/load <id> <id> ...` renders several
+  conversations into one transcript in the order given, with the last id
+  becoming the active conversation for new messages.
+- **New `/purpose` command:** re-shows the welcome starter purpose buttons
+  inline in the transcript, so more starter questions can be asked without
+  leaving the current conversation.
 - **Quiet tool activity by default:** with `/verbose` off, ordinary tool calls,
   results, failures, counters, and live tool status are hidden from the chat
   transcript. `/verbose on` enables tool tracking and detailed transcript
@@ -51,7 +104,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   the current browser.
 - **Readable Markdown tables:** assistant table syntax now renders as
   accessible, high-contrast tables with padded cells, borders, alignment,
-  striping, and horizontal overflow for narrow screens.
+  striping, content-sized columns, and horizontal overflow for narrow screens.
+- **Readable Markdown math symbols:** common LaTeX-style symbols inside dollar
+  delimiters, such as `$\rightarrow$`, now display as mathematical glyphs
+  without requiring an online rendering dependency.
 - **Deeper command discovery:** a bare `/` shows every command;
   `/help <command>` explains canonical commands and aliases, `/help <pattern*>`
   gives full pages for matches, and `/help all` shows every full help page.
@@ -123,6 +179,17 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Analysis notes
 
+- **Phase 1 Option A deep analysis:** new
+  `docs/analysis/improvements-8-plan-phase-1-option-a.md` analyses
+  the best implementation of Phase 1 Option A of the improvements-8
+  plan against the pinned pi 0.80.10 upstream contract: `--mode rpc`
+  plus a shipped fail-closed mediation extension (gate-in-place),
+  an operator-controlled router on/off mode with audited toggling,
+  honest per-call telemetry in the chat UX (`/verbose`), a
+  server-assembled full-dump `/export` (events, audit slice, bridge
+  logs, policy digest), and a docs-truthful-at-every-commit delivery
+  sequence. Design analysis only; no behaviour change. The analysis
+  index in `docs/analysis/README.md` now lists the document.
 - **Mediation diagrams:** new `docs/analysis/mediation-diagrams/`
   folder with vertical Mermaid diagrams — `current-state.md` shows how
   the system works today (installed shape, chat turn transport, the

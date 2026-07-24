@@ -59,6 +59,9 @@ reinstall. Extend it from the chat with `/ttl <days>`. See
 The chat streams live turn progress when the browser supports
 `EventSource`, falls back automatically when it does not, and keeps one
 visible queued message if you submit while the agent is already working.
+The agent can also schedule one bounded future continuation with
+`timer.reactivation`; the upcoming turn is visible and cancellable in the chat,
+and `/reactivation` or its `/reactivate` alias controls the feature.
 Type `/` to browse the complete command catalogue without leaving the
 composer; keep typing to narrow it. `/help` shows the compact command index,
 `/help <command>` explains one command in detail, `/help <pattern*>` explains

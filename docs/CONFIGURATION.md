@@ -365,6 +365,45 @@ sends it automatically when the current turn finishes; submitting another
 normal message replaces that queued item with an explicit notice. Slash
 commands such as `/stop`, `/approve`, and `/deny` still run immediately.
 
+### Agent reactivation
+
+The pi agent may call the policy-mediated `timer.reactivation` tool when work
+must continue beyond the current model turn. The server keeps exactly one
+future reactivation across all conversations. The chat footer shows its fire
+time, reason, prompt preview, and a **Cancel** button. When it fires, a visibly
+labelled synthetic user request starts an ordinary turn in the same
+conversation; all tool policy and approval checks run again. That turn streams
+into the transcript live — its tools and reply text appear as they happen, the
+same way an operator's own message does — so a task spread across several
+continuations (for example a long essay) is visibly chained rather than
+appearing only once each turn has finished.
+
+The shipped pi bridge presents this capability through a structured
+`<ubuntu-zombie-reactivation>` request at the end of the agent's reply. The
+server removes that machine-readable block before saving the visible answer,
+validates it against the closed `timer.reactivation` schema and policy class,
+and reports whether the request was accepted. This lets the AI reactivate
+itself; `/reactivation` is the operator control for the capability, not the
+mechanism that schedules each continuation.
+
+Reactivation is enabled by default with a 1-second minimum and 1-hour maximum
+delay. Both limits and the enabled state are durable in `conversations.db`.
+These defaults are also the hard safety bounds, and no timer may outlive the
+remaining TTL.
+
+| Command | Effect |
+| ------- | ------ |
+| `/reactivation` | Show settings and the upcoming timer. |
+| `/reactivation on` | Allow the agent to schedule a continuation. |
+| `/reactivation off` | Disable scheduling and cancel the pending timer. |
+| `/reactivation cancel` | Cancel the pending timer without disabling scheduling. |
+| `/reactivation minimum <duration>` | Set the minimum permitted delay. |
+| `/reactivation maximum <duration>` | Set the maximum permitted delay. |
+| `/reactivate ...` | Alias for `/reactivation ...`. |
+
+Durations use the same number/unit format as `/ttl`. Disabling reactivation,
+cancelling it, or changing bounds requires an authenticated chat session.
+
 ### Time to Live (the kill switch)
 
 Every install gives the root-capable agent a bounded lifetime. The

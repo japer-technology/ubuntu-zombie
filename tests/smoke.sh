@@ -61,6 +61,8 @@ run_python() {
   PYTHONPATH=payload/agent ZOMBIE_POLICY=payload/etc/policy.yaml python3 - <<'PY'
 import policy
 import server
+import tempfile
+from pathlib import Path
 
 p = policy.load_policy()
 
@@ -121,6 +123,7 @@ import tools as _t
 assert set(_t.tool_names()) == {
     "shell.run", "fs.read", "fs.list", "fs.write", "pkg.query", "pkg.install",
     "svc.status", "svc.control", "net.status", "skill.list", "skill.load",
+    "timer.reactivation",
 }, _t.tool_names()
 # Per-tool default classifications come from the registry; shell.run
 # is computed per-argv via the existing classify() path.
@@ -130,6 +133,51 @@ if p.classify_tool("pkg.install", {"names": ["curl"]}) != "system_change":
     raise SystemExit("pkg.install should be system_change")
 if p.classify_tool("svc.control", {"unit": "cron", "action": "restart"}) != "system_change":
     raise SystemExit("svc.control should be system_change")
+if p.classify_tool("timer.reactivation", {
+    "delay_seconds": 30, "prompt": "continue"
+}) != "chat_schedule":
+    raise SystemExit("timer.reactivation should use chat_schedule")
+if p.requires_approval("chat_schedule"):
+    raise SystemExit("chat_schedule should auto-run within its server-enforced bounds")
+# Install upgrades preserve operator policy.yaml files. Policies created before
+# chat_schedule existed must inherit its safe built-in default, while an
+# explicit operator override must still be honoured.
+with tempfile.TemporaryDirectory() as directory:
+    legacy_path = Path(directory) / "policy.yaml"
+    legacy_path.write_text(
+        """\
+settings:
+  default_class: destructive
+classes:
+  read_only:
+    approval: auto
+""",
+        encoding="utf-8",
+    )
+    legacy = policy.load_policy(legacy_path)
+    reactivation_args = {
+        "delay_seconds": 10,
+        "prompt": "Why is the sky blue?",
+    }
+    if legacy.requires_approval(
+        legacy.classify_tool("timer.reactivation", reactivation_args)
+    ):
+        raise SystemExit("legacy policies should auto-run timer.reactivation")
+    legacy_path.write_text(
+        """\
+settings:
+  default_class: destructive
+classes:
+  read_only:
+    approval: auto
+  chat_schedule:
+    approval: required
+""",
+        encoding="utf-8",
+    )
+    overridden = policy.load_policy(legacy_path)
+    if not overridden.requires_approval("chat_schedule"):
+        raise SystemExit("explicit chat_schedule approval override was ignored")
 if p.classify_tool("shell.run", {"argv": ["ls", "-la"]}) != "read_only":
     raise SystemExit("shell.run ls should be read_only via classify()")
 if p.classify_tool("shell.run", {"command": "sudo apt-get install -y curl"}) != "system_change":
@@ -365,6 +413,171 @@ finally:
         else:
             os.environ[k] = v
 PY
+
+  echo "  durable timer reactivation"
+  _REACTIVATION_TMP="$(mktemp -d)"
+  trap 'rm -rf "${_REACTIVATION_TMP:-}"' EXIT
+  ZOMBIE_HISTORY_DB="${_REACTIVATION_TMP}/conversations.db" \
+  ZOMBIE_LIFECYCLE_STATE="${_REACTIVATION_TMP}/lifecycle.json" \
+  ZOMBIE_AUDIT_LOG="${_REACTIVATION_TMP}/audit.jsonl" \
+  ZOMBIE_POLICY=payload/etc/policy.yaml \
+  PYTHONPATH=payload/agent python3 - <<'PY'
+import json
+import os
+import sqlite3
+import time
+from pathlib import Path
+from history import History
+
+Path(os.environ["ZOMBIE_LIFECYCLE_STATE"]).write_text(json.dumps({
+    "created_at": time.time(),
+    "expires_at": time.time() + 3600,
+    "dead": False,
+}))
+
+import server
+
+app = server.App()
+conversation_id = app.history.create_conversation("timer test")
+settings = app.reactivation_info()
+assert settings["enabled"] is True, settings
+assert settings["minimum_seconds"] == 1, settings
+assert settings["maximum_seconds"] == 3600, settings
+system_prompt = server.render_append_system("test facts", 10, 120)
+assert '"delay_seconds":10' in system_prompt, system_prompt
+assert "minimum delay of\n10 seconds" in system_prompt, system_prompt
+
+accepted = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=1,
+    prompt="Continue the test.",
+    reason="Smoke test",
+)
+assert accepted["status"] == "accepted", accepted
+pending = app.reactivation_info()["pending"]
+assert pending and pending["conversation_id"] == conversation_id, pending
+
+rejected = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=30,
+    prompt="Do not replace.",
+    reason="Second timer",
+)
+assert rejected["status"] == "rejected_pending_exists", rejected
+
+replaced = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=40,
+    prompt="Replacement.",
+    reason="Replacement timer",
+    replace_existing=True,
+)
+assert replaced["status"] == "replaced", replaced
+assert app.cancel_reactivation()["cancelled"]["id"] == \
+    replaced["reactivation"]["id"]
+assert app.reactivation_info()["pending"] is None
+
+disabled = app.configure_reactivation(enabled=False)
+assert disabled["enabled"] is False, disabled
+rejected = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=30,
+    prompt="Disabled.",
+    reason="Disabled timer",
+)
+assert rejected["status"] == "rejected_disabled", rejected
+
+invalid = app.configure_reactivation(minimum_seconds=0)
+assert "error" in invalid, invalid
+invalid = app.configure_reactivation(maximum_seconds=3601)
+assert "error" in invalid, invalid
+
+for name, old_minimum, old_maximum, expected_minimum, expected_maximum in (
+    ("defaults", 30, 86400, 1, 3600),
+    ("custom", 10, 1800, 10, 1800),
+    ("low", 0, 120, 1, 120),
+    ("high", 10, 7200, 10, 3600),
+):
+    migration_path = Path(os.environ["ZOMBIE_HISTORY_DB"]).with_name(
+        f"migration-{name}.db"
+    )
+    with sqlite3.connect(migration_path) as connection:
+        connection.execute(
+            "CREATE TABLE reactivation_settings ("
+            "singleton INTEGER PRIMARY KEY, enabled INTEGER NOT NULL, "
+            "minimum_seconds INTEGER NOT NULL, maximum_seconds INTEGER NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO reactivation_settings VALUES (1, 1, ?, ?)",
+            (old_minimum, old_maximum),
+        )
+        connection.execute("PRAGMA user_version = 2")
+    migrated = History(migration_path).reactivation_settings()
+    assert migrated["minimum_seconds"] == expected_minimum, (name, migrated)
+    assert migrated["maximum_seconds"] == expected_maximum, (name, migrated)
+
+app.configure_reactivation(enabled=True)
+fired = []
+app.start_streaming_message = lambda cid, prompt, user_meta=None: (
+    fired.append((cid, prompt, user_meta)) or
+    {"turn_id": "smoke-turn", "conversation_id": cid}
+)
+due, existing = app.history.schedule_reactivation(
+    conversation_id,
+    time.time() - 1,
+    "Fire now.",
+    "Due timer",
+)
+assert due and existing is None
+app._reactivation_wakeup.set()
+deadline = time.time() + 2
+while not fired and time.time() < deadline:
+    time.sleep(0.02)
+assert fired, "due reactivation did not fire"
+assert fired[0][2]["auto_reactivation"] is True, fired
+assert app.history.pending_reactivation() is None
+
+active = server.TurnStream(
+    "active-turn", conversation_id, "active-reactivation", "Active test"
+)
+with app._lock:
+    app.turns[active.turn_id] = active
+active_info = app.reactivation_info()["active"]
+assert active_info == {
+    "id": "active-reactivation",
+    "conversation_id": conversation_id,
+    "turn_id": "active-turn",
+    "reason": "Active test",
+}, active_info
+stopped = app.stop_turn("active-turn")
+assert stopped == {"ok": True, "turn_id": "active-turn"}, stopped
+assert active.cancel_event.is_set()
+active.done_at = time.monotonic()
+assert app.reactivation_info()["active"] is None
+
+visible, request, error = server._agent_reactivation_request(
+    "I need another turn.\n"
+    '<ubuntu-zombie-reactivation>{"delay_seconds":1,'
+    '"prompt":"Continue the test.","reason":"More work remains.",'
+    '"replace_existing":false}</ubuntu-zombie-reactivation>'
+)
+assert visible == "I need another turn.", visible
+assert error is None, error
+assert request is not None
+self_scheduled = app._consume_agent_reactivation(conversation_id, request)
+assert self_scheduled["status"] == "accepted", self_scheduled
+assert app.reactivation_info()["pending"]["prompt"] == "Continue the test."
+app.cancel_reactivation()
+
+visible, request, error = server._agent_reactivation_request(
+    "Visible reply\n<ubuntu-zombie-reactivation>{bad json}"
+)
+assert visible == "Visible reply", visible
+assert request is None
+assert error, error
+PY
+  rm -rf "${_REACTIVATION_TMP}"
+  trap - EXIT
 
   # Stubbed end-to-end run of pi_mono.run_turn against
   # tests/fixtures/stub-pi-mono.mjs. Verifies the bridge protocol,
@@ -935,6 +1148,7 @@ PY
     PYTHONPATH=payload/agent \
       python3 - <<'PY'
 import time
+import threading
 import pi_mono, tools
 
 def on_tool_call(call_id, name, args):
@@ -958,6 +1172,27 @@ except pi_mono.BridgeError as exc:
         raise SystemExit(f"watchdog took too long to fire: {elapsed:.1f}s")
 else:
     raise SystemExit("expected a BridgeError from the idle watchdog")
+
+cancel = threading.Event()
+cancel.set()
+started = time.monotonic()
+try:
+    pi_mono.run_turn(
+        prompt="Stop me",
+        system_prompt="stub",
+        history=[],
+        on_tool_call=on_tool_call,
+        tool_names=tools.tool_names(),
+        timeout=60.0,
+        cancel_event=cancel,
+    )
+except pi_mono.BridgeError as exc:
+    if "stopped by the operator" not in str(exc):
+        raise SystemExit(f"unexpected cancellation BridgeError: {exc}")
+    if time.monotonic() - started > 5:
+        raise SystemExit("operator cancellation took too long")
+else:
+    raise SystemExit("expected a BridgeError from operator cancellation")
 PY
 
     # Real bridge against pi's actual `--mode json` event schema. This
@@ -1175,6 +1410,7 @@ PY
   PYTHONPATH=payload/agent python3 - <<'PY'
 import json
 import server
+import time
 
 info = server.version_info()
 # The payload version must resolve from the repo-root VERSION file
@@ -1205,7 +1441,10 @@ def fake_urlopen(request, timeout):
     return Response({"version": "9.8.7"})
 
 server.urlopen = fake_urlopen
-server._version_cache = (0.0, {})
+server._version_cache = (
+    time.monotonic() - server.VERSION_CACHE_SECONDS - 1,
+    {},
+)
 checked = server.version_info(check_latest=True)
 checked_components = {row["name"]: row for row in checked["components"]}
 assert checked_components["ubuntu-zombie"]["latest"] == "2099.1.2", checked
@@ -2980,9 +3219,31 @@ EOF
     || { echo "/locals must probe standard API ports across the LAN" >&2; exit 1; }
   grep -q '\["/fullwidth \[on|off\]"' payload/agent/templates/index.html \
     || { echo "chat must expose /fullwidth with optional on/off" >&2; exit 1; }
-  grep -q 'body.fullwidth main, body.fullwidth .composer' \
+  grep -q 'body.fullwidth main, body.fullwidth .composer,' \
     payload/agent/templates/index.html \
     || { echo "/fullwidth must widen the transcript and composer" >&2; exit 1; }
+  grep -q 'body.fullwidth .reactivation-banner' \
+    payload/agent/templates/index.html \
+    || { echo "/fullwidth must widen the reactivation banner" >&2; exit 1; }
+  grep -q 'completeUi("Done.")' payload/agent/templates/index.html \
+    || { echo "completed streamed turns must display Done" >&2; exit 1; }
+  grep -q 'async function uzStreamReactivationTurn' \
+    payload/agent/templates/index.html \
+    && grep -q 'uzStreamLiveTurn(active.turn_id' \
+      payload/agent/templates/index.html \
+    || { echo "fired reactivations must stream live in chat" >&2; exit 1; }
+  grep -q 'Reactivation started for conversation' \
+    payload/agent/templates/index.html \
+    || { echo "reactivation processing must be visible in chat" >&2; exit 1; }
+  grep -q 'id="pause-reactivation"' payload/agent/templates/index.html \
+    && grep -q 'id="stop-reactivation"' payload/agent/templates/index.html \
+    && grep -q '/api/turn/${encodeURIComponent(activeReactivation.turn_id)}/stop' \
+      payload/agent/templates/index.html \
+    || { echo "active reactivations must expose pause and stop controls" >&2; exit 1; }
+  grep -q 'visibleReactivationReply' payload/agent/templates/index.html \
+    && grep -q 'ubuntu-zombie-reactivation' \
+      payload/agent/templates/index.html \
+    || { echo "structured reactivation requests must stay out of live chat" >&2; exit 1; }
   python3 payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
 import importlib.machinery
@@ -3115,6 +3376,9 @@ PY
     || { echo "chat composer must retain its accessible label" >&2; exit 1; }
   grep -q 'data-starter=' payload/agent/templates/index.html \
     || { echo "chat welcome must retain its starter prompts" >&2; exit 1; }
+  grep -q 'case "/purpose"' payload/agent/templates/index.html \
+    && grep -q '"#welcome \[data-starter\]"' payload/agent/templates/index.html \
+    || { echo "/purpose must re-show the welcome starter buttons inline" >&2; exit 1; }
   grep -q '@media (max-width: 640px)' payload/agent/templates/index.html \
     || { echo "chat UI must retain its mobile layout" >&2; exit 1; }
   grep -q 'text: "Copy"' payload/agent/templates/index.html \
@@ -3131,7 +3395,7 @@ PY
     || { echo "installer must retain separated deployment phases" >&2; exit 1; }
   grep -q 'transcriptPinnedToBottom' payload/agent/templates/index.html \
     || { echo "chat transcript must retain sticky tail tracking" >&2; exit 1; }
-  grep -q 'body.innerHTML = renderMarkdown(liveMarkdown)' \
+  grep -q 'body.innerHTML = renderMarkdown(visibleReactivationReply(liveMarkdown))' \
     payload/agent/templates/index.html \
     || { echo "streamed assistant replies must render as Markdown" >&2; exit 1; }
   grep -q 'applyTurnPayload(payload, true)' payload/agent/templates/index.html \
@@ -3139,6 +3403,65 @@ PY
     && grep -q 'Activity already observed on this page is retained' \
       payload/agent/templates/index.html \
     || { echo "verbose transcript activity must remain inspectable and persistent" >&2; exit 1; }
+  command -v node >/dev/null \
+    || { echo "node is required for chat UI smoke tests" >&2; exit 1; }
+  _TOOL_DETAIL_TEST="$(mktemp)"
+  python3 - "${_TOOL_DETAIL_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+stats_start = text.index("const uzTextEncoder")
+stats_end = text.index("function formatDuration", stats_start)
+args_start = text.index("function summarizeArgs")
+args_end = text.index("function renderToolCall", args_start)
+test = r'''
+const command = `printf 'hello world\\n'
+wc -c ./README.md`;
+const args = { command };
+if (formatToolArguments(args) !== command) {
+  throw new Error("command arguments must render as readable text");
+}
+const mixed = { command, cwd: "/tmp/example" };
+if (formatToolArguments(mixed) !== `${command}\n{\n  "cwd": "/tmp/example"\n}`) {
+  throw new Error("command arguments with metadata must include both sections");
+}
+const special = { command: 'echo "test"', cwd: "/path/with\\backslash" };
+// The expected value is a JavaScript string containing JSON, so the
+// backslash is escaped once for the source literal and once for JSON.
+if (formatToolArguments(special) !== 'echo "test"\n{\n  "cwd": "/path/with\\\\backslash"\n}') {
+  throw new Error("special characters in tool arguments must remain readable");
+}
+if (formatToolArguments({ cwd: "/tmp/example" }) !== '{\n  "cwd": "/tmp/example"\n}') {
+  throw new Error("non-command arguments must render as JSON");
+}
+if (formatToolArguments(null) !== "" ||
+    formatToolArguments(undefined) !== "" ||
+    formatToolArguments("") !== "") {
+  throw new Error("empty arguments must render as an empty string");
+}
+if (formatToolArguments(42) !== "42") {
+  throw new Error("non-object arguments must render as strings");
+}
+if (toolArgumentPayload({ args_summary: args, args: { command: "fallback" } }) !== args ||
+    toolArgumentPayload({ args }) !== args) {
+  throw new Error("tool argument payload must prefer args_summary and fallback to args");
+}
+if (toolArgumentBytes(args) !== byteLength(JSON.stringify(args))) {
+  throw new Error("tool input bytes must count serialized arguments");
+}
+const note = formatToolDoneNote("bash", "done", ["58 ms", "287 B in", "11.9 kB out"]);
+if (note !== "bash · done · 58 ms · 287 B in · 11.9 kB out") {
+  throw new Error(`unexpected tool done note: ${note}`);
+}
+if (formatToolDoneNote("tool", "status", []) !== "tool · status") {
+  throw new Error("empty tool metric list must not add a trailing separator");
+}
+'''
+Path(sys.argv[1]).write_text(text[stats_start:stats_end] + text[args_start:args_end] + test)
+PY
+  node "${_TOOL_DETAIL_TEST}"
+  rm -f "${_TOOL_DETAIL_TEST}"
   if grep -A3 'function tallyStat' payload/agent/templates/index.html \
       | grep -q 'if (!verboseMode) return'; then
     echo "verbose statistics must be retained before display is enabled" >&2
@@ -3164,7 +3487,24 @@ from pathlib import Path
 text = Path("payload/agent/templates/index.html").read_text()
 start = text.index("function uzCommandName")
 end = text.index("let commandMatches", start)
+reactivation_start = text.index("function visibleReactivationReply")
+reactivation_end = text.index(
+    "async function uzStreamReactivationTurn", reactivation_start
+)
 test = r'''
+const marker = "<ubuntu-zombie-reactivation>";
+const REACTIVATION_REQUEST_MARKER = marker;
+if (visibleReactivationReply("Visible reply") !== "Visible reply") {
+  throw new Error("ordinary streamed replies must remain visible");
+}
+if (visibleReactivationReply("Visible reply\n" + marker + '{"delay_seconds":1}') !==
+    "Visible reply") {
+  throw new Error("complete structured requests must be hidden");
+}
+if (visibleReactivationReply("Visible reply\n<ubuntu-zombie-react") !==
+    "Visible reply") {
+  throw new Error("partial structured request markers must be hidden");
+}
 const entries = [
   ["/local [url]"],
   ["/locals"],
@@ -3180,7 +3520,9 @@ if (uzExactCommandIndex(entries, "/loc") !== -1) {
   throw new Error("partial commands must remain autocomplete candidates");
 }
 '''
-Path(sys.argv[1]).write_text(text[start:end] + test)
+Path(sys.argv[1]).write_text(
+    text[reactivation_start:reactivation_end] + text[start:end] + test
+)
 PY
   node "${_COMMAND_TEST}"
   rm -f "${_COMMAND_TEST}"
@@ -3209,6 +3551,20 @@ for (const invalid of ["", "0", "-1", "2.5", "3x", "9007199254740992"]) {
 }
 if (uzPositiveInteger("42") !== 42) {
   throw new Error("rejected a valid positive integer");
+}
+const lastLoad = uzParseLoadArgs("LAST");
+if (!lastLoad || lastLoad.last !== true) {
+  throw new Error("/load last must target the newest conversation");
+}
+const multiLoad = uzParseLoadArgs(" 3  1\t7 ");
+if (!multiLoad || multiLoad.last ||
+    JSON.stringify(multiLoad.ids) !== "[3,1,7]") {
+  throw new Error("/load must accept several whitespace-separated ids");
+}
+for (const invalid of ["", "last 2", "1 zero", "0 1", "1 -2"]) {
+  if (uzParseLoadArgs(invalid) !== null) {
+    throw new Error(`accepted invalid /load arguments: ${invalid}`);
+  }
 }
 '''
 Path(sys.argv[1]).write_text(text[start:end] + test)
@@ -3415,14 +3771,25 @@ start = text.index("function escapeHtml")
 end = text.index("function showThinking")
 test = r'''
 const output = renderMarkdown(
-  "| Name | State |\n| :--- | ---: |\n| api | **online** |"
+  "| Name | State |\n| :--- | ---: |\n| api | **online** $\\rightarrow$ |"
 );
 if (!output.includes("<table>") ||
     !output.includes('<th class="align-left">Name</th>') ||
     !output.includes(
-      '<td class="align-right"><strong>online</strong></td>'
+      '<td class="align-right"><strong>online</strong> ' +
+      '<span class="math" role="math">→</span></td>'
     )) {
   throw new Error(output);
+}
+const math = renderMarkdown(
+  "$\\leftarrow$ $\\Rightarrow$ $\\alpha$ $\\leq$ `\\rightarrow`"
+);
+if (!math.includes('<span class="math" role="math">←</span>') ||
+    !math.includes('<span class="math" role="math">⇒</span>') ||
+    !math.includes('<span class="math" role="math">α</span>') ||
+    !math.includes('<span class="math" role="math">≤</span>') ||
+    !math.includes("<code>\\rightarrow</code>")) {
+  throw new Error(math);
 }
 '''
 Path(sys.argv[1]).write_text(text[start:end] + test)
