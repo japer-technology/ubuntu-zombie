@@ -408,6 +408,7 @@ let chatDisabled = false;
 let fullWidthMode = false;
 let brandTitle = "Ubuntu Zombie";
 let activeReactivation = null;
+let pendingReactivation = null;
 
 // In-flight turn state. ``turnController`` lets the operator (or a
 // client-side timeout) abort a request that the server is taking too
@@ -1404,6 +1405,7 @@ async function refreshReactivation() {
       reactivationBanner.hidden = false;
       if (active.turn_id !== activeReactivation?.turn_id) {
         activeReactivation = active;
+        pendingReactivation = null;
         if (Number(active.conversation_id) === Number(conversationId)) {
           await uzLoadConversation(active.conversation_id,
             `Reactivation started for conversation #${active.conversation_id}.`);
@@ -1420,6 +1422,13 @@ async function refreshReactivation() {
         await uzLoadConversation(completed.conversation_id,
           "Reactivation finished.");
       }
+    } else if (!pending && pendingReactivation) {
+      const completed = pendingReactivation;
+      pendingReactivation = null;
+      if (Number(completed.conversation_id) === Number(conversationId)) {
+        await uzLoadConversation(completed.conversation_id,
+          "Reactivation finished.");
+      }
     }
     if (!pending) {
       reactivationBanner.hidden = true;
@@ -1427,6 +1436,7 @@ async function refreshReactivation() {
       return data;
     }
     reactivationTitle.textContent = "Reactivation queued";
+    pendingReactivation = pending;
     const when = new Date(Number(pending.fire_at) * 1000);
     const preview = String(pending.prompt || "").replace(/\s+/g, " ").slice(0, 100);
     reactivationDetail.textContent =
