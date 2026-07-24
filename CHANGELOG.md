@@ -29,6 +29,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `/fullwidth`, and firing, processing, and completion appear in the active
   chat. Agent-selected timers prefer the configured minimum delay unless a
   longer wait is specifically needed.
+- **Live reactivation turns:** fired continuations now stream into the active
+  conversation exactly like operator sends — tools and reply text appear in
+  real time instead of only after the turn finishes — so a multi-turn task
+  (for example a long essay written across several reactivations) is visibly
+  chained. The browser polls reactivation state more tightly while a
+  continuation is about to fire or streaming so it attaches early enough to
+  show the live activity.
 - **Accurate turn completion:** successful streamed turns now finish with
   “Done.” instead of leaving “Finalising the reply…” visible.
 

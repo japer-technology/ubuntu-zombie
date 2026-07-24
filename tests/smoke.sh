@@ -3202,7 +3202,12 @@ EOF
     || { echo "/fullwidth must widen the reactivation banner" >&2; exit 1; }
   grep -q 'completeUi("Done.")' payload/agent/templates/index.html \
     || { echo "completed streamed turns must display Done" >&2; exit 1; }
-  grep -q 'Processing scheduled reactivation' \
+  grep -q 'async function uzStreamReactivationTurn' \
+    payload/agent/templates/index.html \
+    && grep -q 'uzStreamLiveTurn(active.turn_id' \
+      payload/agent/templates/index.html \
+    || { echo "fired reactivations must stream live in chat" >&2; exit 1; }
+  grep -q 'Reactivation started for conversation' \
     payload/agent/templates/index.html \
     || { echo "reactivation processing must be visible in chat" >&2; exit 1; }
   python3 payload/bin/llama-manager --help >/dev/null

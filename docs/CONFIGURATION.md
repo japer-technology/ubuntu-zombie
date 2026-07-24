@@ -372,7 +372,11 @@ must continue beyond the current model turn. The server keeps exactly one
 future reactivation across all conversations. The chat footer shows its fire
 time, reason, prompt preview, and a **Cancel** button. When it fires, a visibly
 labelled synthetic user request starts an ordinary turn in the same
-conversation; all tool policy and approval checks run again.
+conversation; all tool policy and approval checks run again. That turn streams
+into the transcript live — its tools and reply text appear as they happen, the
+same way an operator's own message does — so a task spread across several
+continuations (for example a long essay) is visibly chained rather than
+appearing only once each turn has finished.
 
 The shipped pi bridge presents this capability through a structured
 `<ubuntu-zombie-reactivation>` request at the end of the agent's reply. The
