@@ -155,10 +155,12 @@ classes:
         encoding="utf-8",
     )
     legacy = policy.load_policy(legacy_path)
+    reactivation_args = {
+        "delay_seconds": 10,
+        "prompt": "Why is the sky blue?",
+    }
     if legacy.requires_approval(
-        legacy.classify_tool("timer.reactivation", {
-            "delay_seconds": 10, "prompt": "Why is the sky blue?"
-        })
+        legacy.classify_tool("timer.reactivation", reactivation_args)
     ):
         raise SystemExit("legacy policies should auto-run timer.reactivation")
     legacy_path.write_text(
