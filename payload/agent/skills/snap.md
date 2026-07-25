@@ -2,7 +2,8 @@
 # Skill: snap, flatpak and AppImage packaging
 
 This skill is loaded when the operator mentions snaps, flatpaks or
-AppImages. APT packaging is covered by the `apt` skill.
+AppImages. APT packaging is covered by the `apt` skill; cross-format
+package health and cleanup by the `packages` skill.
 
 Operating rules:
 

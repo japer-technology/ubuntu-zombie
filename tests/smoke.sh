@@ -270,11 +270,12 @@ from pathlib import Path
 skills = skill_loader.load_skills([Path("payload/agent/skills")])
 names = {s.name for s in skills}
 assert names == {
-    "ai-agents", "apt", "backup", "containers", "css", "database", "desktop",
-    "dev", "disk", "files", "forgejo", "git", "hardware", "hermes-agent",
-    "html", "journal", "json", "kernel", "llm", "locale", "network",
-    "obsidian", "openclaw-agent", "performance", "pi-mono-agent",
-    "scheduling", "secrets", "security", "snap", "sql", "systemd",
+    "ai-agents", "apt", "backup", "certificates", "containers", "css",
+    "database", "desktop", "dev", "disk", "files", "forgejo", "git",
+    "hardware", "hermes-agent", "html", "journal", "json", "kernel", "llm",
+    "locale", "network", "obsidian", "openclaw-agent", "packages",
+    "performance", "pi-mono-agent", "process", "reactivation", "scheduling",
+    "secrets", "security", "services", "snap", "sql", "systemd",
     "troubleshoot", "ubuntu", "users", "virtualization", "web", "zombie",
     "zram",
 }, names
@@ -328,6 +329,11 @@ for prompt, expected in (
     ("Hermes", "hermes-agent"),
     ("OpenClaw", "openclaw-agent"),
     ("pi-mono", "pi-mono-agent"),
+    ("Services", "services"),
+    ("Packages", "packages"),
+    ("Processes", "process"),
+    ("Certificate", "certificates"),
+    ("Reactivation", "reactivation"),
 ):
     sel = skill_loader.select_skills(
         [prompt],
@@ -3051,10 +3057,11 @@ run_standards() {
   # ``make package`` carries them into the release bundle and the
   # installer can deploy them to /opt/ai-zombie/skills/.
   local s
-  for s in ai-agents apt backup containers css database desktop dev disk \
-           files forgejo git hardware hermes-agent html journal json kernel \
-           llm locale network obsidian openclaw-agent performance \
-           pi-mono-agent scheduling secrets security snap sql systemd \
+  for s in ai-agents apt backup certificates containers css database \
+           desktop dev disk files forgejo git hardware hermes-agent html \
+           journal json kernel llm locale network obsidian openclaw-agent \
+           packages performance pi-mono-agent process reactivation \
+           scheduling secrets security services snap sql systemd \
            troubleshoot ubuntu users virtualization web zombie zram; do
     [[ -s "payload/agent/skills/${s}.md" ]] || \
       { echo "missing built-in skill: payload/agent/skills/${s}.md" >&2; exit 1; }

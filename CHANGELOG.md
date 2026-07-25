@@ -27,6 +27,28 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Built-in skills
 
+- **Fourth wave — five more briefs, catalogue at 43:** the catalogue
+  now also covers `services` (unit dependency analysis, startup
+  ordering, health trends from the journal, and coordinated
+  bottom-up restarts and reconfigurations), `packages` (cross-format
+  package health spanning deb/snap/flatpak — broken and unmet
+  dependencies, repository and mirror hygiene, holds/pins/downgrades
+  and routine cleanup), `process` (per-process and process-tree
+  monitoring, attributing resource spikes to the owning tree or unit,
+  and safe containment or termination of runaway, defunct and
+  unresponsive processes), `certificates` (TLS certificate
+  lifecycle, chain and expiry diagnosis, trust stores and renewal
+  without disabling verification) and `reactivation` (using the
+  one-shot `timer.reactivation` continuation transparently: honest
+  reasons and prompts, bounded chains, respecting operator
+  cancellation, and deferring recurring work to host timers). The
+  `backup` brief is enhanced
+  with orchestration ordering for database-plus-file runs, rotation
+  and retention policy (`borg prune`/`restic forget` with dry-run
+  first), restore rehearsal into scratch locations, integrity checks
+  and 3-2-1 reporting. The `systemd`, `apt`, `snap` and `performance`
+  briefs gained cross-references so a prompt lands on the narrowest
+  brief.
 - **Management catalogue expansion:** new focused briefs cover coordinated
   Ubuntu maintenance, general AI-agent orchestration, and safe operation of
   Hermes, OpenClaw and Ubuntu Zombie's embedded pi-mono runtime. The existing

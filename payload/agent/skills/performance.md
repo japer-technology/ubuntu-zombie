@@ -2,7 +2,9 @@
 # Skill: performance triage
 
 This skill is loaded when the operator asks why the machine is heavy,
-what is consuming resources, or how to make something faster.
+what is consuming resources, or how to make something faster. Once a
+specific process or tree is the suspect, the `process` skill covers
+attribution, containment and safe termination.
 
 Operating rules:
 
