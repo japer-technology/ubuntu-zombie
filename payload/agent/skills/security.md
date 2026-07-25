@@ -34,7 +34,8 @@ Operating rules:
 - Do not read or echo credential material: `/etc/shadow`, private keys
   under `~/.ssh` or `/etc/ssl/private`, API tokens, or Ubuntu Zombie's
   own secrets file. `fs.read` denies `/proc/<pid>/environ` for exactly
-  this reason.
+  this reason. The `secrets` skill covers how to confirm a credential
+  without disclosing it.
 - Distinguish "this package version is behind" from "this machine is
   vulnerable". Ubuntu backports security fixes without bumping the
   upstream version, so a version comparison against upstream is not
