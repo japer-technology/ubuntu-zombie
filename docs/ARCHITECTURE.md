@@ -98,8 +98,10 @@ Action classes are:
 | `destructive` | Irreversible actions; requires the confirmation phrase. |
 
 Built-in skills ship under `/opt/ai-zombie/skills/` and cover `apt`,
-`desktop`, `disk`, `files`, `journal`, `network`, `security`, `snap`,
-`systemd`, `troubleshoot`, `users` and `zombie`. Each brief steers the
+`backup`, `containers`, `desktop`, `disk`, `files`, `hardware`,
+`journal`, `kernel`, `locale`, `network`, `obsidian`, `performance`,
+`scheduling`, `security`, `snap`, `systemd`, `troubleshoot`, `users`,
+`web`, `zombie` and `zram`. Each brief steers the
 model toward the correct typed tool and names the policy class the
 operator is about to be asked to approve; skills never expand the tool
 registry. Trigger words are unique across the built-in catalogue so a

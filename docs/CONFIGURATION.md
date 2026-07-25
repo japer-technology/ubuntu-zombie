@@ -260,8 +260,8 @@ underlying program is safe to elevate.
 
 ### Tool classes and per-turn budgets
 
-The agent emits structured tool calls from a closed 10-tool registry
-defined in `payload/agent/tools.py`:
+The agent emits structured tool calls from a closed registry defined in
+`payload/agent/tools.py`:
 
 | Tool              | Registry default class | Purpose                                                    |
 | ----------------- | ---------------------- | ---------------------------------------------------------- |
@@ -274,6 +274,7 @@ defined in `payload/agent/tools.py`:
 | `svc.status`      | `read_only`            | Inspect a systemd unit (status / is-active).               |
 | `svc.control`     | `system_change`        | Start/stop/restart/reload/enable/disable a systemd unit.   |
 | `net.status`      | `read_only`            | Read-only interface and listening-port inspection.          |
+| `web.fetch`       | `read_only`            | Fetch a public http/https URL read-only (GET/HEAD).        |
 | `skill.list`      | `read_only`            | Enumerate available skills.                                |
 | `skill.load`      | `read_only`            | Read the markdown body of a skill by name.                 |
 
@@ -288,6 +289,17 @@ chat service's environment are never returned by an auto-approved read.
 Both tools then act on the resolved path, so a symlink swapped after the
 check cannot escape the allow-list.
 `fs.write` remains limited to `/opt/ai-zombie/state` and `/tmp`.
+
+`web.fetch` performs read-only outbound lookups so the agent can check
+an upstream version or read documentation before advising a change. It
+accepts `GET`/`HEAD` on `http`/`https` URLs only, refuses URLs carrying
+credentials, and refuses hosts that resolve to a non-global address —
+loopback, link-local (including `169.254.169.254`) and private ranges —
+on the initial request and on every redirect hop. Bodies are truncated
+to `max_bytes` (64 KiB default, 1 MiB ceiling) and the request URL is
+recorded in the audit log. There is no request body: the internet is
+readable, not writable, so local files and secrets cannot be shipped
+out through this tool.
 
 Two `policy.yaml` blocks control them:
 
@@ -777,7 +789,7 @@ Skill files are short markdown briefs the agent loads via `skill.list`
 
 | Path                         | Purpose                                                         |
 | ---------------------------- | --------------------------------------------------------------- |
-| `/opt/ai-zombie/skills/`     | Root-owned, ships with the package (`apt`, `desktop`, `disk`, `files`, `journal`, `network`, `security`, `snap`, `systemd`, `troubleshoot`, `users`, `zombie`). |
+| `/opt/ai-zombie/skills/`     | Root-owned, ships with the package (`apt`, `backup`, `containers`, `desktop`, `disk`, `files`, `hardware`, `journal`, `kernel`, `locale`, `network`, `obsidian`, `performance`, `scheduling`, `security`, `snap`, `systemd`, `troubleshoot`, `users`, `web`, `zombie`, `zram`). |
 | `/etc/ubuntu-zombie/skills.d/` | Operator-extensible. Same mode/owner contract as `policy.yaml`. |
 
 Drop additional `*.md` files into `/etc/ubuntu-zombie/skills.d/` to
