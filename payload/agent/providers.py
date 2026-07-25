@@ -620,6 +620,8 @@ def _probe_lmstudio(address: str, port: int) -> dict | None:
         with socket.create_connection(
             (address, port), timeout=_PROBE_CONNECT_TIMEOUT
         ):
+            # Reachability is the whole signal; the socket is closed
+            # immediately and the model list is fetched over HTTP below.
             pass
     except OSError:
         return None

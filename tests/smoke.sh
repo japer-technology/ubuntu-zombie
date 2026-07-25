@@ -3563,10 +3563,18 @@ PY
   grep -q 'A turn is still running. Stop it before retrying.' \
     payload/agent/templates/index.html \
     || { echo "/retry must not start a second turn over a live stream" >&2; exit 1; }
-  grep -B2 'activeEventSource = new EventSource' \
-      payload/agent/templates/index.html \
-    | grep -q 'if (activeEventSource) activeEventSource.close();' \
-    || { echo "a new live stream must close any previous EventSource" >&2; exit 1; }
+  python3 - <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+marker = "activeEventSource = new EventSource("
+index = text.index(marker)
+# The preceding statements must close any stream still attached, or a
+# second turn started over a live one leaks its EventSource.
+if "activeEventSource.close()" not in text[max(0, index - 400):index]:
+    sys.exit("a new live stream must close any previous EventSource")
+PY
   if grep -A3 'function tallyStat' payload/agent/templates/index.html \
       | grep -q 'if (!verboseMode) return'; then
     echo "verbose statistics must be retained before display is enabled" >&2
