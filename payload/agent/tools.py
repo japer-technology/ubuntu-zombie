@@ -61,6 +61,10 @@ def _check_field(name: str, value: Any, spec: dict[str, Any]) -> None:
         # as ``shell.run`` ``timeout`` (which would otherwise be coerced to
         # ``0`` and immediately fire ``TimeoutExpired``).
         raise SchemaError(f"{name}: expected integer, got {type(value).__name__}")
+    if expected == "number" and (
+        isinstance(value, bool) or not isinstance(value, (int, float))
+    ):
+        raise SchemaError(f"{name}: expected number, got {type(value).__name__}")
     if expected == "boolean" and not isinstance(value, bool):
         raise SchemaError(f"{name}: expected boolean, got {type(value).__name__}")
     if expected == "array":
@@ -132,23 +136,67 @@ def _write_allowed_prefixes() -> tuple[Path, ...]:
     return (_state_dir(), Path("/tmp"))
 
 
-def _within(target: Path, roots: tuple[Path, ...]) -> bool:
+def _denied_read(resolved: Path) -> bool:
+    """Reject reads that would hand process secrets back to the model.
+
+    ``/proc`` is on the read allow-list (inspection files such as
+    ``/proc/meminfo``), but ``/proc/<pid>/environ`` exposes the chat
+    service's own environment — including provider API keys loaded from
+    the secrets file. ``fs.read`` is auto-approved ``read_only``, so this
+    has to be blocked here rather than at the policy gate.
+    """
+    parts = resolved.parts
+    return (
+        len(parts) >= 4
+        and parts[1] == "proc"
+        and parts[3] == "environ"
+    )
+
+
+def _resolve_within(target: Path, roots: tuple[Path, ...]) -> Path | None:
+    """Return the symlink-resolved path when it lives under ``roots``.
+
+    Callers must operate on the *returned* path: performing I/O on the
+    unresolved path would re-traverse the symlinks that were just
+    validated, so a link swapped after the check could escape the
+    allow-list.
+    """
     try:
         resolved = target.expanduser().resolve()
     except OSError:
-        return False
+        return None
     for root in roots:
         try:
             resolved.relative_to(root.resolve())
-            return True
+            return resolved
         except (OSError, ValueError):
             continue
-    return False
+    return None
+
+
+def _within(target: Path, roots: tuple[Path, ...]) -> bool:
+    return _resolve_within(target, roots) is not None
 
 
 # ---------------------------------------------------------------------------
 # Tool shims
 # ---------------------------------------------------------------------------
+
+def _valid_pkg_name(name: str) -> bool:
+    # A leading ``-`` would be parsed as an option by apt-get/dpkg even
+    # after ``shlex.quote`` (quoting stops shell metacharacters, not
+    # option parsing), so reject it in addition to the ``--`` guard the
+    # callers pass.
+    if not name or name.startswith("-"):
+        return False
+    return name.replace("-", "").replace("+", "").replace(".", "").isalnum()
+
+
+def _valid_unit_name(unit: str) -> bool:
+    if not unit or unit.startswith("-"):
+        return False
+    return all(c.isalnum() or c in "._@-" for c in unit)
+
 
 def _shim_shell_run(args: dict[str, Any]) -> dict[str, Any]:
     argv = args.get("argv")
@@ -161,8 +209,9 @@ def _shim_shell_run(args: dict[str, Any]) -> dict[str, Any]:
     timeout = int(args.get("timeout") or 0) or None
     cwd = args.get("cwd")
     if cwd is not None:
-        cwd_path = Path(str(cwd)).expanduser()
-        if not _within(cwd_path, _write_allowed_prefixes()):
+        cwd_path = _resolve_within(
+            Path(str(cwd)).expanduser(), _write_allowed_prefixes())
+        if cwd_path is None:
             raise SchemaError(f"shell.run: cwd {cwd!r} outside writable allow-list")
         cwd = str(cwd_path)
     kwargs: dict[str, Any] = {}
@@ -181,9 +230,12 @@ def _shim_shell_run(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _shim_fs_read(args: dict[str, Any]) -> dict[str, Any]:
-    path = Path(str(args["path"])).expanduser()
-    if not _within(path, _read_allowed_prefixes()):
-        raise SchemaError(f"fs.read: {path} outside readable allow-list")
+    raw = Path(str(args["path"])).expanduser()
+    path = _resolve_within(raw, _read_allowed_prefixes())
+    if path is None:
+        raise SchemaError(f"fs.read: {raw} outside readable allow-list")
+    if _denied_read(path):
+        raise SchemaError(f"fs.read: {raw} is denied (process environment)")
     max_bytes = int(args.get("max_bytes") or 65536)
     data = path.read_bytes()
     truncated = len(data) > max_bytes
@@ -193,9 +245,10 @@ def _shim_fs_read(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _shim_fs_list(args: dict[str, Any]) -> dict[str, Any]:
-    path = Path(str(args["path"])).expanduser()
-    if not _within(path, _read_allowed_prefixes()):
-        raise SchemaError(f"fs.list: {path} outside readable allow-list")
+    raw = Path(str(args["path"])).expanduser()
+    path = _resolve_within(raw, _read_allowed_prefixes())
+    if path is None:
+        raise SchemaError(f"fs.list: {raw} outside readable allow-list")
     if not path.is_dir():
         raise SchemaError(f"fs.list: {path} is not a directory")
     max_entries = int(args.get("max_entries") or 1000)
@@ -224,9 +277,10 @@ def _shim_fs_list(args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _shim_fs_write(args: dict[str, Any]) -> dict[str, Any]:
-    path = Path(str(args["path"])).expanduser()
-    if not _within(path, _write_allowed_prefixes()):
-        raise SchemaError(f"fs.write: {path} outside writable allow-list")
+    raw = Path(str(args["path"])).expanduser()
+    path = _resolve_within(raw, _write_allowed_prefixes())
+    if path is None:
+        raise SchemaError(f"fs.write: {raw} outside writable allow-list")
     content = str(args["content"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -235,9 +289,12 @@ def _shim_fs_write(args: dict[str, Any]) -> dict[str, Any]:
 
 def _shim_pkg_query(args: dict[str, Any]) -> dict[str, Any]:
     name = str(args["name"])
-    if not name.replace("-", "").replace("+", "").replace(".", "").isalnum():
+    if not _valid_pkg_name(name):
         raise SchemaError(f"pkg.query: invalid package name {name!r}")
-    res = run_command(f"dpkg -s {shlex.quote(name)} 2>&1 || apt-cache policy {shlex.quote(name)}")
+    res = run_command(
+        f"dpkg -s -- {shlex.quote(name)} 2>&1 "
+        f"|| apt-cache policy -- {shlex.quote(name)}"
+    )
     return {"exit_code": res.exit_code, "stdout": res.stdout, "stderr": res.stderr}
 
 
@@ -246,9 +303,9 @@ def _shim_pkg_install(args: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(names, list) or not names:
         raise SchemaError("pkg.install: names must be a non-empty array")
     for n in names:
-        if not isinstance(n, str) or not n.replace("-", "").replace("+", "").replace(".", "").isalnum():
+        if not isinstance(n, str) or not _valid_pkg_name(n):
             raise SchemaError(f"pkg.install: invalid package name {n!r}")
-    cmd = "sudo apt-get install -y " + " ".join(shlex.quote(n) for n in names)
+    cmd = "sudo apt-get install -y -- " + " ".join(shlex.quote(n) for n in names)
     res = run_command(cmd)
     return {"exit_code": res.exit_code, "stdout": res.stdout, "stderr": res.stderr,
             "duration_ms": res.duration_ms}
@@ -256,9 +313,12 @@ def _shim_pkg_install(args: dict[str, Any]) -> dict[str, Any]:
 
 def _shim_svc_status(args: dict[str, Any]) -> dict[str, Any]:
     unit = str(args["unit"])
-    if not all(c.isalnum() or c in "._@-" for c in unit):
+    if not _valid_unit_name(unit):
         raise SchemaError(f"svc.status: invalid unit {unit!r}")
-    res = run_command(f"systemctl status --no-pager {shlex.quote(unit)} || systemctl is-active {shlex.quote(unit)}")
+    res = run_command(
+        f"systemctl status --no-pager -- {shlex.quote(unit)} "
+        f"|| systemctl is-active -- {shlex.quote(unit)}"
+    )
     return {"exit_code": res.exit_code, "stdout": res.stdout, "stderr": res.stderr}
 
 
@@ -267,9 +327,9 @@ def _shim_svc_control(args: dict[str, Any]) -> dict[str, Any]:
     if action not in {"start", "stop", "restart", "reload", "enable", "disable"}:
         raise SchemaError(f"svc.control: invalid action {action!r}")
     unit = str(args["unit"])
-    if not all(c.isalnum() or c in "._@-" for c in unit):
+    if not _valid_unit_name(unit):
         raise SchemaError(f"svc.control: invalid unit {unit!r}")
-    res = run_command(f"sudo systemctl {action} {shlex.quote(unit)}")
+    res = run_command(f"sudo systemctl {action} -- {shlex.quote(unit)}")
     return {"exit_code": res.exit_code, "stdout": res.stdout, "stderr": res.stderr}
 
 

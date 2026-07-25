@@ -283,6 +283,10 @@ allow-list (`/opt/ai-zombie/state`, `/etc`, `/var/log`, `/proc`, `/sys`,
 Ubuntu inspection files readable — `/etc/os-release`, `/etc/localtime`
 and `/etc/resolv.conf` are symlinks into the last three roots — while
 home directories and `/opt/ai-zombie/secrets` stay out of reach.
+`/proc/<pid>/environ` is denied explicitly so provider keys held in the
+chat service's environment are never returned by an auto-approved read.
+Both tools then act on the resolved path, so a symlink swapped after the
+check cannot escape the allow-list.
 `fs.write` remains limited to `/opt/ai-zombie/state` and `/tmp`.
 
 Two `policy.yaml` blocks control them:

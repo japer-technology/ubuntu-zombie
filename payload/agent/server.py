@@ -620,6 +620,13 @@ class App:
         # for subclass implementations, and Ubuntu's supported Python
         # versions preserve that contract.
         with state.queue.mutex:
+            if not state.queue.queue:
+                # The consumer drained the queue between ``put_nowait``
+                # raising ``Full`` and this lock being acquired; there is
+                # nothing to evict and ``del ...[0]`` would raise.
+                state.queue.queue.append(frame)
+                state.queue.not_empty.notify()
+                return
             drop_index: int | None = None
             for idx, old in enumerate(state.queue.queue):
                 if old[0] == "token":
@@ -2076,7 +2083,10 @@ def _local_summary(messages: list[dict[str, Any]], limit: int = 12) -> str:
     """Create a deterministic, local summary without spending tokens."""
     total = len(messages)
     head = messages[:3]
-    tail = messages[-max(limit - len(head), 0):]
+    tail_count = max(limit - len(head), 0)
+    # ``messages[-0:]`` is ``messages[0:]`` (the whole list), so the
+    # empty-tail case has to be spelled out explicitly.
+    tail = messages[-tail_count:] if tail_count else []
     selected: list[dict[str, Any]] = []
     seen: set[int] = set()
     for msg in head + tail:

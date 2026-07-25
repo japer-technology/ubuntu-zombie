@@ -62,6 +62,31 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/tty` and `/dev/fd/N`,
   so `tee /dev/stderr` and `>/dev/null` stay `read_only`.
 
+### Payload bug fixes
+
+- **Tool argument hardening:** `pkg.query`, `pkg.install`, `svc.status` and
+  `svc.control` now reject names that start with `-` and pass `--` before
+  operator-supplied arguments, so an option-shaped package or unit name can
+  no longer be parsed as an `apt-get`/`dpkg`/`systemctl` flag.
+- **Symlink-safe filesystem tools:** `fs.read`, `fs.list`, `fs.write` and
+  `shell.run`'s `cwd` now operate on the resolved path they validated
+  instead of re-traversing the original one, closing a check/use gap.
+- **No process-environment reads:** `fs.read` refuses `/proc/<pid>/environ`,
+  which would otherwise hand the chat service's provider API keys back to
+  the model under the auto-approved `read_only` class.
+- **Policy cache keyed by path:** `load_policy()` no longer returns a cached
+  policy from a different file that happens to share a size and mtime.
+- **Correct summary truncation:** the local conversation summary no longer
+  falls back to the whole transcript when the head fills the message budget.
+- **Robust bridge handling:** a non-object JSON reply from the pi-ai bridge
+  raises a clean provider error instead of `AttributeError`, a tool callback
+  that returns a non-object is reported as a tool error, and the idle
+  watchdog no longer counts time spent waiting on operator approval.
+- **Stream queue overflow:** emitting an event onto a queue that the SSE
+  consumer just drained no longer raises `IndexError`.
+- **Anthropic key redaction:** the `sk-ant-` rule now runs before the generic
+  `sk-` rule in both the audit redactor and `collect-diagnostics`.
+
 ### Chat fixes
 
 - **Disabled turn watchdog is honoured:** `max_turn_seconds: 0` now really

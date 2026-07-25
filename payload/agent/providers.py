@@ -299,8 +299,11 @@ def _run_bridge(
         ) from exc
 
     if not isinstance(result, dict) or not result.get("ok"):
-        msg = (result or {}).get("error", "unknown pi-ai bridge error")
-        code = (result or {}).get("code", "")
+        # ``result`` may be any JSON value; a truthy non-dict (e.g. a
+        # list) would make ``(result or {}).get(...)`` raise.
+        data = result if isinstance(result, dict) else {}
+        msg = data.get("error", "unknown pi-ai bridge error")
+        code = data.get("code", "")
         if code == "missing_key":
             raise NoProviderConfigured(msg)
         raise ProviderError(msg)

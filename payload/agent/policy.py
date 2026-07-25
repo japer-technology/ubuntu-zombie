@@ -582,7 +582,7 @@ def _extract_sudo_allow_list_from_text(text: str) -> tuple[str, ...]:
     return tuple(out)
 
 
-_cache: tuple[tuple[int, int], Policy] | None = None
+_cache: tuple[tuple[str, int, int], Policy] | None = None
 
 
 def load_policy(path: Path = POLICY_PATH) -> Policy:
@@ -594,7 +594,10 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
     # FIX-3-14: use ``(st_mtime_ns, st_size)`` as the cache key. The
     # previous key was ``st_mtime`` (seconds), which loses two writes
     # inside the same FS tick (common on tmpfs / certain CI setups).
-    key = (st.st_mtime_ns, st.st_size)
+    # The path is part of the key: two different policy files can
+    # share a size and mtime (common in tests and on tmpfs), and the
+    # cached ``Policy`` for one must never be served for the other.
+    key = (str(path), st.st_mtime_ns, st.st_size)
     if _cache is not None and _cache[0] == key:
         return _cache[1]
     text = path.read_text(encoding="utf-8")
