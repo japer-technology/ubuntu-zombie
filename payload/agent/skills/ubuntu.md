@@ -1,4 +1,4 @@
-<!-- triggers: ubuntu, ubuntu-pro, ubuntu-drivers, do-release-upgrade, release-upgrade, unattended-upgrades, motd-news -->
+<!-- triggers: ubuntu, ubuntu-pro, ubuntu-drivers, do-release-upgrade, release-upgrade, motd-news -->
 # Skill: Ubuntu system management
 
 This skill is loaded for Ubuntu-wide maintenance that spans narrower
@@ -19,7 +19,8 @@ Operating rules:
 - Never start `do-release-upgrade`, attach or detach Ubuntu Pro, change
   package origins, or enable unattended upgrades without an explicit
   operator request. These are system-wide changes with rollback and service
-  restart consequences.
+  restart consequences; use the `security` skill for unattended-upgrade
+  policy.
 - Before a release upgrade, verify supported source and target releases,
   free space, package-manager consistency, third-party repositories, backups
   and console access. Recommend a tested restore path; do not treat an
