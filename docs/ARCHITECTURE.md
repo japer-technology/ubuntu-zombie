@@ -97,9 +97,14 @@ Action classes are:
 | `network_change` | Firewall or interface mutation. |
 | `destructive` | Irreversible actions; requires the confirmation phrase. |
 
-Built-in skills ship under `/opt/ai-zombie/skills/` and currently cover
-`apt` and `systemd`. Operators may add local skill briefs under
-`/etc/ubuntu-zombie/skills.d/`.
+Built-in skills ship under `/opt/ai-zombie/skills/` and cover `apt`,
+`desktop`, `disk`, `files`, `journal`, `network`, `security`, `snap`,
+`systemd`, `troubleshoot`, `users` and `zombie`. Each brief steers the
+model toward the correct typed tool and names the policy class the
+operator is about to be asked to approve; skills never expand the tool
+registry. Trigger words are unique across the built-in catalogue so a
+prompt loads only the briefs that apply. Operators may add local skill
+briefs under `/etc/ubuntu-zombie/skills.d/`.
 
 ## Agent reactivation
 

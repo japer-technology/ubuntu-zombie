@@ -8,6 +8,23 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Built-in skills
+
+- **Ten new skill briefs:** the shipped catalogue grows from `apt` and
+  `systemd` to also cover `desktop`, `disk`, `files`, `journal`,
+  `network`, `security`, `snap`, `troubleshoot`, `users` and `zombie`.
+  Each brief points the model at the correct typed tool, states the
+  policy class the operator will be asked to approve, and restates the
+  product invariants that matter in that domain — no new inbound network
+  surface, no self-widening of the policy gate, and no disabling of the
+  chat service. Skills remain guidance only: the tool registry is
+  unchanged and still closed.
+- **Unique trigger words:** trigger markers no longer overlap across
+  built-in skills, so a prompt loads only the briefs that apply. The
+  smoke tests enforce both the catalogue contents and trigger
+  uniqueness, and `verify` checks every brief reached
+  `/opt/ai-zombie/skills/`.
+
 ### Agent reactivation
 
 - **Durable `timer.reactivation`:** pi can schedule one bounded future

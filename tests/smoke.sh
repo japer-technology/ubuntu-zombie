@@ -240,18 +240,30 @@ finally:
     if _saved is not None:
         _os.environ["ZOMBIE_SKILLS_DIR"] = _saved
 
-# Skill loader discovers the six built-in skills, parses their
-# trigger markers, selects only on trigger-word match in recent user
-# messages, and renders a block that carries the on-disk path so the
-# UI can show provenance.
+# Skill loader discovers every built-in skill, parses their trigger
+# markers, selects only on trigger-word match in recent user messages,
+# and renders a block that carries the on-disk path so the UI can show
+# provenance.
 import skill_loader
 from pathlib import Path
 
 skills = skill_loader.load_skills([Path("payload/agent/skills")])
 names = {s.name for s in skills}
-assert names == {"apt", "systemd"}, names
+assert names == {
+    "apt", "desktop", "disk", "files", "journal", "network", "security",
+    "snap", "systemd", "troubleshoot", "users", "zombie",
+}, names
 for s in skills:
     assert s.triggers, f"skill {s.name} has no triggers"
+
+# Trigger words are unique across the built-in catalogue. A shared
+# trigger loads two briefs for one prompt, which wastes context and
+# makes the injected guidance harder for the operator to predict.
+_seen = {}
+for s in skills:
+    for trig in s.triggers:
+        assert trig not in _seen, f"trigger {trig!r}: {_seen[trig]} and {s.name}"
+        _seen[trig] = s.name
 
 # Trigger match on the last user turn only.
 # No trigger words -> no skills selected.
@@ -2992,11 +3004,12 @@ run_standards() {
     [[ -s "$f" ]] || { echo "missing required repository file: $f" >&2; exit 1; }
   done
 
-  # The six built-in skills ship under payload/agent/skills/ so
+  # The built-in skills ship under payload/agent/skills/ so
   # ``make package`` carries them into the release bundle and the
   # installer can deploy them to /opt/ai-zombie/skills/.
   local s
-  for s in apt systemd; do
+  for s in apt desktop disk files journal network security snap systemd \
+           troubleshoot users zombie; do
     [[ -s "payload/agent/skills/${s}.md" ]] || \
       { echo "missing built-in skill: payload/agent/skills/${s}.md" >&2; exit 1; }
   done
