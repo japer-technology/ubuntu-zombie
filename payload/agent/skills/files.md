@@ -38,3 +38,19 @@ Operating rules:
 - Validate after writing where a validator exists (`visudo -c`,
   `sshd -t`, `netplan generate`, `nginx -t`, `systemd-analyze verify`).
   A syntax error in a file that gates boot or login is expensive.
+- Preserve ownership, mode, ACLs, extended attributes and symlink semantics
+  when replacing an existing file. A content-correct replacement with
+  different metadata can still break a service or expose a secret.
+- Prefer an atomic same-filesystem replacement for complete rewrites:
+  prepare and validate a temporary file, apply the intended metadata, then
+  rename it over the destination. Do not truncate a live configuration
+  before its replacement is known-good.
+- Treat recursive copy, move, archive extraction and deletion as potentially
+  destructive. Inspect source and destination, estimate size, reject paths
+  that resolve unexpectedly, and never let an archive write through absolute
+  paths or `..` traversal.
+- Do not overwrite on name collision without explicit intent. For bulk work,
+  produce a bounded preview or manifest first and verify counts, checksums or
+  representative files afterward.
+- Keep user files owned by the user. When privileged inspection is necessary,
+  avoid leaving root-owned output in home or project directories.
