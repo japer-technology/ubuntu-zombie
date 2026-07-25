@@ -371,6 +371,11 @@ async function run() {
     } else if (assistantText) {
       send({ type: "final", text: assistantText });
     } else {
+      // The turn produced no text at all (the model stopped after its
+      // tool calls). The protocol still needs a terminating frame, and
+      // this is not an error, so send an empty final; the Python server
+      // turns it into a visible "ended without a reply" note rather
+      // than storing a blank message.
       send({ type: "final", text: "" });
     }
   }
