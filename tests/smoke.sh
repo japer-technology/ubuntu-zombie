@@ -323,11 +323,11 @@ assert "Active skill: apt" in block, block
 # New management briefs are independently discoverable by their
 # representative names without loading unrelated catalogue entries.
 for prompt, expected in (
-    ("check this Ubuntu host", "ubuntu"),
-    ("manage an AI-agent workflow", "ai-agents"),
-    ("diagnose Hermes", "hermes-agent"),
-    ("inspect OpenClaw", "openclaw-agent"),
-    ("check the pi-mono bridge", "pi-mono-agent"),
+    ("Ubuntu", "ubuntu"),
+    ("AI-agent", "ai-agents"),
+    ("Hermes", "hermes-agent"),
+    ("OpenClaw", "openclaw-agent"),
+    ("pi-mono", "pi-mono-agent"),
 ):
     sel = skill_loader.select_skills(
         [prompt],
