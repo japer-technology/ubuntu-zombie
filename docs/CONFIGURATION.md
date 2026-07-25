@@ -277,6 +277,14 @@ defined in `payload/agent/tools.py`:
 | `skill.list`      | `read_only`            | Enumerate available skills.                                |
 | `skill.load`      | `read_only`            | Read the markdown body of a skill by name.                 |
 
+`fs.read` and `fs.list` resolve symlinks before checking the readable
+allow-list (`/opt/ai-zombie/state`, `/etc`, `/var/log`, `/proc`, `/sys`,
+`/usr/share`, `/usr/lib` and `/run/systemd`), which keeps the canonical
+Ubuntu inspection files readable — `/etc/os-release`, `/etc/localtime`
+and `/etc/resolv.conf` are symlinks into the last three roots — while
+home directories and `/opt/ai-zombie/secrets` stay out of reach.
+`fs.write` remains limited to `/opt/ai-zombie/state` and `/tmp`.
+
 Two `policy.yaml` blocks control them:
 
 ```yaml
@@ -307,7 +315,9 @@ Budget enforcement:
 - `max_turn_seconds` is an inactivity watchdog, not a total-duration
   ceiling. Each model event or tool result resets it, so an active task can
   run longer than 24 hours. The bridge and browser deadlines sit slightly
-  above it so the Python driver reports stalled turns cleanly first.
+  above it so the Python driver reports stalled turns cleanly first. Setting
+  it to `0` disables the watchdog entirely; a wedged turn then ends only
+  when the operator presses Stop.
 
 These shipped defaults deliberately favour capable local models. Operators
 can still tune all three values in `/opt/ai-zombie/etc/policy.yaml`; elevated

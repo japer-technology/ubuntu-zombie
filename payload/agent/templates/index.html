@@ -1975,6 +1975,12 @@ function applyTurnPayload(data, preserveTranscript = false) {
     renderConversation(data.messages || [], data.events || []);
   } else if (!preserveTranscript && data.reply) {
     addMessage("assistant", data.reply);
+  } else if (preserveTranscript && data.reply) {
+    // Streamed replies are painted straight into the live bubble, so
+    // ``addMessage`` never sees them. Record the final text here or
+    // transcript-aware commands (``/copy``) would miss every streamed
+    // turn.
+    visibleMessages.push({ role: "assistant", content: data.reply });
   }
   const events = data.events || [];
   if (!preserveTranscript && events.some(ev => ev.kind === "tool_call")) {
@@ -2114,7 +2120,8 @@ function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} }
       // dropped frame) still gets a completed line so it is visible.
       const stack = toolLineStacks.get(key);
       const record = stack?.shift() || startToolLine(
-        key, note, "Start event was not received.", false);
+        key, typeof noteOrProvider === "function" ? key : noteOrProvider,
+        "Start event was not received.", false);
       const { line, label, detailBody } = record;
       const state = stateOverride || (ok === false ? "failed" : "done");
       const icons = { failed: "✗", warning: "!", done: "✓" };
@@ -2151,6 +2158,9 @@ function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} }
       else status.remove();
     };
     liveTurnCleanup = settleLive;
+    // Never leave a previous stream open: an abandoned EventSource keeps
+    // reconnecting and writes into an orphaned bubble.
+    if (activeEventSource) activeEventSource.close();
     activeEventSource = new EventSource(`/api/stream/${encodeURIComponent(turnId)}`);
 
     const completeUi = (finalStatus = null) => {
@@ -3078,6 +3088,14 @@ async function handleSlashCommand(input) {
       addMessage("user", input);
       if (!conversationId) {
         addMessage("system", "No active conversation to retry.", { error: true });
+        return true;
+      }
+      if (turnBusy) {
+        // Retrying mid-turn would start a second stream over the top of
+        // the live one, orphaning its EventSource and Stop button.
+        addMessage("system",
+          "A turn is still running. Stop it before retrying.",
+          { error: true });
         return true;
       }
       try {

@@ -152,6 +152,11 @@ _DEFAULT_HTTP_PORT = 80
 _DEFAULT_HTTPS_PORT = 443
 _LOCAL_API_LAN_PORTS = (1234, 8080, 11434, 51234)
 _MANAGED_LLAMA_LOOPBACK_PORTS = (58080,)
+# Seconds to wait for a TCP handshake during local API discovery, and
+# how many probes to run at once. Together these bound a full /24 sweep
+# to a few seconds so ``/locals`` does not stall the chat.
+_PROBE_CONNECT_TIMEOUT = 0.4
+_PROBE_MAX_WORKERS = 64
 
 # Every provider key env var, in registry order. Used by the pi-mono
 # bridge driver to strip non-active provider keys before spawning the
@@ -607,6 +612,19 @@ def _local_scan_network() -> ipaddress.IPv4Network:
 
 
 def _probe_lmstudio(address: str, port: int) -> dict | None:
+    # Cheap TCP pre-check first. A LAN sweep is ~1000 probes; letting each
+    # one spend the full HTTP timeout on a silently dropped SYN made
+    # ``/locals`` block the chat for the better part of a minute. Closed
+    # ports refuse immediately, so only filtered hosts pay this timeout.
+    try:
+        with socket.create_connection(
+            (address, port), timeout=_PROBE_CONNECT_TIMEOUT
+        ):
+            # Reachability is the whole signal; the socket is closed
+            # immediately and the model list is fetched over HTTP below.
+            pass
+    except OSError:
+        return None
     url = f"http://{address}:{port}/v1/models"
     request = Request(url, headers={"Accept": "application/json"})
     try:
@@ -677,7 +695,9 @@ def scan_lmstudio(
         for address in subnet if str(address) != "127.0.0.1"
         for candidate in lan_ports
     )
-    with ThreadPoolExecutor(max_workers=min(32, len(probes))) as pool:
+    with ThreadPoolExecutor(
+        max_workers=min(_PROBE_MAX_WORKERS, len(probes))
+    ) as pool:
         found = list(pool.map(
             lambda probe: _probe_lmstudio(*probe), probes
         ))

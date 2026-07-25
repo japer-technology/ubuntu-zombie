@@ -115,7 +115,16 @@ def _read_allowed_prefixes() -> tuple[Path, ...]:
         Path("/var/log"),
         Path("/proc"),
         Path("/sys"),
-        Path("/usr/share/doc"),
+        Path("/usr/share"),
+        # Ubuntu ships several canonical inspection files under /etc as
+        # symlinks into these read-only distro/runtime trees
+        # (``/etc/os-release`` -> ``/usr/lib/os-release``,
+        # ``/etc/localtime`` -> ``/usr/share/zoneinfo/...``,
+        # ``/etc/resolv.conf`` -> ``/run/systemd/resolve/...``). The
+        # allow-list is checked against the *resolved* path, so these
+        # roots must be listed or the most common read-only lookups fail.
+        Path("/usr/lib"),
+        Path("/run/systemd"),
     )
 
 

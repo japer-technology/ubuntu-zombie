@@ -262,6 +262,11 @@ def run_turn(
                 except ProcessLookupError:
                     pass
                 return
+            # A non-positive timeout disables the idle deadline. The
+            # watchdog still runs when an operator stop is possible, so
+            # the check has to be repeated here and not only at start-up.
+            if not timeout or timeout <= 0:
+                continue
             with activity_lock:
                 idle = time.monotonic() - last_activity
             if idle >= timeout:
