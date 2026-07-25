@@ -2171,7 +2171,11 @@ function uzStreamLiveTurn(turnId, { armTimeout = () => {}, finalize = () => {} }
       completed = true;
       if (activeEventSource) activeEventSource.close();
       activeEventSource = null;
-      if (typeof payload.reply === "string") liveMarkdown = payload.reply;
+      // Keep whatever was streamed if the terminal payload carries no
+      // text: overwriting with "" would blank a visible reply.
+      if (typeof payload.reply === "string" && payload.reply) {
+        liveMarkdown = payload.reply;
+      }
       // Keep the live tool inspectors, phase records and stat snapshots;
       // rebuilding from stored history would discard display-only details.
       applyTurnPayload(payload, true);

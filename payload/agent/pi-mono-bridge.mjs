@@ -356,11 +356,26 @@ async function run() {
     finalEmitted = true;
     clearIdle();
     flushTokenBuffer();
-    if (assistantText) {
+    // An error recorded *after* the last successful assistant text wins:
+    // preferring the stale text would hide the failure and leave the
+    // operator with a truncated preamble ("Let me check…") and no
+    // explanation. Any partial text is carried in the error message so
+    // nothing the model said is lost.
+    if (lastError) {
+      send({
+        type: "error",
+        message: assistantText
+          ? `${lastError}\n\nPartial reply before the error:\n${assistantText}`
+          : lastError,
+      });
+    } else if (assistantText) {
       send({ type: "final", text: assistantText });
-    } else if (lastError) {
-      send({ type: "error", message: lastError });
     } else {
+      // The turn produced no text at all (the model stopped after its
+      // tool calls). The protocol still needs a terminating frame, and
+      // this is not an error, so send an empty final; the Python server
+      // turns it into a visible "ended without a reply" note rather
+      // than storing a blank message.
       send({ type: "final", text: "" });
     }
   }

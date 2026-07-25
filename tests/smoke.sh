@@ -1454,6 +1454,75 @@ except pi_mono.BridgeError as exc:
 else:
     raise SystemExit("expected a BridgeError for the provider error case")
 PY
+
+    # A provider error after some assistant text must not be masked by
+    # that stale partial text (the operator would otherwise see a
+    # truncated preamble and no explanation at all).
+    echo "  pi-mono real bridge prefers a late error over partial text"
+    ZOMBIE_FAKE_PI_MODE="partial-error" \
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/payload/agent/pi-mono-bridge.mjs" \
+    ZOMBIE_PI_MONO_BIN="$(pwd)/tests/fixtures/fake-pi-json.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import pi_mono, tools
+
+try:
+    pi_mono.run_turn(
+        prompt="say hi",
+        system_prompt="stub",
+        history=[],
+        on_tool_call=lambda *_a: {"ok": True, "result": {}},
+        tool_names=tools.tool_names(),
+        timeout=20.0,
+    )
+except pi_mono.BridgeError as exc:
+    text = str(exc)
+    if "Connection error" not in text:
+        raise SystemExit(f"late provider error was masked: {text!r}")
+    if "Let me check that for you." not in text:
+        raise SystemExit(f"partial reply was dropped: {text!r}")
+else:
+    raise SystemExit("expected a BridgeError when the turn ended in error")
+PY
+
+    # A turn where tools run but the model never speaks must never be
+    # stored or streamed as a blank reply: the transcript skips empty
+    # bubbles, so the operator saw tool activity and then nothing.
+    echo "  empty model turn still produces a visible reply"
+    _EMPTY_TMP="$(mktemp -d)"
+    ZOMBIE_HISTORY_DB="${_EMPTY_TMP}/conversations.db" \
+    ZOMBIE_AUDIT_LOG="${_EMPTY_TMP}/audit.log" \
+    ZOMBIE_POLICY="payload/etc/policy.yaml" \
+    ZOMBIE_FAKE_PI_MODE="silent" \
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/payload/agent/pi-mono-bridge.mjs" \
+    ZOMBIE_PI_MONO_BIN="$(pwd)/tests/fixtures/fake-pi-json.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import server
+
+emitted = []
+app = server.App()
+out = app.post_message(
+    None, "look at the release file",
+    emit=lambda event, payload: emitted.append((event, payload)))
+reply = out.get("reply") or ""
+if not reply.strip():
+    raise SystemExit(f"a text-less turn produced no visible reply: {out!r}")
+if "without a reply" not in reply:
+    raise SystemExit(f"unexpected empty-turn notice: {reply!r}")
+if "1 tool call ran" not in reply:
+    raise SystemExit(f"empty-turn notice lost the tool count: {reply!r}")
+done = [payload for event, payload in emitted if event == "turn_done"]
+if not done or not (done[-1].get("reply") or "").strip():
+    raise SystemExit(f"turn_done streamed a blank reply: {done!r}")
+stored = [m for m in app.history.get_messages(out["conversation_id"])
+          if m["role"] == "assistant"]
+if not stored or not (stored[-1]["content"] or "").strip():
+    raise SystemExit("an empty assistant message was stored in history")
+PY
+    rm -rf "${_EMPTY_TMP}"
   else
     echo "  (skipping pi-mono stub end-to-end: node not on PATH)"
   fi

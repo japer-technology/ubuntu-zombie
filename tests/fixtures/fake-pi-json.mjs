@@ -17,6 +17,9 @@
 //                       test can assert the bridge forwarded history.
 //   "shell-status"    — expected non-zero shell status plus a genuine
 //                       tool failure, for progress classification tests.
+//   "silent"          — a tool runs but the model never says anything,
+//                       so the turn ends with no assistant text.
+//   "partial-error"   — some assistant text, then a provider error.
 //
 // Crucially, it does NOT read stdin: the real `pi --mode json` is a
 // one-shot event stream, and the bridge must let it exit on stdin EOF
@@ -70,6 +73,37 @@ if (mode === "error") {
 }
 
 const asst = (text) => ({ role: "assistant", content: text ? [{ type: "text", text }] : [], ...base, stopReason: "stop", timestamp: Date.now() });
+
+if (mode === "silent") {
+  // The model calls a tool and then stops without producing any text —
+  // the "tools ran, then no reply" case.
+  const quiet = asst("");
+  out({ type: "message_start", message: quiet });
+  out({ type: "tool_execution_start", toolCallId: "s1", toolName: "read", args: { path: "/etc/os-release" } });
+  out({ type: "tool_execution_end", toolCallId: "s1", toolName: "read", result: "NAME=Ubuntu", isError: false });
+  out({ type: "message_end", message: quiet });
+  out({ type: "turn_end", message: quiet, toolResults: [] });
+  out({ type: "agent_end", messages: [quiet], willRetry: false });
+  await waitForStdinEof();
+  process.exit(0);
+}
+
+if (mode === "partial-error") {
+  // A preamble is streamed, then the provider fails: the error must not
+  // be masked by the stale partial text.
+  const preamble = asst("Let me check that for you.");
+  out({ type: "message_start", message: asst("") });
+  out({ type: "message_update", message: preamble, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "Let me check that for you.", partial: preamble } });
+  out({ type: "message_end", message: preamble });
+  const err = { role: "assistant", content: [], ...base, stopReason: "error", errorMessage: "Connection error.", timestamp: Date.now() };
+  out({ type: "message_start", message: err });
+  out({ type: "message_end", message: err });
+  out({ type: "turn_end", message: err, toolResults: [] });
+  out({ type: "agent_end", messages: [err], willRetry: false });
+  await waitForStdinEof();
+  process.exit(0);
+}
+
 
 if (mode === "echo") {
   const answer = promptArg();

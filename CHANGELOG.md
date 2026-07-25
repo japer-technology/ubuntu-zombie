@@ -149,6 +149,18 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Payload bug fixes
 
+- **No more silent turns after tool use:** a model that ran tools and then
+  stopped without saying anything used to end the turn with an empty
+  reply, which the transcript renders as nothing at all — tool activity
+  followed by silence. The chat service now replaces a blank answer with
+  a short note (including how many tools ran) so the turn is always
+  visible, records it in history, and audits an `empty_reply` event.
+  The browser also keeps whatever text it streamed instead of clearing
+  it when the terminal frame carries no reply.
+- **Provider errors are no longer masked by a preamble:** when `pi`
+  streamed some text ("Let me check…") and then failed, the bridge
+  returned the stale preamble as the answer and dropped the error.
+  A late error now wins and carries the partial reply with it.
 - **Tool argument hardening:** `pkg.query`, `pkg.install`, `svc.status` and
   `svc.control` now reject names that start with `-` and pass `--` before
   operator-supplied arguments, so an option-shaped package or unit name can
