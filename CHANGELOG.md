@@ -62,6 +62,33 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   `/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/tty` and `/dev/fd/N`,
   so `tee /dev/stderr` and `>/dev/null` stay `read_only`.
 
+### Chat fixes
+
+- **Disabled turn watchdog is honoured:** `max_turn_seconds: 0` now really
+  disables the idle deadline. Because streamed turns always supply an
+  operator-stop event, the watchdog thread kept running and killed every
+  streamed turn about half a second in with a bogus "timed out after 0s"
+  error.
+- **Readable system files:** `fs.read` and `fs.list` resolve symlinks
+  before checking the allow-list, so `/etc/os-release`, `/etc/localtime`
+  and `/etc/resolv.conf` — the most common read-only lookups — no longer
+  fail with "outside readable allow-list". Home directories and the
+  secrets file remain unreachable.
+- **Orphaned tool results render:** a `tool_end` or `pending_approval`
+  frame that arrives without its `tool_start` no longer throws
+  `ReferenceError` in the browser, which had also prevented the approval
+  buttons for that call from being drawn.
+- **`/copy` works after streamed replies:** streamed answers are now
+  recorded in the visible transcript, so `/copy` no longer reports "No
+  assistant response matched that number" for every live turn.
+- **`/retry` cannot clobber a live turn:** retrying while a turn is
+  streaming is refused with a clear message instead of orphaning the live
+  EventSource and the Stop button; starting a stream also closes any
+  previous one.
+- **Faster `/locals`:** local API discovery pre-checks TCP reachability and
+  scans with more workers, cutting a full `/24` sweep from roughly 48
+  seconds to a few seconds.
+
 ### Chat discovery and layout
 
 - **Tighter verbose tool lines:** each streamed tool line now shows the

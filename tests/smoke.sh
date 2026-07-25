@@ -196,6 +196,21 @@ try:
     raise SystemExit("svc.control with bad action must be rejected")
 except _t.SchemaError:
     pass
+# The read allow-list is checked against the resolved path, so the
+# canonical Ubuntu inspection files that live under /etc as symlinks into
+# read-only distro/runtime trees must still be readable. Secrets and home
+# directories must stay out of reach.
+_read_roots = _t._read_allowed_prefixes()
+for _linked in ("/etc/os-release", "/etc/localtime", "/etc/resolv.conf"):
+    _candidate = Path(_linked)
+    if not _candidate.exists():
+        continue
+    if not _t._within(_candidate, _read_roots):
+        raise SystemExit(f"{_linked} must be inside the read allow-list")
+for _denied in ("/home", "/root/.ssh/id_rsa",
+                "/opt/ai-zombie/secrets/env", "/usr/bin/sudo"):
+    if _t._within(Path(_denied), _read_roots):
+        raise SystemExit(f"{_denied} must stay outside the read allow-list")
 # ``bool`` must not satisfy an ``integer`` field. Python treats ``bool``
 # as a subclass of ``int``; without an explicit guard ``shell.run``
 # would accept ``{"timeout": False}`` and ``subprocess`` would coerce
@@ -1191,6 +1206,36 @@ except pi_mono.BridgeError as exc:
         raise SystemExit(f"unexpected cancellation BridgeError: {exc}")
     if time.monotonic() - started > 5:
         raise SystemExit("operator cancellation took too long")
+else:
+    raise SystemExit("expected a BridgeError from operator cancellation")
+
+# A non-positive timeout disables the idle deadline, as documented. The
+# streaming path always supplies a cancel_event, which keeps the watchdog
+# thread running, so the idle check must stay disabled inside the loop too
+# (otherwise ``max_turn_seconds: 0`` killed every streamed turn after the
+# first watchdog tick).
+late_cancel = threading.Event()
+threading.Timer(3.0, late_cancel.set).start()
+started = time.monotonic()
+try:
+    pi_mono.run_turn(
+        prompt="No deadline",
+        system_prompt="stub",
+        history=[],
+        on_tool_call=on_tool_call,
+        tool_names=tools.tool_names(),
+        timeout=0,
+        cancel_event=late_cancel,
+    )
+except pi_mono.BridgeError as exc:
+    if "timed out" in str(exc):
+        raise SystemExit(
+            "a non-positive timeout must disable the idle watchdog"
+        )
+    if "stopped by the operator" not in str(exc):
+        raise SystemExit(f"unexpected disabled-watchdog BridgeError: {exc}")
+    if time.monotonic() - started < 2.5:
+        raise SystemExit("the wedged turn ended before the operator stop")
 else:
     raise SystemExit("expected a BridgeError from operator cancellation")
 PY
@@ -3462,6 +3507,66 @@ Path(sys.argv[1]).write_text(text[stats_start:stats_end] + text[args_start:args_
 PY
   node "${_TOOL_DETAIL_TEST}"
   rm -f "${_TOOL_DETAIL_TEST}"
+  # A tool_end (or pending_approval) whose tool_start frame was dropped
+  # must still render a completed line. The fallback used to reference an
+  # undefined ``note`` binding, so the listener threw a ReferenceError and
+  # the approval buttons for that call were never drawn.
+  _ORPHAN_TOOL_TEST="$(mktemp)"
+  python3 - "${_ORPHAN_TOOL_TEST}" <<'PY'
+import sys
+from pathlib import Path
+
+text = Path("payload/agent/templates/index.html").read_text()
+start = text.index("const toolLineStacks = new Map();")
+end = text.index("const settleLive =", start)
+prelude = r'''
+const verboseMode = true;
+const scrollLog = () => {};
+const el = (tag, opts = {}) => {
+  const node = {
+    tag,
+    children: [],
+    className: opts.class || "",
+    textContent: opts.text || "",
+    hidden: false,
+    appendChild(child) { this.children.push(child); return child; },
+    get firstElementChild() { return this.children[0] || null; },
+  };
+  return node;
+};
+const activity = el("div");
+'''
+test = r'''
+const orphan = endToolLine("fs.read", false, "fs.read · failed", "boom");
+if (!orphan || orphan.className !== "act failed verbose-tool-activity") {
+  throw new Error("an orphaned tool_end must still render a failed line");
+}
+if (activity.children.length !== 1) {
+  throw new Error("the orphaned line must be appended to the activity list");
+}
+const label = orphan.children[1];
+if (label.textContent !== "fs.read · failed") {
+  throw new Error(`unexpected orphan label: ${label.textContent}`);
+}
+const dynamic = endToolLine("shell.run", true, () => "shell.run · done", "ok");
+if (dynamic.className !== "act done verbose-tool-activity") {
+  throw new Error("an orphaned tool_end with a callback note must render");
+}
+'''
+Path(sys.argv[1]).write_text(prelude + text[start:end] + test)
+PY
+  node "${_ORPHAN_TOOL_TEST}"
+  rm -f "${_ORPHAN_TOOL_TEST}"
+  grep -q 'visibleMessages.push({ role: "assistant", content: data.reply })' \
+    payload/agent/templates/index.html \
+    || { echo "streamed replies must be recorded for /copy" >&2; exit 1; }
+  grep -q 'A turn is still running. Stop it before retrying.' \
+    payload/agent/templates/index.html \
+    || { echo "/retry must not start a second turn over a live stream" >&2; exit 1; }
+  grep -B2 'activeEventSource = new EventSource' \
+      payload/agent/templates/index.html \
+    | grep -q 'if (activeEventSource) activeEventSource.close();' \
+    || { echo "a new live stream must close any previous EventSource" >&2; exit 1; }
   if grep -A3 'function tallyStat' payload/agent/templates/index.html \
       | grep -q 'if (!verboseMode) return'; then
     echo "verbose statistics must be retained before display is enabled" >&2
