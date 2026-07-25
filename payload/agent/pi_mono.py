@@ -244,6 +244,12 @@ def run_turn(
     timed_out = threading.Event()
     cancelled = threading.Event()
     stop_watchdog = threading.Event()
+    # Set while a tool callback is running. The callback can block for a
+    # long time waiting on the operator approval gate, and that wait is
+    # activity, not idleness — refreshing ``last_activity`` only *after*
+    # the callback returns would let the watchdog kill the bridge in the
+    # middle of a pending approval.
+    tool_in_flight = threading.Event()
     activity_lock = threading.Lock()
     last_activity = time.monotonic()
 
@@ -266,6 +272,8 @@ def run_turn(
             # watchdog still runs when an operator stop is possible, so
             # the check has to be repeated here and not only at start-up.
             if not timeout or timeout <= 0:
+                continue
+            if tool_in_flight.is_set():
                 continue
             with activity_lock:
                 idle = time.monotonic() - last_activity
@@ -339,14 +347,22 @@ def run_turn(
                                        f"budget reached ({max_tool_calls}); "
                                        f"end the turn and summarise.")}
                 else:
+                    tool_in_flight.set()
                     try:
                         result = on_tool_call(
                             str(event.get("id") or uuid.uuid4().hex),
                             str(event.get("name") or ""),
                             dict(event.get("args") or {}),
                         )
+                        if not isinstance(result, dict):
+                            raise BridgeError(
+                                "tool callback returned "
+                                f"{type(result).__name__}, expected dict"
+                            )
                     except Exception as exc:  # noqa: BLE001
                         result = {"ok": False, "error": f"{exc.__class__.__name__}: {exc}"}
+                    finally:
+                        tool_in_flight.clear()
                     reply = {"type": "tool_result", "id": event.get("id"), **result}
                 # Executing a tool (or waiting on the operator gate) is
                 # activity, not idleness — refresh the deadline before we

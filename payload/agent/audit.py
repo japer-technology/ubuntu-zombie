@@ -112,8 +112,11 @@ def _sensitive_env_redactors() -> tuple[tuple[re.Pattern[str], str], ...]:
 
 # Token-shaped strings: provider keys, base64 blobs, ssh keys, etc.
 _REDACTORS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"sk-[A-Za-z0-9_-]{12,}"), "sk-***REDACTED***"),
+    # Order matters: the generic ``sk-`` pattern also matches
+    # ``sk-ant-...`` keys, so the Anthropic-specific rule has to run
+    # first or it would never fire.
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{12,}"), "sk-ant-***REDACTED***"),
+    (re.compile(r"sk-[A-Za-z0-9_-]{12,}"), "sk-***REDACTED***"),
     (re.compile(r"tskey-[A-Za-z0-9_-]{12,}"), "tskey-***REDACTED***"),
     (re.compile(r"ssh-(rsa|ed25519|dss)\s+[A-Za-z0-9+/=]{20,}"), "ssh-*** REDACTED ***"),
     # FIX-3-11: capture the separator (``:`` or ``=``) so the
