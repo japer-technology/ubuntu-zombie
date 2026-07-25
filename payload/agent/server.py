@@ -41,7 +41,7 @@ import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote
 from urllib.request import Request, urlopen
@@ -221,6 +221,45 @@ def _agent_reactivation_request(
     if not isinstance(request, dict):
         return visible, None, "structured reactivation request must be an object"
     return visible, request, None
+
+
+def _tool_activity_count(events: Iterable[dict[str, Any]]) -> int:
+    """Count the tool runs a turn performed.
+
+    Mediated calls arrive as ``tool_call`` frames; tools ``pi`` executes
+    itself are only announced as ``progress``/``tool_start`` frames, so
+    both are counted.
+    """
+    count = 0
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        if kind == "tool_call":
+            count += 1
+        elif kind == "progress" and event.get("kind") == "tool_start":
+            count += 1
+    return count
+
+
+def _empty_reply_notice(events: Iterable[dict[str, Any]]) -> str:
+    """Explain a turn that ended without any assistant text.
+
+    A model can stop right after its tool calls (or after an approval
+    gate ended the turn) and return nothing to say. Storing that empty
+    string left the operator staring at tool activity and no answer —
+    the transcript even skips blank bubbles on reload — so the turn
+    looked lost. Replace it with a short, honest note instead.
+    """
+    calls = _tool_activity_count(events)
+    ran = (f"{calls} tool call{'s' if calls != 1 else ''} ran"
+           if calls else "no tools ran")
+    return (
+        "_The model ended this turn without a reply "
+        f"({ran}). It stopped after its tool activity instead of "
+        "answering; ask it to summarise what it found, or send the "
+        "message again._"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1117,6 +1156,15 @@ class App:
                 reply.rstrip()
                 + f"\n\n_Reactivation request rejected: {reactivation_error}._"
             )
+        if not reply.strip():
+            # A turn that produced no assistant text (the model stopped
+            # after its tool calls, or an approval gate ended the turn)
+            # must not be stored — or streamed — as a blank reply: the
+            # UI drops empty bubbles, so the operator sees tool activity
+            # and then nothing at all.
+            reply = _empty_reply_notice(turn.get("events") or [])
+            log_event("empty_reply", conversation_id=conv_id,
+                      log_path=turn.get("log_path"))
         self.history.add_message(conv_id, "assistant", reply,
                                  {"engine": "pi-mono",
                                   "log_path": turn.get("log_path")})
