@@ -27,16 +27,17 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Built-in skills
 
-- **Ten further skill briefs:** the catalogue now also covers `backup`,
-  `containers`, `hardware`, `kernel`, `locale`, `obsidian`,
-  `performance`, `scheduling`, `web` and `zram`, so ordinary Ubuntu
-  Desktop administration — snapshots and restores, drivers and
-  peripherals, boot and kernel modules, time/locale/keyboard, container
+- **Second wave — ten more briefs:** on top of the ten below, the
+  catalogue now also covers `backup`, `containers`, `hardware`,
+  `kernel`, `locale`, `obsidian`, `performance`, `scheduling`, `web`
+  and `zram`, so ordinary Ubuntu Desktop administration — snapshots and
+  restores, drivers and peripherals, boot and kernel modules,
+  time/locale/keyboard settings, container
   runtimes, scheduled work, compressed swap, markdown vaults and
   read-only web lookups — has a brief that names the right tool, the
   policy class the operator will be asked to approve, and the failure
   mode that matters in that domain.
-- **Ten new skill briefs:** the shipped catalogue grows from `apt` and
+- **First wave — ten briefs:** the shipped catalogue grew from `apt` and
   `systemd` to also cover `desktop`, `disk`, `files`, `journal`,
   `network`, `security`, `snap`, `troubleshoot`, `users` and `zombie`.
   Each brief points the model at the correct typed tool, states the

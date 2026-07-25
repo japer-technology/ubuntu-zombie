@@ -28,7 +28,7 @@ Operating rules:
   the file goes through `shell.run` with `sudo`.
 - Size zram against real RAM, not a rule of thumb. Half of RAM is a
   common ceiling; more than that can push the system into reclaiming
-  memory to store memory. Report the numbers you used.
+  memory in order to compress and store it in zram. Report the numbers you used.
 - zram wants a higher `vm.swappiness` than a disk swap file — values
   around 100–180 are normal for zram-only systems because swapping to
   RAM is cheap. Set it in `/etc/sysctl.d/` rather than editing
