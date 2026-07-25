@@ -270,11 +270,12 @@ from pathlib import Path
 skills = skill_loader.load_skills([Path("payload/agent/skills")])
 names = {s.name for s in skills}
 assert names == {
-    "apt", "backup", "containers", "css", "database", "desktop", "dev",
-    "disk", "files", "forgejo", "git", "hardware", "html", "journal",
-    "json", "kernel", "llm", "locale", "network", "obsidian",
-    "performance", "scheduling", "secrets", "security", "snap", "sql",
-    "systemd", "troubleshoot", "users", "virtualization", "web", "zombie",
+    "ai-agents", "apt", "backup", "containers", "css", "database", "desktop",
+    "dev", "disk", "files", "forgejo", "git", "hardware", "hermes-agent",
+    "html", "journal", "json", "kernel", "llm", "locale", "network",
+    "obsidian", "openclaw-agent", "performance", "pi-mono-agent",
+    "scheduling", "secrets", "security", "snap", "sql", "systemd",
+    "troubleshoot", "ubuntu", "users", "virtualization", "web", "zombie",
     "zram",
 }, names
 for s in skills:
@@ -318,6 +319,24 @@ assert [s.name for s in sel] == ["apt"], [s.name for s in sel]
 block = skill_loader.render_skills_block(sel)
 assert "payload/agent/skills/apt.md" in block, block
 assert "Active skill: apt" in block, block
+
+# New management briefs are independently discoverable by their
+# representative names without loading unrelated catalogue entries.
+for prompt, expected in (
+    ("check this Ubuntu host", "ubuntu"),
+    ("manage an AI-agent workflow", "ai-agents"),
+    ("diagnose Hermes", "hermes-agent"),
+    ("inspect OpenClaw", "openclaw-agent"),
+    ("check the pi-mono bridge", "pi-mono-agent"),
+):
+    sel = skill_loader.select_skills(
+        [prompt],
+        recent=1,
+        dirs=[Path("payload/agent/skills")],
+    )
+    assert [s.name for s in sel] == [expected], (
+        prompt, [s.name for s in sel]
+    )
 
 # Empty selection -> empty block (no header noise on every turn).
 assert skill_loader.render_skills_block([]) == ""
@@ -3032,10 +3051,11 @@ run_standards() {
   # ``make package`` carries them into the release bundle and the
   # installer can deploy them to /opt/ai-zombie/skills/.
   local s
-  for s in apt backup containers css database desktop dev disk files \
-           forgejo git hardware html journal json kernel llm locale network \
-           obsidian performance scheduling secrets security snap sql \
-           systemd troubleshoot users virtualization web zombie zram; do
+  for s in ai-agents apt backup containers css database desktop dev disk \
+           files forgejo git hardware hermes-agent html journal json kernel \
+           llm locale network obsidian openclaw-agent performance \
+           pi-mono-agent scheduling secrets security snap sql systemd \
+           troubleshoot ubuntu users virtualization web zombie zram; do
     [[ -s "payload/agent/skills/${s}.md" ]] || \
       { echo "missing built-in skill: payload/agent/skills/${s}.md" >&2; exit 1; }
   done

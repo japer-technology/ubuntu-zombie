@@ -97,12 +97,13 @@ Action classes are:
 | `network_change` | Firewall or interface mutation. |
 | `destructive` | Irreversible actions; requires the confirmation phrase. |
 
-Built-in skills ship under `/opt/ai-zombie/skills/` and cover `apt`,
-`backup`, `containers`, `css`, `database`, `desktop`, `dev`, `disk`,
-`files`, `forgejo`, `git`, `hardware`, `html`, `journal`, `json`,
-`kernel`, `llm`, `locale`, `network`, `obsidian`, `performance`,
-`scheduling`, `secrets`, `security`, `snap`, `sql`, `systemd`,
-`troubleshoot`, `users`, `virtualization`, `web`, `zombie` and `zram`.
+Built-in skills ship under `/opt/ai-zombie/skills/` and cover `ai-agents`,
+`apt`, `backup`, `containers`, `css`, `database`, `desktop`, `dev`, `disk`,
+`files`, `forgejo`, `git`, `hardware`, `hermes-agent`, `html`, `journal`,
+`json`, `kernel`, `llm`, `locale`, `network`, `obsidian`,
+`openclaw-agent`, `performance`, `pi-mono-agent`, `scheduling`, `secrets`,
+`security`, `snap`, `sql`, `systemd`, `troubleshoot`, `ubuntu`, `users`,
+`virtualization`, `web`, `zombie` and `zram`.
 Each brief steers the
 model toward the correct typed tool and names the policy class the
 operator is about to be asked to approve; skills never expand the tool

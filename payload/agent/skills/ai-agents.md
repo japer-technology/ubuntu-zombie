@@ -1,4 +1,4 @@
-<!-- triggers: agentic, subagent, subagents, multi-agent, multiagent, orchestration, orchestrator, mcp, a2a, tool-calling, toolcalling -->
+<!-- triggers: ai-agent, ai-agents, agentic, subagent, subagents, multi-agent, multiagent, orchestration, orchestrator, mcp, a2a, tool-calling, toolcalling -->
 # Skill: AI agent management
 
 This skill is loaded when the operator manages agent runtimes, tool servers,

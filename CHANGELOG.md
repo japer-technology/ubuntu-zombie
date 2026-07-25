@@ -27,6 +27,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Built-in skills
 
+- **Management catalogue expansion:** new focused briefs cover coordinated
+  Ubuntu maintenance, general AI-agent orchestration, and safe operation of
+  Hermes, OpenClaw and Ubuntu Zombie's embedded pi-mono runtime. The existing
+  `dev` and `files` briefs now add repository-aware programming workflows,
+  metadata-preserving atomic file changes and safer bulk operations. Smoke
+  tests verify discovery, unique triggers, representative selection and
+  package/deployment coverage for all 38 built-ins.
 - **Third wave — eleven more briefs:** the catalogue now also covers
   `css`, `database`, `dev`, `forgejo`, `git`, `html`, `json`, `llm`,
   `secrets`, `sql` and `virtualization`. These close the gaps an
