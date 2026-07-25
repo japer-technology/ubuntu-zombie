@@ -53,3 +53,19 @@ Operating rules:
   (`which python3`, `readlink -f $(which node)`). "It is installed" is
   ambiguous on a machine with a snap, a `.deb` and a version manager
   all providing the same command.
+- Before editing a project, find its contributor and agent instructions,
+  inspect `git status`, identify generated files, and learn the existing
+  lint/build/test commands. Repository-local instructions outrank generic
+  language advice.
+- Make the smallest coherent change. Do not reformat unrelated files,
+  rewrite history, discard local modifications, or silently modify lockfiles,
+  generated output and vendored code.
+- Validate in increasing scope: syntax or targeted tests first, then the
+  repository's existing lint, test and build commands. Do not install a new
+  checker merely to validate a small change.
+- Keep test and build commands non-interactive and bounded. Never launch a
+  watcher, development server or interactive debugger through the agent
+  unless the operator explicitly requests and can control that process.
+- Before committing or handing back changes, review the diff for accidental
+  credentials, machine-local paths, debug output and unrelated edits; report
+  tests that were run and any validation that could not run.

@@ -4428,11 +4428,11 @@ check "pi-mono settings rendered"          test -r \${ZOMBIE_DIR}/pi/settings.js
 check "pi-mono APPEND_SYSTEM rendered"     test -r \${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md
 check "pi-mono log dir present"            test -d \${ZOMBIE_DIR}/state/logs
 check "built-in skills directory present"  test -d \${ZOMBIE_DIR}/skills
-for skill in apt backup containers css database desktop dev disk files \
-             forgejo git hardware html journal json kernel llm locale \
-             network obsidian performance scheduling secrets security snap \
-             sql systemd troubleshoot users virtualization web zombie \
-             zram; do
+for skill in ai-agents apt backup containers css database desktop dev disk \
+             files forgejo git hardware hermes-agent html journal json kernel \
+             llm locale network obsidian openclaw-agent performance \
+             pi-mono-agent scheduling secrets security snap sql systemd \
+             troubleshoot ubuntu users virtualization web zombie zram; do
   check "skill \${skill}.md deployed"        test -r \${ZOMBIE_DIR}/skills/\${skill}.md
 done
 check "operator skills.d/ present"         test -d /etc/ubuntu-zombie/skills.d
