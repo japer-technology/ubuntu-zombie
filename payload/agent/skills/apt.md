@@ -2,7 +2,9 @@
 # Skill: APT package management on Ubuntu
 
 This skill is loaded when the operator's recent prompts mention APT,
-package installs, or related Debian package terms.
+package installs, or related Debian package terms. Cross-format
+package health — broken dependencies, repositories and mirrors, and
+routine cleanup — is covered by the `packages` skill.
 
 Operating rules:
 

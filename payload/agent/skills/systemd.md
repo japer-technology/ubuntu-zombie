@@ -2,7 +2,9 @@
 # Skill: systemd service management
 
 This skill is loaded when the operator mentions systemd, services,
-units, or the journal.
+units, or the journal. Dependency analysis, startup ordering, health
+trends and coordinated multi-unit restarts are covered in more depth
+by the `services` skill.
 
 Operating rules:
 
