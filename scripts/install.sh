@@ -4428,8 +4428,10 @@ check "pi-mono settings rendered"          test -r \${ZOMBIE_DIR}/pi/settings.js
 check "pi-mono APPEND_SYSTEM rendered"     test -r \${ZOMBIE_DIR}/pi/APPEND_SYSTEM.md
 check "pi-mono log dir present"            test -d \${ZOMBIE_DIR}/state/logs
 check "built-in skills directory present"  test -d \${ZOMBIE_DIR}/skills
-check "skill apt.md deployed"              test -r \${ZOMBIE_DIR}/skills/apt.md
-check "skill systemd.md deployed"          test -r \${ZOMBIE_DIR}/skills/systemd.md
+for skill in apt desktop disk files journal network security snap systemd \
+             troubleshoot users zombie; do
+  check "skill \${skill}.md deployed"        test -r \${ZOMBIE_DIR}/skills/\${skill}.md
+done
 check "operator skills.d/ present"         test -d /etc/ubuntu-zombie/skills.d
 check "agent tools.py compiles"            \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/tools.py
 check "agent pi_mono.py compiles"          \${AGENT_HOME}/agent-env/bin/python -m py_compile \${ZOMBIE_DIR}/agent/pi_mono.py

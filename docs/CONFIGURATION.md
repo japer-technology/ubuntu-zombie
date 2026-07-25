@@ -777,12 +777,20 @@ Skill files are short markdown briefs the agent loads via `skill.list`
 
 | Path                         | Purpose                                                         |
 | ---------------------------- | --------------------------------------------------------------- |
-| `/opt/ai-zombie/skills/`     | Root-owned, ships with the package (`apt`, `systemd`). |
+| `/opt/ai-zombie/skills/`     | Root-owned, ships with the package (`apt`, `desktop`, `disk`, `files`, `journal`, `network`, `security`, `snap`, `systemd`, `troubleshoot`, `users`, `zombie`). |
 | `/etc/ubuntu-zombie/skills.d/` | Operator-extensible. Same mode/owner contract as `policy.yaml`. |
 
 Drop additional `*.md` files into `/etc/ubuntu-zombie/skills.d/` to
 extend the catalogue. Names must be unique across both directories;
 shadowing is rejected at load time.
+
+A skill is guidance, not capability: it can steer the model toward a
+tool but never adds one, because the registry in
+`payload/agent/tools.py` is closed. A file is auto-selected when a word
+from its `<!-- triggers: ... -->` marker appears in the recent operator
+turns, and the injected block names the on-disk path so the operator can
+see exactly what was added to the prompt. Keep trigger words specific:
+generic words load briefs on unrelated turns and waste context.
 
 ## Advanced environment overrides
 
