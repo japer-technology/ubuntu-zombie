@@ -270,10 +270,12 @@ from pathlib import Path
 skills = skill_loader.load_skills([Path("payload/agent/skills")])
 names = {s.name for s in skills}
 assert names == {
-    "apt", "backup", "containers", "desktop", "disk", "files", "hardware",
-    "journal", "kernel", "locale", "network", "obsidian", "performance",
-    "scheduling", "security", "snap", "systemd", "troubleshoot", "users",
-    "web", "zombie", "zram",
+    "apt", "backup", "containers", "css", "database", "desktop", "dev",
+    "disk", "files", "forgejo", "git", "hardware", "html", "journal",
+    "json", "kernel", "llm", "locale", "network", "obsidian",
+    "performance", "scheduling", "secrets", "security", "snap", "sql",
+    "systemd", "troubleshoot", "users", "virtualization", "web", "zombie",
+    "zram",
 }, names
 for s in skills:
     assert s.triggers, f"skill {s.name} has no triggers"
@@ -3030,9 +3032,10 @@ run_standards() {
   # ``make package`` carries them into the release bundle and the
   # installer can deploy them to /opt/ai-zombie/skills/.
   local s
-  for s in apt backup containers desktop disk files hardware journal kernel \
-           locale network obsidian performance scheduling security snap \
-           systemd troubleshoot users web zombie zram; do
+  for s in apt backup containers css database desktop dev disk files \
+           forgejo git hardware html journal json kernel llm locale network \
+           obsidian performance scheduling secrets security snap sql \
+           systemd troubleshoot users virtualization web zombie zram; do
     [[ -s "payload/agent/skills/${s}.md" ]] || \
       { echo "missing built-in skill: payload/agent/skills/${s}.md" >&2; exit 1; }
   done

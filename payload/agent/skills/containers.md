@@ -41,7 +41,8 @@ Operating rules:
   restart policies before proposing `systemctl restart docker`.
 - LXD/Incus system containers are closer to VMs: `lxc list`,
   `lxc info`, `lxc config show` describe them, and deleting an instance
-  destroys its storage volume.
+  destroys its storage volume. Real hypervisors — KVM, VirtualBox,
+  Multipass — are the `virtualization` skill.
 - Kubernetes contexts are a footgun. Print `kubectl config
   current-context` and confirm it with the operator before any command
   that mutates cluster state — a "test" namespace on the wrong cluster

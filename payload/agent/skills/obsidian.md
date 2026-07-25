@@ -44,7 +44,8 @@ Operating rules:
   Git or a cloud folder, ask before touching files — an edit made while
   the sync client is running can produce conflict copies. For a
   Git-backed vault, prefer ordinary `git status`/`git diff` (both
-  `read_only`) to explain state before proposing a commit.
+  `read_only`) to explain state before proposing a commit; the `git`
+  skill covers the rest.
 - Vaults hold personal and often sensitive writing. Quote only the
   lines needed to answer the question, never dump note contents into
   the transcript wholesale, and never send them off the machine.

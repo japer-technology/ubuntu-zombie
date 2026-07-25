@@ -31,6 +31,9 @@ Operating rules:
   operations that can roll back or remove system state; they need the
   exact confirmation phrase. Quote that requirement rather than
   reaching for a command that avoids it.
+- Databases are not backed up by copying their files. Dump them with
+  the engine's own tool while the server runs, and include the dump in
+  the file-level backup — see the `database` skill.
 - A backup nobody has restored is a hypothesis. After creating one,
   verify it: list the archive (`tar -tzf`, `borg list`,
   `restic snapshots`), check the byte count, and restore one file to

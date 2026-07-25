@@ -30,7 +30,8 @@ Operating rules:
   `scripts/install.sh` and its `repair` subcommand.
 - Never echo password material, hashes from `/etc/shadow`, or SSH
   private keys into the chat. `/etc/shadow` is not readable through
-  `fs.read` for the same reason.
+  `fs.read` for the same reason, and the `secrets` skill covers
+  credential handling in general.
 - Prefer group membership over broadened file modes. `chmod 777` on a
   shared directory is almost always the wrong repair for "permission
   denied", and it is irreversible in the sense that nobody remembers

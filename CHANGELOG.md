@@ -27,6 +27,18 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Built-in skills
 
+- **Third wave — eleven more briefs:** the catalogue now also covers
+  `css`, `database`, `dev`, `forgejo`, `git`, `html`, `json`, `llm`,
+  `secrets`, `sql` and `virtualization`. These close the gaps an
+  Ubuntu Desktop operator hits next — working copies and history
+  rewrites, language toolchains that must not be installed into the
+  system interpreter, hypervisors and guest disks, database servers
+  and the SQL run against them, JSON/HTML/CSS handling with escaping
+  and injection called out, credential handling that confirms presence
+  instead of value, and the product's own optional components (the
+  Forgejo forge and the local llama.cpp/provider setup). Existing
+  briefs gained cross-references so a prompt lands on the narrowest
+  one.
 - **Second wave — ten more briefs:** on top of the ten below, the
   catalogue now also covers `backup`, `containers`, `hardware`,
   `kernel`, `locale`, `obsidian`, `performance`, `scheduling`, `web`

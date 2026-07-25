@@ -789,7 +789,7 @@ Skill files are short markdown briefs the agent loads via `skill.list`
 
 | Path                         | Purpose                                                         |
 | ---------------------------- | --------------------------------------------------------------- |
-| `/opt/ai-zombie/skills/`     | Root-owned, ships with the package (`apt`, `backup`, `containers`, `desktop`, `disk`, `files`, `hardware`, `journal`, `kernel`, `locale`, `network`, `obsidian`, `performance`, `scheduling`, `security`, `snap`, `systemd`, `troubleshoot`, `users`, `web`, `zombie`, `zram`). |
+| `/opt/ai-zombie/skills/`     | Root-owned, ships with the package (`apt`, `backup`, `containers`, `css`, `database`, `desktop`, `dev`, `disk`, `files`, `forgejo`, `git`, `hardware`, `html`, `journal`, `json`, `kernel`, `llm`, `locale`, `network`, `obsidian`, `performance`, `scheduling`, `secrets`, `security`, `snap`, `sql`, `systemd`, `troubleshoot`, `users`, `virtualization`, `web`, `zombie`, `zram`). |
 | `/etc/ubuntu-zombie/skills.d/` | Operator-extensible. Same mode/owner contract as `policy.yaml`. |
 
 Drop additional `*.md` files into `/etc/ubuntu-zombie/skills.d/` to

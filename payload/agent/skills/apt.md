@@ -32,6 +32,9 @@ Operating rules:
   dependency the vendor needs is not in the Ubuntu archive), report the
   exact apt error to the operator and ask how to proceed rather than
   forcing the package on with `dpkg -i --force-depends`.
+- Language ecosystems have their own package managers (`pip`, `npm`,
+  `cargo`). They are not apt's business and must not be run as root
+  against the system interpreter — see the `dev` skill.
 - If a package is missing on the system, report it and ask the
   operator how to proceed. Read-only web lookups (`web.fetch`, or
   `curl`/`wget` to stdout) are fine for checking an upstream version or
