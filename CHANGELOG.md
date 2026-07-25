@@ -8,8 +8,34 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Read-only web access
+
+- **New `web.fetch` tool:** the closed registry gains a `read_only`
+  outbound fetch so the agent can check an upstream version or read
+  documentation before advising a change. It accepts `GET`/`HEAD` on
+  `http`/`https` URLs only, refuses embedded credentials, and refuses
+  hosts that resolve to loopback, link-local or private addresses — on
+  the first request and on every redirect hop — so an auto-approved
+  fetch cannot reach the loopback chat service, the LAN or a cloud
+  metadata endpoint. Bodies are truncated (64 KiB default, 1 MiB
+  ceiling) and every request URL is audited. There is no request body,
+  so local files and secrets cannot leave through it.
+- **Prompt guidance:** the system prompt now states that read-only
+  internet lookups are allowed and expected, and reinforces that the
+  internet is for reading — no shipping local files, environment or
+  credentials outward, and no `curl … | bash`.
+
 ### Built-in skills
 
+- **Ten further skill briefs:** the catalogue now also covers `backup`,
+  `containers`, `hardware`, `kernel`, `locale`, `obsidian`,
+  `performance`, `scheduling`, `web` and `zram`, so ordinary Ubuntu
+  Desktop administration — snapshots and restores, drivers and
+  peripherals, boot and kernel modules, time/locale/keyboard, container
+  runtimes, scheduled work, compressed swap, markdown vaults and
+  read-only web lookups — has a brief that names the right tool, the
+  policy class the operator will be asked to approve, and the failure
+  mode that matters in that domain.
 - **Ten new skill briefs:** the shipped catalogue grows from `apt` and
   `systemd` to also cover `desktop`, `disk`, `files`, `journal`,
   `network`, `security`, `snap`, `troubleshoot`, `users` and `zombie`.

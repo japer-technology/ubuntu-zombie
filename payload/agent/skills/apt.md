@@ -33,6 +33,7 @@ Operating rules:
   exact apt error to the operator and ask how to proceed rather than
   forcing the package on with `dpkg -i --force-depends`.
 - If a package is missing on the system, report it and ask the
-  operator how to proceed. Do not silently fall back to a curl|bash
-  install — there is no generic `http.get` tool and that pattern is
-  forbidden by the threat model.
+  operator how to proceed. Read-only web lookups (`web.fetch`, or
+  `curl`/`wget` to stdout) are fine for checking an upstream version or
+  release note, but never fall back to a `curl | bash` install — that
+  pattern is forbidden by the threat model. See the `web` skill.

@@ -20,9 +20,13 @@ should not gain third-party deps just to gate a dozen calls.
 """
 from __future__ import annotations
 
+import ipaddress
 import os
 import shlex
+import socket
 import subprocess
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Callable
 
@@ -382,6 +386,126 @@ def _shim_skill_load(args: dict[str, Any]) -> dict[str, Any]:
     raise SchemaError(f"skill.load: skill {name!r} not found")
 
 
+# ---------------------------------------------------------------------------
+# Read-only web access
+# ---------------------------------------------------------------------------
+
+# Byte caps for ``web.fetch``. The default keeps a page cheap in context;
+# the maximum stops a large download from filling the transcript.
+WEB_FETCH_DEFAULT_BYTES = 64 * 1024
+WEB_FETCH_MAX_BYTES = 1024 * 1024
+WEB_FETCH_TIMEOUT_SECONDS = 20
+WEB_FETCH_MAX_REDIRECTS = 5
+WEB_FETCH_USER_AGENT = "ubuntu-zombie/web.fetch (+read-only)"
+
+
+def _assert_public_url(url: str) -> str:
+    """Validate ``url`` for outbound read-only fetching.
+
+    Rejects anything that is not plain ``http``/``https``, URLs carrying
+    embedded credentials, and hosts that resolve to a non-global address.
+    The last check is the SSRF guard: without it ``web.fetch`` — which is
+    ``read_only`` and therefore auto-approved — could read the loopback
+    chat service, LAN devices, or a cloud metadata endpoint such as
+    ``169.254.169.254``. DNS is re-resolved by the HTTP client after this
+    check, so a hostile resolver can still rebind; the guard is a
+    meaningful barrier, not a proof.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError as exc:
+        raise SchemaError(f"web.fetch: invalid URL: {exc}") from exc
+    if parts.scheme not in ("http", "https"):
+        raise SchemaError(
+            f"web.fetch: only http/https URLs are allowed, got {parts.scheme!r}"
+        )
+    if parts.username or parts.password:
+        raise SchemaError("web.fetch: URLs with embedded credentials are refused")
+    host = parts.hostname
+    if not host:
+        raise SchemaError("web.fetch: URL has no host")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    try:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except (OSError, ValueError) as exc:
+        raise SchemaError(f"web.fetch: cannot resolve {host!r}: {exc}") from exc
+    for info in infos:
+        address = info[4][0]
+        try:
+            ip = ipaddress.ip_address(address)
+        except ValueError:
+            raise SchemaError(f"web.fetch: unusable address for {host!r}")
+        if not ip.is_global:
+            raise SchemaError(
+                f"web.fetch: {host!r} resolves to the non-public address "
+                f"{address}; local and private targets are refused"
+            )
+    return url
+
+
+class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validate every redirect target against :func:`_assert_public_url`."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        _assert_public_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _shim_web_fetch(args: dict[str, Any]) -> dict[str, Any]:
+    url = _assert_public_url(str(args["url"]))
+    method = str(args.get("method") or "GET").upper()
+    if method not in ("GET", "HEAD"):
+        raise SchemaError(f"web.fetch: method {method!r} is not allowed")
+    max_bytes = int(args.get("max_bytes") or WEB_FETCH_DEFAULT_BYTES)
+    if max_bytes <= 0:
+        raise SchemaError("web.fetch: max_bytes must be positive")
+    max_bytes = min(max_bytes, WEB_FETCH_MAX_BYTES)
+
+    request = urllib.request.Request(
+        url,
+        method=method,
+        headers={"User-Agent": WEB_FETCH_USER_AGENT, "Accept": "*/*"},
+    )
+    opener = urllib.request.build_opener(_GuardedRedirectHandler)
+    opener.addheaders = []
+    try:
+        with opener.open(request, timeout=WEB_FETCH_TIMEOUT_SECONDS) as response:
+            status = int(getattr(response, "status", 0) or 0)
+            final_url = response.geturl()
+            content_type = response.headers.get("Content-Type", "")
+            raw = b"" if method == "HEAD" else response.read(max_bytes + 1)
+    except urllib.error.HTTPError as exc:
+        # An error status is an answer, not a tool failure: report it so
+        # the model can say "that page returned 404" instead of retrying.
+        body = exc.read(max_bytes + 1) if exc.fp is not None else b""
+        truncated = len(body) > max_bytes
+        return {
+            "url": url,
+            "final_url": exc.url or url,
+            "status": int(exc.code),
+            "content_type": exc.headers.get("Content-Type", "") if exc.headers else "",
+            "bytes": len(body[:max_bytes]),
+            "truncated": truncated,
+            "body": body[:max_bytes].decode("utf-8", errors="replace"),
+        }
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise SchemaError(f"web.fetch: request failed: {exc}") from exc
+
+    truncated = len(raw) > max_bytes
+    body = raw[:max_bytes]
+    return {
+        "url": url,
+        "final_url": final_url,
+        "status": status,
+        "content_type": content_type,
+        "bytes": len(body),
+        "truncated": truncated,
+        "body": body.decode("utf-8", errors="replace"),
+    }
+
+
 def _shim_timer_reactivation(_args: dict[str, Any]) -> dict[str, Any]:
     raise SchemaError(
         "timer.reactivation requires an active conversation runtime"
@@ -540,6 +664,24 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         shim=_shim_skill_load,
+    ),
+    "web.fetch": _t(
+        classification="read_only",
+        description=(
+            "Fetch a public http/https URL read-only and return its status "
+            "and a truncated body."
+        ),
+        schema={
+            "type": "object",
+            "properties": {
+                "url": {"type": "string"},
+                "method": {"type": "string", "enum": ["GET", "HEAD"]},
+                "max_bytes": {"type": "integer"},
+            },
+            "required": ["url"],
+            "additionalProperties": False,
+        },
+        shim=_shim_web_fetch,
     ),
     "timer.reactivation": _t(
         classification="chat_schedule",

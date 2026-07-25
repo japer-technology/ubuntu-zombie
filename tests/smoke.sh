@@ -122,8 +122,8 @@ if hasattr(server, "extract_commands"):
 import tools as _t
 assert set(_t.tool_names()) == {
     "shell.run", "fs.read", "fs.list", "fs.write", "pkg.query", "pkg.install",
-    "svc.status", "svc.control", "net.status", "skill.list", "skill.load",
-    "timer.reactivation",
+    "svc.status", "svc.control", "net.status", "web.fetch", "skill.list",
+    "skill.load", "timer.reactivation",
 }, _t.tool_names()
 # Per-tool default classifications come from the registry; shell.run
 # is computed per-argv via the existing classify() path.
@@ -133,6 +133,26 @@ if p.classify_tool("pkg.install", {"names": ["curl"]}) != "system_change":
     raise SystemExit("pkg.install should be system_change")
 if p.classify_tool("svc.control", {"unit": "cron", "action": "restart"}) != "system_change":
     raise SystemExit("svc.control should be system_change")
+if p.classify_tool("web.fetch", {"url": "https://example.com"}) != "read_only":
+    raise SystemExit("web.fetch should be read_only")
+# web.fetch is auto-approved, so its SSRF guard is the only thing keeping
+# an auto-run fetch away from the loopback chat service, the LAN and the
+# cloud metadata endpoint. Non-http schemes and credentials are refused too.
+for _bad in ("file:///etc/passwd", "http://127.0.0.1:8080/",
+             "http://169.254.169.254/latest/meta-data/",
+             "******example.com/"):
+    try:
+        _t.dispatch("web.fetch", {"url": _bad})
+    except _t.SchemaError:
+        pass
+    else:
+        raise SystemExit(f"web.fetch must refuse {_bad!r}")
+try:
+    _t.dispatch("web.fetch", {"url": "https://example.com", "method": "POST"})
+except _t.SchemaError:
+    pass
+else:
+    raise SystemExit("web.fetch must refuse non-GET/HEAD methods")
 if p.classify_tool("timer.reactivation", {
     "delay_seconds": 30, "prompt": "continue"
 }) != "chat_schedule":
@@ -250,8 +270,10 @@ from pathlib import Path
 skills = skill_loader.load_skills([Path("payload/agent/skills")])
 names = {s.name for s in skills}
 assert names == {
-    "apt", "desktop", "disk", "files", "journal", "network", "security",
-    "snap", "systemd", "troubleshoot", "users", "zombie",
+    "apt", "backup", "containers", "desktop", "disk", "files", "hardware",
+    "journal", "kernel", "locale", "network", "obsidian", "performance",
+    "scheduling", "security", "snap", "systemd", "troubleshoot", "users",
+    "web", "zombie", "zram",
 }, names
 for s in skills:
     assert s.triggers, f"skill {s.name} has no triggers"
@@ -3008,8 +3030,9 @@ run_standards() {
   # ``make package`` carries them into the release bundle and the
   # installer can deploy them to /opt/ai-zombie/skills/.
   local s
-  for s in apt desktop disk files journal network security snap systemd \
-           troubleshoot users zombie; do
+  for s in apt backup containers desktop disk files hardware journal kernel \
+           locale network obsidian performance scheduling security snap \
+           systemd troubleshoot users web zombie zram; do
     [[ -s "payload/agent/skills/${s}.md" ]] || \
       { echo "missing built-in skill: payload/agent/skills/${s}.md" >&2; exit 1; }
   done

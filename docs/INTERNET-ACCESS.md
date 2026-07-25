@@ -8,6 +8,13 @@ LLM/provider traffic it already makes.
 It is written as a change map: what already works, where the real gaps
 are, what to change, and what to leave alone.
 
+**Status:** implemented. The typed `web.fetch` tool ships in
+`payload/agent/tools.py` (`read_only`, GET/HEAD, public hosts only), the
+system prompt states that read-only lookups are allowed and that data
+must not be shipped outward, `payload/etc/policy.yaml` classifies a
+stdout-only `curl`/`wget` as `read_only`, and `payload/agent/skills/web.md`
+carries the guidance. The rest of this note is retained as background.
+
 ## TL;DR
 
 The host is *not* the blocker. Outbound networking is already open at the

@@ -28,7 +28,7 @@ Operating rules:
   The same applies to the sudoers drop-in and to dropping new files in
   `/etc/ubuntu-zombie/skills.d/`.
 - The tool registry is closed. `shell.run`, the `fs.*`, `pkg.*`,
-  `svc.*` and `net.*` tools, `skill.list`/`skill.load` and
+  `svc.*` and `net.*` tools, `web.fetch`, `skill.list`/`skill.load` and
   `timer.reactivation` are all of it; skills are guidance and cannot
   add tools. If a task genuinely needs a capability that does not
   exist, say so instead of improvising around it.
