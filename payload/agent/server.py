@@ -261,7 +261,11 @@ def _agent_reactivation_request(
 
 
 def _decode_reactivation_json(encoded: str) -> Any:
-    """Decode JSON while tolerating a few common model formatting slips."""
+    """Decode a structured request, returning its JSON-compatible value.
+
+    ``encoded`` may use a surrounding JSON fence, single quotes, or
+    trailing commas, which are common minor model formatting slips.
+    """
     fenced = re.fullmatch(
         r"```(?:json)?\s*(.*?)\s*```", encoded, flags=re.IGNORECASE | re.DOTALL
     )
@@ -269,7 +273,7 @@ def _decode_reactivation_json(encoded: str) -> Any:
     try:
         return json.loads(candidate)
     except json.JSONDecodeError as strict_error:
-        # ``literal_eval`` safely accepts single quotes and trailing
+        # literal_eval safely accepts single quotes and trailing
         # commas. Translate JSON's literal names only outside strings so
         # mixed JSON/Python-style objects remain recoverable.
         relaxed = _pythonize_json_literals(candidate)
@@ -280,7 +284,11 @@ def _decode_reactivation_json(encoded: str) -> Any:
 
 
 def _pythonize_json_literals(value: str) -> str:
-    """Translate JSON literals outside quoted strings for ``literal_eval``."""
+    """Return text with JSON booleans/null translated outside strings.
+
+    Quoted content in ``value`` is preserved while unquoted ``true``,
+    ``false``, and ``null`` become their Python literal equivalents.
+    """
     replacements = {"true": "True", "false": "False", "null": "None"}
     result: list[str] = []
     quote: str | None = None
