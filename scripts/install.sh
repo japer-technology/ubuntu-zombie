@@ -208,9 +208,10 @@ llama_catalog_release() {
     "${PAYLOAD_DIR}/etc/llama-builds.json"
 }
 
-# Known-good versions of the Node bridges. A fresh install replaces these
-# values with the latest versions resolved from npm; the fallbacks keep
-# source-tree verification and non-install subcommands well-defined.
+# Known-good versions of the Node bridges. The install path replaces these
+# globals with versions resolved from npm before embedding them in the
+# deployed version files and verifier. Other subcommands use the source-tree
+# values only as informational fallbacks.
 read_pinned_version() {
   local file="$1"
   if [[ -r "${file}" ]]; then
@@ -3409,7 +3410,7 @@ retry 4 5 -- install_npm_latest
 retry 4 5 -- npm install -g --ignore-scripts yarn pnpm typescript ts-node
 
 install_latest_node_bridge() {
-  local name="$1" package="$2" metadata_url="$3" version_var_name="$4"
+  local name="$1" package="$2" metadata_url="$3"
   local tmp_dir version tarball_url integrity tarball
   tmp_dir="$(mktemp -d)"
   curl_get "${metadata_url}" -o "${tmp_dir}/latest.json" \
@@ -3463,7 +3464,11 @@ install_latest_node_bridge() {
   rm -rf "${tmp_dir}"
   npm ls -g --depth=0 "${package}@${version}" >/dev/null \
     || die "${package}@${version} was not installed successfully." 1
-  printf -v "${version_var_name}" '%s' "${version}"
+  case "${name}" in
+    pi-ai) PI_AI_VERSION="${version}" ;;
+    pi-mono) PI_MONO_VERSION="${version}" ;;
+    *) die "Unknown Earendil module label: ${name}." 1 ;;
+  esac
 }
 
 # Resolve both Earendil modules at install time so every install and repair
@@ -3471,13 +3476,13 @@ install_latest_node_bridge() {
 # npm sees either tarball.
 retry 4 5 -- install_latest_node_bridge \
   pi-ai @earendil-works/pi-ai \
-  "https://registry.npmjs.org/@earendil-works%2Fpi-ai/latest" PI_AI_VERSION
+  "https://registry.npmjs.org/@earendil-works%2Fpi-ai/latest"
 
 # pi-mono is the agent loop the chat service drives via
 # payload/agent/pi-mono-bridge.mjs.
 retry 4 5 -- install_latest_node_bridge \
   pi-mono @earendil-works/pi-coding-agent \
-  "https://registry.npmjs.org/@earendil-works%2Fpi-coding-agent/latest" PI_MONO_VERSION
+  "https://registry.npmjs.org/@earendil-works%2Fpi-coding-agent/latest"
 }
 
 # ---------------------------------------------------------------------------

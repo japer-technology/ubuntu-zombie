@@ -3238,8 +3238,10 @@ run_standards() {
     || { echo "installer must resolve the latest pi-coding-agent release" >&2; exit 1; }
   grep -q 'Integrity check failed for ${package}@${version}' scripts/install.sh \
     || { echo "latest Earendil tarballs must be integrity-verified" >&2; exit 1; }
-  grep -q "printf -v.*version_var_name.*version" scripts/install.sh \
-    || { echo "installer must retain resolved Earendil versions" >&2; exit 1; }
+  grep -q 'pi-ai) PI_AI_VERSION="${version}"' scripts/install.sh \
+    || { echo "installer must retain the resolved pi-ai version" >&2; exit 1; }
+  grep -q 'pi-mono) PI_MONO_VERSION="${version}"' scripts/install.sh \
+    || { echo "installer must retain the resolved pi-mono version" >&2; exit 1; }
 
   # The built-in skills ship under payload/agent/skills/ so
   # ``make package`` carries them into the release bundle and the
