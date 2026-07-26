@@ -490,6 +490,8 @@ function byteLength(s) {
   catch (_e) { return String(s).length; }
 }
 
+// Set includeTurn false for server-wide activity unrelated to the
+// conversation turn currently displayed in this browser.
 function tallyStat(field, n = 1, includeTurn = true) {
   if (!Number.isFinite(n) || n <= 0) return;
   netStats.session[field] += n;
