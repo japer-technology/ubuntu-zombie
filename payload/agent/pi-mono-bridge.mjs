@@ -130,6 +130,18 @@ function extractText(content) {
   return out;
 }
 
+function latestAssistantText(messages) {
+  if (!Array.isArray(messages)) return "";
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (!message || message.role !== "assistant") continue;
+    // The last assistant message is authoritative even when it is empty or
+    // errored; falling back to an earlier pre-tool preamble would mask that.
+    return message.stopReason === "error" ? "" : extractText(message.content);
+  }
+  return "";
+}
+
 // pi's real built-in tool names (see `pi --help`: "Built-in tools:
 // read, bash, edit, write, grep, find, ls"). The Python registry uses
 // logical names like `fs.read` / `shell.run` that pi does not know
@@ -396,6 +408,13 @@ async function run() {
       if (ame && ame.type === "text_delta" && typeof ame.delta === "string") {
         assistantText += ame.delta;
         sendTokenDelta(ame.delta);
+      } else {
+        // Some providers emit only the updated message snapshot. Keep it as
+        // a fallback instead of depending on text_delta being present.
+        const snapshot = evt.message && evt.message.role === "assistant"
+          ? extractText(evt.message.content)
+          : "";
+        if (snapshot) assistantText = snapshot;
       }
     } else if (kind === "message_end") {
       const msg = evt.message;
@@ -457,10 +476,31 @@ async function run() {
         }
         send(progress);
       }
+    } else if (kind === "turn_end") {
+      // A few OpenAI-compatible providers omit the final message_end after
+      // a tool result but include the completed answer on turn_end.
+      const terminalText = evt.message && evt.message.role === "assistant" &&
+        evt.message.stopReason !== "error"
+        ? extractText(evt.message.content)
+        : "";
+      if (terminalText) {
+        assistantText = terminalText;
+        lastError = "";
+      }
     } else if (kind === "agent_end") {
       // `willRetry === true` means pi will auto-retry after a transient
       // error; only the terminal agent_end (or process exit) ends the turn.
-      if (evt.willRetry !== true) finish();
+      if (evt.willRetry !== true) {
+        // agent_end is the authoritative terminal snapshot. Recover its
+        // latest assistant text before finishing because some providers
+        // expose the post-tool answer only here.
+        const terminalText = latestAssistantText(evt.messages);
+        if (terminalText) {
+          assistantText = terminalText;
+          lastError = "";
+        }
+        finish();
+      }
     } else if (kind === "auto_retry_start") {
       // A retry is starting after a transient failure — clear any captured
       // state so a later success is not masked by stale output.

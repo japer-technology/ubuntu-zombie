@@ -8,6 +8,13 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Agent replies
+
+- **Post-tool answers are no longer dropped:** the pi-mono bridge now
+  recovers the completed assistant message from terminal `turn_end` and
+  `agent_end` snapshots when an OpenAI-compatible provider omits the final
+  `message_end` event after tool use.
+
 ### Agent reactivation debugging
 
 - **Chains no longer break on reply formatting:** structured
