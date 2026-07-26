@@ -686,14 +686,14 @@ assert visible == "Middle.", visible
 visible, request, error = server._agent_reactivation_request(
     "Before."
     "<ubuntu-zombie-reactivation>```json\n"
-    "{'delay_seconds': 4, 'prompt': 'relaxed', "
+    "{'delay_seconds': 4, 'prompt': 'relaxed true', "
     "'replace_existing': false,}\n```"
     "</ubuntu-zombie-reactivation>After."
 )
 assert error is None, error
 assert request == {
     "delay_seconds": 4,
-    "prompt": "relaxed",
+    "prompt": "relaxed true",
     "replace_existing": False,
 }, request
 assert visible == "Before.After.", visible

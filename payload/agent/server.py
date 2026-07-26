@@ -308,8 +308,14 @@ def _pythonize_json_literals(value: str) -> str:
             end = index + len(literal)
             if (
                 value.startswith(literal, index)
-                and (index == 0 or not value[index - 1].isalnum())
-                and (end == len(value) or not value[end].isalnum())
+                and (
+                    index == 0
+                    or not (value[index - 1].isalnum() or value[index - 1] == "_")
+                )
+                and (
+                    end == len(value)
+                    or not (value[end].isalnum() or value[end] == "_")
+                )
             ):
                 result.append(replacement)
                 index = end
