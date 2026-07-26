@@ -3422,9 +3422,22 @@ install_latest_node_bridge() {
       console.error("metadata is missing version, tarball, or integrity");
       process.exit(1);
     }
+    let tarball;
+    try {
+      tarball = new URL(m.dist.tarball);
+    } catch {
+      console.error("metadata contains an invalid tarball URL");
+      process.exit(1);
+    }
+    if (tarball.protocol !== "https:" ||
+        tarball.hostname !== "registry.npmjs.org") {
+      console.error("metadata tarball URL is outside the npm registry");
+      process.exit(1);
+    }
     const i = m.dist.integrity.indexOf("-");
-    if (i <= 0 || i === m.dist.integrity.length - 1) {
-      console.error("metadata contains malformed integrity");
+    if (i <= 0 || i === m.dist.integrity.length - 1 ||
+        m.dist.integrity.slice(0, i) !== "sha512") {
+      console.error("metadata must contain a sha512 integrity value");
       process.exit(1);
     }
     process.stdout.write(
@@ -3445,8 +3458,8 @@ install_latest_node_bridge() {
     const fs = require("fs"), crypto = require("crypto");
     const sri = process.argv[1], file = process.argv[2];
     const i = sri.indexOf("-");
-    if (i <= 0 || i === sri.length - 1) {
-      console.error("malformed integrity value");
+    if (i <= 0 || i === sri.length - 1 || sri.slice(0, i) !== "sha512") {
+      console.error("malformed or unsupported integrity value");
       process.exit(1);
     }
     const got = crypto.createHash(sri.slice(0, i))
@@ -3464,6 +3477,8 @@ install_latest_node_bridge() {
   rm -rf "${tmp_dir}"
   npm ls -g --depth=0 "${package}@${version}" >/dev/null \
     || die "${package}@${version} was not installed successfully." 1
+  # name is the stable internal bridge label, not necessarily the npm package
+  # basename (pi-mono maps to @earendil-works/pi-coding-agent).
   case "${name}" in
     pi-ai) PI_AI_VERSION="${version}" ;;
     pi-mono) PI_MONO_VERSION="${version}" ;;

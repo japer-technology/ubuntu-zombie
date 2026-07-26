@@ -3238,6 +3238,10 @@ run_standards() {
     || { echo "installer must resolve the latest pi-coding-agent release" >&2; exit 1; }
   grep -q 'Integrity check failed for ${package}@${version}' scripts/install.sh \
     || { echo "latest Earendil tarballs must be integrity-verified" >&2; exit 1; }
+  grep -q 'tarball.hostname !== "registry.npmjs.org"' scripts/install.sh \
+    || { echo "Earendil tarballs must stay on the npm registry" >&2; exit 1; }
+  grep -q 'sri.slice(0, i) !== "sha512"' scripts/install.sh \
+    || { echo "Earendil tarballs must require sha512 integrity" >&2; exit 1; }
   grep -q 'pi-ai) PI_AI_VERSION="${version}"' scripts/install.sh \
     || { echo "installer must retain the resolved pi-ai version" >&2; exit 1; }
   grep -q 'pi-mono) PI_MONO_VERSION="${version}"' scripts/install.sh \
