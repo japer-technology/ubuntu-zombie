@@ -3409,7 +3409,7 @@ retry 4 5 -- install_npm_latest
 retry 4 5 -- npm install -g --ignore-scripts yarn pnpm typescript ts-node
 
 install_latest_node_bridge() {
-  local name="$1" package="$2" metadata_url="$3" version_var="$4"
+  local name="$1" package="$2" metadata_url="$3" version_var_name="$4"
   local tmp_dir version tarball_url integrity tarball
   tmp_dir="$(mktemp -d)"
   curl_get "${metadata_url}" -o "${tmp_dir}/latest.json" \
@@ -3417,9 +3417,15 @@ install_latest_node_bridge() {
   node -e '
     const m = require(process.argv[1]);
     if (!m.version || !m.dist || !m.dist.tarball ||
-        typeof m.dist.integrity !== "string") process.exit(1);
+        typeof m.dist.integrity !== "string") {
+      console.error("metadata is missing version, tarball, or integrity");
+      process.exit(1);
+    }
     const i = m.dist.integrity.indexOf("-");
-    if (i <= 0 || i === m.dist.integrity.length - 1) process.exit(1);
+    if (i <= 0 || i === m.dist.integrity.length - 1) {
+      console.error("metadata contains malformed integrity");
+      process.exit(1);
+    }
     process.stdout.write(
       [m.version, m.dist.tarball, m.dist.integrity].join("\n") + "\n"
     );
@@ -3438,10 +3444,16 @@ install_latest_node_bridge() {
     const fs = require("fs"), crypto = require("crypto");
     const sri = process.argv[1], file = process.argv[2];
     const i = sri.indexOf("-");
-    if (i <= 0 || i === sri.length - 1) process.exit(1);
+    if (i <= 0 || i === sri.length - 1) {
+      console.error("malformed integrity value");
+      process.exit(1);
+    }
     const got = crypto.createHash(sri.slice(0, i))
       .update(fs.readFileSync(file)).digest("base64");
-    process.exit(got === sri.slice(i + 1) ? 0 : 1);
+    if (got !== sri.slice(i + 1)) {
+      console.error("tarball integrity does not match registry metadata");
+      process.exit(1);
+    }
   ' "${integrity}" "${tarball}" \
     || { rm -rf "${tmp_dir}"; die "Integrity check failed for ${package}@${version}." 1; }
 
@@ -3451,7 +3463,7 @@ install_latest_node_bridge() {
   rm -rf "${tmp_dir}"
   npm ls -g --depth=0 "${package}@${version}" >/dev/null \
     || die "${package}@${version} was not installed successfully." 1
-  printf -v "${version_var}" '%s' "${version}"
+  printf -v "${version_var_name}" '%s' "${version}"
 }
 
 # Resolve both Earendil modules at install time so every install and repair

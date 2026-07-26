@@ -3238,7 +3238,7 @@ run_standards() {
     || { echo "installer must resolve the latest pi-coding-agent release" >&2; exit 1; }
   grep -q 'Integrity check failed for ${package}@${version}' scripts/install.sh \
     || { echo "latest Earendil tarballs must be integrity-verified" >&2; exit 1; }
-  grep -q "printf -v.*version_var.*version" scripts/install.sh \
+  grep -q "printf -v.*version_var_name.*version" scripts/install.sh \
     || { echo "installer must retain resolved Earendil versions" >&2; exit 1; }
 
   # The built-in skills ship under payload/agent/skills/ so
