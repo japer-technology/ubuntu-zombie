@@ -490,10 +490,10 @@ function byteLength(s) {
   catch (_e) { return String(s).length; }
 }
 
-function tallyStat(field, n = 1) {
+function tallyStat(field, n = 1, includeTurn = true) {
   if (!Number.isFinite(n) || n <= 0) return;
   netStats.session[field] += n;
-  netStats.turn[field] += n;
+  if (includeTurn) netStats.turn[field] += n;
 }
 
 function formatBytes(n) {
@@ -1521,13 +1521,16 @@ async function refreshReactivation() {
       stopReactivationBtn.hidden = false;
       reactivationBanner.hidden = false;
       if (active.turn_id !== activeReactivation?.turn_id) {
-        netStats.turn = newStatBucket();
-        tallyStat("reactivations");
+        const currentConversation =
+          Number(active.conversation_id) === Number(conversationId);
+        const startsLocalTurn = currentConversation && !activeEventSource;
+        if (startsLocalTurn) netStats.turn = newStatBucket();
+        tallyStat("reactivations", 1, startsLocalTurn);
         appendVerboseActivity(
           `Reactivation ${active.id || active.turn_id} started.`);
         activeReactivation = active;
         pendingReactivation = null;
-        if (Number(active.conversation_id) === Number(conversationId)) {
+        if (currentConversation) {
           await uzStreamReactivationTurn(active);
         }
       }

@@ -267,7 +267,7 @@ def _decode_reactivation_json(encoded: str) -> Any:
     trailing commas, which are common minor model formatting slips.
     """
     fenced = re.fullmatch(
-        r"```(?:json)?\s*(.*?)\s*```", encoded, flags=re.IGNORECASE | re.DOTALL
+        r"```(?:json)?\s*(.*)\s*```", encoded, flags=re.IGNORECASE | re.DOTALL
     )
     candidate = fenced.group(1) if fenced else encoded
     try:
@@ -286,7 +286,8 @@ def _decode_reactivation_json(encoded: str) -> Any:
 def _pythonize_json_literals(value: str) -> str:
     """Return text with JSON booleans/null translated outside strings.
 
-    Quoted content in ``value`` is preserved while unquoted ``true``,
+    A character-by-character scan preserves single- and double-quoted
+    content, including escape sequences, while unquoted ``true``,
     ``false``, and ``null`` become their Python literal equivalents.
     """
     replacements = {"true": "True", "false": "False", "null": "None"}
