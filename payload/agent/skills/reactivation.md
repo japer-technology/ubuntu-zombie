@@ -21,6 +21,13 @@ Operating rules:
   shown to the operator in the chat footer with the fire time and a
   Cancel button; a vague prompt like "continue" hides what the next
   turn will actually attempt.
+- The `<ubuntu-zombie-reactivation>` block may appear anywhere in the
+  reply; it does not need to be the final text. The runtime removes all
+  such blocks from the visible answer. If more than one appears, only
+  the last request is activated, so make the final block authoritative.
+- Emit valid JSON when possible. The parser also tolerates a surrounding
+  JSON code fence, single-quoted strings, and trailing commas so minor
+  formatting slips do not break a continuation.
 - Delays are bounded (1 second minimum, 1 hour maximum by default,
   operator-tunable within those hard limits) and no timer may outlive
   the remaining TTL. If the work needs to resume further out than the

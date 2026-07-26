@@ -480,7 +480,7 @@ function newStatBucket() {
   return { startedAt: Date.now(),
            apiCalls: 0, bytesOut: 0, bytesIn: 0, sseEvents: 0,
            toolCalls: 0, toolFailures: 0, toolOutputBytes: 0,
-           streamChars: 0 };
+           reactivations: 0, streamChars: 0 };
 }
 const netStats = { session: newStatBucket(), turn: newStatBucket() };
 
@@ -538,6 +538,7 @@ function statsSummary(bucket) {
     ` · ${plural(bucket.toolCalls, "tool call")}` +
     (bucket.toolFailures ? ` (${bucket.toolFailures} failed)` : "") +
     ` · ${formatBytes(bucket.toolOutputBytes)} tool output` +
+    ` · ${plural(bucket.reactivations, "reactivation")}` +
     ` · ${plural(bucket.sseEvents, "stream event")}` +
     ` · ${bucket.streamChars} streamed chars`;
 }
@@ -1520,6 +1521,10 @@ async function refreshReactivation() {
       stopReactivationBtn.hidden = false;
       reactivationBanner.hidden = false;
       if (active.turn_id !== activeReactivation?.turn_id) {
+        netStats.turn = newStatBucket();
+        tallyStat("reactivations");
+        appendVerboseActivity(
+          `Reactivation ${active.id || active.turn_id} started.`);
         activeReactivation = active;
         pendingReactivation = null;
         if (Number(active.conversation_id) === Number(conversationId)) {
