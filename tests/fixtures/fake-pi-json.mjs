@@ -20,6 +20,8 @@
 //   "silent"          — a tool runs but the model never says anything,
 //                       so the turn ends with no assistant text.
 //   "partial-error"   — some assistant text, then a provider error.
+//   "terminal-answer" — a post-tool answer appears only on agent_end.
+//   "turn-answer"     — a post-tool answer appears only on turn_end.
 //
 // Crucially, it does NOT read stdin: the real `pi --mode json` is a
 // one-shot event stream, and the bridge must let it exit on stdin EOF
@@ -84,6 +86,32 @@ if (mode === "silent") {
   out({ type: "message_end", message: quiet });
   out({ type: "turn_end", message: quiet, toolResults: [] });
   out({ type: "agent_end", messages: [quiet], willRetry: false });
+  await waitForStdinEof();
+  process.exit(0);
+}
+
+if (mode === "terminal-answer") {
+  const quiet = asst("");
+  const answer = asst("The system is Ubuntu.");
+  out({ type: "message_start", message: quiet });
+  out({ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "/etc/os-release" } });
+  out({ type: "tool_execution_end", toolCallId: "t1", toolName: "read", result: "NAME=Ubuntu", isError: false });
+  out({ type: "message_end", message: quiet });
+  out({ type: "turn_end", message: quiet, toolResults: [] });
+  out({ type: "agent_end", messages: [quiet, answer], willRetry: false });
+  await waitForStdinEof();
+  process.exit(0);
+}
+
+if (mode === "turn-answer") {
+  const quiet = asst("");
+  const answer = asst("The system is Ubuntu.");
+  out({ type: "message_start", message: quiet });
+  out({ type: "tool_execution_start", toolCallId: "t1", toolName: "read", args: { path: "/etc/os-release" } });
+  out({ type: "tool_execution_end", toolCallId: "t1", toolName: "read", result: "NAME=Ubuntu", isError: false });
+  out({ type: "message_end", message: quiet });
+  out({ type: "turn_end", message: answer, toolResults: [] });
+  out({ type: "agent_end", messages: [], willRetry: false });
   await waitForStdinEof();
   process.exit(0);
 }

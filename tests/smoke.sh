@@ -1432,6 +1432,36 @@ if not any(e.get("type") == "token" for e in out["events"]):
     raise SystemExit("bridge must forward token events")
 PY
 
+    # Some OpenAI-compatible providers expose the post-tool assistant answer
+    # only in agent_end.messages. The bridge must recover that terminal
+    # snapshot instead of returning an empty turn.
+    echo "  pi-mono bridge recovers terminal-only post-tool answer"
+    ZOMBIE_FAKE_PI_MODE="terminal-answer" \
+    ZOMBIE_PI_MONO_BRIDGE="$(pwd)/payload/agent/pi-mono-bridge.mjs" \
+    ZOMBIE_PI_MONO_BIN="$(pwd)/tests/fixtures/fake-pi-json.mjs" \
+    ZOMBIE_PI_MONO_LOG_DIR="$(mktemp -d)" \
+    PYTHONPATH=payload/agent \
+      python3 - <<'PY'
+import os
+
+import pi_mono, tools
+
+for mode in ("terminal-answer", "turn-answer"):
+    os.environ["ZOMBIE_FAKE_PI_MODE"] = mode
+    out = pi_mono.run_turn(
+        prompt="which operating system is this?",
+        system_prompt="stub",
+        history=[],
+        on_tool_call=lambda *_args: {"ok": True, "result": {}},
+        tool_names=tools.tool_names(),
+        timeout=20.0,
+    )
+    if out["final"] != "The system is Ubuntu.":
+        raise SystemExit(
+            f"bridge dropped {mode} post-tool answer: {out['final']!r}"
+        )
+PY
+
     # A non-zero bash status can be a normal negative probe (for example,
     # grep finding no match). Pi nests bash exit metadata under result.details;
     # preserve it so the UI can distinguish that status from a tool failure.
