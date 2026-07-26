@@ -8,6 +8,15 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Installer dependencies
+
+- **Earendil modules now track npm `latest`:** every install and repair
+  resolves the newest `@earendil-works/pi-ai` and
+  `@earendil-works/pi-coding-agent` releases, verifies each
+  registry-provided integrity hash, installs the tarballs with lifecycle
+  scripts disabled, and records the resolved versions for `/version` and
+  the deployed health check.
+
 ### Agent replies
 
 - **Post-tool answers are no longer dropped:** the pi-mono bridge now

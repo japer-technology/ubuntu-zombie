@@ -92,10 +92,10 @@ The Actions side is pinned, but Scorecard also parses shell scripts and
 flags unpinned package installs. `payload/bin/setup-agent-venv` runs
 `pip install --upgrade <pkgs>` with no version constraints, and
 `scripts/install.sh` runs `npm install -g --ignore-scripts yarn pnpm
-typescript ts-node`
-unpinned. (The `@earendil-works/pi-*` npm packages *are* version-pinned
-via the `*.version` files and installed with `--ignore-scripts`, which
-is good practice — keep that.)
+typescript ts-node` unpinned. The `@earendil-works/pi-*` packages also
+track npm `latest`, but their registry-provided integrity hashes are
+verified before their tarballs are passed to `npm install
+--ignore-scripts`.
 
 Suggestions:
 

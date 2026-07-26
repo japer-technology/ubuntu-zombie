@@ -3232,6 +3232,15 @@ run_standards() {
     [[ -s "$f" ]] || { echo "missing required repository file: $f" >&2; exit 1; }
   done
 
+  grep -q 'registry.npmjs.org/@earendil-works%2Fpi-ai/latest' scripts/install.sh \
+    || { echo "installer must resolve the latest pi-ai release" >&2; exit 1; }
+  grep -q 'registry.npmjs.org/@earendil-works%2Fpi-coding-agent/latest' scripts/install.sh \
+    || { echo "installer must resolve the latest pi-coding-agent release" >&2; exit 1; }
+  grep -q 'Integrity check failed for ${package}@${version}' scripts/install.sh \
+    || { echo "latest Earendil tarballs must be integrity-verified" >&2; exit 1; }
+  grep -q "printf -v.*version_var.*version" scripts/install.sh \
+    || { echo "installer must retain resolved Earendil versions" >&2; exit 1; }
+
   # The built-in skills ship under payload/agent/skills/ so
   # ``make package`` carries them into the release bundle and the
   # installer can deploy them to /opt/ai-zombie/skills/.

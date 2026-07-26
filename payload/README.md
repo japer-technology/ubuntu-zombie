@@ -193,7 +193,7 @@ flowchart TB
 | [`skill_loader.py`](agent/skill_loader.py) | Selects trigger-matched Markdown skills and records their on-disk provenance; never expands the tool surface. |
 | [`templates/`](agent/templates) | The chat UI (`index.html`) plus `settings.json.tmpl` and `APPEND_SYSTEM.md.tmpl`, rendered by the installer into `/opt/ai-zombie/pi/`. |
 | [`skills/`](agent/skills) | Built-in skill catalogue (`apt`, `systemd`) — Markdown nudges toward the correct typed tool. |
-| `pi-ai.version`, `pi-mono.version`, `bridge-dependencies.lock` | Pinned versions and checksums for the Node bridge dependencies. |
+| `pi-ai.version`, `pi-mono.version`, `bridge-dependencies.lock` | Known-good bridge versions and checksums for release validation; installs resolve npm `latest` and write the resolved versions to the deployed files. |
 | [`examples.md`](agent/examples.md) | Example operator prompts surfaced in the UI. |
 
 ### Action classes
