@@ -29,6 +29,7 @@ import json
 import os
 import platform
 import queue
+import re
 import shutil
 import socket
 import sqlite3
@@ -201,19 +202,56 @@ def render_append_system(
     )
 
 
+def _tidy_reactivation_remainder(text: str) -> str:
+    """Clean up the reply text left behind once request blocks are cut.
+
+    Removing a block that the model wrapped in a fenced code span would
+    otherwise leave an empty ``` … ``` pair (and a hole of blank lines)
+    in the visible reply.
+    """
+    text = re.sub(r"```[A-Za-z0-9_+-]*[ \t]*\r?\n?\s*```", "", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def _agent_reactivation_request(
     reply: str,
 ) -> tuple[str, dict[str, Any] | None, str | None]:
-    """Remove and decode one trailing agent reactivation request."""
-    stripped = reply.rstrip()
-    start = stripped.rfind(AGENT_REACTIVATION_OPEN)
-    if start < 0:
+    """Remove agent reactivation request blocks and decode the last one.
+
+    The block is documented as the final thing in a reply, but models
+    routinely append a closing sentence, wrap the request in a code
+    fence, or emit it more than once. Every well-formed block is
+    therefore stripped from the visible reply wherever it appears and
+    the last one wins, so a continuation chain cannot break purely on
+    reply formatting. An error is reported only when a marker is
+    present but no block could be decoded.
+    """
+    if AGENT_REACTIVATION_OPEN not in reply:
         return reply, None, None
-    visible = stripped[:start].rstrip()
-    encoded = stripped[start + len(AGENT_REACTIVATION_OPEN):]
-    if not encoded.endswith(AGENT_REACTIVATION_CLOSE):
-        return visible, None, "structured reactivation request is not closed"
-    encoded = encoded[:-len(AGENT_REACTIVATION_CLOSE)].strip()
+    visible_parts: list[str] = []
+    encoded_blocks: list[str] = []
+    error: str | None = None
+    rest = reply
+    while True:
+        start = rest.find(AGENT_REACTIVATION_OPEN)
+        if start < 0:
+            break
+        opened = start + len(AGENT_REACTIVATION_OPEN)
+        end = rest.find(AGENT_REACTIVATION_CLOSE, opened)
+        if end < 0:
+            error = "structured reactivation request is not closed"
+            visible_parts.append(rest[:start])
+            rest = ""
+            break
+        encoded_blocks.append(rest[opened:end])
+        visible_parts.append(rest[:start])
+        rest = rest[end + len(AGENT_REACTIVATION_CLOSE):]
+    visible_parts.append(rest)
+    visible = _tidy_reactivation_remainder("".join(visible_parts))
+    if not encoded_blocks:
+        return visible, None, error
+    encoded = encoded_blocks[-1].strip()
     try:
         request = json.loads(encoded)
     except json.JSONDecodeError as exc:
@@ -753,12 +791,32 @@ class App:
                 if state.done_at is None:
                     terminal = "turn_error" if result.get("error") and not result.get("reply") else "turn_done"
                     self._finish_turn(state, result, terminal)
+                if state.reactivation_id is not None and result.get("error"):
+                    # A continuation chain that dies inside its own turn
+                    # would otherwise leave only a generic provider error
+                    # behind; name the reactivation so the stall is
+                    # traceable in the audit log.
+                    log_event(
+                        "reactivation_turn_failed",
+                        conversation_id=conv_id,
+                        reactivation_id=state.reactivation_id,
+                        turn_id=turn_id,
+                        error=str(result["error"]),
+                    )
             except Exception as exc:  # noqa: BLE001
                 msg = (
                     f"streaming turn {turn_id} failed for conversation #{conv_id} "
                     f"(prompt {len(prompt)} chars): "
                     f"{exc.__class__.__name__}: {exc}"
                 )
+                if state.reactivation_id is not None:
+                    log_event(
+                        "reactivation_turn_failed",
+                        conversation_id=conv_id,
+                        reactivation_id=state.reactivation_id,
+                        turn_id=turn_id,
+                        error=msg,
+                    )
                 err = {"conversation_id": conv_id, "error": msg}
                 self._finish_turn(state, err, "turn_error")
 
@@ -1411,7 +1469,19 @@ class App:
                 "turn_id": active_turn.turn_id,
                 "reason": active_turn.reactivation_reason,
             }
-        return {"ok": True, **settings, "pending": pending, "active": active}
+        # The most recent terminal record explains why a continuation
+        # chain stopped (fired, cancelled by the operator, failed).
+        last_item = self.history.last_reactivation()
+        last = self._public_reactivation(last_item)
+        if last is not None and last_item is not None:
+            last["error"] = last_item["error"]
+        return {
+            "ok": True,
+            **settings,
+            "pending": pending,
+            "active": active,
+            "last": last,
+        }
 
     def configure_reactivation(
         self,
@@ -1491,7 +1561,61 @@ class App:
                 self._reactivation_wakeup.wait(1.0)
                 self._reactivation_wakeup.clear()
 
+    def _busy_conversations(self) -> set[int]:
+        """Conversations that currently have a turn in flight."""
+        with self._lock:
+            self._sweep_turns()
+            return {
+                turn.conversation_id for turn in self.turns.values()
+                if turn.done_at is None
+            }
+
+    def _reactivation_terminal(
+        self,
+        item: dict[str, Any],
+        status: str,
+        error: str,
+        *,
+        actor: str = "system",
+    ) -> None:
+        """Finish a claimed timer that never started a turn.
+
+        A silently dropped continuation is the hardest reactivation
+        failure to debug, so the outcome is written to the durable
+        record, to the conversation transcript (as a visible system
+        message) and to the audit log.
+        """
+        self.history.finish_reactivation(item["id"], status, error)
+        event = ("reactivation_cancelled" if status == "cancelled"
+                 else "reactivation_failed")
+        try:
+            self.history.add_event(item["conversation_id"], event, {
+                "id": item["id"],
+                "fire_at": item["fire_at"],
+                "reason": item["reason"],
+                "error": error,
+            })
+            self.history.add_message(
+                item["conversation_id"],
+                "system",
+                f"Scheduled reactivation did not run: {error}.",
+                {"error": True, "reactivation_id": item["id"]},
+            )
+        except sqlite3.Error:
+            # The conversation may have been deleted; the audit entry
+            # below is then the only remaining record.
+            pass
+        log_event(
+            event,
+            actor=actor,
+            conversation_id=item["conversation_id"],
+            reactivation_id=item["id"],
+            reason=item["reason"],
+            error=error,
+        )
+
     def _reactivation_daemon(self) -> None:
+        deferred_id: str | None = None
         while True:
             pending = self.history.pending_reactivation()
             if pending is None:
@@ -1500,30 +1624,37 @@ class App:
                 timeout = max(0.0, min(30.0, pending["fire_at"] - time.time()))
             self._reactivation_wakeup.wait(timeout)
             self._reactivation_wakeup.clear()
-            if pending is not None and pending["fire_at"] <= time.time():
-                with self._lock:
-                    conversation_busy = any(
-                        turn.conversation_id == pending["conversation_id"]
-                        and turn.done_at is None
-                        for turn in self.turns.values()
+            # Re-read the durable record instead of trusting the
+            # snapshot taken before the sleep: it may have been
+            # cancelled, replaced, or (when the sleep ended a hair
+            # early) not yet due. Deciding from a stale snapshot could
+            # skip the busy check entirely and start a second turn in a
+            # conversation that already has one running.
+            due = self.history.pending_reactivation()
+            if due is None or due["fire_at"] > time.time():
+                continue
+            busy = self._busy_conversations()
+            if due["conversation_id"] in busy:
+                if deferred_id != due["id"]:
+                    deferred_id = due["id"]
+                    log_event(
+                        "reactivation_deferred",
+                        conversation_id=due["conversation_id"],
+                        reactivation_id=due["id"],
+                        reason="conversation_busy",
                     )
-                if conversation_busy:
-                    self._reactivation_wakeup.wait(1.0)
-                    self._reactivation_wakeup.clear()
-                    continue
-            item = self.history.claim_due_reactivation(time.time())
+                self._reactivation_wakeup.wait(1.0)
+                self._reactivation_wakeup.clear()
+                continue
+            item = self.history.claim_due_reactivation(
+                time.time(), busy_conversations=busy
+            )
             if item is None:
                 continue
+            deferred_id = None
             if not self.history.reactivation_settings()["enabled"]:
-                self.history.finish_reactivation(
-                    item["id"], "cancelled", "disabled"
-                )
-                log_event(
-                    "reactivation_cancelled",
-                    actor="system",
-                    conversation_id=item["conversation_id"],
-                    reactivation_id=item["id"],
-                    reason="disabled",
+                self._reactivation_terminal(
+                    item, "cancelled", "reactivation is disabled"
                 )
                 continue
             life = lifecycle.status()
@@ -1531,13 +1662,7 @@ class App:
                 item["conversation_id"]
             ):
                 error = "TTL expired" if life["dead"] else "conversation missing"
-                self.history.finish_reactivation(item["id"], "failed", error)
-                log_event(
-                    "reactivation_failed",
-                    conversation_id=item["conversation_id"],
-                    reactivation_id=item["id"],
-                    error=error,
-                )
+                self._reactivation_terminal(item, "failed", error)
                 continue
             result = self.start_streaming_message(
                 item["conversation_id"],
@@ -1549,16 +1674,14 @@ class App:
                 },
             )
             if result.get("error"):
-                error = str(result["error"])
-                self.history.finish_reactivation(item["id"], "failed", error)
-                log_event(
-                    "reactivation_failed",
-                    conversation_id=item["conversation_id"],
-                    reactivation_id=item["id"],
-                    error=error,
+                self._reactivation_terminal(
+                    item, "failed", str(result["error"])
                 )
                 continue
             self.history.finish_reactivation(item["id"], "fired")
+            chain_index = self.history.count_reactivations(
+                item["conversation_id"], "fired"
+            )
             self.history.add_event(
                 item["conversation_id"],
                 "reactivation_fired",
@@ -1567,6 +1690,7 @@ class App:
                     "fire_at": item["fire_at"],
                     "reason": item["reason"],
                     "turn_id": result["turn_id"],
+                    "chain_index": chain_index,
                 },
             )
             log_event(
@@ -1574,7 +1698,9 @@ class App:
                 conversation_id=item["conversation_id"],
                 reactivation_id=item["id"],
                 turn_id=result["turn_id"],
+                chain_index=chain_index,
             )
+
     def approve(self, tool_call_id: str, decision: str,
                 phrase: str | None = None) -> dict[str, Any]:
         with self._lock:

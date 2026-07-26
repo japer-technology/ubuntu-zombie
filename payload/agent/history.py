@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 DB_PATH = Path(os.environ.get(
     "ZOMBIE_HISTORY_DB", "/opt/ai-zombie/state/conversations.db"
@@ -321,17 +321,36 @@ class History:
             "error": None,
         }, existing
 
-    def claim_due_reactivation(self, now: float) -> dict[str, Any] | None:
-        """Atomically claim a due timer so it can never fire twice."""
+    def claim_due_reactivation(
+        self,
+        now: float,
+        busy_conversations: Iterable[int] | None = None,
+    ) -> dict[str, Any] | None:
+        """Atomically claim a due timer so it can never fire twice.
+
+        ``busy_conversations`` names conversations that already have a
+        turn in flight; a timer for one of them is left pending so the
+        continuation cannot run concurrently with the turn that is
+        still producing the work it continues.
+        """
+        skip = {int(cid) for cid in (busy_conversations or ())}
         with self._lock:
-            row = self._conn.execute(
+            rows = self._conn.execute(
                 "SELECT id, conversation_id, created_at, fire_at, reason, prompt, "
                 "status, actor, error FROM reactivations "
                 "WHERE status = 'pending' AND fire_at <= ? "
-                "ORDER BY fire_at LIMIT 1",
+                "ORDER BY fire_at",
                 (now,),
-            ).fetchone()
-            item = self._reactivation_row(row)
+            ).fetchall()
+            item = None
+            for row in rows:
+                candidate = self._reactivation_row(row)
+                if candidate is None:
+                    continue
+                if int(candidate["conversation_id"]) in skip:
+                    continue
+                item = candidate
+                break
             if item is None:
                 return None
             cur = self._conn.execute(
@@ -344,6 +363,33 @@ class History:
                 return None
         item["status"] = "firing"
         return item
+
+    def last_reactivation(self) -> dict[str, Any] | None:
+        """The most recent timer that already reached a terminal
+        state, so operators can see why a continuation chain stopped."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, conversation_id, created_at, fire_at, reason, prompt, "
+                "status, actor, error FROM reactivations "
+                "WHERE status NOT IN ('pending', 'firing') "
+                "ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        return self._reactivation_row(row)
+
+    def count_reactivations(
+        self, conversation_id: int, status: str = "fired"
+    ) -> int:
+        """How many timers in this conversation reached ``status``.
+
+        Used to report continuation-chain depth so a chain that stops
+        after a few turns can be diagnosed from the audit log."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*) FROM reactivations "
+                "WHERE conversation_id = ? AND status = ?",
+                (conversation_id, status),
+            ).fetchone()
+        return int(row[0]) if row else 0
 
     def finish_reactivation(
         self, reactivation_id: str, status: str, error: str | None = None

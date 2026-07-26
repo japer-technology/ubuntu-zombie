@@ -8,6 +8,32 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Agent reactivation debugging
+
+- **Chains no longer break on reply formatting:** structured
+  `<ubuntu-zombie-reactivation>` requests are now recognised wherever
+  they appear in a reply — followed by a closing sentence, wrapped in a
+  code fence, or emitted more than once (the last one wins) — instead of
+  only when the block is the very last thing in the message. Every block
+  is removed from the visible answer, and a fence left empty by the
+  removal is cleaned up.
+- **No overlapping continuation turns:** the timer daemon re-reads the
+  durable record after sleeping and refuses to claim a timer whose
+  conversation still has a turn in flight, closing a race where a timer
+  that came due exactly as the daemon woke skipped the busy check and
+  started a second concurrent turn. Deferrals are audited as
+  `reactivation_deferred`.
+- **Visible failures:** a continuation the daemon refuses to run (TTL
+  expired, capability disabled, conversation gone, turn could not start)
+  is now written to the conversation as a system message and history
+  event as well as the audit log, and a continuation turn that fails
+  inside itself is audited as `reactivation_turn_failed`.
+- **Last-outcome reporting:** `/api/reactivation` returns the most
+  recent terminal timer, `/reactivation` prints it, and the chat banner
+  keeps a stopped chain's reason on screen. Fired continuations record a
+  `chain_index` and are labelled `continuation N` in chat, so "it stops
+  after three" is diagnosable from the transcript and the audit log.
+
 ### Read-only web access
 
 - **New `web.fetch` tool:** the closed registry gains a `read_only`

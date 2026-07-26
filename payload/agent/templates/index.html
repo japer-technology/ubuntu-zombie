@@ -1195,9 +1195,18 @@ function renderSkillActive(p) {
 
 function renderReactivationFiredEvent(p) {
   const detail = p.reason ? ` — ${p.reason}` : "";
+  const index = Number(p.chain_index) > 0 ? ` (continuation ${Number(p.chain_index)})` : "";
   return el("div", {
     class: "system",
-    text: `Reactivation started${detail}.`,
+    text: `Reactivation started${index}${detail}.`,
+  });
+}
+
+function renderReactivationFailedEvent(p) {
+  const detail = p.error ? ` ${p.error}.` : "";
+  return el("div", {
+    class: "system error",
+    text: `Reactivation did not run:${detail || " unknown reason."}`,
   });
 }
 
@@ -1208,6 +1217,8 @@ function renderEvent(ev) {
   if (ev.kind === "pending_tool_call") return renderPendingToolCall(p);
   if (ev.kind === "skill_active") return renderSkillActive(p);
   if (ev.kind === "reactivation_fired") return renderReactivationFiredEvent(p);
+  if (ev.kind === "reactivation_failed" || ev.kind === "reactivation_cancelled")
+    return renderReactivationFailedEvent(p);
   return null;
 }
 
@@ -1533,6 +1544,19 @@ async function refreshReactivation() {
       }
     }
     if (!pending) {
+      const last = data.last;
+      if (last && last.status !== "fired" && last.error) {
+        // Keep the reason a chain stopped visible instead of silently
+        // hiding the banner.
+        reactivationTitle.textContent = "Reactivation stopped";
+        reactivationDetail.textContent =
+          `${last.status}: ${last.error} · ${last.reason || ""}`.trim();
+        cancelReactivationBtn.hidden = true;
+        pauseReactivationBtn.hidden = true;
+        stopReactivationBtn.hidden = true;
+        reactivationBanner.hidden = false;
+        return data;
+      }
       reactivationBanner.hidden = true;
       reactivationDetail.textContent = "";
       pauseReactivationBtn.hidden = true;
@@ -2840,6 +2864,14 @@ async function handleSlashCommand(input) {
           );
         } else {
           lines.push("No reactivation is queued.");
+        }
+        if (state.last) {
+          const outcome = state.last.error
+            ? `${state.last.status} (${state.last.error})`
+            : state.last.status;
+          lines.push(
+            `Last continuation #${String(state.last.id).slice(0, 8)}: ${outcome}.`
+          );
         }
         addMessage("system", lines.join("\n"));
       } catch (err) { addMessage("system", String(err), { error: true }); }

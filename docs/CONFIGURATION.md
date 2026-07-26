@@ -405,12 +405,24 @@ continuations (for example a long essay) is visibly chained rather than
 appearing only once each turn has finished.
 
 The shipped pi bridge presents this capability through a structured
-`<ubuntu-zombie-reactivation>` request at the end of the agent's reply. The
-server removes that machine-readable block before saving the visible answer,
-validates it against the closed `timer.reactivation` schema and policy class,
-and reports whether the request was accepted. This lets the AI reactivate
-itself; `/reactivation` is the operator control for the capability, not the
-mechanism that schedules each continuation.
+`<ubuntu-zombie-reactivation>` request in the agent's reply. The server removes
+every machine-readable block — wherever it appears, including inside a code
+fence or ahead of a closing sentence — before saving the visible answer, uses
+the last one, validates it against the closed `timer.reactivation` schema and
+policy class, and reports whether the request was accepted. This lets the AI
+reactivate itself; `/reactivation` is the operator control for the capability,
+not the mechanism that schedules each continuation.
+
+Continuation chains are debuggable. A due timer is never started while its
+conversation still has a turn in flight (the deferral is audited as
+`reactivation_deferred`), and a timer that the daemon refuses to run — TTL
+expired, capability disabled, conversation gone, turn could not start — is
+recorded on the durable record, written to the transcript as a visible system
+message, and audited. `/reactivation` and the chat banner report the last
+terminal outcome, so a chain that stops after a few continuations shows the
+reason instead of simply going quiet. Each fired continuation is audited with
+its `chain_index` and labelled in chat as `continuation N`. A continuation turn
+that fails inside itself is audited as `reactivation_turn_failed`.
 
 Reactivation is enabled by default with a 1-second minimum and 1-hour maximum
 delay. Both limits and the enabled state are durable in `conversations.db`.
