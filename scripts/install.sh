@@ -212,7 +212,7 @@ llama_catalog_release() {
 # globals with versions resolved from npm before embedding them in the
 # deployed version files and verifier. Other subcommands use the source-tree
 # values only as informational fallbacks.
-read_pinned_version() {
+read_bridge_version_fallback() {
   local file="$1"
   if [[ -r "${file}" ]]; then
     tr -d '[:space:]' < "${file}"
@@ -220,8 +220,8 @@ read_pinned_version() {
     printf 'unknown'
   fi
 }
-PI_AI_VERSION="$(read_pinned_version "${PAYLOAD_DIR}/agent/pi-ai.version")"
-PI_MONO_VERSION="$(read_pinned_version "${PAYLOAD_DIR}/agent/pi-mono.version")"
+PI_AI_VERSION="$(read_bridge_version_fallback "${PAYLOAD_DIR}/agent/pi-ai.version")"
+PI_MONO_VERSION="$(read_bridge_version_fallback "${PAYLOAD_DIR}/agent/pi-mono.version")"
 
 # Exit codes:
 #   0  ok
