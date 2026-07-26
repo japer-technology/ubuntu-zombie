@@ -23,6 +23,7 @@ prompt-formatting helpers are still exposed for the installer
 from __future__ import annotations
 
 import argparse
+import ast
 import getpass
 import html
 import json
@@ -159,12 +160,12 @@ the tool call in text — for example, to list the home directory call the
 `ls` tool, do not print a tool-call string.
 
 If useful work must continue in a later model turn, you can reactivate
-yourself. Append exactly one structured request as the final thing in your
-reply:
+yourself. Include a structured request anywhere in your reply:
 <ubuntu-zombie-reactivation>{{"delay_seconds":{reactivation_minimum_seconds},"prompt":"Continue the prior task.","reason":"More work remains.","replace_existing":false}}</ubuntu-zombie-reactivation>
 The runtime removes this block from the visible reply and schedules an
-ordinary future turn in the same conversation. Use it only when another turn
-is genuinely needed. Use the configured minimum delay of
+ordinary future turn in the same conversation. If more than one request
+appears, the last one is used. Use it only when another turn is genuinely
+needed. Use the configured minimum delay of
 {reactivation_minimum_seconds} seconds unless a specific need requires longer;
 never exceed the configured maximum of {reactivation_maximum_seconds} seconds,
 and do not invoke it through `bash`.
@@ -219,13 +220,11 @@ def _agent_reactivation_request(
 ) -> tuple[str, dict[str, Any] | None, str | None]:
     """Remove agent reactivation request blocks and decode the last one.
 
-    The block is documented as the final thing in a reply, but models
-    routinely append a closing sentence, wrap the request in a code
-    fence, or emit it more than once. Every well-formed block is
-    therefore stripped from the visible reply wherever it appears and
-    the last one wins, so a continuation chain cannot break purely on
-    reply formatting. An error is reported only when a marker is
-    present but no block could be decoded.
+    Every well-formed block is stripped from the visible reply wherever
+    it appears and the last one wins. Minor model-generated JSON
+    mistakes (a surrounding fence, trailing commas, or single quotes)
+    are accepted. An error is reported only when a marker is present
+    but no block could be decoded.
     """
     if AGENT_REACTIVATION_OPEN not in reply:
         return reply, None, None
@@ -253,12 +252,88 @@ def _agent_reactivation_request(
         return visible, None, error
     encoded = encoded_blocks[-1].strip()
     try:
-        request = json.loads(encoded)
-    except json.JSONDecodeError as exc:
-        return visible, None, f"invalid structured reactivation JSON: {exc.msg}"
+        request = _decode_reactivation_json(encoded)
+    except ValueError as exc:
+        return visible, None, f"invalid structured reactivation JSON: {exc}"
     if not isinstance(request, dict):
         return visible, None, "structured reactivation request must be an object"
     return visible, request, None
+
+
+def _decode_reactivation_json(encoded: str) -> Any:
+    """Decode a structured request, returning its JSON-compatible value.
+
+    ``encoded`` may use a surrounding JSON fence, single quotes, or
+    trailing commas, which are common minor model formatting slips.
+    """
+    fenced = re.fullmatch(
+        r"```(?:json)?\s*(.*)\s*```", encoded, flags=re.IGNORECASE | re.DOTALL
+    )
+    candidate = fenced.group(1) if fenced else encoded
+    try:
+        return json.loads(candidate)
+    except json.JSONDecodeError as strict_error:
+        # literal_eval safely accepts single quotes and trailing
+        # commas. Translate JSON's literal names only outside strings so
+        # mixed JSON/Python-style objects remain recoverable.
+        relaxed = _pythonize_json_literals(candidate)
+        try:
+            return ast.literal_eval(relaxed)
+        except (SyntaxError, ValueError) as exc:
+            raise ValueError(strict_error.msg) from exc
+
+
+def _pythonize_json_literals(value: str) -> str:
+    """Return text with JSON booleans/null translated outside strings.
+
+    A character-by-character scan preserves single- and double-quoted
+    content, including escape sequences, while unquoted ``true``,
+    ``false``, and ``null`` become their Python literal equivalents.
+    """
+    replacements = {"true": "True", "false": "False", "null": "None"}
+    result: list[str] = []
+    quote: str | None = None
+    escaped = False
+    index = 0
+    while index < len(value):
+        char = value[index]
+        if quote is not None:
+            result.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            result.append(char)
+            index += 1
+            continue
+        matched = False
+        for literal, replacement in replacements.items():
+            end = index + len(literal)
+            if (
+                value.startswith(literal, index)
+                and (
+                    index == 0
+                    or not (value[index - 1].isalnum() or value[index - 1] == "_")
+                )
+                and (
+                    end == len(value)
+                    or not (value[end].isalnum() or value[end] == "_")
+                )
+            ):
+                result.append(replacement)
+                index = end
+                matched = True
+                break
+        if not matched:
+            result.append(char)
+            index += 1
+    return "".join(result)
 
 
 def _tool_activity_count(events: Iterable[dict[str, Any]]) -> int:

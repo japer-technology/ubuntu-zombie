@@ -32,7 +32,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   code fence, or emitted more than once (the last one wins) — instead of
   only when the block is the very last thing in the message. Every block
   is removed from the visible answer, and a fence left empty by the
-  removal is cleaned up.
+  removal is cleaned up. Minor JSON slips such as a surrounding fence,
+  single-quoted strings, and trailing commas are also accepted.
+- **Verbose reactivation accounting:** browser activity statistics now
+  count fired reactivations and report them in verbose turn and session
+  summaries.
 - **No overlapping continuation turns:** the timer daemon re-reads the
   durable record after sleeping and refuses to claim a timer whose
   conversation still has a turn in flight, closing a race where a timer

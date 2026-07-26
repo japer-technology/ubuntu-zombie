@@ -682,6 +682,30 @@ assert error is None, error
 assert request["prompt"] == "last", request
 assert visible == "Middle.", visible
 
+# Minor JSON slips from a model should not break a continuation.
+visible, request, error = server._agent_reactivation_request(
+    "Before."
+    "<ubuntu-zombie-reactivation>```json\n"
+    "{'delay_seconds': 4, 'prompt': 'relaxed true', "
+    "'replace_existing': false,}\n```"
+    "</ubuntu-zombie-reactivation>After."
+)
+assert error is None, error
+assert request == {
+    "delay_seconds": 4,
+    "prompt": "relaxed true",
+    "replace_existing": False,
+}, request
+assert visible == "Before.After.", visible
+
+relaxed = server._decode_reactivation_json(r'''```
+{"delay_seconds": 5, 'prompt': "keep true false null and an escaped \"quote\"",}
+```''')
+assert relaxed == {
+    "delay_seconds": 5,
+    "prompt": 'keep true false null and an escaped "quote"',
+}, relaxed
+
 # Ordinary fenced code in a reply must survive untouched.
 sample = "Run this:\n```sh\nls -la\n```\nDone."
 assert server._agent_reactivation_request(sample) == (sample, None, None)
@@ -3549,6 +3573,10 @@ EOF
     && grep -q 'ubuntu-zombie-reactivation' \
       payload/agent/templates/index.html \
     || { echo "structured reactivation requests must stay out of live chat" >&2; exit 1; }
+  grep -q 'tallyStat("reactivations"' payload/agent/templates/index.html \
+    && grep -q 'plural(bucket.reactivations, "reactivation")' \
+      payload/agent/templates/index.html \
+    || { echo "verbose mode must count reactivations" >&2; exit 1; }
   python3 payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
 import importlib.machinery

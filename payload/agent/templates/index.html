@@ -480,7 +480,7 @@ function newStatBucket() {
   return { startedAt: Date.now(),
            apiCalls: 0, bytesOut: 0, bytesIn: 0, sseEvents: 0,
            toolCalls: 0, toolFailures: 0, toolOutputBytes: 0,
-           streamChars: 0 };
+           reactivations: 0, streamChars: 0 };
 }
 const netStats = { session: newStatBucket(), turn: newStatBucket() };
 
@@ -490,10 +490,12 @@ function byteLength(s) {
   catch (_e) { return String(s).length; }
 }
 
-function tallyStat(field, n = 1) {
+// Set includeTurn false for server-wide activity unrelated to the
+// conversation turn currently displayed in this browser.
+function tallyStat(field, n = 1, includeTurn = true) {
   if (!Number.isFinite(n) || n <= 0) return;
   netStats.session[field] += n;
-  netStats.turn[field] += n;
+  if (includeTurn) netStats.turn[field] += n;
 }
 
 function formatBytes(n) {
@@ -538,6 +540,7 @@ function statsSummary(bucket) {
     ` · ${plural(bucket.toolCalls, "tool call")}` +
     (bucket.toolFailures ? ` (${bucket.toolFailures} failed)` : "") +
     ` · ${formatBytes(bucket.toolOutputBytes)} tool output` +
+    ` · ${plural(bucket.reactivations, "reactivation")}` +
     ` · ${plural(bucket.sseEvents, "stream event")}` +
     ` · ${bucket.streamChars} streamed chars`;
 }
@@ -1520,9 +1523,16 @@ async function refreshReactivation() {
       stopReactivationBtn.hidden = false;
       reactivationBanner.hidden = false;
       if (active.turn_id !== activeReactivation?.turn_id) {
+        const currentConversation =
+          Number(active.conversation_id) === Number(conversationId);
+        const startsLocalTurn = currentConversation && !activeEventSource;
+        if (startsLocalTurn) netStats.turn = newStatBucket();
+        tallyStat("reactivations", 1, startsLocalTurn);
+        appendVerboseActivity(
+          `Reactivation ${active.id || active.turn_id} started.`);
         activeReactivation = active;
         pendingReactivation = null;
-        if (Number(active.conversation_id) === Number(conversationId)) {
+        if (currentConversation) {
           await uzStreamReactivationTurn(active);
         }
       }
