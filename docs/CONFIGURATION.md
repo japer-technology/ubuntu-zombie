@@ -53,11 +53,13 @@ override is set (from `payload/agent/providers.py`):
 | `openrouter` | *(no default; must be set)* |
 | `lmstudio`   | *(no default; must be set)* |
 
-All providers are routed through [`@earendil-works/pi-ai`][pi-ai],
-installed globally by `scripts/install.sh` at the version pinned in
-`payload/agent/pi-ai.version`. The chat service shells out to the Node
-bridge at `/opt/ai-zombie/agent/pi-ai-bridge.mjs`; there are no
-bespoke per-provider Python clients.
+All providers are routed through [`@earendil-works/pi-ai`][pi-ai].
+At every install or repair, `scripts/install.sh` resolves the npm
+`latest` release, verifies the registry-provided integrity hash, and
+installs it globally. The resolved version is written to
+`/opt/ai-zombie/agent/pi-ai.version`. The chat service shells out to
+the Node bridge at `/opt/ai-zombie/agent/pi-ai-bridge.mjs`; there are
+no bespoke per-provider Python clients.
 
 `ZOMBIE_PROVIDER` + `ZOMBIE_MODEL` (plus the matching `*_API_KEY`) are
 the **single source of truth** for both the status banner and the agent
@@ -341,8 +343,10 @@ calls continue to require the configured approvals regardless of budget.
 
 ### pi-mono runtime
 
-The installer pins `@earendil-works/pi-coding-agent` to the version in
-`payload/agent/pi-mono.version` and renders runtime configs into
+At every install or repair, the installer resolves the npm `latest`
+release of `@earendil-works/pi-coding-agent`, verifies the
+registry-provided integrity hash, and records the resolved version in
+`/opt/ai-zombie/agent/pi-mono.version`. It renders runtime configs into
 `/opt/ai-zombie/pi/`:
 
 | Path                                   | Purpose                                  |

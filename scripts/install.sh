@@ -208,13 +208,11 @@ llama_catalog_release() {
     "${PAYLOAD_DIR}/etc/llama-builds.json"
 }
 
-# Pinned versions of the Node bridges, read from their single source of
-# truth (the *.version files deployed alongside the agent). They are
-# embedded into the generated verify script and used by the install-time
-# pin checks, so define them up front to avoid unbound-variable aborts
-# under `set -u`. Fall back to "unknown" if a file is somehow missing so
-# the installer degrades gracefully instead of crashing.
-read_pinned_version() {
+# Known-good versions of the Node bridges. The install path replaces these
+# globals with versions resolved from npm before embedding them in the
+# deployed version files and verifier. Other subcommands use the source-tree
+# values only as informational fallbacks.
+read_bridge_version_fallback() {
   local file="$1"
   if [[ -r "${file}" ]]; then
     tr -d '[:space:]' < "${file}"
@@ -222,9 +220,8 @@ read_pinned_version() {
     printf 'unknown'
   fi
 }
-PI_AI_VERSION="$(read_pinned_version "${PAYLOAD_DIR}/agent/pi-ai.version")"
-PI_MONO_VERSION="$(read_pinned_version "${PAYLOAD_DIR}/agent/pi-mono.version")"
-readonly PI_AI_VERSION PI_MONO_VERSION
+PI_AI_VERSION="$(read_bridge_version_fallback "${PAYLOAD_DIR}/agent/pi-ai.version")"
+PI_MONO_VERSION="$(read_bridge_version_fallback "${PAYLOAD_DIR}/agent/pi-mono.version")"
 
 # Exit codes:
 #   0  ok
@@ -3412,50 +3409,95 @@ install_npm_latest() {
 retry 4 5 -- install_npm_latest
 retry 4 5 -- npm install -g --ignore-scripts yarn pnpm typescript ts-node
 
-install_pinned_node_bridge() {
-  local name="$1" version_file="$2"
-  local pinned_version package version url sha256 tmp_dir tarball
-  local _integrity _license
-
-  pinned_version="$(tr -d '[:space:]' < "${version_file}")"
-  if [[ -z "${pinned_version}" ]]; then
-    die "${version_file#${REPO_ROOT}/} is empty; refusing to install ${name} unpinned." 1
-  fi
-
-  if ! read -r package version url sha256 _integrity _license < <(
-    awk -v want="${name}" '
-      $0 !~ /^#/ && $1 == want { print $2, $3, $4, $5, $6, $7 }
-    ' "${PAYLOAD_DIR}/agent/bridge-dependencies.lock"
-  ); then
-    die "Missing bridge dependency lock entry for ${name}." 1
-  fi
-  if [[ -z "${package:-}" || -z "${version:-}" || -z "${url:-}" || -z "${sha256:-}" ]]; then
-    die "Incomplete bridge dependency lock entry for ${name}." 1
-  fi
-  if [[ "${version}" != "${pinned_version}" ]]; then
-    die "${version_file#${REPO_ROOT}/} pins ${pinned_version}, but bridge lock pins ${version}." 1
-  fi
-
+install_latest_node_bridge() {
+  local name="$1" package="$2" metadata_url="$3"
+  local tmp_dir version tarball_url integrity tarball
   tmp_dir="$(mktemp -d)"
-  tarball="${tmp_dir}/${name}.tgz"
-  curl_get "${url}" -o "${tarball}" \
+  curl_get "${metadata_url}" -o "${tmp_dir}/latest.json" \
     || { rm -rf "${tmp_dir}"; return 1; }
-  printf '%s  %s\n' "${sha256}" "${tarball}" | sha256sum -c - >/dev/null \
-    || { rm -rf "${tmp_dir}"; die "Checksum mismatch for ${package}@${version} from ${url}." 1; }
+  node -e '
+    const m = require(process.argv[1]);
+    if (!m.version || !m.dist || !m.dist.tarball ||
+        typeof m.dist.integrity !== "string") {
+      console.error("metadata is missing version, tarball, or integrity");
+      process.exit(1);
+    }
+    let tarball;
+    try {
+      tarball = new URL(m.dist.tarball);
+    } catch {
+      console.error("metadata contains an invalid tarball URL");
+      process.exit(1);
+    }
+    if (tarball.protocol !== "https:" ||
+        tarball.hostname !== "registry.npmjs.org") {
+      console.error("metadata tarball URL is outside the npm registry");
+      process.exit(1);
+    }
+    const i = m.dist.integrity.indexOf("-");
+    if (i <= 0 || i === m.dist.integrity.length - 1 ||
+        m.dist.integrity.slice(0, i) !== "sha512") {
+      console.error("metadata must contain a sha512 integrity value");
+      process.exit(1);
+    }
+    process.stdout.write(
+      [m.version, m.dist.tarball, m.dist.integrity].join("\n") + "\n"
+    );
+  ' "${tmp_dir}/latest.json" > "${tmp_dir}/meta.txt" \
+    || { rm -rf "${tmp_dir}"; die "npm metadata for latest ${package} was invalid." 1; }
+  version="$(sed -n 1p "${tmp_dir}/meta.txt")"
+  tarball_url="$(sed -n 2p "${tmp_dir}/meta.txt")"
+  integrity="$(sed -n 3p "${tmp_dir}/meta.txt")"
+  [[ -n "${version}" && -n "${tarball_url}" && -n "${integrity}" ]] \
+    || { rm -rf "${tmp_dir}"; die "npm metadata for latest ${package} was incomplete." 1; }
 
-  log "Installing ${package}@${version} globally from checksum-pinned tarball."
+  tarball="${tmp_dir}/${name}.tgz"
+  curl_get "${tarball_url}" -o "${tarball}" \
+    || { rm -rf "${tmp_dir}"; return 1; }
+  node -e '
+    const fs = require("fs"), crypto = require("crypto");
+    const sri = process.argv[1], file = process.argv[2];
+    const i = sri.indexOf("-");
+    if (i <= 0 || i === sri.length - 1 || sri.slice(0, i) !== "sha512") {
+      console.error("malformed or unsupported integrity value");
+      process.exit(1);
+    }
+    const got = crypto.createHash(sri.slice(0, i))
+      .update(fs.readFileSync(file)).digest("base64");
+    if (got !== sri.slice(i + 1)) {
+      console.error("tarball integrity does not match registry metadata");
+      process.exit(1);
+    }
+  ' "${integrity}" "${tarball}" \
+    || { rm -rf "${tmp_dir}"; die "Integrity check failed for ${package}@${version}." 1; }
+
+  log "Installing latest ${package} (${version}) from its integrity-verified tarball."
   npm install -g --ignore-scripts "${tarball}" \
     || { rm -rf "${tmp_dir}"; return 1; }
   rm -rf "${tmp_dir}"
+  npm ls -g --depth=0 "${package}@${version}" >/dev/null \
+    || die "${package}@${version} was not installed successfully." 1
+  # name is the stable internal bridge label, not necessarily the npm package
+  # basename (pi-mono maps to @earendil-works/pi-coding-agent).
+  case "${name}" in
+    pi-ai) PI_AI_VERSION="${version}" ;;
+    pi-mono) PI_MONO_VERSION="${version}" ;;
+    *) die "Unknown Earendil module label: ${name}." 1 ;;
+  esac
 }
 
-# pi-ai is the unified LLM client for the chat service. Pinned to the
-# exact version and checksum recorded in payload/agent/bridge-dependencies.lock.
-retry 4 5 -- install_pinned_node_bridge pi-ai "${PAYLOAD_DIR}/agent/pi-ai.version"
+# Resolve both Earendil modules at install time so every install and repair
+# converges on the newest npm release. Registry-provided SRI is verified before
+# npm sees either tarball.
+retry 4 5 -- install_latest_node_bridge \
+  pi-ai @earendil-works/pi-ai \
+  "https://registry.npmjs.org/@earendil-works%2Fpi-ai/latest"
 
 # pi-mono is the agent loop the chat service drives via
-# payload/agent/pi-mono-bridge.mjs. Pinned the same way as pi-ai.
-retry 4 5 -- install_pinned_node_bridge pi-mono "${PAYLOAD_DIR}/agent/pi-mono.version"
+# payload/agent/pi-mono-bridge.mjs.
+retry 4 5 -- install_latest_node_bridge \
+  pi-mono @earendil-works/pi-coding-agent \
+  "https://registry.npmjs.org/@earendil-works%2Fpi-coding-agent/latest"
 }
 
 # ---------------------------------------------------------------------------
@@ -4200,8 +4242,9 @@ done
 # read-only; only root mutates the agent tree.
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/pi-ai-bridge.mjs" "${ZOMBIE_DIR}/agent/pi-ai-bridge.mjs"
-install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
-  "${PAYLOAD_DIR}/agent/pi-ai.version" "${ZOMBIE_DIR}/agent/pi-ai.version"
+printf '%s\n' "${PI_AI_VERSION}" > "${ZOMBIE_DIR}/agent/pi-ai.version"
+chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/agent/pi-ai.version"
+chmod 644 "${ZOMBIE_DIR}/agent/pi-ai.version"
 # Deploy the payload VERSION alongside the agent tree so the chat
 # service can report it via /api/version (the /version chat command).
 if [[ -f "${REPO_ROOT}/VERSION" ]]; then
@@ -4212,8 +4255,9 @@ fi
 # same reasons.
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/pi-mono-bridge.mjs" "${ZOMBIE_DIR}/agent/pi-mono-bridge.mjs"
-install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
-  "${PAYLOAD_DIR}/agent/pi-mono.version" "${ZOMBIE_DIR}/agent/pi-mono.version"
+printf '%s\n' "${PI_MONO_VERSION}" > "${ZOMBIE_DIR}/agent/pi-mono.version"
+chown "${AGENT_USER}:${AGENT_USER}" "${ZOMBIE_DIR}/agent/pi-mono.version"
+chmod 644 "${ZOMBIE_DIR}/agent/pi-mono.version"
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/templates/index.html" "${ZOMBIE_DIR}/agent/templates/index.html"
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \

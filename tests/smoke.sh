@@ -3232,6 +3232,21 @@ run_standards() {
     [[ -s "$f" ]] || { echo "missing required repository file: $f" >&2; exit 1; }
   done
 
+  grep -q 'registry.npmjs.org/@earendil-works%2Fpi-ai/latest' scripts/install.sh \
+    || { echo "installer must resolve the latest pi-ai release" >&2; exit 1; }
+  grep -q 'registry.npmjs.org/@earendil-works%2Fpi-coding-agent/latest' scripts/install.sh \
+    || { echo "installer must resolve the latest pi-coding-agent release" >&2; exit 1; }
+  grep -q 'Integrity check failed for ${package}@${version}' scripts/install.sh \
+    || { echo "latest Earendil tarballs must be integrity-verified" >&2; exit 1; }
+  grep -q 'tarball.hostname !== "registry.npmjs.org"' scripts/install.sh \
+    || { echo "Earendil tarballs must stay on the npm registry" >&2; exit 1; }
+  grep -q 'sri.slice(0, i) !== "sha512"' scripts/install.sh \
+    || { echo "Earendil tarballs must require sha512 integrity" >&2; exit 1; }
+  grep -q 'pi-ai) PI_AI_VERSION="${version}"' scripts/install.sh \
+    || { echo "installer must retain the resolved pi-ai version" >&2; exit 1; }
+  grep -q 'pi-mono) PI_MONO_VERSION="${version}"' scripts/install.sh \
+    || { echo "installer must retain the resolved pi-mono version" >&2; exit 1; }
+
   # The built-in skills ship under payload/agent/skills/ so
   # ``make package`` carries them into the release bundle and the
   # installer can deploy them to /opt/ai-zombie/skills/.
