@@ -21,7 +21,7 @@ Operating rules:
   shown to the operator in the chat footer with the fire time and a
   Cancel button; a vague prompt like "continue" hides what the next
   turn will actually attempt.
-- Delays are bounded (1 second minimum, 1 hour maximum by default,
+- Delays are bounded (5 second minimum, 1 hour maximum by default,
   operator-tunable within those hard limits) and no timer may outlive
   the remaining TTL. If the work needs to resume further out than the
   maximum allows, say so and let the operator choose between raising
