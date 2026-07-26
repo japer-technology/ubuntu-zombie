@@ -117,18 +117,22 @@ briefs under `/etc/ubuntu-zombie/skills.d/`.
 `timer.reactivation` lets pi schedule one future continuation in the same
 conversation. The server stores a single global pending timer in
 `conversations.db`; a new request must explicitly replace the existing one.
-A trailing structured agent request is stripped from the visible reply,
-validated against the closed tool schema and `chat_schedule` policy class,
-then dispatched to the timer runtime.
-A server-owned timer thread atomically claims a due record, checks the TTL and
-conversation, and starts an ordinary turn with fresh policy decisions. It
-never executes a tool directly or carries an approval into the new turn.
+Structured agent requests are stripped from the visible reply wherever they
+appear (the last one wins), validated against the closed tool schema and
+`chat_schedule` policy class, then dispatched to the timer runtime.
+A server-owned timer thread re-reads the durable record after each sleep,
+skips conversations that already have a turn in flight, atomically claims a due
+record, checks the TTL and conversation, and starts an ordinary turn with fresh
+policy decisions. It never executes a tool directly or carries an approval into
+the new turn.
 
 The authenticated UI polls the pending state, shows its reason, prompt preview,
 and fire time, and gives the operator a cancel control. The injected user
 message is marked `auto_reactivation` in history and rendered as queued by the
-timer. Scheduling, replacement, cancellation, firing, and failure are written
-to the audit log.
+timer. Scheduling, replacement, cancellation, deferral, firing, chain depth,
+and failure are written to the audit log; a continuation the daemon refuses to
+run also appears in the transcript and in the last-outcome report returned by
+`/api/reactivation`.
 
 ## Optional components
 

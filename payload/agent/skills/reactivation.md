@@ -21,7 +21,7 @@ Operating rules:
   shown to the operator in the chat footer with the fire time and a
   Cancel button; a vague prompt like "continue" hides what the next
   turn will actually attempt.
-- Delays are bounded (5 second minimum, 1 hour maximum by default,
+- Delays are bounded (1 second minimum, 1 hour maximum by default,
   operator-tunable within those hard limits) and no timer may outlive
   the remaining TTL. If the work needs to resume further out than the
   maximum allows, say so and let the operator choose between raising
@@ -42,10 +42,12 @@ Operating rules:
   cancels without disabling. If scheduling fails because the
   capability is off, report that and stop — do not look for another
   way to run later.
-- Scheduling, replacement, cancellation, firing and failure are all
-  audited, and the pending state is durable in the conversation
+- Scheduling, replacement, cancellation, deferral, firing and failure
+  are all audited, and the pending state is durable in the conversation
   database. When asked "is anything scheduled?", answer from
-  `/reactivation` status rather than memory of the conversation.
+  `/reactivation` status rather than memory of the conversation; it
+  also reports the last continuation's outcome, which is the first
+  thing to check when a chain stopped earlier than expected.
 - Do not use reactivation for recurring maintenance (backups,
   cleanups, health checks). Anything that should happen more than
   once belongs in a systemd timer or cron entry the operator can see

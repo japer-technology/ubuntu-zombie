@@ -651,6 +651,86 @@ visible, request, error = server._agent_reactivation_request(
 assert visible == "Visible reply", visible
 assert request is None
 assert error, error
+
+# A chain must not break on reply formatting: trailing prose, a code
+# fence around the block, and repeated blocks all still schedule.
+visible, request, error = server._agent_reactivation_request(
+    "Working.\n"
+    '<ubuntu-zombie-reactivation>{"delay_seconds":1,"prompt":"p"}'
+    "</ubuntu-zombie-reactivation>\nI will continue shortly."
+)
+assert error is None, error
+assert request == {"delay_seconds": 1, "prompt": "p"}, request
+assert visible == "Working.\n\nI will continue shortly.", visible
+
+visible, request, error = server._agent_reactivation_request(
+    "Working.\n```json\n"
+    '<ubuntu-zombie-reactivation>{"delay_seconds":2,"prompt":"p"}'
+    "</ubuntu-zombie-reactivation>\n```"
+)
+assert error is None, error
+assert request["delay_seconds"] == 2, request
+assert visible == "Working.", visible
+
+visible, request, error = server._agent_reactivation_request(
+    '<ubuntu-zombie-reactivation>{"delay_seconds":1,"prompt":"first"}'
+    "</ubuntu-zombie-reactivation>Middle."
+    '<ubuntu-zombie-reactivation>{"delay_seconds":3,"prompt":"last"}'
+    "</ubuntu-zombie-reactivation>"
+)
+assert error is None, error
+assert request["prompt"] == "last", request
+assert visible == "Middle.", visible
+
+# Ordinary fenced code in a reply must survive untouched.
+sample = "Run this:\n```sh\nls -la\n```\nDone."
+assert server._agent_reactivation_request(sample) == (sample, None, None)
+
+# A due timer must never start a second turn in a conversation that is
+# already running one, and the deferral must not lose the timer.
+busy_turn = server.TurnStream("busy-turn", conversation_id)
+with app._lock:
+    app.turns[busy_turn.turn_id] = busy_turn
+busy_due, _existing = app.history.schedule_reactivation(
+    conversation_id, time.time() - 1, "Deferred.", "Busy timer"
+)
+assert app.history.claim_due_reactivation(
+    time.time(), busy_conversations={conversation_id}
+) is None
+before = len(fired)
+app._reactivation_wakeup.set()
+time.sleep(0.5)
+assert len(fired) == before, fired
+assert app.history.pending_reactivation()["id"] == busy_due["id"]
+busy_turn.done_at = time.monotonic()
+app._reactivation_wakeup.set()
+deadline = time.time() + 3
+while len(fired) == before and time.time() < deadline:
+    time.sleep(0.02)
+assert len(fired) > before, "deferred reactivation never fired"
+
+# A timer the daemon refuses to run is recorded and reported, not
+# dropped silently: the operator can see why a chain stopped.
+app.configure_reactivation(enabled=False)
+dropped, _existing = app.history.schedule_reactivation(
+    conversation_id, time.time() - 1, "Dropped.", "Disabled timer"
+)
+app._reactivation_wakeup.set()
+deadline = time.time() + 3
+while app.history.pending_reactivation() and time.time() < deadline:
+    time.sleep(0.02)
+last = app.reactivation_info()["last"]
+assert last and last["id"] == dropped["id"], last
+assert last["status"] == "cancelled", last
+assert last["error"] == "reactivation is disabled", last
+notice = app.history.get_messages(conversation_id)[-1]
+assert notice["role"] == "system", notice
+assert "did not run" in notice["content"], notice
+assert any(
+    event["kind"] == "reactivation_cancelled"
+    for event in app.history.get_events(conversation_id)
+), "system cancellation must be visible in the conversation"
+app.configure_reactivation(enabled=True)
 PY
   rm -rf "${_REACTIVATION_TMP}"
   trap - EXIT
