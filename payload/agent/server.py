@@ -237,16 +237,14 @@ def _agent_reactivation_request(
         start = rest.find(AGENT_REACTIVATION_OPEN)
         if start < 0:
             break
-        end = rest.find(AGENT_REACTIVATION_CLOSE, start
-                        + len(AGENT_REACTIVATION_OPEN))
+        opened = start + len(AGENT_REACTIVATION_OPEN)
+        end = rest.find(AGENT_REACTIVATION_CLOSE, opened)
         if end < 0:
             error = "structured reactivation request is not closed"
             visible_parts.append(rest[:start])
             rest = ""
             break
-        encoded_blocks.append(
-            rest[start + len(AGENT_REACTIVATION_OPEN):end]
-        )
+        encoded_blocks.append(rest[opened:end])
         visible_parts.append(rest[:start])
         rest = rest[end + len(AGENT_REACTIVATION_CLOSE):]
     visible_parts.append(rest)
@@ -1477,8 +1475,13 @@ class App:
         last = self._public_reactivation(last_item)
         if last is not None and last_item is not None:
             last["error"] = last_item["error"]
-        return {"ok": True, **settings, "pending": pending, "active": active,
-                "last": last}
+        return {
+            "ok": True,
+            **settings,
+            "pending": pending,
+            "active": active,
+            "last": last,
+        }
 
     def configure_reactivation(
         self,
