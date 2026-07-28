@@ -1378,6 +1378,7 @@ class App:
         reply, reactivation_request, reactivation_error = (
             _agent_reactivation_request(reply)
         )
+        reactivation_result: dict[str, Any] | None = None
         if reactivation_request is not None:
             reactivation_result = self._consume_agent_reactivation(
                 conv_id, reactivation_request
@@ -1388,6 +1389,11 @@ class App:
                 + f"\n\n_Reactivation request: {status.replace('_', ' ')}._"
             )
         elif reactivation_error is not None:
+            reactivation_result = {
+                "ok": False,
+                "status": "rejected_format",
+                "error": reactivation_error,
+            }
             log_event(
                 "reactivation_rejected",
                 conversation_id=conv_id,
@@ -1414,6 +1420,11 @@ class App:
             "conversation_id": conv_id,
             "reply": reply,
         }
+        if reactivation_result is not None:
+            # Let the terminal SSE frame carry the canonical scheduling
+            # outcome so the browser can show the queued/failed banner
+            # immediately instead of waiting for the next poll.
+            payload["reactivation"] = reactivation_result
         # The live transcript already contains this turn. Avoid serialising
         # the entire conversation into the terminal SSE frame: large command
         # histories otherwise leave the browser apparently stuck in the

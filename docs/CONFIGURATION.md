@@ -406,7 +406,9 @@ conversation; all tool policy and approval checks run again. That turn streams
 into the transcript live — its tools and reply text appear as they happen, the
 same way an operator's own message does — so a task spread across several
 continuations (for example a long essay) is visibly chained rather than
-appearing only once each turn has finished.
+appearing only once each turn has finished. When a reply schedules or rejects a
+continuation, the terminal turn payload carries that outcome too, so the queued
+or stopped banner appears immediately rather than on the next poll.
 
 The shipped pi bridge presents this capability through a structured
 `<ubuntu-zombie-reactivation>` request in the agent's reply. The server removes

@@ -659,6 +659,41 @@ assert self_scheduled["status"] == "accepted", self_scheduled
 assert app.reactivation_info()["pending"]["prompt"] == "Continue the test."
 app.cancel_reactivation()
 
+# The terminal turn payload must carry the canonical scheduling outcome so
+# the browser can show the queued continuation immediately instead of
+# waiting for the next reactivation poll.
+original_run_turn = server.pi_mono.run_turn
+emitted = []
+try:
+    server.pi_mono.run_turn = lambda **kwargs: {
+        "final": (
+            "Scheduling the next step.\n"
+            '<ubuntu-zombie-reactivation>{"delay_seconds":5,'
+            '"prompt":"Payload queued continuation.",'
+            '"reason":"Payload outcome."}</ubuntu-zombie-reactivation>'
+        ),
+        "events": [],
+        "log_path": None,
+    }
+    payload = app.post_message(
+        conversation_id,
+        "schedule via payload",
+        emit=lambda event, data: emitted.append((event, data)),
+    )
+finally:
+    server.pi_mono.run_turn = original_run_turn
+assert payload["reactivation"]["status"] == "accepted", payload
+assert payload["reactivation"]["reactivation"]["prompt"] == \
+    "Payload queued continuation.", payload
+assert any(
+    event == "turn_done"
+    and data.get("reactivation", {}).get("status") == "accepted"
+    for event, data in emitted
+), emitted
+assert app.reactivation_info()["pending"]["prompt"] == \
+    "Payload queued continuation."
+app.cancel_reactivation()
+
 visible, request, error = server._agent_reactivation_request(
     "Visible reply\n<ubuntu-zombie-reactivation>{bad json}"
 )
@@ -3622,6 +3657,9 @@ EOF
     && grep -q 'ubuntu-zombie-reactivation' \
       payload/agent/templates/index.html \
     || { echo "structured reactivation requests must stay out of live chat" >&2; exit 1; }
+  grep -q 'showPendingReactivation' payload/agent/templates/index.html \
+    && grep -q 'data.reactivation' payload/agent/templates/index.html \
+    || { echo "terminal reactivation outcomes must update chat immediately" >&2; exit 1; }
   grep -q 'tallyStat("reactivations"' payload/agent/templates/index.html \
     && grep -q 'plural(bucket.reactivations, "reactivation")' \
       payload/agent/templates/index.html \

@@ -1509,6 +1509,23 @@ async function uzResumeReactivationStream() {
   if (activeReactivation) await uzStreamReactivationTurn(activeReactivation);
 }
 
+function showPendingReactivation(pending) {
+  reactivationTitle.textContent = "Reactivation queued";
+  pendingReactivation = pending;
+  const when = new Date(Number(pending.fire_at) * 1000);
+  const preview = String(pending.prompt || "").replace(/\s+/g, " ").slice(0, 100);
+  const remaining = Number.isFinite(Number(pending.remaining_seconds))
+    ? Number(pending.remaining_seconds)
+    : Math.max(0, Math.round(Number(pending.fire_at) - Date.now() / 1000));
+  reactivationDetail.textContent =
+    `${pending.reason} · ${when.toLocaleString()} ` +
+    `(${uzFormatSeconds(remaining)}) · ${preview}`;
+  cancelReactivationBtn.hidden = false;
+  pauseReactivationBtn.hidden = true;
+  stopReactivationBtn.hidden = true;
+  reactivationBanner.hidden = false;
+}
+
 async function refreshReactivation() {
   try {
     const data = await uzFetchJson("/api/reactivation");
@@ -1573,17 +1590,7 @@ async function refreshReactivation() {
       stopReactivationBtn.hidden = true;
       return data;
     }
-    reactivationTitle.textContent = "Reactivation queued";
-    pendingReactivation = pending;
-    const when = new Date(Number(pending.fire_at) * 1000);
-    const preview = String(pending.prompt || "").replace(/\s+/g, " ").slice(0, 100);
-    reactivationDetail.textContent =
-      `${pending.reason} · ${when.toLocaleString()} ` +
-      `(${uzFormatSeconds(pending.remaining_seconds)}) · ${preview}`;
-    cancelReactivationBtn.hidden = false;
-    pauseReactivationBtn.hidden = true;
-    stopReactivationBtn.hidden = true;
-    reactivationBanner.hidden = false;
+    showPendingReactivation(pending);
     return data;
   } catch (_err) {
     reactivationBanner.hidden = true;
@@ -2023,6 +2030,15 @@ function applyTurnPayload(data, preserveTranscript = false) {
   // Render the error exactly once, after any transcript re-render (which
   // clears the log and would otherwise wipe an earlier error bubble).
   if (data.error) addMessage("system", data.error, { error: true });
+  // A turn that scheduled (or rejected) a continuation carries the canonical
+  // outcome in its terminal payload. Show it immediately; polling remains
+  // the fallback and will reconcile active/fired state shortly after.
+  if (data.reactivation) {
+    if (data.reactivation.reactivation) {
+      showPendingReactivation(data.reactivation.reactivation);
+    }
+    void refreshReactivation();
+  }
   // In verbose mode every completed turn ends with its background
   // activity tally so the operator can see what the turn cost.
   appendVerboseTally();

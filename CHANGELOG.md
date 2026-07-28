@@ -45,6 +45,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   lower custom values safely). Chained continuations no longer fire on a
   1-second cadence that could leave the browser still settling the previous
   live turn when the next one started.
+- **Immediate queued-state rendering:** the terminal `turn_done` payload now
+  carries the canonical reactivation outcome (`accepted`, `replaced`, or the
+  rejection reason), and the chat renders the queued banner from that frame
+  immediately instead of waiting for the next `/api/reactivation` poll.
 - **Verbose reactivation accounting:** browser activity statistics now
   count fired reactivations and report them in verbose turn and session
   summaries.
