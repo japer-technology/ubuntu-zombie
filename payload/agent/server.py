@@ -220,14 +220,18 @@ def _agent_reactivation_request(
 ) -> tuple[str, dict[str, Any] | None, str | None]:
     """Remove agent reactivation request blocks and decode the last one.
 
-    Every well-formed block is stripped from the visible reply wherever
-    it appears and the last one wins. Minor model-generated JSON
-    mistakes (a surrounding fence, trailing commas, or single quotes)
-    are accepted. An error is reported only when a marker is present
-    but no block could be decoded.
+    Every well-formed ``<ubuntu-zombie-reactivation>`` block is stripped
+    from the visible reply wherever it appears and the last one wins.
+    Minor model-generated JSON mistakes (a surrounding fence, trailing
+    commas, or single quotes) are accepted. When a model forgets the
+    wrapper entirely, a bare top-level JSON object that exactly matches
+    the ``timer.reactivation`` shape is recovered the same way instead
+    of being shown to the operator as ordinary text. An error is
+    reported only when a marker is present but no block could be
+    decoded.
     """
     if AGENT_REACTIVATION_OPEN not in reply:
-        return reply, None, None
+        return _bare_agent_reactivation_request(reply)
     visible_parts: list[str] = []
     encoded_blocks: list[str] = []
     error: str | None = None
@@ -258,6 +262,111 @@ def _agent_reactivation_request(
     if not isinstance(request, dict):
         return visible, None, "structured reactivation request must be an object"
     return visible, request, None
+
+
+_REACTIVATION_REQUIRED_KEYS = {"delay_seconds", "prompt"}
+_REACTIVATION_ALLOWED_KEYS = {
+    "delay_seconds",
+    "prompt",
+    "reason",
+    "replace_existing",
+}
+
+
+def _bare_agent_reactivation_request(
+    reply: str,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Recover an unwrapped top-level reactivation JSON object.
+
+    Some providers occasionally emit the request payload as plain text
+    (often fenced as ``json``) instead of inside the required marker.
+    Only objects with the exact ``timer.reactivation`` key shape are
+    consumed, so an ordinary JSON example in an answer remains visible.
+    The last valid bare request wins, matching marker-block semantics.
+    """
+    candidates: list[tuple[int, int, dict[str, Any]]] = []
+    for start, end in _top_level_json_object_spans(reply):
+        encoded = reply[start:end]
+        try:
+            decoded = _decode_reactivation_json(encoded)
+        except ValueError:
+            continue
+        if _looks_like_reactivation_request(decoded):
+            candidates.append((start, end, decoded))
+    if not candidates:
+        return reply, None, None
+    visible = reply
+    for start, end, _request in reversed(candidates):
+        visible = visible[:start] + visible[end:]
+    visible = _tidy_reactivation_remainder(visible)
+    return visible, candidates[-1][2], None
+
+
+def _looks_like_reactivation_request(value: Any) -> bool:
+    """Return True for JSON shaped exactly like ``timer.reactivation``."""
+    if not isinstance(value, dict):
+        return False
+    keys = set(value)
+    if not _REACTIVATION_REQUIRED_KEYS.issubset(keys):
+        return False
+    if not keys.issubset(_REACTIVATION_ALLOWED_KEYS):
+        return False
+    delay = value.get("delay_seconds")
+    if isinstance(delay, bool) or not isinstance(delay, int):
+        return False
+    prompt = value.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        return False
+    if "reason" in value and not isinstance(value["reason"], str):
+        return False
+    if "replace_existing" in value and not isinstance(
+        value["replace_existing"], bool
+    ):
+        return False
+    return True
+
+
+def _top_level_json_object_spans(text: str) -> list[tuple[int, int]]:
+    """Return spans of balanced top-level ``{...}`` objects in text."""
+    spans: list[tuple[int, int]] = []
+    index = 0
+    while index < len(text):
+        if text[index] != "{":
+            index += 1
+            continue
+        end = _json_object_end(text, index)
+        if end is None:
+            index += 1
+            continue
+        spans.append((index, end))
+        index = end
+    return spans
+
+
+def _json_object_end(text: str, start: int) -> int | None:
+    """Return the exclusive end of the object starting at ``start``."""
+    depth = 0
+    quote: str | None = None
+    escaped = False
+    for cursor in range(start, len(text)):
+        char = text[cursor]
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return cursor + 1
+    return None
 
 
 def _decode_reactivation_json(encoded: str) -> Any:

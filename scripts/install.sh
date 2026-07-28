@@ -984,7 +984,10 @@ is_valid_forgejo_version() {
 # because the value is interpolated into the runner-registration command:
 # no whitespace, quotes, or shell metacharacters.
 is_valid_forgejo_runner_labels() {
-  [[ "$1" =~ ^[A-Za-z0-9._:/,+-]{1,512}$ ]]
+  # BSD regcomp (used by macOS bash) rejects bounded repetitions above
+  # 255, so enforce the length separately and keep the regex simple.
+  (( ${#1} >= 1 && ${#1} <= 512 )) || return 1
+  [[ "$1" =~ ^[A-Za-z0-9._:/,+-]+$ ]]
 }
 
 # Forgejo JWT secrets are unpadded base64url encodings of exactly 32 bytes,

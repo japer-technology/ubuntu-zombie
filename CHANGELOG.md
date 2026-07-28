@@ -34,6 +34,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   is removed from the visible answer, and a fence left empty by the
   removal is cleaned up. Minor JSON slips such as a surrounding fence,
   single-quoted strings, and trailing commas are also accepted.
+- **Unwrapped request recovery:** a provider that forgets the
+  `<ubuntu-zombie-reactivation>` wrapper but emits a bare top-level JSON
+  object with exactly the `timer.reactivation` fields no longer leaks
+  that payload into the visible reply; the server consumes the last such
+  object and schedules (or rejects) it through the normal policy path.
+  Ordinary JSON examples with extra or missing keys remain untouched.
 - **Verbose reactivation accounting:** browser activity statistics now
   count fired reactivations and report them in verbose turn and session
   summaries.

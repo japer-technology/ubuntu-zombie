@@ -413,9 +413,12 @@ The shipped pi bridge presents this capability through a structured
 every machine-readable block — wherever it appears, including inside a code
 fence or ahead of a closing sentence — before saving the visible answer, uses
 the last one, validates it against the closed `timer.reactivation` schema and
-policy class, and reports whether the request was accepted. This lets the AI
-reactivate itself; `/reactivation` is the operator control for the capability,
-not the mechanism that schedules each continuation.
+policy class, and reports whether the request was accepted. If a provider
+forgets the wrapper but emits a bare top-level JSON object with exactly the
+`timer.reactivation` fields, the server recovers and hides that request the
+same way rather than leaving it as visible text. This lets the AI reactivate
+itself; `/reactivation` is the operator control for the capability, not the
+mechanism that schedules each continuation.
 
 Continuation chains are debuggable. A due timer is never started while its
 conversation still has a turn in flight (the deferral is audited as

@@ -59,6 +59,7 @@ run_python() {
   PYTHONPATH=payload/agent python3 -c 'import policy; p = policy.load_policy(); print("classes:", list(p.classes))'
   echo "  policy payload regressions"
   PYTHONPATH=payload/agent ZOMBIE_POLICY=payload/etc/policy.yaml python3 - <<'PY'
+import platform
 import policy
 import server
 import tempfile
@@ -218,15 +219,18 @@ except _t.SchemaError:
     pass
 # The read allow-list is checked against the resolved path, so the
 # canonical Ubuntu inspection files that live under /etc as symlinks into
-# read-only distro/runtime trees must still be readable. Secrets and home
-# directories must stay out of reach.
+# read-only distro/runtime trees must still be readable. This assertion is
+# Linux-specific: macOS also has /etc/localtime, but it resolves into
+# /private/var/db and is outside the Ubuntu runtime's allow-list. Secrets
+# and home directories must stay out of reach on every platform.
 _read_roots = _t._read_allowed_prefixes()
-for _linked in ("/etc/os-release", "/etc/localtime", "/etc/resolv.conf"):
-    _candidate = Path(_linked)
-    if not _candidate.exists():
-        continue
-    if not _t._within(_candidate, _read_roots):
-        raise SystemExit(f"{_linked} must be inside the read allow-list")
+if platform.system() == "Linux":
+    for _linked in ("/etc/os-release", "/etc/localtime", "/etc/resolv.conf"):
+        _candidate = Path(_linked)
+        if not _candidate.exists():
+            continue
+        if not _t._within(_candidate, _read_roots):
+            raise SystemExit(f"{_linked} must be inside the read allow-list")
 for _denied in ("/home", "/root/.ssh/id_rsa",
                 "/opt/ai-zombie/secrets/env", "/usr/bin/sudo"):
     if _t._within(Path(_denied), _read_roots):
@@ -710,6 +714,39 @@ assert relaxed == {
 sample = "Run this:\n```sh\nls -la\n```\nDone."
 assert server._agent_reactivation_request(sample) == (sample, None, None)
 
+# A provider that forgets the structured wrapper must not leak the
+# request into chat: an exact bare timer.reactivation-shaped JSON object
+# is consumed, while ordinary JSON examples remain visible.
+visible, request, error = server._agent_reactivation_request(
+    "Working.\n```json\n"
+    '{"delay_seconds":6,"prompt":"bare fence",'
+    '"reason":"Provider omitted the marker."}\n```\nAfter.'
+)
+assert error is None, error
+assert request == {
+    "delay_seconds": 6,
+    "prompt": "bare fence",
+    "reason": "Provider omitted the marker.",
+}, request
+assert visible == "Working.\n\nAfter.", visible
+
+visible, request, error = server._agent_reactivation_request(
+    'Working.\n{"delay_seconds":7,"prompt":"bare object",'
+    '"replace_existing":false}\nAfter.'
+)
+assert error is None, error
+assert request == {
+    "delay_seconds": 7,
+    "prompt": "bare object",
+    "replace_existing": False,
+}, request
+assert visible == "Working.\n\nAfter.", visible
+
+ordinary = (
+    'Example payload:\n{"delay_seconds":1,"prompt":"demo","extra":true}'
+)
+assert server._agent_reactivation_request(ordinary) == (ordinary, None, None)
+
 # A due timer must never start a second turn in a conversation that is
 # already running one, and the deferral must not lose the timer.
 busy_turn = server.TurnStream("busy-turn", conversation_id)
@@ -866,9 +903,11 @@ PY
     # hermetic stub bridge so no API key or @earendil-works/pi-ai
     # install is needed. Also exercises the server App wrappers.
     echo "  providers model catalogue + /model endpoints"
+    _MODEL_TMP="$(mktemp -d)"
     ZOMBIE_PI_AI_BRIDGE="$(pwd)/tests/fixtures/stub-pi-ai-bridge.mjs" \
     ZOMBIE_NODE="$(command -v node)" \
-    ZOMBIE_AUDIT_LOG="$(mktemp -d)/audit.log" \
+    ZOMBIE_HISTORY_DB="${_MODEL_TMP}/conversations.db" \
+    ZOMBIE_AUDIT_LOG="${_MODEL_TMP}/audit.log" \
     PYTHONPATH=payload/agent \
       python3 - <<'PY'
 import json
