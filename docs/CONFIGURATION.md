@@ -431,7 +431,7 @@ reason instead of simply going quiet. Each fired continuation is audited with
 its `chain_index` and labelled in chat as `continuation N`. A continuation turn
 that fails inside itself is audited as `reactivation_turn_failed`.
 
-Reactivation is enabled by default with a 1-second minimum and 1-hour maximum
+Reactivation is enabled by default with a 5-second minimum and 1-hour maximum
 delay. Both limits and the enabled state are durable in `conversations.db`.
 These defaults are also the hard safety bounds, and no timer may outlive the
 remaining TTL.

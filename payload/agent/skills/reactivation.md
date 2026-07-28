@@ -28,7 +28,7 @@ Operating rules:
 - Emit valid JSON when possible. The parser also tolerates a surrounding
   JSON code fence, single-quoted strings, and trailing commas so minor
   formatting slips do not break a continuation.
-- Delays are bounded (1 second minimum, 1 hour maximum by default,
+- Delays are bounded (5 seconds minimum, 1 hour maximum by default,
   operator-tunable within those hard limits) and no timer may outlive
   the remaining TTL. If the work needs to resume further out than the
   maximum allows, say so and let the operator choose between raising

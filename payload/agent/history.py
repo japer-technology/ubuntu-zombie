@@ -21,9 +21,10 @@ DB_PATH = Path(os.environ.get(
     "ZOMBIE_HISTORY_DB", "/opt/ai-zombie/state/conversations.db"
 ))
 
-# Version 2 added durable reactivation. Version 3 narrows its supported delay
-# range and migrates the former defaults while preserving valid custom values.
-SCHEMA_VERSION = 3
+# Version 2 added durable reactivation. Version 3 narrowed its supported delay
+# range. Version 4 raises the minimum delay to 5 seconds so the chat UI can
+# settle between chained continuation turns.
+SCHEMA_VERSION = 4
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -58,7 +59,7 @@ CREATE INDEX IF NOT EXISTS events_by_conv
 CREATE TABLE IF NOT EXISTS reactivation_settings (
     singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
     enabled         INTEGER NOT NULL DEFAULT 1,
-    minimum_seconds INTEGER NOT NULL DEFAULT 1,
+    minimum_seconds INTEGER NOT NULL DEFAULT 5,
     maximum_seconds INTEGER NOT NULL DEFAULT 3600
 );
 
@@ -120,7 +121,7 @@ class History:
                 # Best-effort: if the snapshot fails the migration
                 # still proceeds — additive only, no destructive ops.
                 pass
-        if current < 3:
+        if current < 4:
             has_reactivation_settings = self._conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' "
                 "AND name='reactivation_settings'"
@@ -129,15 +130,20 @@ class History:
                 self._conn.execute(
                     "UPDATE reactivation_settings SET "
                     "minimum_seconds = CASE "
-                    "WHEN minimum_seconds = 30 THEN 1 "
-                    "WHEN minimum_seconds < 1 THEN 1 "
+                    "WHEN minimum_seconds = 30 THEN 5 "
+                    "WHEN minimum_seconds < 5 THEN 5 "
                     "WHEN minimum_seconds > 3600 THEN 3600 "
                     "ELSE minimum_seconds END, "
                     "maximum_seconds = CASE "
                     "WHEN maximum_seconds = 86400 THEN 3600 "
-                    "WHEN maximum_seconds < 1 THEN 1 "
+                    "WHEN maximum_seconds < 5 THEN 5 "
                     "WHEN maximum_seconds > 3600 THEN 3600 "
                     "ELSE maximum_seconds END"
+                )
+                self._conn.execute(
+                    "UPDATE reactivation_settings SET "
+                    "maximum_seconds = minimum_seconds "
+                    "WHERE maximum_seconds < minimum_seconds"
                 )
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._conn.commit()

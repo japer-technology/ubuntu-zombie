@@ -521,7 +521,7 @@ app = server.App()
 conversation_id = app.history.create_conversation("timer test")
 settings = app.reactivation_info()
 assert settings["enabled"] is True, settings
-assert settings["minimum_seconds"] == 1, settings
+assert settings["minimum_seconds"] == 5, settings
 assert settings["maximum_seconds"] == 3600, settings
 system_prompt = server.render_append_system("test facts", 10, 120)
 assert '"delay_seconds":10' in system_prompt, system_prompt
@@ -529,13 +529,21 @@ assert "minimum delay of\n10 seconds" in system_prompt, system_prompt
 
 accepted = app.schedule_reactivation(
     conversation_id=conversation_id,
-    delay_seconds=1,
+    delay_seconds=5,
     prompt="Continue the test.",
     reason="Smoke test",
 )
 assert accepted["status"] == "accepted", accepted
 pending = app.reactivation_info()["pending"]
 assert pending and pending["conversation_id"] == conversation_id, pending
+
+too_fast = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=1,
+    prompt="This would race the UI settle window.",
+    reason="Below minimum",
+)
+assert too_fast["status"] == "rejected_policy", too_fast
 
 rejected = app.schedule_reactivation(
     conversation_id=conversation_id,
@@ -567,15 +575,17 @@ rejected = app.schedule_reactivation(
 )
 assert rejected["status"] == "rejected_disabled", rejected
 
-invalid = app.configure_reactivation(minimum_seconds=0)
+invalid = app.configure_reactivation(minimum_seconds=4)
 assert "error" in invalid, invalid
 invalid = app.configure_reactivation(maximum_seconds=3601)
 assert "error" in invalid, invalid
 
 for name, old_minimum, old_maximum, expected_minimum, expected_maximum in (
-    ("defaults", 30, 86400, 1, 3600),
+    ("defaults", 30, 86400, 5, 3600),
     ("custom", 10, 1800, 10, 1800),
-    ("low", 0, 120, 1, 120),
+    ("low", 0, 120, 5, 120),
+    ("previous-floor", 1, 3600, 5, 3600),
+    ("inverted", 10, 1, 10, 10),
     ("high", 10, 7200, 10, 3600),
 ):
     migration_path = Path(os.environ["ZOMBIE_HISTORY_DB"]).with_name(
@@ -637,7 +647,7 @@ assert app.reactivation_info()["active"] is None
 
 visible, request, error = server._agent_reactivation_request(
     "I need another turn.\n"
-    '<ubuntu-zombie-reactivation>{"delay_seconds":1,'
+    '<ubuntu-zombie-reactivation>{"delay_seconds":5,'
     '"prompt":"Continue the test.","reason":"More work remains.",'
     '"replace_existing":false}</ubuntu-zombie-reactivation>'
 )

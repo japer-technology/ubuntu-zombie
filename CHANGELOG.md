@@ -40,6 +40,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   that payload into the visible reply; the server consumes the last such
   object and schedules (or rejects) it through the normal policy path.
   Ordinary JSON examples with extra or missing keys remain untouched.
+- **Five-second continuation floor:** the hard/default minimum reactivation
+  delay is now 5 seconds (existing databases migrate 1-second defaults and
+  lower custom values safely). Chained continuations no longer fire on a
+  1-second cadence that could leave the browser still settling the previous
+  live turn when the next one started.
 - **Verbose reactivation accounting:** browser activity statistics now
   count fired reactivations and report them in verbose turn and session
   summaries.
@@ -157,7 +162,7 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   only the operator controls. Streamed completion frames also omit redundant
   full-history data so long command transcripts do not remain stuck at
   “Finalising the reply”.
-- **Shorter reactivation bounds:** continuations may be scheduled from 1 second
+- **Shorter reactivation bounds:** continuations may be scheduled from 5 seconds
   up to 1 hour in the future. Existing durable defaults are migrated safely.
 - **Preserved-policy compatibility:** installations upgraded from releases
   before `chat_schedule` existed now retain automatic approval for bounded
