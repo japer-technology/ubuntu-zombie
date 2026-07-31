@@ -134,6 +134,12 @@ and failure are written to the audit log; a continuation the daemon refuses to
 run also appears in the transcript and in the last-outcome report returned by
 `/api/reactivation`.
 
+The operator can reset this mechanism with `/reactivation reset`. The reset
+atomically restores the default enabled state and delay bounds, retires the
+queued timer, requests cancellation of any active continuation, and advances a
+durable reset timestamp so pre-reset outcomes and chain counts do not leak into
+the current UX. Historical timer rows and audit evidence are retained.
+
 ## Optional components
 
 The installer uses the component-aware grammar `scripts/install.sh

@@ -26,6 +26,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Agent reactivation debugging
 
+- **Reactivation reset:** `/reactivation reset` now restores the enabled
+  5-second/1-hour defaults, cancels queued and active continuations, clears
+  stale current-status UX, and restarts chain numbering without deleting
+  historical timer rows, transcript events, or audit evidence.
 - **Chains no longer break on reply formatting:** structured
   `<ubuntu-zombie-reactivation>` requests are now recognised wherever
   they appear in a reply — followed by a closing sentence, wrapped in a

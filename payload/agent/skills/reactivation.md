@@ -46,7 +46,9 @@ Operating rules:
   open-ended "keep going" loops; give the chain a defined end.
 - The operator owns the switch. `/reactivation off` disables the
   capability and cancels the pending timer; `/reactivation cancel`
-  cancels without disabling. If scheduling fails because the
+  cancels without disabling. `/reactivation reset` restores the enabled
+  5-second/1-hour defaults and clears queued, active, and stale status
+  state while retaining history and audit evidence. If scheduling
   capability is off, report that and stop — do not look for another
   way to run later.
 - Scheduling, replacement, cancellation, deferral, firing and failure

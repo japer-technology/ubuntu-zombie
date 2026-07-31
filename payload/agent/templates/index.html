@@ -1260,7 +1260,7 @@ const SLASH_COMMANDS = [
   ["/profile", "Show the active local profile.", "Configuration"],
   ["/purpose", "Show the starter purpose buttons inline in this chat.", "Help"],
   ["/redraw", "Reload the current conversation from SQLite.", "Conversation"],
-  ["/reactivation [on|off|cancel|minimum <duration>|maximum <duration>]", "Show or configure agent reactivation (alias: /reactivate).", "Session"],
+  ["/reactivation [on|off|cancel|reset|minimum <duration>|maximum <duration>]", "Show, reset, or configure agent reactivation (alias: /reactivate).", "Session"],
   ["/rebrand [title]", "Rebrand this browser's Ubuntu Zombie UI; omit title to reset.", "Configuration"],
   ["/reprompt [placeholder]", "Replace this browser's prompt placeholder; omit text to reset.", "Configuration"],
   ["/retry", "Retry the last user turn in a new branch.", "Conversation"],
@@ -1305,7 +1305,7 @@ const COMMAND_DETAILS = {
   "/profile": "Shows the active agent profile and loaded instruction metadata.",
   "/purpose": "Shows the starter purpose buttons inline so more prompts can be picked in the same conversation.",
   "/redraw": "Reloads the active conversation and tool events from local storage.",
-  "/reactivation": "Shows the single upcoming agent continuation, enables or disables scheduling, cancels it, or configures bounded minimum and maximum delays. Alias: /reactivate.",
+  "/reactivation": "Shows the single upcoming agent continuation, enables or disables scheduling, cancels it, resets the mechanism to a clean default state, or configures bounded minimum and maximum delays. Alias: /reactivate.",
   "/rebrand": "Changes this browser's interface branding or resets it to Ubuntu Zombie.",
   "/reprompt": "Changes the prompt placeholder for this browser or resets it to the default.",
   "/retry": "Branches before the latest user turn and submits that prompt again.",
@@ -2868,12 +2868,19 @@ async function handleSlashCommand(input) {
             { enabled: action === "on" });
         } else if (action === "cancel") {
           data = await uzPostJson("/api/reactivation", { cancel: true });
+        } else if (action === "reset") {
+          data = await uzPostJson("/api/reactivation", { reset: true });
+          if (activeReactivation) abortTurn("Reactivation reset.");
+          pendingReactivation = null;
+          activeReactivation = null;
+          reactivationLiveTurnId = null;
+          reactivationStreamPaused = false;
         } else if (action === "minimum" || action === "maximum") {
           if (!value) throw new Error(`${action} requires a duration`);
           data = await uzPostJson("/api/reactivation", { [action]: value });
         } else {
           throw new Error(
-            "Usage: /reactivation [on|off|cancel|minimum <duration>|maximum <duration>]"
+            "Usage: /reactivation [on|off|cancel|reset|minimum <duration>|maximum <duration>]"
           );
         }
         const state = await refreshReactivation() || data;
@@ -2882,6 +2889,12 @@ async function handleSlashCommand(input) {
           `Delay bounds: ${uzFormatSeconds(state.minimum_seconds)} to ` +
             `${uzFormatSeconds(state.maximum_seconds)}.`,
         ];
+        if (data.reset) {
+          lines.push(
+            "Reactivation mechanism reset to defaults; queued and active " +
+            "continuations were cleared."
+          );
+        }
         if (state.pending) {
           lines.push(
             `Upcoming #${state.pending.id.slice(0, 8)}: ` +

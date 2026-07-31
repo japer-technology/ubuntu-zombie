@@ -645,6 +645,46 @@ assert active.cancel_event.is_set()
 active.done_at = time.monotonic()
 assert app.reactivation_info()["active"] is None
 
+# Reset restores the default mechanism and clears current UX state while
+# preserving historical rows for audit. It also stops active reactivation
+# work and retires the queued timer.
+custom = app.configure_reactivation(
+    enabled=True, minimum_seconds=10, maximum_seconds=120
+)
+assert custom["minimum_seconds"] == 10, custom
+queued_for_reset = app.schedule_reactivation(
+    conversation_id=conversation_id,
+    delay_seconds=10,
+    prompt="Should be reset.",
+    reason="Reset test",
+)
+reset_active = server.TurnStream(
+    "reset-active-turn", conversation_id, "reset-active", "Reset active test"
+)
+with app._lock:
+    app.turns[reset_active.turn_id] = reset_active
+reset = app.reset_reactivation()
+assert reset["reset"] is True, reset
+assert reset["enabled"] is True, reset
+assert reset["minimum_seconds"] == 5, reset
+assert reset["maximum_seconds"] == 3600, reset
+assert reset["cancelled"]["id"] == \
+    queued_for_reset["reactivation"]["id"], reset
+assert reset["stopped_turns"] == 1, reset
+assert reset_active.cancel_event.is_set()
+reset_active.done_at = time.monotonic()
+reset_info = app.reactivation_info()
+assert reset_info["pending"] is None, reset_info
+assert reset_info["active"] is None, reset_info
+assert reset_info["last"] is None, reset_info
+assert app.history.count_reactivations(conversation_id) == 0
+with sqlite3.connect(os.environ["ZOMBIE_HISTORY_DB"]) as connection:
+    retained = connection.execute(
+        "SELECT status, error FROM reactivations WHERE id = ?",
+        (queued_for_reset["reactivation"]["id"],),
+    ).fetchone()
+assert retained == ("cancelled", "reset by operator"), retained
+
 visible, request, error = server._agent_reactivation_request(
     "I need another turn.\n"
     '<ubuntu-zombie-reactivation>{"delay_seconds":5,'
@@ -823,13 +863,21 @@ dropped, _existing = app.history.schedule_reactivation(
 )
 app._reactivation_wakeup.set()
 deadline = time.time() + 3
-while app.history.pending_reactivation() and time.time() < deadline:
+last = None
+notice = None
+while time.time() < deadline:
+    last = app.reactivation_info()["last"]
+    notice = app.history.get_messages(conversation_id)[-1]
+    if (
+        last and last["id"] == dropped["id"]
+        and notice["role"] == "system"
+        and "did not run" in notice["content"]
+    ):
+        break
     time.sleep(0.02)
-last = app.reactivation_info()["last"]
 assert last and last["id"] == dropped["id"], last
 assert last["status"] == "cancelled", last
 assert last["error"] == "reactivation is disabled", last
-notice = app.history.get_messages(conversation_id)[-1]
 assert notice["role"] == "system", notice
 assert "did not run" in notice["content"], notice
 assert any(
@@ -3660,6 +3708,10 @@ EOF
   grep -q 'showPendingReactivation' payload/agent/templates/index.html \
     && grep -q 'data.reactivation' payload/agent/templates/index.html \
     || { echo "terminal reactivation outcomes must update chat immediately" >&2; exit 1; }
+  grep -q 'uzPostJson("/api/reactivation", { reset: true })' \
+    payload/agent/templates/index.html \
+    && grep -q 'data.get("reset") is True' payload/agent/server.py \
+    || { echo "/reactivation reset must connect the chat UX to the API" >&2; exit 1; }
   grep -q 'tallyStat("reactivations"' payload/agent/templates/index.html \
     && grep -q 'plural(bucket.reactivations, "reactivation")' \
       payload/agent/templates/index.html \

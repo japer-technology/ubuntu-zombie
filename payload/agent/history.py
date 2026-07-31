@@ -23,8 +23,9 @@ DB_PATH = Path(os.environ.get(
 
 # Version 2 added durable reactivation. Version 3 narrowed its supported delay
 # range. Version 4 raises the minimum delay to 5 seconds so the chat UI can
-# settle between chained continuation turns.
-SCHEMA_VERSION = 4
+# settle between chained continuation turns. Version 5 records the most recent
+# operator reset without deleting the older audit-supporting timer records.
+SCHEMA_VERSION = 5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversations (
@@ -60,7 +61,8 @@ CREATE TABLE IF NOT EXISTS reactivation_settings (
     singleton       INTEGER PRIMARY KEY CHECK (singleton = 1),
     enabled         INTEGER NOT NULL DEFAULT 1,
     minimum_seconds INTEGER NOT NULL DEFAULT 5,
-    maximum_seconds INTEGER NOT NULL DEFAULT 3600
+    maximum_seconds INTEGER NOT NULL DEFAULT 3600,
+    reset_at        REAL NOT NULL DEFAULT 0
 );
 
 INSERT OR IGNORE INTO reactivation_settings(singleton) VALUES (1);
@@ -145,6 +147,22 @@ class History:
                     "maximum_seconds = minimum_seconds "
                     "WHERE maximum_seconds < minimum_seconds"
                 )
+        if current < 5:
+            has_reactivation_settings = self._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name='reactivation_settings'"
+            ).fetchone() is not None
+            if has_reactivation_settings:
+                columns = {
+                    str(row[1]) for row in self._conn.execute(
+                        "PRAGMA table_info(reactivation_settings)"
+                    ).fetchall()
+                }
+                if "reset_at" not in columns:
+                    self._conn.execute(
+                        "ALTER TABLE reactivation_settings "
+                        "ADD COLUMN reset_at REAL NOT NULL DEFAULT 0"
+                    )
         self._conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         self._conn.commit()
 
@@ -270,6 +288,45 @@ class History:
         )
         return self.reactivation_settings()
 
+    def reset_reactivation(
+        self,
+        *,
+        minimum_seconds: int,
+        maximum_seconds: int,
+    ) -> dict[str, Any] | None:
+        """Restore defaults and retire the queued timer atomically.
+
+        Existing timer rows remain available for audit and transcript
+        reconstruction. ``reset_at`` makes pre-reset outcomes invisible to
+        current status and starts continuation-chain numbering over.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, conversation_id, created_at, fire_at, reason, prompt, "
+                "status, actor, error FROM reactivations "
+                "WHERE status = 'pending' LIMIT 1"
+            ).fetchone()
+            pending = self._reactivation_row(row)
+            reset_at = time.time()
+            if pending is not None:
+                self._conn.execute(
+                    "UPDATE reactivations SET status = 'cancelled', "
+                    "error = 'reset by operator' "
+                    "WHERE id = ? AND status = 'pending'",
+                    (pending["id"],),
+                )
+            self._conn.execute(
+                "UPDATE reactivation_settings SET enabled = 1, "
+                "minimum_seconds = ?, maximum_seconds = ?, reset_at = ? "
+                "WHERE singleton = 1",
+                (minimum_seconds, maximum_seconds, reset_at),
+            )
+            self._conn.commit()
+        if pending is not None:
+            pending["status"] = "cancelled"
+            pending["error"] = "reset by operator"
+        return pending
+
     def pending_reactivation(self) -> dict[str, Any] | None:
         with self._lock:
             row = self._conn.execute(
@@ -374,11 +431,15 @@ class History:
         """The most recent timer that already reached a terminal
         state, so operators can see why a continuation chain stopped."""
         with self._lock:
+            reset_at = self._conn.execute(
+                "SELECT reset_at FROM reactivation_settings WHERE singleton = 1"
+            ).fetchone()[0]
             row = self._conn.execute(
                 "SELECT id, conversation_id, created_at, fire_at, reason, prompt, "
                 "status, actor, error FROM reactivations "
-                "WHERE status NOT IN ('pending', 'firing') "
-                "ORDER BY created_at DESC LIMIT 1"
+                "WHERE status NOT IN ('pending', 'firing') AND created_at > ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (reset_at,),
             ).fetchone()
         return self._reactivation_row(row)
 
@@ -390,10 +451,13 @@ class History:
         Used to report continuation-chain depth so a chain that stops
         after a few turns can be diagnosed from the audit log."""
         with self._lock:
+            reset_at = self._conn.execute(
+                "SELECT reset_at FROM reactivation_settings WHERE singleton = 1"
+            ).fetchone()[0]
             row = self._conn.execute(
                 "SELECT COUNT(*) FROM reactivations "
-                "WHERE conversation_id = ? AND status = ?",
-                (conversation_id, status),
+                "WHERE conversation_id = ? AND status = ? AND created_at > ?",
+                (conversation_id, status, reset_at),
             ).fetchone()
         return int(row[0]) if row else 0
 

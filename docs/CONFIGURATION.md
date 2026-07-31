@@ -444,12 +444,17 @@ remaining TTL.
 | `/reactivation on` | Allow the agent to schedule a continuation. |
 | `/reactivation off` | Disable scheduling and cancel the pending timer. |
 | `/reactivation cancel` | Cancel the pending timer without disabling scheduling. |
+| `/reactivation reset` | Restore defaults and clear queued, active, and stale status state. |
 | `/reactivation minimum <duration>` | Set the minimum permitted delay. |
 | `/reactivation maximum <duration>` | Set the maximum permitted delay. |
 | `/reactivate ...` | Alias for `/reactivation ...`. |
 
-Durations use the same number/unit format as `/ttl`. Disabling reactivation,
-cancelling it, or changing bounds requires an authenticated chat session.
+Durations use the same number/unit format as `/ttl`. A reset enables
+reactivation, restores the 5-second/1-hour bounds, cancels queued and active
+continuations, and clears the previous outcome from current status. Historical
+timer rows, transcript events, and audit records are retained. Disabling,
+cancelling, resetting, or changing bounds requires an authenticated chat
+session.
 
 ### Time to Live (the kill switch)
 
