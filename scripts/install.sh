@@ -1457,6 +1457,48 @@ forgejo_runner_config_is_managed() {
       /var/lib/forgejo-runner/config.yaml
 }
 
+forgejo_runner_drop_in_paths() {
+  local loaded
+  loaded="$(
+    systemctl show forgejo-runner.service --property=DropInPaths --value \
+      2>/dev/null || true
+  )"
+  {
+    tr ' ' '\n' <<<"${loaded}"
+    find /etc/systemd/system/forgejo-runner.service.d -maxdepth 1 \
+      \( -type f -o -type l \) -name '*.conf' -print 2>/dev/null || true
+  } | awk 'NF && !seen[$0]++'
+}
+
+_forgejo_runner_drop_in_is_obsolete() {
+  local drop_in="$1"
+  [[ -f "${drop_in}" ]] || return 1
+  awk '
+    /^[[:space:]]*($|#|;)/ { next }
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      content[++count] = line
+    }
+    END {
+      exit !(count == 3 \
+        && content[1] == "[Service]" \
+        && content[2] == "ExecStart=" \
+        && content[3] == "ExecStart=/usr/local/bin/forgejo-runner -c /var/lib/forgejo-runner/config.yaml daemon")
+    }
+  ' "${drop_in}"
+}
+
+remove_obsolete_forgejo_runner_drop_in() {
+  local drop_in=/etc/systemd/system/forgejo-runner.service.d/override.conf
+  _forgejo_runner_drop_in_is_obsolete "${drop_in}" || return 0
+  rm -f "${drop_in}"
+  rmdir /etc/systemd/system/forgejo-runner.service.d 2>/dev/null || true
+  info "Removed the obsolete Forgejo runner systemd override."
+  note_changed
+}
+
 forgejo_runner_uses_managed_config() {
   systemctl show forgejo-runner.service --property=ExecStart --value \
       2>/dev/null \
@@ -1633,7 +1675,8 @@ verify_forgejo() {
     fi
   fi
   if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
-    local _fj_runner_cfg_perms _fj_runner_registration_perms
+    local _fj_runner_cfg_perms _fj_runner_drop_ins
+    local _fj_runner_registration_perms
     systemctl is-active --quiet forgejo-runner.service 2>/dev/null \
       && vr ok forgejo runner "Forgejo Actions runner active." \
       || vr fail forgejo runner "Forgejo runner unit installed but not active. Run: sudo systemctl restart forgejo-runner"
@@ -1669,6 +1712,12 @@ verify_forgejo() {
     forgejo_runner_uses_managed_config \
       && vr ok forgejo runner_exec "Runner service loads the managed configuration." \
       || vr fail forgejo runner_exec "Runner service does not load /var/lib/forgejo-runner/config.yaml. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    _fj_runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+    if [[ -z "${_fj_runner_drop_ins}" ]]; then
+      vr ok forgejo runner_drop_ins "Runner service has no unmanaged systemd drop-ins."
+    else
+      vr fail forgejo runner_drop_ins "Runner service has unmanaged systemd drop-ins: ${_fj_runner_drop_ins//$'\n'/ }. Reconcile them, then run: sudo ./${SCRIPT_NAME} repair forgejo"
+    fi
     if forgejo_runner_has_docker_access; then
       vr ok forgejo runner_docker_access "forgejo-runner can access the Docker daemon."
     elif (( EUID != 0 )); then
@@ -1918,7 +1967,7 @@ cmd_doctor() {
         dr warn forgejo forgejo_ca_current "Exported and active Caddy local CA roots are missing or do not match. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
       if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
-        local runner_config_perms
+        local runner_config_perms runner_drop_ins
         if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
           dr ok forgejo forgejo_runner "Forgejo Actions runner active."
         else
@@ -1956,6 +2005,12 @@ cmd_doctor() {
           dr ok forgejo forgejo_runner_exec "Runner service loads the managed configuration."
         else
           dr warn forgejo forgejo_runner_exec "Runner service ignores the managed configuration. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+        if [[ -z "${runner_drop_ins}" ]]; then
+          dr ok forgejo forgejo_runner_drop_ins "Runner service has no unmanaged systemd drop-ins."
+        else
+          dr warn forgejo forgejo_runner_drop_ins "Runner service has unmanaged systemd drop-ins: ${runner_drop_ins//$'\n'/ }. Reconcile them before repair."
         fi
         if forgejo_runner_has_docker_access; then
           dr ok forgejo forgejo_runner_docker_access "forgejo-runner can access the Docker daemon."
@@ -2129,9 +2184,14 @@ cmd_repair() {
           /var/lib/forgejo-runner/config.yaml
         install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
           /etc/systemd/system/forgejo-runner.service
+        remove_obsolete_forgejo_runner_drop_in
         systemctl enable --now docker.service >/dev/null 2>&1 \
           || die "Docker Engine failed to start; see journalctl -u docker." 1
         systemctl daemon-reload
+        local runner_drop_ins
+        runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+        [[ -z "${runner_drop_ins}" ]] \
+          || die "Refusing to start the Forgejo runner with unmanaged systemd drop-ins: ${runner_drop_ins//$'\n'/ }. Reconcile or remove them, then re-run repair." 1
         forgejo_runner_uses_managed_config \
           || die "The effective forgejo-runner unit ignores the managed config; inspect systemd drop-ins." 1
         if ! forgejo_runner_in_docker_group \
@@ -4459,7 +4519,12 @@ EOF
     chmod 600 /var/lib/forgejo-runner/.runner
     install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
       /etc/systemd/system/forgejo-runner.service
+    remove_obsolete_forgejo_runner_drop_in
     systemctl daemon-reload
+    local _runner_drop_ins
+    _runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+    [[ -z "${_runner_drop_ins}" ]] \
+      || die "Refusing to start the Forgejo runner with unmanaged systemd drop-ins: ${_runner_drop_ins//$'\n'/ }. Reconcile or remove them, then re-run install." 1
     forgejo_runner_uses_managed_config \
       || die "The effective forgejo-runner unit does not load the managed config; inspect systemd drop-ins." 1
     systemctl enable forgejo-runner.service >/dev/null \

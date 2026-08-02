@@ -239,10 +239,15 @@ deliberate choice):
   maps `ubuntu-latest` jobs to `docker://node:20-bookworm`).
 - Writes a root-owned managed `config.yaml` that allows one concurrent
   job, disables privileged containers and arbitrary volume mounts, keeps
-  the Docker socket out of job containers, and uses host networking so
-  containers can clone from and report to loopback-only Forgejo.
+  the Docker socket out of job containers, disables the built-in cache
+  proxy that would otherwise listen on every host interface, and uses host
+  networking so containers can clone from and report to loopback-only
+  Forgejo.
 - Installs `forgejo-runner.service` with explicit dependencies on Docker
   and Forgejo and an explicit `-c /var/lib/forgejo-runner/config.yaml`.
+- Removes the exact redundant `override.conf` used by the former manual
+  repair. Any other runner systemd drop-in is preserved and reported,
+  and must be reconciled before the runner starts.
 - Restarts the runner and fails the installation unless that exact service
   invocation declares successfully to Forgejo.
 
@@ -384,8 +389,8 @@ remove the trusted CA root from clients when the host is retired.
   `containerd.io`, then re-run.
 - **Runner does not declare:** inspect
   `sudo journalctl -u forgejo-runner`; verify Forgejo and Docker are
-  healthy, the registration is non-empty, and no systemd drop-in replaces
-  the managed command.
+  healthy, the registration is non-empty, and no unmanaged systemd drop-in
+  changes the managed unit.
 - **`app.ini` is missing:** do not restart Forgejo. Recover the original
   root-protected file from backup. Emergency reconstruction rotates lost
   credentials/secrets and requires a PostgreSQL backup and an explicit

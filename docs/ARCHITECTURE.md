@@ -166,8 +166,8 @@ name, Caddy terminates a certificate from its internal CA, and the
 installer exports only the public CA root for clients to trust. Runner job
 containers use host networking to reach Forgejo's loopback endpoint, so the
 runner is restricted to trusted repositories even though privileged
-containers, arbitrary volumes, and job access to the Docker socket are
-disabled. These services are sandboxed
+containers, arbitrary volumes, job access to the Docker socket, and the
+runner's all-interface cache proxy are disabled. These services are sandboxed
 (`NoNewPrivileges`, `ProtectSystem=full`, scoped `ReadWritePaths`) —
 the opposite of the deliberately unsandboxed chat unit. Its secrets
 live only in `/etc/forgejo/app.ini` (`root:git`, `640`). The policy

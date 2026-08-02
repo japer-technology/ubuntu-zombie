@@ -3441,6 +3441,7 @@ run_standards() {
       payload/systemd/forgejo-runner.service \
     || { echo "forgejo-runner.service must require Docker and Forgejo" >&2; exit 1; }
   if ! grep -Eq '^  capacity: 1$' payload/etc/forgejo-runner-config.yaml \
+      || ! grep -Eq '^  enabled: false$' payload/etc/forgejo-runner-config.yaml \
       || ! grep -Eq '^  network: host$' payload/etc/forgejo-runner-config.yaml \
       || ! grep -Eq '^  privileged: false$' payload/etc/forgejo-runner-config.yaml \
       || ! grep -Eq '^  valid_volumes: \[\]$' payload/etc/forgejo-runner-config.yaml \
@@ -3472,14 +3473,37 @@ run_standards() {
   done
   for runner_check in runner_registration runner_config runner_config_perms \
       runner_docker_service runner_docker_group runner_docker_access \
-      runner_exec runner_declared; do
+      runner_exec runner_drop_ins runner_declared; do
     grep -q "${runner_check}" <<<"${verify_forgejo_body}" \
       || { echo "Forgejo verify must include runner check: ${runner_check}" >&2; exit 1; }
   done
+  local forgejo_drop_in_checker forgejo_drop_in_tmp
+  forgejo_drop_in_checker="$(
+    install_function _forgejo_runner_drop_in_is_obsolete
+  )"
+  forgejo_drop_in_tmp="$(mktemp)"
+  cat > "${forgejo_drop_in_tmp}" <<'EOF'
+[Service]
+ExecStart=
+ExecStart=/usr/local/bin/forgejo-runner -c /var/lib/forgejo-runner/config.yaml daemon
+EOF
+  bash -c "${forgejo_drop_in_checker}
+    _forgejo_runner_drop_in_is_obsolete \"\$1\"" _ "${forgejo_drop_in_tmp}" \
+    || { rm -f "${forgejo_drop_in_tmp}"; echo "exact obsolete runner override must be recognized" >&2; exit 1; }
+  printf '%s\n' 'Environment=OPERATOR_OVERRIDE=1' >> "${forgejo_drop_in_tmp}"
+  if bash -c "${forgejo_drop_in_checker}
+      _forgejo_runner_drop_in_is_obsolete \"\$1\"" _ "${forgejo_drop_in_tmp}"; then
+    rm -f "${forgejo_drop_in_tmp}"
+    echo "custom runner drop-ins must never be removed automatically" >&2
+    exit 1
+  fi
+  rm -f "${forgejo_drop_in_tmp}"
   local lifecycle_helper
   for lifecycle_helper in caddyfile_has_forgejo_route \
       caddy_configuration_is_valid caddy_exported_ca_is_current \
       configure_forgejo_lan_https forgejo_runner_config_is_managed \
+      forgejo_runner_drop_in_paths _forgejo_runner_drop_in_is_obsolete \
+      remove_obsolete_forgejo_runner_drop_in \
       forgejo_runner_declared_successfully; do
     awk -v signature="${lifecycle_helper}() {" '
       $0 == signature { helper = NR }

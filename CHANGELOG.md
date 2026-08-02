@@ -13,8 +13,9 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Safe same-host runner defaults:** co-located runners now load a managed,
   root-owned configuration with one-job capacity, host networking for the
   loopback Forgejo callback path, privileged containers and arbitrary volumes
-  disabled, and no Docker socket mounted into jobs. The systemd unit requires
-  both Docker and Forgejo and explicitly loads that configuration.
+  disabled, no Docker socket mounted into jobs, and the all-interface cache
+  proxy disabled. The systemd unit requires both Docker and Forgejo and
+  explicitly loads that configuration.
 - **Runner readiness verification:** installation now rejects empty
   registrations and fails unless the current service invocation declares to
   Forgejo. Verify and doctor also check registration, protected config,
@@ -24,6 +25,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   before early subcommand dispatch, protected files are reported as
   uninspectable rather than missing for non-root diagnostics, and repair
   refuses to restart Forgejo when `app.ini` is missing or empty.
+- **Systemd override convergence:** the exact obsolete runner
+  `override.conf` from the documented repair is removed automatically;
+  other drop-ins are preserved and reported instead of silently overriding
+  the managed unit.
 
 ### Installer dependencies
 

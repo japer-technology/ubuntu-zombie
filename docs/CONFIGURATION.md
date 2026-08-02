@@ -697,11 +697,12 @@ Caveats:
 - Co-locating the runner with the forge is contrary to upstream
   guidance. The managed runner allows one job at a time, disables privileged
   containers and arbitrary host-volume mounts, and does not expose the Docker
-  socket inside jobs. Job containers still use host networking so they can
-  reach loopback-only Forgejo; they can therefore also reach other host
-  loopback services. The runner process itself has Docker-daemon access,
-  which is root-equivalent. Enable it only for repositories and maintainers
-  trusted to control this machine.
+  socket inside jobs. It also disables the built-in Actions cache proxy,
+  which otherwise listens on every host interface. Job containers still use
+  host networking so they can reach loopback-only Forgejo; they can therefore
+  also reach other host loopback services. The runner process itself has
+  Docker-daemon access, which is root-equivalent. Enable it only for
+  repositories and maintainers trusted to control this machine.
 - Binaries are downloaded from Forgejo's release host and verified against
   published SHA-256 checksums; pin `FORGEJO_VERSION` where
   reproducibility matters.

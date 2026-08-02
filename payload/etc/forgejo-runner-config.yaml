@@ -3,6 +3,10 @@ runner:
   file: /var/lib/forgejo-runner/.runner
   capacity: 1
 
+cache:
+  # The built-in cache proxy listens on every interface by default.
+  enabled: false
+
 container:
   # Job containers must share host networking to reach loopback-only Forgejo.
   network: host
