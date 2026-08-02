@@ -1322,6 +1322,132 @@ caddy_exported_ca_is_current() {
     || sudo -n cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null
 }
 
+_caddyfile_is_packaged_default() {
+  awk '
+    /^[[:space:]]*($|#)/ { next }
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      content[++count] = line
+    }
+    END {
+      exit !(count == 4 \
+        && content[1] == ":80 {" \
+        && content[2] == "root * /usr/share/caddy" \
+        && content[3] == "file_server" \
+        && content[4] == "}")
+    }
+  ' "$1"
+}
+
+configure_forgejo_lan_https() {
+  local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
+  local caddy_begin_count caddy_end_count
+  host="$(forgejo_url_host)"
+  FORGEJO_URL_HOST="${host}"
+
+  if [[ -f /etc/forgejo/app.ini ]]; then
+    sed -i \
+      -e 's|^HTTP_ADDR = .*|HTTP_ADDR = 127.0.0.1|' \
+      -e "s|^DOMAIN = .*|DOMAIN = ${host}|" \
+      -e "s|^ROOT_URL = .*|ROOT_URL = https://${host}/|" \
+      /etc/forgejo/app.ini
+    chown root:git /etc/forgejo/app.ini
+    chmod 640 /etc/forgejo/app.ini
+  fi
+
+  [[ -f /etc/caddy/Caddyfile ]] || install -m 644 /dev/null /etc/caddy/Caddyfile
+  if _caddyfile_is_packaged_default /etc/caddy/Caddyfile; then
+    install -m 644 -o root -g root /dev/null /etc/caddy/Caddyfile
+  fi
+  caddy_begin="# BEGIN install.sh Forgejo"
+  caddy_end="# END install.sh Forgejo"
+  read -r caddy_begin_count caddy_end_count < <(
+    awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
+      BEGIN { begin_count = 0; end_count = 0 }
+      $0 == begin { begin_count++ }
+      $0 == end { end_count++ }
+      END { print begin_count + 0, end_count + 0 }
+    ' /etc/caddy/Caddyfile
+  )
+  if (( caddy_begin_count != caddy_end_count )); then
+    die "Caddyfile contains an incomplete managed Forgejo block. Restore or remove that block manually, then re-run repair forgejo." 1
+  fi
+  caddy_tmp="$(mktemp)"
+  awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
+    BEGIN { managed = 0 }
+    $0 == begin { managed = 1; next }
+    $0 == end { managed = 0; next }
+    !managed { print }
+  ' /etc/caddy/Caddyfile > "${caddy_tmp}"
+  cat >> "${caddy_tmp}" <<EOF
+${caddy_begin}
+# Managed by ${SCRIPT_NAME}. Forgejo stays on loopback; Caddy is the LAN edge.
+https://${host} {
+	tls internal
+	reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}
+}
+${caddy_end}
+EOF
+  if cmp -s "${caddy_tmp}" /etc/caddy/Caddyfile; then
+    rm -f "${caddy_tmp}"
+  else
+    install -m 644 -o root -g root "${caddy_tmp}" /etc/caddy/Caddyfile
+    rm -f "${caddy_tmp}"
+  fi
+  rm -f /etc/caddy/conf.d/forgejo.caddy
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null \
+    || die "Caddy configuration validation failed; /etc/caddy/Caddyfile was not activated." 1
+
+  install -d -m 755 -o root -g root /etc/avahi/services
+  avahi_tmp="$(mktemp)"
+  cat > "${avahi_tmp}" <<EOF
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">Forgejo on %h</name>
+  <service>
+    <type>_https._tcp</type>
+    <port>443</port>
+  </service>
+</service-group>
+EOF
+  if [[ -f /etc/avahi/services/forgejo.service ]] \
+      && cmp -s "${avahi_tmp}" /etc/avahi/services/forgejo.service; then
+    rm -f "${avahi_tmp}"
+  else
+    install -m 644 -o root -g root "${avahi_tmp}" \
+      /etc/avahi/services/forgejo.service
+    rm -f "${avahi_tmp}"
+  fi
+
+  systemctl enable --now avahi-daemon.service >/dev/null 2>&1 \
+    || die "Avahi failed to start; see journalctl -u avahi-daemon." 1
+  systemctl restart forgejo.service \
+    || die "Forgejo failed to apply its HTTPS public URL; see journalctl -u forgejo." 1
+  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
+       "http://127.0.0.1:${FORGEJO_HTTP_PORT}/api/healthz"; then
+    die "Forgejo did not become healthy after applying its HTTPS public URL; see journalctl -u forgejo." 1
+  fi
+  systemctl enable --now caddy.service >/dev/null 2>&1 \
+    || die "Caddy failed to start; see journalctl -u caddy." 1
+  systemctl reload-or-restart caddy.service \
+    || die "Caddy failed to load the Forgejo HTTPS configuration; see journalctl -u caddy." 1
+
+  ca_source=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+  retry 6 1 -- test -r "${ca_source}" \
+    || die "Caddy did not create its local CA certificate; see journalctl -u caddy." 1
+  install -m 644 -o root -g root "${ca_source}" \
+    /etc/forgejo/caddy-local-ca.crt
+  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
+       --cacert /etc/forgejo/caddy-local-ca.crt \
+       --resolve "${host}:443:127.0.0.1" \
+       "https://${host}/api/healthz"; then
+    die "Forgejo HTTPS endpoint did not become healthy; see journalctl -u caddy and journalctl -u forgejo." 1
+  fi
+}
+
 forgejo_runner_config_is_managed() {
   [[ -r "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
       && -r /var/lib/forgejo-runner/config.yaml ]] \
@@ -1972,19 +2098,48 @@ cmd_repair() {
       warn "  To install: sudo ./${SCRIPT_NAME} install forgejo"
     fi
     if [[ -d /etc/forgejo || -d /var/lib/forgejo ]]; then
-      [[ -d /etc/forgejo ]] && { chown root:git /etc/forgejo; chmod 750 /etc/forgejo; }
-      [[ -f /etc/forgejo/app.ini ]] && { chown root:git /etc/forgejo/app.ini; chmod 640 /etc/forgejo/app.ini; }
+      [[ -s /etc/forgejo/app.ini ]] \
+        || die "Refusing to repair or restart Forgejo because /etc/forgejo/app.ini is missing or empty. Recover the original config from backup; recreating its secrets requires a separate, backed-up recovery procedure." \
+          1
+      chown root:git /etc/forgejo
+      chmod 750 /etc/forgejo
+      chown root:git /etc/forgejo/app.ini
+      chmod 640 /etc/forgejo/app.ini
       [[ -d /var/lib/forgejo ]] && { chown -R git:git /var/lib/forgejo; chmod 750 /var/lib/forgejo; }
       if [[ -f /etc/systemd/system/forgejo.service ]]; then
         systemctl daemon-reload
-        systemctl restart forgejo.service || warn "Forgejo failed to restart; see journalctl -u forgejo"
+        systemctl restart forgejo.service \
+          || die "Forgejo failed to restart; see journalctl -u forgejo." 1
       fi
-      if [[ -f /etc/forgejo/app.ini ]]; then
-        configure_forgejo_lan_https
-      fi
+      configure_forgejo_lan_https
       if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
-        chown -R forgejo-runner:forgejo-runner /var/lib/forgejo-runner 2>/dev/null || true
-        systemctl restart forgejo-runner.service || warn "Forgejo runner failed to restart; see journalctl -u forgejo-runner"
+        id forgejo-runner >/dev/null 2>&1 \
+          || die "Forgejo runner unit exists but user forgejo-runner is missing." 1
+        [[ -s /var/lib/forgejo-runner/.runner ]] \
+          || die "Forgejo runner registration is missing or empty; re-run the Forgejo runner install." 1
+        usermod -aG docker forgejo-runner
+        chown forgejo-runner:forgejo-runner /var/lib/forgejo-runner \
+          /var/lib/forgejo-runner/.runner
+        chmod 750 /var/lib/forgejo-runner
+        chmod 600 /var/lib/forgejo-runner/.runner
+        install -m 640 -o root -g forgejo-runner \
+          "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+          /var/lib/forgejo-runner/config.yaml
+        install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
+          /etc/systemd/system/forgejo-runner.service
+        systemctl enable --now docker.service >/dev/null 2>&1 \
+          || die "Docker Engine failed to start; see journalctl -u docker." 1
+        systemctl daemon-reload
+        forgejo_runner_uses_managed_config \
+          || die "The effective forgejo-runner unit ignores the managed config; inspect systemd drop-ins." 1
+        if ! forgejo_runner_in_docker_group \
+            || ! forgejo_runner_has_docker_access; then
+          die "forgejo-runner cannot access the Docker daemon after repair." 1
+        fi
+        systemctl restart forgejo-runner.service \
+          || die "Forgejo runner failed to restart; see journalctl -u forgejo-runner." 1
+        retry 6 2 -- forgejo_runner_declared_successfully \
+          || die "Forgejo runner restarted but did not declare successfully; see journalctl -u forgejo-runner." 1
       fi
       ok "Forgejo ownership and services re-asserted."
     fi
@@ -3917,132 +4072,6 @@ deb [signed-by=${keyring}] https://dl.cloudsmith.io/public/caddy/stable/deb/debi
 EOF
   chmod 0644 "${source}"
   apt_get update
-}
-
-_caddyfile_is_packaged_default() {
-  awk '
-    /^[[:space:]]*($|#)/ { next }
-    {
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      content[++count] = line
-    }
-    END {
-      exit !(count == 4 \
-        && content[1] == ":80 {" \
-        && content[2] == "root * /usr/share/caddy" \
-        && content[3] == "file_server" \
-        && content[4] == "}")
-    }
-  ' "$1"
-}
-
-configure_forgejo_lan_https() {
-  local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
-  local caddy_begin_count caddy_end_count
-  host="$(forgejo_url_host)"
-  FORGEJO_URL_HOST="${host}"
-
-  if [[ -f /etc/forgejo/app.ini ]]; then
-    sed -i \
-      -e 's|^HTTP_ADDR = .*|HTTP_ADDR = 127.0.0.1|' \
-      -e "s|^DOMAIN = .*|DOMAIN = ${host}|" \
-      -e "s|^ROOT_URL = .*|ROOT_URL = https://${host}/|" \
-      /etc/forgejo/app.ini
-    chown root:git /etc/forgejo/app.ini
-    chmod 640 /etc/forgejo/app.ini
-  fi
-
-  [[ -f /etc/caddy/Caddyfile ]] || install -m 644 /dev/null /etc/caddy/Caddyfile
-  if _caddyfile_is_packaged_default /etc/caddy/Caddyfile; then
-    install -m 644 -o root -g root /dev/null /etc/caddy/Caddyfile
-  fi
-  caddy_begin="# BEGIN install.sh Forgejo"
-  caddy_end="# END install.sh Forgejo"
-  read -r caddy_begin_count caddy_end_count < <(
-    awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
-      BEGIN { begin_count = 0; end_count = 0 }
-      $0 == begin { begin_count++ }
-      $0 == end { end_count++ }
-      END { print begin_count + 0, end_count + 0 }
-    ' /etc/caddy/Caddyfile
-  )
-  if (( caddy_begin_count != caddy_end_count )); then
-    die "Caddyfile contains an incomplete managed Forgejo block. Restore or remove that block manually, then re-run repair forgejo." 1
-  fi
-  caddy_tmp="$(mktemp)"
-  awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
-    BEGIN { managed = 0 }
-    $0 == begin { managed = 1; next }
-    $0 == end { managed = 0; next }
-    !managed { print }
-  ' /etc/caddy/Caddyfile > "${caddy_tmp}"
-  cat >> "${caddy_tmp}" <<EOF
-${caddy_begin}
-# Managed by ${SCRIPT_NAME}. Forgejo stays on loopback; Caddy is the LAN edge.
-https://${host} {
-	tls internal
-	reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}
-}
-${caddy_end}
-EOF
-  if cmp -s "${caddy_tmp}" /etc/caddy/Caddyfile; then
-    rm -f "${caddy_tmp}"
-  else
-    install -m 644 -o root -g root "${caddy_tmp}" /etc/caddy/Caddyfile
-    rm -f "${caddy_tmp}"
-  fi
-  rm -f /etc/caddy/conf.d/forgejo.caddy
-  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null \
-    || die "Caddy configuration validation failed; /etc/caddy/Caddyfile was not activated." 1
-
-  install -d -m 755 -o root -g root /etc/avahi/services
-  avahi_tmp="$(mktemp)"
-  cat > "${avahi_tmp}" <<EOF
-<?xml version="1.0" standalone="no"?>
-<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<service-group>
-  <name replace-wildcards="yes">Forgejo on %h</name>
-  <service>
-    <type>_https._tcp</type>
-    <port>443</port>
-  </service>
-</service-group>
-EOF
-  if [[ -f /etc/avahi/services/forgejo.service ]] \
-      && cmp -s "${avahi_tmp}" /etc/avahi/services/forgejo.service; then
-    rm -f "${avahi_tmp}"
-  else
-    install -m 644 -o root -g root "${avahi_tmp}" \
-      /etc/avahi/services/forgejo.service
-    rm -f "${avahi_tmp}"
-  fi
-
-  systemctl enable --now avahi-daemon.service >/dev/null 2>&1 \
-    || die "Avahi failed to start; see journalctl -u avahi-daemon." 1
-  systemctl restart forgejo.service \
-    || die "Forgejo failed to apply its HTTPS public URL; see journalctl -u forgejo." 1
-  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
-       "http://127.0.0.1:${FORGEJO_HTTP_PORT}/api/healthz"; then
-    die "Forgejo did not become healthy after applying its HTTPS public URL; see journalctl -u forgejo." 1
-  fi
-  systemctl enable --now caddy.service >/dev/null 2>&1 \
-    || die "Caddy failed to start; see journalctl -u caddy." 1
-  systemctl reload-or-restart caddy.service \
-    || die "Caddy failed to load the Forgejo HTTPS configuration; see journalctl -u caddy." 1
-
-  ca_source=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
-  retry 6 1 -- test -r "${ca_source}" \
-    || die "Caddy did not create its local CA certificate; see journalctl -u caddy." 1
-  install -m 644 -o root -g root "${ca_source}" \
-    /etc/forgejo/caddy-local-ca.crt
-  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
-       --cacert /etc/forgejo/caddy-local-ca.crt \
-       --resolve "${host}:443:127.0.0.1" \
-       "https://${host}/api/healthz"; then
-    die "Forgejo HTTPS endpoint did not become healthy; see journalctl -u caddy and journalctl -u forgejo." 1
-  fi
 }
 
 # component-hook: forgejo begin
