@@ -753,7 +753,7 @@ Optional components (all default 0 / off; see options/ for the roadmap):
                               backed by PostgreSQL, reachable over LAN HTTPS
                               through Caddy and mDNS/Avahi.
   ZOMBIE_INSTALL_FORGEJO_RUNNER=1  also install a Forgejo Actions runner on
-                              the same host (standard Docker executor).
+                              the same host (restricted Docker executor).
                               Requires ZOMBIE_INSTALL_FORGEJO=1.
   FORGEJO_HTTP_PORT=<n>       Forgejo loopback backend port (default 3000).
   FORGEJO_ADMIN_USER=<name>   initial admin account (default forgejo-admin).
@@ -2282,7 +2282,7 @@ Optional components enabled:
 EOF
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
     cat <<EOF
-  Actions runner  co-located Forgejo Actions runner (Docker executor)
+  Actions runner  co-located Forgejo Actions runner (restricted Docker executor)
                   Docker: reuse existing engine, otherwise apt: docker.io
                   binary: /usr/local/bin/forgejo-runner
                   registers against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels:
@@ -2574,7 +2574,7 @@ _toggle_forgejo_runner() {
   else
     ZOMBIE_INSTALL_FORGEJO_RUNNER=1
     warn "Co-locating the runner with the forge is contrary to upstream guidance; enabling deliberately."
-    info "Forgejo Actions runner enabled (standard Docker executor)."
+    info "Forgejo Actions runner enabled (restricted Docker executor)."
   fi
 }
 
@@ -2598,7 +2598,7 @@ print_options_table() {
     field "1) Forgejo server"  "enabled"
     field "2) Forgejo port"    "${FORGEJO_HTTP_PORT}/tcp (loopback backend)"
     field "3) Forgejo admin"   "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD_SOURCE}"))"
-    field "4) Actions runner"  "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo 'disabled')"
+    field "4) Actions runner"  "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (restricted Docker executor, same host)' || echo 'disabled')"
     field "5) Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}"))"
     if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
       field "6) Versions"      "Forgejo ${FORGEJO_VERSION:-latest release}, runner ${FORGEJO_RUNNER_VERSION:-latest release} (labels ${FORGEJO_RUNNER_LABELS})"
@@ -2929,7 +2929,7 @@ review_forgejo_parameters() {
     field "1) Forgejo port"   "${FORGEJO_HTTP_PORT}/tcp (loopback backend)"
     field "2) Forgejo admin"  "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD_SOURCE}"))"
     field "3) PostgreSQL database" "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}"))"
-    field "4) Actions runner" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo disabled)"
+    field "4) Actions runner" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (restricted Docker executor, same host)' || echo disabled)"
     field "5) Versions"       "Forgejo ${FORGEJO_VERSION:-latest release}"
     field "6) Core records"   "${LOG_FILE}; $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo 'receipt disabled')"
     field "   Host"           "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
@@ -3011,7 +3011,7 @@ receipt_start_forgejo() {
     "$(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}")"
   printf 'Forgejo version  : %s\n' "${FORGEJO_VERSION:-latest (resolved at install)}"
   printf 'Actions runner   : %s\n' \
-    "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, Docker executor)' || echo disabled)"
+    "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, restricted Docker executor)' || echo disabled)"
 }
 
 receipt_start_llama() {
@@ -3395,7 +3395,7 @@ if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
   printf '  - Install Forgejo + PostgreSQL with LAN HTTPS at https://%s/\n' \
     "$(forgejo_url_host)"
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
-    printf '  - Install a co-located Forgejo Actions runner (Docker executor)\n'
+    printf '  - Install a co-located Forgejo Actions runner (restricted Docker executor)\n'
   fi
   if [[ "${ZOMBIE_INSTALL_LLAMA}" == "1" ]]; then
     printf '  - Install the independent PC-wide llama.cpp service on 127.0.0.1:8080\n'

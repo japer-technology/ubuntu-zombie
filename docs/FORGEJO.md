@@ -20,7 +20,7 @@ flowchart TD
     caddy --> forgejo["127.0.0.1:3000<br/>Forgejo (loopback-only backend)"]
     forgejo --> postgres["127.0.0.1:5432<br/>PostgreSQL"]
     forgejo -.->|"optional"| runner["forgejo-runner"]
-    runner --> docker["Docker executor<br/>(loopback registration)"]
+    runner --> docker["Docker job containers<br/>(host network)"]
 ```
 
 - **Forgejo binds only to loopback** (`HTTP_ADDR = 127.0.0.1`, port
@@ -33,6 +33,9 @@ flowchart TD
   DNS configuration.
 - **Registration is disabled** (`DISABLE_REGISTRATION = true`); the
   admin creates further accounts. Forgejo Actions is enabled.
+- **The optional runner is a high-trust co-location:** its host process
+  controls Docker, while job containers use host networking to reach
+  loopback-only Forgejo.
 
 ## Ways to run the install
 
@@ -228,13 +231,27 @@ deliberate choice):
 - Resolves and downloads `forgejo-runner` exactly like the server
   binary (pin with `FORGEJO_RUNNER_VERSION`; checksum-verified) to
   `/usr/local/bin/forgejo-runner`.
-- Registers once: if `/var/lib/forgejo-runner/.runner` exists,
-  registration is skipped; otherwise a registration token is generated
-  with `forgejo actions generate-runner-token` and the runner is
+- Registers once: if `/var/lib/forgejo-runner/.runner` exists and is
+  non-empty, registration is skipped; otherwise a registration token is
+  generated with `forgejo actions generate-runner-token` and the runner is
   registered non-interactively against
   `http://127.0.0.1:<port>/` with `FORGEJO_RUNNER_LABELS` (default
   maps `ubuntu-latest` jobs to `docker://node:20-bookworm`).
-- Installs and enables `forgejo-runner.service`.
+- Writes a root-owned managed `config.yaml` that allows one concurrent
+  job, disables privileged containers and arbitrary volume mounts, keeps
+  the Docker socket out of job containers, and uses host networking so
+  containers can clone from and report to loopback-only Forgejo.
+- Installs `forgejo-runner.service` with explicit dependencies on Docker
+  and Forgejo and an explicit `-c /var/lib/forgejo-runner/config.yaml`.
+- Restarts the runner and fails the installation unless that exact service
+  invocation declares successfully to Forgejo.
+
+Upstream recommends a separate runner host or VM. Host networking also lets
+jobs reach other loopback services on this PC, including PostgreSQL and, on a
+combined installation, the Ubuntu Zombie chat service. Docker-daemon access
+held by the runner process is root-equivalent even though the socket is not
+mounted into jobs. Use the co-located runner only for repositories and
+maintainers trusted to administer the host.
 
 ## Non-interactive installs and receipts
 
@@ -296,7 +313,8 @@ before migration and health-checked after.
 | `/etc/caddy/Caddyfile` | Contains the marked, managed Forgejo block. |
 | `/etc/avahi/services/forgejo.service` | mDNS `_https._tcp` advertisement. |
 | `/usr/local/bin/forgejo-runner` | Runner binary (optional). |
-| `/var/lib/forgejo-runner/` | Runner home + `.runner` registration. |
+| `/var/lib/forgejo-runner/.runner` | Runner registration state (`forgejo-runner:forgejo-runner`, `600`). |
+| `/var/lib/forgejo-runner/config.yaml` | Managed same-host runner policy (`root:forgejo-runner`, `640`). |
 | `/etc/systemd/system/forgejo-runner.service` | Runner unit (optional). |
 
 ## Verify, doctor, repair, uninstall
@@ -316,14 +334,20 @@ loopback-only bind and HTTPS `ROOT_URL`, the managed Caddy route
 (exactly one marked block with the right host, port, and internal
 TLS), Caddyfile validity, absence of the legacy fragment, Avahi, the
 exported CA (present *and* matching Caddy's active root), both the
-loopback and HTTPS `/api/healthz` endpoints, and the runner service
-when installed. `--json` emits machine-readable results.
+loopback and HTTPS `/api/healthz` endpoints, and, when installed, the
+runner's registration, managed config and effective command,
+protected-file permissions, Docker service and group access, and current
+successful declaration. `--json` emits machine-readable results. Run
+verification with `sudo`; otherwise protected state is reported as not
+inspectable rather than missing.
 
 `repair forgejo` re-asserts ownership and permissions on
 `/etc/forgejo`, `app.ini`, and `/var/lib/forgejo`, restarts the
 services, regenerates the managed Caddy/Avahi configuration (including
-migrating the legacy `conf.d/forgejo.caddy` fragment), and re-exports
-the CA.
+migrating the legacy `conf.d/forgejo.caddy` fragment), re-exports the CA,
+and restores the managed runner unit/configuration. It refuses to restart
+Forgejo when `app.ini` is missing or empty because silently regenerating
+database credentials and encryption secrets is not a safe repair.
 
 Uninstalling removes the services, binaries, managed Caddy block,
 Avahi advertisement, and `/etc/forgejo`, then asks separately before
@@ -358,3 +382,11 @@ remove the trusted CA root from clients when the host is retired.
 - **Runner refuses to install Docker:** `containerd.io` is present;
   install a compatible Docker Engine yourself or remove
   `containerd.io`, then re-run.
+- **Runner does not declare:** inspect
+  `sudo journalctl -u forgejo-runner`; verify Forgejo and Docker are
+  healthy, the registration is non-empty, and no systemd drop-in replaces
+  the managed command.
+- **`app.ini` is missing:** do not restart Forgejo. Recover the original
+  root-protected file from backup. Emergency reconstruction rotates lost
+  credentials/secrets and requires a PostgreSQL backup and an explicit
+  recovery procedure.

@@ -594,10 +594,10 @@ removing downloaded models and state.
 
 A self-hosted [Forgejo](https://forgejo.org/) git forge backed by
 PostgreSQL, with LAN discovery and HTTPS provided by Avahi and Caddy.
-An optional co-located Forgejo Actions runner uses the standard Docker
-executor. `docs/FORGEJO.md` documents the install path itself
-(phases, update behaviour, files installed, lifecycle subcommands) in
-depth.
+An optional co-located Forgejo Actions runner uses a restricted Docker
+executor with host networking. `docs/FORGEJO.md` documents the install
+path itself (phases, update behaviour, files installed, lifecycle
+subcommands) in depth.
 
 Forgejo itself binds only to `127.0.0.1`. Caddy is the LAN-facing entry
 point on HTTPS port `443`, uses its internal certificate authority, and
@@ -614,7 +614,7 @@ The installer writes this hostname route as a marked block in
 | Variable                        | Default                                  | Effect |
 | ------------------------------- | ---------------------------------------- | ------ |
 | `ZOMBIE_INSTALL_FORGEJO`        | `0`                                      | Set to `1` to install Forgejo + PostgreSQL. |
-| `ZOMBIE_INSTALL_FORGEJO_RUNNER` | `0`                                      | Set to `1` to also install a co-located Actions runner. Requires the server flag. |
+| `ZOMBIE_INSTALL_FORGEJO_RUNNER` | `0`                                      | Set to `1` to also install a co-located Actions runner for trusted repositories. Requires the server flag. |
 | `FORGEJO_HTTP_PORT`             | `3000`                                   | Forgejo loopback web/API port behind Caddy. |
 | `FORGEJO_ADMIN_USER`            | `forgejo-admin`                          | Initial admin account name. |
 | `FORGEJO_ADMIN_EMAIL`           | `forgejo-admin@localhost.localdomain`    | Initial admin email. |
@@ -695,9 +695,13 @@ Caveats:
   is disabled by default
   (`DISABLE_REGISTRATION = true`); the admin creates accounts.
 - Co-locating the runner with the forge is contrary to upstream
-  guidance (a compromised job shares the host with the forge). The
-  installer prints a warning and proceeds only because the flag is an
-  explicit opt-in.
+  guidance. The managed runner allows one job at a time, disables privileged
+  containers and arbitrary host-volume mounts, and does not expose the Docker
+  socket inside jobs. Job containers still use host networking so they can
+  reach loopback-only Forgejo; they can therefore also reach other host
+  loopback services. The runner process itself has Docker-daemon access,
+  which is root-equivalent. Enable it only for repositories and maintainers
+  trusted to control this machine.
 - Binaries are downloaded from Forgejo's release host and verified against
   published SHA-256 checksums; pin `FORGEJO_VERSION` where
   reproducibility matters.

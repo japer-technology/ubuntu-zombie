@@ -191,7 +191,7 @@ and reversible by `uninstall.sh`. These environment flags remain the
 compatibility API for cloud-init and other automation and are additive
 with explicit component targets. The first is a self-hosted **Forgejo**
 git forge (PostgreSQL-backed, `.local` LAN discovery, Caddy internal-CA
-HTTPS, optional co-located Actions runner):
+HTTPS, optional co-located Actions runner for trusted repositories only):
 
 ```bash
 sudo ZOMBIE_INSTALL_FORGEJO=1 ZOMBIE_INSTALL_FORGEJO_RUNNER=1 \
