@@ -659,7 +659,11 @@ detected, each is reported and protected by a separate exact, capitalized
 `YES` confirmation. `--yes` does not bypass these data-safety gates. For
 unattended updates, set `FORGEJO_CONFIRM_UPDATE=YES` and
 `FORGEJO_CONFIRM_DATABASE_REUSE=YES`. The update path never drops the database
-or repository data.
+or repository data. Existing component or database state with a missing,
+empty, or incomplete `app.ini` is not reconstructed: install and repair stop
+before rotating credentials or secrets. A server re-run preserves an
+installed runner from its component manifest or on-disk artifacts and
+restores its boot enablement.
 
 ### Trust the Forgejo local certificate authority
 

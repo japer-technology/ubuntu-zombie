@@ -19,12 +19,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 - **Runner readiness verification:** installation now rejects empty
   registrations and fails unless the current service invocation declares to
   Forgejo. Verify and doctor also check registration, protected config,
-  effective service arguments, Docker service/group access, and the current
-  declaration.
+  exact effective service arguments, unit and boot state, Docker
+  service/group access, and the current declaration. Re-runs preserve runner
+  intent from the component manifest or installed artifacts.
 - **Fail-closed lifecycle repair:** all Forgejo lifecycle helpers are defined
   before early subcommand dispatch, protected files are reported as
-  uninspectable rather than missing for non-root diagnostics, and repair
-  refuses to restart Forgejo when `app.ini` is missing or empty.
+  uninspectable rather than missing for non-root diagnostics, and install and
+  repair refuse to reconstruct Forgejo when `app.ini` is missing, empty, or
+  lacks the preserved database password or security secrets.
 - **Systemd override convergence:** the exact obsolete runner
   `override.conf` from the documented repair is removed automatically;
   other drop-ins are preserved and reported instead of silently overriding

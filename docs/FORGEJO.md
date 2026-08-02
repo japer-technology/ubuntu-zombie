@@ -154,7 +154,10 @@ If a matching role **or** database already exists, the installer warns
 that the state will be reused (never dropped) and demands an exact,
 capitalized `YES` — interactively, or via
 `FORGEJO_CONFIRM_DATABASE_REUSE=YES` for unattended runs. `--yes` does
-not bypass this data-safety gate.
+not bypass this data-safety gate. If `app.ini` is missing, empty, or lacks
+the preserved database password and security secrets, the installer refuses
+before generating a password or changing the existing role; credential and
+secret reconstruction is a separate, backed-up recovery operation.
 
 ### 6. Write `/etc/forgejo/app.ini`
 
@@ -299,6 +302,9 @@ existing installation:
 - Secrets and the database password are reused from `app.ini`.
 - The database and role are reused, never dropped; runner
   registration is not repeated.
+- Existing runner intent is restored from the component manifest or runner
+  artifacts, so a server update also converges and restarts the runner
+  instead of silently disabling it.
 - The managed Caddy block and Avahi service file are rewritten only
   when their content differs.
 
@@ -341,8 +347,9 @@ TLS), Caddyfile validity, absence of the legacy fragment, Avahi, the
 exported CA (present *and* matching Caddy's active root), both the
 loopback and HTTPS `/api/healthz` endpoints, and, when installed, the
 runner's registration, managed config and effective command,
-protected-file permissions, Docker service and group access, and current
-successful declaration. `--json` emits machine-readable results. Run
+protected-file permissions, unit presence and boot enablement, Docker
+service and group access, and current successful declaration. `--json`
+emits machine-readable results. Run
 verification with `sudo`; otherwise protected state is reported as not
 inspectable rather than missing.
 
@@ -351,8 +358,10 @@ inspectable rather than missing.
 services, regenerates the managed Caddy/Avahi configuration (including
 migrating the legacy `conf.d/forgejo.caddy` fragment), re-exports the CA,
 and restores the managed runner unit/configuration. It refuses to restart
-Forgejo when `app.ini` is missing or empty because silently regenerating
-database credentials and encryption secrets is not a safe repair.
+Forgejo when `app.ini` is missing, empty, or incomplete because silently
+regenerating database credentials and encryption secrets is not a safe
+repair. Runner repair also restores the unit when missing and re-enables it
+at boot.
 
 Uninstalling removes the services, binaries, managed Caddy block,
 Avahi advertisement, and `/etc/forgejo`, then asks separately before

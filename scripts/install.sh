@@ -535,6 +535,21 @@ legacy_forgejo_present() {
     || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]
 }
 
+established_forgejo_state_present() {
+  local path
+  [[ -f /etc/systemd/system/forgejo.service \
+      || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" \
+      || -s /etc/forgejo/app.ini ]] \
+    && return 0
+  for path in /var/lib/forgejo/data/forgejo-repositories \
+      /var/lib/forgejo/data/lfs; do
+    [[ -d "${path}" ]] || continue
+    find "${path}" -mindepth 1 -print -quit 2>/dev/null | grep -q . \
+      && return 0
+  done
+  return 1
+}
+
 llama_installation_is_managed() {
   local marker
   for marker in /etc/llama.cpp/managed-by-ubuntu-zombie \
@@ -997,6 +1012,35 @@ is_valid_forgejo_jwt_secret() {
   [[ "$1" =~ ^[A-Za-z0-9_-]{43}$ ]]
 }
 
+# Read one key from one section of an ini file (first match wins), so
+# same-named keys in other sections (e.g. NAME/USER/PASSWD) never leak.
+ini_get() {
+  local file="$1" section="$2" key="$3"
+  awk -F' = ' -v s="[${section}]" -v k="${key}" '
+    $0 == s {in_s=1; next}
+    /^\[/   {in_s=0}
+    in_s && $1 == k {print $2; exit}
+  ' "${file}" 2>/dev/null
+}
+
+forgejo_config_file_has_recovery_material() {
+  local file="$1"
+  local db_password secret_key internal_token jwt_secret lfs_jwt_secret
+  [[ -s "${file}" ]] || return 1
+  db_password="$(ini_get "${file}" database PASSWD || true)"
+  secret_key="$(ini_get "${file}" security SECRET_KEY || true)"
+  internal_token="$(ini_get "${file}" security INTERNAL_TOKEN || true)"
+  jwt_secret="$(ini_get "${file}" oauth2 JWT_SECRET || true)"
+  lfs_jwt_secret="$(ini_get "${file}" server LFS_JWT_SECRET || true)"
+  [[ -n "${db_password}" && -n "${secret_key}" && -n "${internal_token}" ]] \
+    && is_valid_forgejo_jwt_secret "${jwt_secret}" \
+    && is_valid_forgejo_jwt_secret "${lfs_jwt_secret}"
+}
+
+forgejo_config_has_recovery_material() {
+  forgejo_config_file_has_recovery_material /etc/forgejo/app.ini
+}
+
 forgejo_url_host() {
   local host
   host="$(hostname -s 2>/dev/null || hostname)"
@@ -1457,6 +1501,25 @@ forgejo_runner_config_is_managed() {
       /var/lib/forgejo-runner/config.yaml
 }
 
+forgejo_manifest_has_runner() {
+  local manifest="${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}"
+  valid_component_manifest_entry "${manifest}" "${COMPONENT_FORGEJO}" \
+    && [[ "$(_read_manifest_value "${manifest}" suboptions)" == "runner" ]]
+}
+
+forgejo_runner_is_expected() {
+  [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+    || forgejo_manifest_has_runner \
+    || [[ -x /usr/local/bin/forgejo-runner \
+      || -f /etc/systemd/system/forgejo-runner.service ]]
+}
+
+restore_forgejo_runner_intent() {
+  is_selected_component "${COMPONENT_FORGEJO}" || return 0
+  forgejo_runner_is_expected || return 0
+  ZOMBIE_INSTALL_FORGEJO_RUNNER=1
+}
+
 forgejo_runner_drop_in_paths() {
   local loaded
   loaded="$(
@@ -1500,9 +1563,13 @@ remove_obsolete_forgejo_runner_drop_in() {
 }
 
 forgejo_runner_uses_managed_config() {
-  systemctl show forgejo-runner.service --property=ExecStart --value \
-      2>/dev/null \
-    | grep -F -- '-c /var/lib/forgejo-runner/config.yaml' >/dev/null
+  local exec_start expected
+  expected="path=/usr/local/bin/forgejo-runner ; argv[]=/usr/local/bin/forgejo-runner -c /var/lib/forgejo-runner/config.yaml daemon ;"
+  exec_start="$(
+    systemctl show forgejo-runner.service --property=ExecStart --value \
+      2>/dev/null || true
+  )"
+  [[ "${exec_start}" == *"${expected}"* ]]
 }
 
 forgejo_runner_in_docker_group() {
@@ -1603,6 +1670,13 @@ verify_forgejo() {
   else
     vr fail forgejo config_perms "Forgejo config permissions incorrect (${_fj_dir_perms:-?}/${_fj_cfg_perms:-?}). Run: sudo ./${SCRIPT_NAME} repair forgejo"
   fi
+  if (( _fj_config_readable )) && forgejo_config_has_recovery_material; then
+    vr ok forgejo config_recovery "Forgejo config contains the preserved database credential and security secrets."
+  elif (( _fj_config_uninspectable )); then
+    vr fail forgejo config_recovery "Forgejo recovery material is not inspectable without root. Re-run with sudo."
+  else
+    vr fail forgejo config_recovery "Forgejo config is missing required recovery material. Recover the original app.ini from backup."
+  fi
   systemctl is-active --quiet postgresql 2>/dev/null \
     && vr ok forgejo db "PostgreSQL active." \
     || vr fail forgejo db "PostgreSQL not running (Forgejo needs it). Run: sudo systemctl start postgresql"
@@ -1674,9 +1748,18 @@ verify_forgejo() {
       fi
     fi
   fi
-  if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+  if forgejo_runner_is_expected; then
     local _fj_runner_cfg_perms _fj_runner_drop_ins
     local _fj_runner_registration_perms
+    [[ -x /usr/local/bin/forgejo-runner ]] \
+      && vr ok forgejo runner_binary "Forgejo runner binary present." \
+      || vr fail forgejo runner_binary "Forgejo runner binary missing. Re-run the Forgejo runner install."
+    [[ -f /etc/systemd/system/forgejo-runner.service ]] \
+      && vr ok forgejo runner_unit "Forgejo runner service unit present." \
+      || vr fail forgejo runner_unit "Forgejo runner service unit missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    systemctl is-enabled --quiet forgejo-runner.service 2>/dev/null \
+      && vr ok forgejo runner_enabled "Forgejo runner enabled at boot." \
+      || vr fail forgejo runner_enabled "Forgejo runner is not enabled at boot. Run: sudo ./${SCRIPT_NAME} repair forgejo"
     systemctl is-active --quiet forgejo-runner.service 2>/dev/null \
       && vr ok forgejo runner "Forgejo Actions runner active." \
       || vr fail forgejo runner "Forgejo runner unit installed but not active. Run: sudo systemctl restart forgejo-runner"
@@ -1902,6 +1985,14 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_config "Forgejo config permissions are ${forgejo_dir_perms:-unknown}/${forgejo_config_perms}; expected root:git 750/640. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
+      if (( forgejo_config_readable )) \
+          && forgejo_config_has_recovery_material; then
+        dr ok forgejo forgejo_config_recovery "Forgejo config contains the preserved database credential and security secrets."
+      elif (( forgejo_config_uninspectable )); then
+        dr warn forgejo forgejo_config_recovery "Forgejo recovery material is not inspectable without root."
+      else
+        dr warn forgejo forgejo_config_recovery "Forgejo config is missing required recovery material. Recover the original app.ini from backup."
+      fi
       if systemctl is-active --quiet postgresql 2>/dev/null; then
         dr ok forgejo forgejo_db "PostgreSQL active."
       else
@@ -1966,8 +2057,23 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_ca_current "Exported and active Caddy local CA roots are missing or do not match. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
-      if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+      if forgejo_runner_is_expected; then
         local runner_config_perms runner_drop_ins
+        if [[ -x /usr/local/bin/forgejo-runner ]]; then
+          dr ok forgejo forgejo_runner_binary "Forgejo runner binary present."
+        else
+          dr warn forgejo forgejo_runner_binary "Forgejo runner binary missing. Re-run the Forgejo runner install."
+        fi
+        if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+          dr ok forgejo forgejo_runner_unit "Forgejo runner service unit present."
+        else
+          dr warn forgejo forgejo_runner_unit "Forgejo runner service unit missing. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        if systemctl is-enabled --quiet forgejo-runner.service 2>/dev/null; then
+          dr ok forgejo forgejo_runner_enabled "Forgejo runner enabled at boot."
+        else
+          dr warn forgejo forgejo_runner_enabled "Forgejo runner is not enabled at boot. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
         if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
           dr ok forgejo forgejo_runner "Forgejo Actions runner active."
         else
@@ -2155,8 +2261,8 @@ cmd_repair() {
       warn "  To install: sudo ./${SCRIPT_NAME} install forgejo"
     fi
     if [[ -d /etc/forgejo || -d /var/lib/forgejo ]]; then
-      [[ -s /etc/forgejo/app.ini ]] \
-        || die "Refusing to repair or restart Forgejo because /etc/forgejo/app.ini is missing or empty. Recover the original config from backup; recreating its secrets requires a separate, backed-up recovery procedure." \
+      forgejo_config_has_recovery_material \
+        || die "Refusing to repair or restart Forgejo because /etc/forgejo/app.ini is missing, empty, or incomplete. Recover the original config from backup; recreating its secrets requires a separate, backed-up recovery procedure." \
           1
       chown root:git /etc/forgejo
       chmod 750 /etc/forgejo
@@ -2169,9 +2275,11 @@ cmd_repair() {
           || die "Forgejo failed to restart; see journalctl -u forgejo." 1
       fi
       configure_forgejo_lan_https
-      if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+      if forgejo_runner_is_expected; then
+        [[ -x /usr/local/bin/forgejo-runner ]] \
+          || die "Forgejo runner is expected but its binary is missing; re-run the Forgejo runner install." 1
         id forgejo-runner >/dev/null 2>&1 \
-          || die "Forgejo runner unit exists but user forgejo-runner is missing." 1
+          || die "Forgejo runner is expected but user forgejo-runner is missing; re-run the Forgejo runner install." 1
         [[ -s /var/lib/forgejo-runner/.runner ]] \
           || die "Forgejo runner registration is missing or empty; re-run the Forgejo runner install." 1
         usermod -aG docker forgejo-runner
@@ -2198,6 +2306,8 @@ cmd_repair() {
             || ! forgejo_runner_has_docker_access; then
           die "forgejo-runner cannot access the Docker daemon after repair." 1
         fi
+        systemctl enable forgejo-runner.service >/dev/null \
+          || die "Could not enable forgejo-runner.service during repair." 1
         systemctl restart forgejo-runner.service \
           || die "Forgejo runner failed to restart; see journalctl -u forgejo-runner." 1
         retry 6 2 -- forgejo_runner_declared_successfully \
@@ -3218,6 +3328,7 @@ trap 'on_error ${LINENO}' ERR
 validate_component_registry \
   "validate review dry_run receipt_start receipt_finish install manifest final legacy verify doctor repair phase_count"
 resolve_lifecycle_targets_from_manifest
+restore_forgejo_runner_intent
 validate_config
 
 if [[ "${SUBCOMMAND}" != "uninstall" ]] \
@@ -3258,6 +3369,12 @@ fi
 
 require_root
 validate_noninteractive
+
+if is_selected_component "${COMPONENT_FORGEJO}" \
+    && established_forgejo_state_present \
+    && ! forgejo_config_has_recovery_material; then
+  die "Refusing to install or update Forgejo because existing component state was found but /etc/forgejo/app.ini is missing, empty, or incomplete. Recover the original config from backup; secret rotation requires a separate, backed-up recovery procedure." 1
+fi
 
 if is_selected_component "${COMPONENT_FORGEJO}" && legacy_forgejo_present; then
   warn "An existing Forgejo installation was detected. The installer will update it in place and preserve repositories and database data."
@@ -4056,17 +4173,6 @@ forgejo_latest_release() {
   return 1
 }
 
-# Read one key from one section of an ini file (first match wins), so
-# same-named keys in other sections (e.g. NAME/USER/PASSWD) never leak.
-ini_get() {
-  local file="$1" section="$2" key="$3"
-  awk -F' = ' -v s="[${section}]" -v k="${key}" '
-    $0 == s {in_s=1; next}
-    /^\[/   {in_s=0}
-    in_s && $1 == k {print $2; exit}
-  ' "${file}" 2>/dev/null
-}
-
 # Download a Codeberg release asset and verify its published .sha256 sum.
 # Usage: codeberg_fetch_verified <url> <dest_tmp_file>
 codeberg_fetch_verified() {
@@ -4199,6 +4305,20 @@ install_forgejo() {
 
   systemctl enable --now postgresql >/dev/null 2>&1 \
     || die "PostgreSQL failed to start; see journalctl -u postgresql." 1
+  _fj_role_exists=0
+  _fj_database_exists=0
+  if runuser -u postgres -- psql -tAc \
+       "SELECT 1 FROM pg_roles WHERE rolname = '${FORGEJO_DB_USER}'" | grep -q 1; then
+    _fj_role_exists=1
+  fi
+  if runuser -u postgres -- psql -tAc \
+       "SELECT 1 FROM pg_database WHERE datname = '${FORGEJO_DB_NAME}'" | grep -q 1; then
+    _fj_database_exists=1
+  fi
+  if (( _fj_role_exists || _fj_database_exists )) \
+      && ! forgejo_config_has_recovery_material; then
+    die "Refusing to reuse the existing Forgejo database or role without a complete /etc/forgejo/app.ini. Recover the original config from backup; secret rotation requires a separate, backed-up recovery procedure." 1
+  fi
   # Password precedence: an operator-supplied FORGEJO_DB_PASSWORD wins;
   # otherwise reuse the password from an existing app.ini so re-runs never
   # desync the credential; otherwise generate it exactly once and record it
@@ -4210,16 +4330,6 @@ install_forgejo() {
   if [[ -z "${FORGEJO_DB_PASSWORD}" ]]; then
     FORGEJO_DB_PASSWORD="$(openssl rand -hex 24)"
     FORGEJO_DB_PASSWORD_SOURCE="generated"
-  fi
-  _fj_role_exists=0
-  _fj_database_exists=0
-  if runuser -u postgres -- psql -tAc \
-       "SELECT 1 FROM pg_roles WHERE rolname = '${FORGEJO_DB_USER}'" | grep -q 1; then
-    _fj_role_exists=1
-  fi
-  if runuser -u postgres -- psql -tAc \
-       "SELECT 1 FROM pg_database WHERE datname = '${FORGEJO_DB_NAME}'" | grep -q 1; then
-    _fj_database_exists=1
   fi
   if (( _fj_role_exists || _fj_database_exists )); then
     warn "Existing PostgreSQL state was detected for Forgejo (database ${FORGEJO_DB_NAME}, role ${FORGEJO_DB_USER}). It will be reused, never dropped."
