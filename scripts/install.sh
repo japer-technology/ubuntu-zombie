@@ -4370,10 +4370,6 @@ EOF
     ensure_forgejo_runner_docker_package /usr/bin/docker
     systemctl enable --now docker >/dev/null 2>&1 \
       || die "Docker Engine failed to start; see journalctl -u docker." 1
-    if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
-      systemctl stop forgejo-runner.service \
-        || die "Could not stop the existing Forgejo runner before updating it." 1
-    fi
     if id forgejo-runner >/dev/null 2>&1; then
       info "User forgejo-runner already exists."
       note_satisfied
@@ -4435,6 +4431,10 @@ EOF
       info "Runner already registered; skipping registration."
       note_satisfied
     else
+      if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+        systemctl stop forgejo-runner.service \
+          || die "Could not stop the existing Forgejo runner before re-registering it." 1
+      fi
       rm -f /var/lib/forgejo-runner/.runner
       _runner_token="$(runuser -u git -- /usr/local/bin/forgejo \
         --config /etc/forgejo/app.ini --work-path /var/lib/forgejo \
