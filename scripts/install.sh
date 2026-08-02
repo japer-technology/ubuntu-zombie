@@ -1341,6 +1341,7 @@ _caddyfile_is_packaged_default() {
   ' "$1"
 }
 
+# lifecycle-helper: forgejo-caddy-configure begin
 configure_forgejo_lan_https() {
   local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
   local caddy_begin_count caddy_end_count
@@ -1447,6 +1448,7 @@ EOF
     die "Forgejo HTTPS endpoint did not become healthy; see journalctl -u caddy and journalctl -u forgejo." 1
   fi
 }
+# lifecycle-helper: forgejo-caddy-configure end
 
 forgejo_runner_config_is_managed() {
   [[ -r "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \

@@ -3429,8 +3429,25 @@ run_standards() {
     || { echo "missing payload/systemd/forgejo.service" >&2; exit 1; }
   [[ -s payload/systemd/forgejo-runner.service ]] \
     || { echo "missing payload/systemd/forgejo-runner.service" >&2; exit 1; }
+  [[ -s payload/etc/forgejo-runner-config.yaml ]] \
+    || { echo "missing payload/etc/forgejo-runner-config.yaml" >&2; exit 1; }
   grep -q "NoNewPrivileges=true" payload/systemd/forgejo.service \
     || { echo "forgejo.service must stay hardened (NoNewPrivileges)" >&2; exit 1; }
+  grep -Fq \
+      "ExecStart=/usr/local/bin/forgejo-runner -c /var/lib/forgejo-runner/config.yaml daemon" \
+      payload/systemd/forgejo-runner.service \
+    || { echo "forgejo-runner.service must load the managed config" >&2; exit 1; }
+  grep -Eq '^Requires=.*docker\.service.*forgejo\.service' \
+      payload/systemd/forgejo-runner.service \
+    || { echo "forgejo-runner.service must require Docker and Forgejo" >&2; exit 1; }
+  if ! grep -Eq '^  capacity: 1$' payload/etc/forgejo-runner-config.yaml \
+      || ! grep -Eq '^  network: host$' payload/etc/forgejo-runner-config.yaml \
+      || ! grep -Eq '^  privileged: false$' payload/etc/forgejo-runner-config.yaml \
+      || ! grep -Eq '^  valid_volumes: \[\]$' payload/etc/forgejo-runner-config.yaml \
+      || ! grep -Eq '^  docker_host: "-"$' payload/etc/forgejo-runner-config.yaml; then
+    echo "managed runner config must enforce the conservative same-host contract" >&2
+    exit 1
+  fi
   grep -q 'LFS_JWT_SECRET = ${_fj_lfs_jwt_secret}' scripts/install.sh \
     || { echo "install.sh must preconfigure Forgejo's LFS JWT secret" >&2; exit 1; }
   grep -q 'chmod 660 /etc/forgejo/app.ini' scripts/install.sh \
@@ -3452,6 +3469,24 @@ run_standards() {
       caddy_config caddy_legacy_route local_ca_current; do
     grep -q "${caddy_check}" <<<"${verify_forgejo_body}" \
       || { echo "Forgejo verify must include deep Caddy check: ${caddy_check}" >&2; exit 1; }
+  done
+  for runner_check in runner_registration runner_config runner_config_perms \
+      runner_docker_service runner_docker_group runner_docker_access \
+      runner_exec runner_declared; do
+    grep -q "${runner_check}" <<<"${verify_forgejo_body}" \
+      || { echo "Forgejo verify must include runner check: ${runner_check}" >&2; exit 1; }
+  done
+  local lifecycle_helper
+  for lifecycle_helper in caddyfile_has_forgejo_route \
+      caddy_configuration_is_valid caddy_exported_ca_is_current \
+      configure_forgejo_lan_https forgejo_runner_config_is_managed \
+      forgejo_runner_declared_successfully; do
+    awk -v signature="${lifecycle_helper}() {" '
+      $0 == signature { helper = NR }
+      /^case "\$\{SUBCOMMAND\}" in$/ { dispatch = NR }
+      END { exit !(helper && dispatch && helper < dispatch) }
+    ' scripts/install.sh \
+      || { echo "lifecycle helper must be defined before dispatch: ${lifecycle_helper}" >&2; exit 1; }
   done
   grep -q 'HTTP_ADDR = 127.0.0.1' scripts/install.sh \
     || { echo "Forgejo backend must stay loopback-only" >&2; exit 1; }
@@ -3503,7 +3538,7 @@ EOF
     || { rm -f "${caddy_test_dir}"; echo "Forgejo Caddy route diagnostics must detect stale hosts and ports" >&2; exit 1; }
   rm -f "${caddy_test_dir}"
   caddy_hook="$(sed -n \
-    '/^configure_forgejo_lan_https() {$/,/^# component-hook: forgejo begin$/p' \
+    '/^# lifecycle-helper: forgejo-caddy-configure begin$/,/^# lifecycle-helper: forgejo-caddy-configure end$/p' \
     scripts/install.sh)"
   awk '
     /systemctl restart forgejo.service/ { restart = NR }
@@ -3590,6 +3625,18 @@ EOF
     END { exit !(gate && alter && gate < alter) }
   ' <<<"${forgejo_hook}" \
     || { echo "database reuse approval must precede role mutation" >&2; exit 1; }
+  grep -Fq '[[ -s /var/lib/forgejo-runner/.runner ]]' <<<"${forgejo_hook}" \
+    || { echo "Forgejo install must reject empty runner registrations" >&2; exit 1; }
+  grep -Fq 'retry 6 2 -- forgejo_runner_declared_successfully' \
+      <<<"${forgejo_hook}" \
+    || { echo "Forgejo install must wait for the current runner declaration" >&2; exit 1; }
+  grep -Fq 'forgejo-runner-config.yaml' <<<"${forgejo_hook}" \
+    || { echo "Forgejo install must deploy the managed runner config" >&2; exit 1; }
+  grep -Fq 'Refusing to repair or restart Forgejo because /etc/forgejo/app.ini is missing or empty.' \
+      scripts/install.sh \
+    || { echo "Forgejo repair must fail closed without app.ini" >&2; exit 1; }
+  grep -Fq 'install -m 640 -o root -g forgejo-runner' scripts/install.sh \
+    || { echo "Forgejo repair must restore root ownership of runner config" >&2; exit 1; }
   local docker_conflict_out forgejo_docker_helper docker_stub
   forgejo_docker_helper="$(install_function ensure_forgejo_runner_docker_package)"
   docker_stub="$(mktemp)"
