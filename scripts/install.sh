@@ -1267,7 +1267,7 @@ validate_noninteractive() {
   [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] || return 0
 }
 
-# Read-only Forgejo lifecycle helpers must be defined before the early
+# Forgejo lifecycle helpers must be defined before the early
 # verify/doctor/repair dispatch below.
 caddyfile_has_forgejo_route() {
   # Return success only for one managed block containing the expected
@@ -1480,24 +1480,24 @@ forgejo_runner_has_docker_access() {
 }
 
 forgejo_runner_declared_successfully() {
-  local invocation_id logs
+  local invocation_id
   systemctl is-active --quiet forgejo-runner.service 2>/dev/null || return 1
   invocation_id="$(
     systemctl show forgejo-runner.service --property=InvocationID --value \
       2>/dev/null || true
   )"
   [[ "${invocation_id}" =~ ^[[:xdigit:]]{32}$ ]] || return 1
-  if (( EUID == 0 )); then
-    logs="$(journalctl --quiet --no-pager \
-      "_SYSTEMD_INVOCATION_ID=${invocation_id}" 2>/dev/null || true)"
-  else
-    logs="$(journalctl --quiet --no-pager \
+  if journalctl --quiet --no-pager \
       "_SYSTEMD_INVOCATION_ID=${invocation_id}" 2>/dev/null \
-      || sudo -n journalctl --quiet --no-pager \
-        "_SYSTEMD_INVOCATION_ID=${invocation_id}" 2>/dev/null \
-      || true)"
+      | awk 'index($0, "declared successfully") { found = 1 }
+             END { exit !found }'; then
+    return 0
   fi
-  grep -F 'declared successfully' <<<"${logs}" >/dev/null
+  (( EUID != 0 )) \
+    && sudo -n journalctl --quiet --no-pager \
+      "_SYSTEMD_INVOCATION_ID=${invocation_id}" 2>/dev/null \
+      | awk 'index($0, "declared successfully") { found = 1 }
+             END { exit !found }'
 }
 
 # ---------------------------------------------------------------------------
@@ -4370,6 +4370,10 @@ EOF
     ensure_forgejo_runner_docker_package /usr/bin/docker
     systemctl enable --now docker >/dev/null 2>&1 \
       || die "Docker Engine failed to start; see journalctl -u docker." 1
+    if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+      systemctl stop forgejo-runner.service \
+        || die "Could not stop the existing Forgejo runner before updating it." 1
+    fi
     if id forgejo-runner >/dev/null 2>&1; then
       info "User forgejo-runner already exists."
       note_satisfied
