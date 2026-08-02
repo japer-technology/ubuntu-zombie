@@ -1695,8 +1695,24 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo "Forgejo installed but not running. Likely causes: port in use, DB auth, or migrations not run. Fix: sudo systemctl restart forgejo"
       fi
+      local forgejo_config_readable=0 forgejo_config_uninspectable=0
       local forgejo_dir_perms forgejo_config_perms
-      forgejo_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
+      if [[ -r /etc/forgejo/app.ini ]]; then
+        forgejo_config_readable=1
+      elif (( EUID != 0 )) && [[ -d /etc/forgejo && ! -x /etc/forgejo ]]; then
+        forgejo_config_uninspectable=1
+        dr warn forgejo forgejo_config_file "Forgejo config is not inspectable without root. Re-run: sudo ./${SCRIPT_NAME} doctor forgejo"
+      elif [[ -f /etc/forgejo/app.ini ]]; then
+        forgejo_config_uninspectable=1
+        dr warn forgejo forgejo_config_file "Forgejo config is not readable. Re-run: sudo ./${SCRIPT_NAME} doctor forgejo"
+      else
+        dr warn forgejo forgejo_config_file "Forgejo config is missing; do not restart Forgejo. Recover app.ini from backup before repair."
+      fi
+      forgejo_dir_perms="$(
+        stat -c '%U:%G %a' /etc/forgejo 2>/dev/null \
+          || sudo -n stat -c '%U:%G %a' /etc/forgejo 2>/dev/null \
+          || true
+      )"
       forgejo_config_perms="$(
         stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
           || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
@@ -1704,7 +1720,9 @@ cmd_doctor() {
       )"
       if [[ "${forgejo_dir_perms}" == "root:git 750" && "${forgejo_config_perms}" == "root:git 640" ]]; then
         dr ok forgejo forgejo_config "Forgejo config permissions are root:git 750/640."
-      elif [[ -n "${forgejo_config_perms}" ]]; then
+      elif (( forgejo_config_uninspectable )); then
+        dr warn forgejo forgejo_config "Forgejo config permissions are not inspectable without root."
+      else
         dr warn forgejo forgejo_config "Forgejo config permissions are ${forgejo_dir_perms:-unknown}/${forgejo_config_perms}; expected root:git 750/640. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
       if systemctl is-active --quiet postgresql 2>/dev/null; then
@@ -1712,10 +1730,12 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_db "PostgreSQL not running (Forgejo needs it). Fix: sudo systemctl start postgresql"
       fi
-      local forgejo_host forgejo_port
-      forgejo_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-      forgejo_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-      forgejo_port="${forgejo_port:-3000}"
+      local forgejo_host="" forgejo_port=3000
+      if (( forgejo_config_readable )); then
+        forgejo_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+        forgejo_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+        forgejo_port="${forgejo_port:-3000}"
+      fi
       if command -v caddy >/dev/null 2>&1; then
         dr ok forgejo forgejo_caddy_binary "Caddy binary present."
       else
@@ -1736,7 +1756,9 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_caddy "Caddy is not running. Fix: sudo systemctl restart caddy"
       fi
-      if [[ -n "${forgejo_host}" ]] \
+      if (( ! forgejo_config_readable )); then
+        dr warn forgejo forgejo_caddy_route "Managed Caddy route cannot be checked without readable Forgejo configuration. Re-run with sudo."
+      elif [[ -n "${forgejo_host}" ]] \
           && caddyfile_has_forgejo_route /etc/caddy/Caddyfile "${forgejo_host}" "${forgejo_port}"; then
         dr ok forgejo forgejo_caddy_route "Managed Caddy route matches ${forgejo_host} -> 127.0.0.1:${forgejo_port} with internal TLS."
       else
@@ -1768,10 +1790,58 @@ cmd_doctor() {
         dr warn forgejo forgejo_ca_current "Exported and active Caddy local CA roots are missing or do not match. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
       if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+        local runner_config_perms
         if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
           dr ok forgejo forgejo_runner "Forgejo Actions runner active."
         else
           dr warn forgejo forgejo_runner "Forgejo runner not running. Check registration and Docker. Fix: sudo systemctl restart forgejo-runner"
+        fi
+        if systemctl is-active --quiet docker.service 2>/dev/null; then
+          dr ok forgejo forgejo_runner_docker "Docker service active."
+        else
+          dr warn forgejo forgejo_runner_docker "Docker is not running. Fix: sudo systemctl restart docker"
+        fi
+        if forgejo_runner_in_docker_group; then
+          dr ok forgejo forgejo_runner_group "forgejo-runner belongs to the docker group."
+        else
+          dr warn forgejo forgejo_runner_group "forgejo-runner is not in the docker group. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        if [[ -s /var/lib/forgejo-runner/.runner ]]; then
+          dr ok forgejo forgejo_runner_registration "Runner registration is present."
+        elif (( EUID != 0 )) \
+            && [[ -d /var/lib/forgejo-runner && ! -x /var/lib/forgejo-runner ]]; then
+          dr warn forgejo forgejo_runner_registration "Runner registration is not inspectable without root. Re-run with sudo."
+        else
+          dr warn forgejo forgejo_runner_registration "Runner registration is missing or empty. Re-run the Forgejo runner install."
+        fi
+        runner_config_perms="$(
+          stat -c '%U:%G %a' /var/lib/forgejo-runner/config.yaml \
+            2>/dev/null || true
+        )"
+        if [[ "${runner_config_perms}" == "root:forgejo-runner 640" ]] \
+            && forgejo_runner_config_is_managed; then
+          dr ok forgejo forgejo_runner_config "Conservative managed runner configuration is active on disk."
+        else
+          dr warn forgejo forgejo_runner_config "Runner config is missing, not inspectable, or unmanaged (${runner_config_perms:-unknown}). Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        if forgejo_runner_uses_managed_config; then
+          dr ok forgejo forgejo_runner_exec "Runner service loads the managed configuration."
+        else
+          dr warn forgejo forgejo_runner_exec "Runner service ignores the managed configuration. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        if forgejo_runner_has_docker_access; then
+          dr ok forgejo forgejo_runner_docker_access "forgejo-runner can access the Docker daemon."
+        elif (( EUID != 0 )); then
+          dr warn forgejo forgejo_runner_docker_access "Docker access as forgejo-runner is not inspectable without root. Re-run with sudo."
+        else
+          dr warn forgejo forgejo_runner_docker_access "forgejo-runner cannot access Docker. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        if forgejo_runner_declared_successfully; then
+          dr ok forgejo forgejo_runner_declared "Current runner invocation declared successfully to Forgejo."
+        elif (( EUID != 0 )); then
+          dr warn forgejo forgejo_runner_declared "Runner declaration is not inspectable without root. Re-run with sudo."
+        else
+          dr warn forgejo forgejo_runner_declared "Current runner invocation has not declared successfully. Check: sudo journalctl -u forgejo-runner"
         fi
       fi
     else
