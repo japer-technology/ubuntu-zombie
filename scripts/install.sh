@@ -1406,34 +1406,50 @@ verify_forgejo() {
   [[ -f /etc/systemd/system/forgejo.service ]] \
     && vr ok forgejo service_unit "Forgejo service unit present." \
     || vr fail forgejo service_unit "Forgejo service unit missing."
-  local _fj_svc_active=0 _fj_dir_perms _fj_cfg_perms _fj_port
+  local _fj_svc_active=0 _fj_config_readable=0
+  local _fj_config_uninspectable=0 _fj_dir_perms _fj_cfg_perms _fj_port
   local _fj_host _fj_root_url _fj_http_addr
   systemctl is-active --quiet forgejo.service 2>/dev/null \
     && { vr ok forgejo service_active "Forgejo service active."; _fj_svc_active=1; } \
     || vr fail forgejo service_active "Forgejo service not active."
-  [[ -f /etc/forgejo/app.ini ]] \
-    && vr ok forgejo config "Forgejo config present." \
-    || vr fail forgejo config "Forgejo config missing."
+  if [[ -r /etc/forgejo/app.ini ]]; then
+    vr ok forgejo config "Forgejo config present and readable."
+    _fj_config_readable=1
+  elif (( EUID != 0 )) && [[ -d /etc/forgejo && ! -x /etc/forgejo ]]; then
+    vr fail forgejo config "Forgejo config is not inspectable without root. Re-run: sudo ./${SCRIPT_NAME} verify forgejo"
+    _fj_config_uninspectable=1
+  elif [[ -f /etc/forgejo/app.ini ]]; then
+    vr fail forgejo config "Forgejo config is not readable. Re-run: sudo ./${SCRIPT_NAME} verify forgejo"
+    _fj_config_uninspectable=1
+  else
+    vr fail forgejo config "Forgejo config missing."
+  fi
   _fj_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
   _fj_cfg_perms="$(stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null || true)"
   if [[ "${_fj_dir_perms}" == "root:git 750" && "${_fj_cfg_perms}" == "root:git 640" ]]; then
     vr ok forgejo config_perms "Forgejo config permissions correct (root:git 750/640)."
-  elif [[ -n "${_fj_dir_perms}${_fj_cfg_perms}" ]]; then
+  elif (( _fj_config_uninspectable )); then
+    vr fail forgejo config_perms "Forgejo config permissions are not inspectable without root. Re-run: sudo ./${SCRIPT_NAME} verify forgejo"
+  else
     vr fail forgejo config_perms "Forgejo config permissions incorrect (${_fj_dir_perms:-?}/${_fj_cfg_perms:-?}). Run: sudo ./${SCRIPT_NAME} repair forgejo"
   fi
   systemctl is-active --quiet postgresql 2>/dev/null \
     && vr ok forgejo db "PostgreSQL active." \
     || vr fail forgejo db "PostgreSQL not running (Forgejo needs it). Run: sudo systemctl start postgresql"
-  _fj_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-  _fj_port="${_fj_port:-3000}"
-  _fj_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-  _fj_root_url="$(awk -F' = ' '/^ROOT_URL/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-  _fj_http_addr="$(awk -F' = ' '/^HTTP_ADDR/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-  if [[ -n "${_fj_host}" && "${_fj_root_url}" == "https://${_fj_host}/" \
-      && "${_fj_http_addr}" == "127.0.0.1" ]]; then
-    vr ok forgejo public_url "Forgejo uses HTTPS at ${_fj_root_url}; backend is loopback-only."
-  else
-    vr fail forgejo public_url "Forgejo HTTPS URL or loopback bind is incorrect. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+  _fj_port=3000
+  _fj_host=""
+  if (( _fj_config_readable )); then
+    _fj_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_port="${_fj_port:-3000}"
+    _fj_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_root_url="$(awk -F' = ' '/^ROOT_URL/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_http_addr="$(awk -F' = ' '/^HTTP_ADDR/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    if [[ -n "${_fj_host}" && "${_fj_root_url}" == "https://${_fj_host}/" \
+        && "${_fj_http_addr}" == "127.0.0.1" ]]; then
+      vr ok forgejo public_url "Forgejo uses HTTPS at ${_fj_root_url}; backend is loopback-only."
+    else
+      vr fail forgejo public_url "Forgejo HTTPS URL or loopback bind is incorrect. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    fi
   fi
   command -v caddy >/dev/null 2>&1 \
     && vr ok forgejo caddy_binary "Caddy binary present." \
@@ -1447,7 +1463,9 @@ verify_forgejo() {
   systemctl is-active --quiet caddy.service 2>/dev/null \
     && vr ok forgejo caddy "Caddy HTTPS reverse proxy active." \
     || vr fail forgejo caddy "Caddy reverse proxy not active. Run: sudo systemctl restart caddy"
-  if [[ -n "${_fj_host}" ]] \
+  if (( ! _fj_config_readable )); then
+    vr fail forgejo caddy_route "Managed Caddy route cannot be checked without readable Forgejo configuration. Re-run with sudo."
+  elif [[ -n "${_fj_host}" ]] \
       && caddyfile_has_forgejo_route /etc/caddy/Caddyfile "${_fj_host}" "${_fj_port}"; then
     vr ok forgejo caddy_route "Managed Caddy route matches ${_fj_host} -> 127.0.0.1:${_fj_port} with internal TLS."
   else
@@ -1487,9 +1505,56 @@ verify_forgejo() {
     fi
   fi
   if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+    local _fj_runner_cfg_perms _fj_runner_registration_perms
     systemctl is-active --quiet forgejo-runner.service 2>/dev/null \
       && vr ok forgejo runner "Forgejo Actions runner active." \
       || vr fail forgejo runner "Forgejo runner unit installed but not active. Run: sudo systemctl restart forgejo-runner"
+    systemctl is-active --quiet docker.service 2>/dev/null \
+      && vr ok forgejo runner_docker_service "Docker service active for the Forgejo runner." \
+      || vr fail forgejo runner_docker_service "Docker service is not active. Run: sudo systemctl restart docker"
+    forgejo_runner_in_docker_group \
+      && vr ok forgejo runner_docker_group "forgejo-runner belongs to the docker group." \
+      || vr fail forgejo runner_docker_group "forgejo-runner is not in the docker group. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    if [[ -s /var/lib/forgejo-runner/.runner ]]; then
+      vr ok forgejo runner_registration "Forgejo runner registration is present."
+    elif (( EUID != 0 )) \
+        && [[ -d /var/lib/forgejo-runner && ! -x /var/lib/forgejo-runner ]]; then
+      vr fail forgejo runner_registration "Runner registration is not inspectable without root. Re-run: sudo ./${SCRIPT_NAME} verify forgejo"
+    else
+      vr fail forgejo runner_registration "Runner registration is missing or empty. Re-run the Forgejo runner install."
+    fi
+    _fj_runner_registration_perms="$(
+      stat -c '%U:%G %a' /var/lib/forgejo-runner/.runner 2>/dev/null || true
+    )"
+    [[ "${_fj_runner_registration_perms}" == "forgejo-runner:forgejo-runner 600" ]] \
+      && vr ok forgejo runner_registration_perms "Runner registration permissions correct (forgejo-runner:forgejo-runner 600)." \
+      || vr fail forgejo runner_registration_perms "Runner registration permissions are incorrect or not inspectable (${_fj_runner_registration_perms:-?}). Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    _fj_runner_cfg_perms="$(
+      stat -c '%U:%G %a' /var/lib/forgejo-runner/config.yaml 2>/dev/null || true
+    )"
+    [[ "${_fj_runner_cfg_perms}" == "root:forgejo-runner 640" ]] \
+      && vr ok forgejo runner_config_perms "Managed runner config permissions correct (root:forgejo-runner 640)." \
+      || vr fail forgejo runner_config_perms "Managed runner config permissions are incorrect or not inspectable (${_fj_runner_cfg_perms:-?}). Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    forgejo_runner_config_is_managed \
+      && vr ok forgejo runner_config "Runner uses the conservative managed same-host configuration." \
+      || vr fail forgejo runner_config "Runner config is missing, not inspectable, or differs from the managed same-host configuration. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    forgejo_runner_uses_managed_config \
+      && vr ok forgejo runner_exec "Runner service loads the managed configuration." \
+      || vr fail forgejo runner_exec "Runner service does not load /var/lib/forgejo-runner/config.yaml. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    if forgejo_runner_has_docker_access; then
+      vr ok forgejo runner_docker_access "forgejo-runner can access the Docker daemon."
+    elif (( EUID != 0 )); then
+      vr fail forgejo runner_docker_access "Docker access as forgejo-runner is not inspectable without root. Re-run with sudo."
+    else
+      vr fail forgejo runner_docker_access "forgejo-runner cannot access the Docker daemon. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    fi
+    if forgejo_runner_declared_successfully; then
+      vr ok forgejo runner_declared "The current runner invocation declared successfully to Forgejo."
+    elif (( EUID != 0 )); then
+      vr fail forgejo runner_declared "The current runner declaration is not inspectable without root. Re-run with sudo."
+    else
+      vr fail forgejo runner_declared "The current runner invocation has not declared successfully. Check: sudo journalctl -u forgejo-runner"
+    fi
   fi
 }
 
