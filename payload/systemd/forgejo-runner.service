@@ -1,16 +1,16 @@
 [Unit]
 Description=Forgejo Actions runner (Ubuntu Zombie optional component)
-Documentation=https://forgejo.org/docs/latest/admin/runner-installation/
+Documentation=https://forgejo.org/docs/latest/admin/actions/installation/binary/
 After=network-online.target docker.service forgejo.service
 Wants=network-online.target
-Requires=docker.service
+Requires=docker.service forgejo.service
 
 [Service]
 Type=simple
 User=forgejo-runner
 Group=forgejo-runner
 WorkingDirectory=/var/lib/forgejo-runner
-ExecStart=/usr/local/bin/forgejo-runner daemon
+ExecStart=/usr/local/bin/forgejo-runner -c /var/lib/forgejo-runner/config.yaml daemon
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

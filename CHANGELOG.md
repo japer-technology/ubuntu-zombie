@@ -8,6 +8,30 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Forgejo runner convergence
+
+- **Safe same-host runner defaults:** co-located runners now load a managed,
+  root-owned configuration with one-job capacity, host networking for the
+  loopback Forgejo callback path, privileged containers and arbitrary volumes
+  disabled, no Docker socket mounted into jobs, and the all-interface cache
+  proxy disabled. The systemd unit requires both Docker and Forgejo and
+  explicitly loads that configuration.
+- **Runner readiness verification:** installation now rejects empty
+  registrations and fails unless the current service invocation declares to
+  Forgejo. Verify and doctor also check registration, protected config,
+  exact effective service arguments, unit and boot state, Docker
+  service/group access, and the current declaration. Re-runs preserve runner
+  intent from the component manifest or installed artifacts.
+- **Fail-closed lifecycle repair:** all Forgejo lifecycle helpers are defined
+  before early subcommand dispatch, protected files are reported as
+  uninspectable rather than missing for non-root diagnostics, and install and
+  repair refuse to reconstruct Forgejo when `app.ini` is missing, empty, or
+  lacks the preserved database password or security secrets.
+- **Systemd override convergence:** the exact obsolete runner
+  `override.conf` from the documented repair is removed automatically;
+  other drop-ins are preserved and reported instead of silently overriding
+  the managed unit.
+
 ### Installer dependencies
 
 - **Earendil modules now track npm `latest`:** every install and repair

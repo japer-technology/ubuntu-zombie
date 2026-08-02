@@ -157,13 +157,17 @@ The first component is the **Forgejo server**
 (`ZOMBIE_INSTALL_FORGEJO`): a git forge backed by PostgreSQL, running
 as the dedicated `git` system user under a hardened `forgejo.service`
 unit, plus an optional co-located Actions runner
-(`ZOMBIE_INSTALL_FORGEJO_RUNNER`, Docker executor, `forgejo-runner`
-system user). Its trust boundary differs from the chat service: the
-Forgejo process is loopback-only, while Caddy is the **network-listening
-service** on HTTPS port `443`. Avahi publishes the machine's `.local`
+(`ZOMBIE_INSTALL_FORGEJO_RUNNER`, restricted Docker executor,
+`forgejo-runner` system user). Its trust boundary differs from the chat
+service: the Forgejo process is loopback-only, while Caddy is the
+**network-listening service** on HTTPS port `443`. Avahi publishes the
+machine's `.local`
 name, Caddy terminates a certificate from its internal CA, and the
-installer exports only the public CA root for clients to trust. These
-services are sandboxed
+installer exports only the public CA root for clients to trust. Runner job
+containers use host networking to reach Forgejo's loopback endpoint, so the
+runner is restricted to trusted repositories even though privileged
+containers, arbitrary volumes, job access to the Docker socket, and the
+runner's all-interface cache proxy are disabled. These services are sandboxed
 (`NoNewPrivileges`, `ProtectSystem=full`, scoped `ReadWritePaths`) —
 the opposite of the deliberately unsandboxed chat unit. Its secrets
 live only in `/etc/forgejo/app.ini` (`root:git`, `640`). The policy

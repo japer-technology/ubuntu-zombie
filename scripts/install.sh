@@ -115,10 +115,9 @@ LOCAL_LLM_MODEL=""
 # sections, receipt records, verify/doctor/repair checks, and a reversal
 # path in uninstall.sh. Forgejo is the first component; more will follow.
 #
-# Forgejo: a self-hosted git forge backed by PostgreSQL, listening on the
-# normal network interfaces (this is a service for people on the LAN, not
-# a loopback-only agent surface). Optionally a Forgejo Actions runner is
-# co-located on the same host using the standard Docker-based executor.
+# Forgejo: a self-hosted git forge backed by PostgreSQL. Forgejo itself stays
+# on loopback; Caddy is the LAN-facing HTTPS endpoint. Optionally a Forgejo
+# Actions runner is co-located on the same host using the Docker executor.
 ZOMBIE_INSTALL_FORGEJO="${ZOMBIE_INSTALL_FORGEJO:-0}"
 ZOMBIE_INSTALL_FORGEJO_RUNNER="${ZOMBIE_INSTALL_FORGEJO_RUNNER:-0}"
 ZOMBIE_INSTALL_LLAMA="${ZOMBIE_INSTALL_LLAMA:-0}"
@@ -536,6 +535,21 @@ legacy_forgejo_present() {
     || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]
 }
 
+established_forgejo_state_present() {
+  local path
+  [[ -f /etc/systemd/system/forgejo.service \
+      || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" \
+      || -s /etc/forgejo/app.ini ]] \
+    && return 0
+  for path in /var/lib/forgejo/data/forgejo-repositories \
+      /var/lib/forgejo/data/lfs; do
+    [[ -d "${path}" ]] || continue
+    find "${path}" -mindepth 1 -print -quit 2>/dev/null | grep -q . \
+      && return 0
+  done
+  return 1
+}
+
 llama_installation_is_managed() {
   local marker
   for marker in /etc/llama.cpp/managed-by-ubuntu-zombie \
@@ -754,7 +768,7 @@ Optional components (all default 0 / off; see options/ for the roadmap):
                               backed by PostgreSQL, reachable over LAN HTTPS
                               through Caddy and mDNS/Avahi.
   ZOMBIE_INSTALL_FORGEJO_RUNNER=1  also install a Forgejo Actions runner on
-                              the same host (standard Docker executor).
+                              the same host (restricted Docker executor).
                               Requires ZOMBIE_INSTALL_FORGEJO=1.
   FORGEJO_HTTP_PORT=<n>       Forgejo loopback backend port (default 3000).
   FORGEJO_ADMIN_USER=<name>   initial admin account (default forgejo-admin).
@@ -996,6 +1010,35 @@ is_valid_forgejo_runner_labels() {
 # the intentionally root-owned configuration.
 is_valid_forgejo_jwt_secret() {
   [[ "$1" =~ ^[A-Za-z0-9_-]{43}$ ]]
+}
+
+# Read one key from one section of an ini file (first match wins), so
+# same-named keys in other sections (e.g. NAME/USER/PASSWD) never leak.
+ini_get() {
+  local file="$1" section="$2" key="$3"
+  awk -F' = ' -v s="[${section}]" -v k="${key}" '
+    $0 == s {in_s=1; next}
+    /^\[/   {in_s=0}
+    in_s && $1 == k {print $2; exit}
+  ' "${file}" 2>/dev/null
+}
+
+forgejo_config_file_has_recovery_material() {
+  local file="$1"
+  local db_password secret_key internal_token jwt_secret lfs_jwt_secret
+  [[ -s "${file}" ]] || return 1
+  db_password="$(ini_get "${file}" database PASSWD || true)"
+  secret_key="$(ini_get "${file}" security SECRET_KEY || true)"
+  internal_token="$(ini_get "${file}" security INTERNAL_TOKEN || true)"
+  jwt_secret="$(ini_get "${file}" oauth2 JWT_SECRET || true)"
+  lfs_jwt_secret="$(ini_get "${file}" server LFS_JWT_SECRET || true)"
+  [[ -n "${db_password}" && -n "${secret_key}" && -n "${internal_token}" ]] \
+    && is_valid_forgejo_jwt_secret "${jwt_secret}" \
+    && is_valid_forgejo_jwt_secret "${lfs_jwt_secret}"
+}
+
+forgejo_config_has_recovery_material() {
+  forgejo_config_file_has_recovery_material /etc/forgejo/app.ini
 }
 
 forgejo_url_host() {
@@ -1268,6 +1311,304 @@ validate_noninteractive() {
   [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] || return 0
 }
 
+# Forgejo lifecycle helpers must be defined before the early
+# verify/doctor/repair dispatch below.
+caddyfile_has_forgejo_route() {
+  # Return success only for one managed block containing the expected
+  # host, loopback backend port, and internal-TLS directive.
+  local caddyfile="$1" host="$2" port="$3"
+  [[ -r "${caddyfile}" ]] || return 1
+  awk -v host="${host}" -v port="${port}" '
+    BEGIN {
+      begin_marker = "# BEGIN install.sh Forgejo"
+      end_marker = "# END install.sh Forgejo"
+    }
+    $0 == begin_marker {
+      begin_count++
+      managed = 1
+      next
+    }
+    $0 == end_marker {
+      end_count++
+      managed = 0
+      next
+    }
+    managed {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == "https://" host " {") site_count++
+      if (line == "tls internal") tls_count++
+      if (line == "reverse_proxy 127.0.0.1:" port) proxy_count++
+    }
+    END {
+      exit !(begin_count == 1 && end_count == 1 && !managed \
+        && site_count == 1 && tls_count == 1 && proxy_count == 1)
+    }
+  ' "${caddyfile}"
+}
+
+caddy_configuration_is_valid() {
+  # Validate as the caller when possible, with passwordless sudo as the
+  # non-root doctor fallback.
+  command -v caddy >/dev/null 2>&1 || return 1
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
+      >/dev/null 2>&1 \
+    || sudo -n caddy validate --config /etc/caddy/Caddyfile \
+      --adapter caddyfile >/dev/null 2>&1
+}
+
+caddy_exported_ca_is_current() {
+  # Return success only when the client export matches Caddy's active root.
+  local active_ca=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+  local exported_ca=/etc/forgejo/caddy-local-ca.crt
+  cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null \
+    || sudo -n cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null
+}
+
+_caddyfile_is_packaged_default() {
+  awk '
+    /^[[:space:]]*($|#)/ { next }
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      content[++count] = line
+    }
+    END {
+      exit !(count == 4 \
+        && content[1] == ":80 {" \
+        && content[2] == "root * /usr/share/caddy" \
+        && content[3] == "file_server" \
+        && content[4] == "}")
+    }
+  ' "$1"
+}
+
+# lifecycle-helper: forgejo-caddy-configure begin
+configure_forgejo_lan_https() {
+  local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
+  local caddy_begin_count caddy_end_count
+  host="$(forgejo_url_host)"
+  FORGEJO_URL_HOST="${host}"
+
+  if [[ -f /etc/forgejo/app.ini ]]; then
+    sed -i \
+      -e 's|^HTTP_ADDR = .*|HTTP_ADDR = 127.0.0.1|' \
+      -e "s|^DOMAIN = .*|DOMAIN = ${host}|" \
+      -e "s|^ROOT_URL = .*|ROOT_URL = https://${host}/|" \
+      /etc/forgejo/app.ini
+    chown root:git /etc/forgejo/app.ini
+    chmod 640 /etc/forgejo/app.ini
+  fi
+
+  [[ -f /etc/caddy/Caddyfile ]] || install -m 644 /dev/null /etc/caddy/Caddyfile
+  if _caddyfile_is_packaged_default /etc/caddy/Caddyfile; then
+    install -m 644 -o root -g root /dev/null /etc/caddy/Caddyfile
+  fi
+  caddy_begin="# BEGIN install.sh Forgejo"
+  caddy_end="# END install.sh Forgejo"
+  read -r caddy_begin_count caddy_end_count < <(
+    awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
+      BEGIN { begin_count = 0; end_count = 0 }
+      $0 == begin { begin_count++ }
+      $0 == end { end_count++ }
+      END { print begin_count + 0, end_count + 0 }
+    ' /etc/caddy/Caddyfile
+  )
+  if (( caddy_begin_count != caddy_end_count )); then
+    die "Caddyfile contains an incomplete managed Forgejo block. Restore or remove that block manually, then re-run repair forgejo." 1
+  fi
+  caddy_tmp="$(mktemp)"
+  awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
+    BEGIN { managed = 0 }
+    $0 == begin { managed = 1; next }
+    $0 == end { managed = 0; next }
+    !managed { print }
+  ' /etc/caddy/Caddyfile > "${caddy_tmp}"
+  cat >> "${caddy_tmp}" <<EOF
+${caddy_begin}
+# Managed by ${SCRIPT_NAME}. Forgejo stays on loopback; Caddy is the LAN edge.
+https://${host} {
+	tls internal
+	reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}
+}
+${caddy_end}
+EOF
+  if cmp -s "${caddy_tmp}" /etc/caddy/Caddyfile; then
+    rm -f "${caddy_tmp}"
+  else
+    install -m 644 -o root -g root "${caddy_tmp}" /etc/caddy/Caddyfile
+    rm -f "${caddy_tmp}"
+  fi
+  rm -f /etc/caddy/conf.d/forgejo.caddy
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null \
+    || die "Caddy configuration validation failed; /etc/caddy/Caddyfile was not activated." 1
+
+  install -d -m 755 -o root -g root /etc/avahi/services
+  avahi_tmp="$(mktemp)"
+  cat > "${avahi_tmp}" <<EOF
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">Forgejo on %h</name>
+  <service>
+    <type>_https._tcp</type>
+    <port>443</port>
+  </service>
+</service-group>
+EOF
+  if [[ -f /etc/avahi/services/forgejo.service ]] \
+      && cmp -s "${avahi_tmp}" /etc/avahi/services/forgejo.service; then
+    rm -f "${avahi_tmp}"
+  else
+    install -m 644 -o root -g root "${avahi_tmp}" \
+      /etc/avahi/services/forgejo.service
+    rm -f "${avahi_tmp}"
+  fi
+
+  systemctl enable --now avahi-daemon.service >/dev/null 2>&1 \
+    || die "Avahi failed to start; see journalctl -u avahi-daemon." 1
+  systemctl restart forgejo.service \
+    || die "Forgejo failed to apply its HTTPS public URL; see journalctl -u forgejo." 1
+  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
+       "http://127.0.0.1:${FORGEJO_HTTP_PORT}/api/healthz"; then
+    die "Forgejo did not become healthy after applying its HTTPS public URL; see journalctl -u forgejo." 1
+  fi
+  systemctl enable --now caddy.service >/dev/null 2>&1 \
+    || die "Caddy failed to start; see journalctl -u caddy." 1
+  systemctl reload-or-restart caddy.service \
+    || die "Caddy failed to load the Forgejo HTTPS configuration; see journalctl -u caddy." 1
+
+  ca_source=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+  retry 6 1 -- test -r "${ca_source}" \
+    || die "Caddy did not create its local CA certificate; see journalctl -u caddy." 1
+  install -m 644 -o root -g root "${ca_source}" \
+    /etc/forgejo/caddy-local-ca.crt
+  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
+       --cacert /etc/forgejo/caddy-local-ca.crt \
+       --resolve "${host}:443:127.0.0.1" \
+       "https://${host}/api/healthz"; then
+    die "Forgejo HTTPS endpoint did not become healthy; see journalctl -u caddy and journalctl -u forgejo." 1
+  fi
+}
+# lifecycle-helper: forgejo-caddy-configure end
+
+forgejo_runner_config_is_managed() {
+  [[ -r "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+      && -r /var/lib/forgejo-runner/config.yaml ]] \
+    && cmp -s "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+      /var/lib/forgejo-runner/config.yaml
+}
+
+forgejo_manifest_has_runner() {
+  local manifest="${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}"
+  valid_component_manifest_entry "${manifest}" "${COMPONENT_FORGEJO}" \
+    && [[ "$(_read_manifest_value "${manifest}" suboptions)" == "runner" ]]
+}
+
+forgejo_runner_is_expected() {
+  [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+    || forgejo_manifest_has_runner \
+    || [[ -x /usr/local/bin/forgejo-runner \
+      || -f /etc/systemd/system/forgejo-runner.service ]]
+}
+
+restore_forgejo_runner_intent() {
+  is_selected_component "${COMPONENT_FORGEJO}" || return 0
+  forgejo_runner_is_expected || return 0
+  ZOMBIE_INSTALL_FORGEJO_RUNNER=1
+}
+
+forgejo_runner_drop_in_paths() {
+  local loaded
+  loaded="$(
+    systemctl show forgejo-runner.service --property=DropInPaths --value \
+      2>/dev/null || true
+  )"
+  {
+    tr ' ' '\n' <<<"${loaded}"
+    find /etc/systemd/system/forgejo-runner.service.d -maxdepth 1 \
+      \( -type f -o -type l \) -name '*.conf' -print 2>/dev/null || true
+  } | awk 'NF && !seen[$0]++'
+}
+
+_forgejo_runner_drop_in_is_obsolete() {
+  local drop_in="$1"
+  [[ -f "${drop_in}" ]] || return 1
+  awk '
+    /^[[:space:]]*($|#|;)/ { next }
+    {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      content[++count] = line
+    }
+    END {
+      exit !(count == 3 \
+        && content[1] == "[Service]" \
+        && content[2] == "ExecStart=" \
+        && content[3] == "ExecStart=/usr/local/bin/forgejo-runner -c /var/lib/forgejo-runner/config.yaml daemon")
+    }
+  ' "${drop_in}"
+}
+
+remove_obsolete_forgejo_runner_drop_in() {
+  local drop_in=/etc/systemd/system/forgejo-runner.service.d/override.conf
+  _forgejo_runner_drop_in_is_obsolete "${drop_in}" || return 0
+  rm -f "${drop_in}"
+  rmdir /etc/systemd/system/forgejo-runner.service.d 2>/dev/null || true
+  info "Removed the obsolete Forgejo runner systemd override."
+  note_changed
+}
+
+forgejo_runner_uses_managed_config() {
+  local exec_start expected
+  expected="path=/usr/local/bin/forgejo-runner ; argv[]=/usr/local/bin/forgejo-runner -c /var/lib/forgejo-runner/config.yaml daemon ;"
+  exec_start="$(
+    systemctl show forgejo-runner.service --property=ExecStart --value \
+      2>/dev/null || true
+  )"
+  [[ "${exec_start}" == *"${expected}"* ]]
+}
+
+forgejo_runner_in_docker_group() {
+  id -nG forgejo-runner 2>/dev/null \
+    | tr ' ' '\n' \
+    | grep -Fx docker >/dev/null
+}
+
+forgejo_runner_has_docker_access() {
+  if (( EUID == 0 )); then
+    runuser -u forgejo-runner -- /usr/bin/docker info \
+      --format '{{.ServerVersion}}' >/dev/null 2>&1
+  else
+    sudo -n -u forgejo-runner -- /usr/bin/docker info \
+      --format '{{.ServerVersion}}' >/dev/null 2>&1
+  fi
+}
+
+forgejo_runner_declared_successfully() {
+  local invocation_id
+  systemctl is-active --quiet forgejo-runner.service 2>/dev/null || return 1
+  invocation_id="$(
+    systemctl show forgejo-runner.service --property=InvocationID --value \
+      2>/dev/null || true
+  )"
+  [[ "${invocation_id}" =~ ^[[:xdigit:]]{32}$ ]] || return 1
+  if journalctl --quiet --no-pager \
+      "_SYSTEMD_INVOCATION_ID=${invocation_id}" 2>/dev/null \
+      | awk 'index($0, "declared successfully") { found = 1 }
+             END { exit !found }'; then
+    return 0
+  fi
+  (( EUID != 0 )) \
+    && sudo -n journalctl --quiet --no-pager \
+      "_SYSTEMD_INVOCATION_ID=${invocation_id}" 2>/dev/null \
+      | awk 'index($0, "declared successfully") { found = 1 }
+             END { exit !found }'
+}
+
 # ---------------------------------------------------------------------------
 # Subcommand: verify}
 
@@ -1302,34 +1643,57 @@ verify_forgejo() {
   [[ -f /etc/systemd/system/forgejo.service ]] \
     && vr ok forgejo service_unit "Forgejo service unit present." \
     || vr fail forgejo service_unit "Forgejo service unit missing."
-  local _fj_svc_active=0 _fj_dir_perms _fj_cfg_perms _fj_port
+  local _fj_svc_active=0 _fj_config_readable=0
+  local _fj_config_uninspectable=0 _fj_dir_perms _fj_cfg_perms _fj_port
   local _fj_host _fj_root_url _fj_http_addr
   systemctl is-active --quiet forgejo.service 2>/dev/null \
     && { vr ok forgejo service_active "Forgejo service active."; _fj_svc_active=1; } \
     || vr fail forgejo service_active "Forgejo service not active."
-  [[ -f /etc/forgejo/app.ini ]] \
-    && vr ok forgejo config "Forgejo config present." \
-    || vr fail forgejo config "Forgejo config missing."
+  if [[ -r /etc/forgejo/app.ini ]]; then
+    vr ok forgejo config "Forgejo config present and readable."
+    _fj_config_readable=1
+  elif (( EUID != 0 )) && [[ -d /etc/forgejo && ! -x /etc/forgejo ]]; then
+    vr fail forgejo config "Forgejo config is not inspectable without root. Re-run: sudo ./${SCRIPT_NAME} verify forgejo"
+    _fj_config_uninspectable=1
+  elif [[ -f /etc/forgejo/app.ini ]]; then
+    vr fail forgejo config "Forgejo config is not readable. Re-run: sudo ./${SCRIPT_NAME} verify forgejo"
+    _fj_config_uninspectable=1
+  else
+    vr fail forgejo config "Forgejo config missing."
+  fi
   _fj_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
   _fj_cfg_perms="$(stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null || true)"
   if [[ "${_fj_dir_perms}" == "root:git 750" && "${_fj_cfg_perms}" == "root:git 640" ]]; then
     vr ok forgejo config_perms "Forgejo config permissions correct (root:git 750/640)."
-  elif [[ -n "${_fj_dir_perms}${_fj_cfg_perms}" ]]; then
+  elif (( _fj_config_uninspectable )); then
+    vr fail forgejo config_perms "Forgejo config permissions are not inspectable without root. Re-run: sudo ./${SCRIPT_NAME} verify forgejo"
+  else
     vr fail forgejo config_perms "Forgejo config permissions incorrect (${_fj_dir_perms:-?}/${_fj_cfg_perms:-?}). Run: sudo ./${SCRIPT_NAME} repair forgejo"
+  fi
+  if (( _fj_config_readable )) && forgejo_config_has_recovery_material; then
+    vr ok forgejo config_recovery "Forgejo config contains the preserved database credential and security secrets."
+  elif (( _fj_config_uninspectable )); then
+    vr fail forgejo config_recovery "Forgejo recovery material is not inspectable without root. Re-run with sudo."
+  else
+    vr fail forgejo config_recovery "Forgejo config is missing required recovery material. Recover the original app.ini from backup."
   fi
   systemctl is-active --quiet postgresql 2>/dev/null \
     && vr ok forgejo db "PostgreSQL active." \
     || vr fail forgejo db "PostgreSQL not running (Forgejo needs it). Run: sudo systemctl start postgresql"
-  _fj_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-  _fj_port="${_fj_port:-3000}"
-  _fj_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-  _fj_root_url="$(awk -F' = ' '/^ROOT_URL/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-  _fj_http_addr="$(awk -F' = ' '/^HTTP_ADDR/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-  if [[ -n "${_fj_host}" && "${_fj_root_url}" == "https://${_fj_host}/" \
-      && "${_fj_http_addr}" == "127.0.0.1" ]]; then
-    vr ok forgejo public_url "Forgejo uses HTTPS at ${_fj_root_url}; backend is loopback-only."
-  else
-    vr fail forgejo public_url "Forgejo HTTPS URL or loopback bind is incorrect. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+  _fj_port=3000
+  _fj_host=""
+  if (( _fj_config_readable )); then
+    _fj_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_port="${_fj_port:-3000}"
+    _fj_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_root_url="$(awk -F' = ' '/^ROOT_URL/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    _fj_http_addr="$(awk -F' = ' '/^HTTP_ADDR/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+    if [[ -n "${_fj_host}" && "${_fj_root_url}" == "https://${_fj_host}/" \
+        && "${_fj_http_addr}" == "127.0.0.1" ]]; then
+      vr ok forgejo public_url "Forgejo uses HTTPS at ${_fj_root_url}; backend is loopback-only."
+    else
+      vr fail forgejo public_url "Forgejo HTTPS URL or loopback bind is incorrect. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    fi
   fi
   command -v caddy >/dev/null 2>&1 \
     && vr ok forgejo caddy_binary "Caddy binary present." \
@@ -1343,7 +1707,9 @@ verify_forgejo() {
   systemctl is-active --quiet caddy.service 2>/dev/null \
     && vr ok forgejo caddy "Caddy HTTPS reverse proxy active." \
     || vr fail forgejo caddy "Caddy reverse proxy not active. Run: sudo systemctl restart caddy"
-  if [[ -n "${_fj_host}" ]] \
+  if (( ! _fj_config_readable )); then
+    vr fail forgejo caddy_route "Managed Caddy route cannot be checked without readable Forgejo configuration. Re-run with sudo."
+  elif [[ -n "${_fj_host}" ]] \
       && caddyfile_has_forgejo_route /etc/caddy/Caddyfile "${_fj_host}" "${_fj_port}"; then
     vr ok forgejo caddy_route "Managed Caddy route matches ${_fj_host} -> 127.0.0.1:${_fj_port} with internal TLS."
   else
@@ -1382,10 +1748,73 @@ verify_forgejo() {
       fi
     fi
   fi
-  if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+  if forgejo_runner_is_expected; then
+    local _fj_runner_cfg_perms _fj_runner_drop_ins
+    local _fj_runner_registration_perms
+    [[ -x /usr/local/bin/forgejo-runner ]] \
+      && vr ok forgejo runner_binary "Forgejo runner binary present." \
+      || vr fail forgejo runner_binary "Forgejo runner binary missing. Re-run the Forgejo runner install."
+    [[ -f /etc/systemd/system/forgejo-runner.service ]] \
+      && vr ok forgejo runner_unit "Forgejo runner service unit present." \
+      || vr fail forgejo runner_unit "Forgejo runner service unit missing. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    systemctl is-enabled --quiet forgejo-runner.service 2>/dev/null \
+      && vr ok forgejo runner_enabled "Forgejo runner enabled at boot." \
+      || vr fail forgejo runner_enabled "Forgejo runner is not enabled at boot. Run: sudo ./${SCRIPT_NAME} repair forgejo"
     systemctl is-active --quiet forgejo-runner.service 2>/dev/null \
       && vr ok forgejo runner "Forgejo Actions runner active." \
       || vr fail forgejo runner "Forgejo runner unit installed but not active. Run: sudo systemctl restart forgejo-runner"
+    systemctl is-active --quiet docker.service 2>/dev/null \
+      && vr ok forgejo runner_docker_service "Docker service active for the Forgejo runner." \
+      || vr fail forgejo runner_docker_service "Docker service is not active. Run: sudo systemctl restart docker"
+    forgejo_runner_in_docker_group \
+      && vr ok forgejo runner_docker_group "forgejo-runner belongs to the docker group." \
+      || vr fail forgejo runner_docker_group "forgejo-runner is not in the docker group. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    if [[ -s /var/lib/forgejo-runner/.runner ]]; then
+      vr ok forgejo runner_registration "Forgejo runner registration is present."
+    elif (( EUID != 0 )) \
+        && [[ -d /var/lib/forgejo-runner && ! -x /var/lib/forgejo-runner ]]; then
+      vr fail forgejo runner_registration "Runner registration is not inspectable without root. Re-run: sudo ./${SCRIPT_NAME} verify forgejo"
+    else
+      vr fail forgejo runner_registration "Runner registration is missing or empty. Re-run the Forgejo runner install."
+    fi
+    _fj_runner_registration_perms="$(
+      stat -c '%U:%G %a' /var/lib/forgejo-runner/.runner 2>/dev/null || true
+    )"
+    [[ "${_fj_runner_registration_perms}" == "forgejo-runner:forgejo-runner 600" ]] \
+      && vr ok forgejo runner_registration_perms "Runner registration permissions correct (forgejo-runner:forgejo-runner 600)." \
+      || vr fail forgejo runner_registration_perms "Runner registration permissions are incorrect or not inspectable (${_fj_runner_registration_perms:-?}). Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    _fj_runner_cfg_perms="$(
+      stat -c '%U:%G %a' /var/lib/forgejo-runner/config.yaml 2>/dev/null || true
+    )"
+    [[ "${_fj_runner_cfg_perms}" == "root:forgejo-runner 640" ]] \
+      && vr ok forgejo runner_config_perms "Managed runner config permissions correct (root:forgejo-runner 640)." \
+      || vr fail forgejo runner_config_perms "Managed runner config permissions are incorrect or not inspectable (${_fj_runner_cfg_perms:-?}). Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    forgejo_runner_config_is_managed \
+      && vr ok forgejo runner_config "Runner uses the conservative managed same-host configuration." \
+      || vr fail forgejo runner_config "Runner config is missing, not inspectable, or differs from the managed same-host configuration. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    forgejo_runner_uses_managed_config \
+      && vr ok forgejo runner_exec "Runner service loads the managed configuration." \
+      || vr fail forgejo runner_exec "Runner service does not load /var/lib/forgejo-runner/config.yaml. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    _fj_runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+    if [[ -z "${_fj_runner_drop_ins}" ]]; then
+      vr ok forgejo runner_drop_ins "Runner service has no unmanaged systemd drop-ins."
+    else
+      vr fail forgejo runner_drop_ins "Runner service has unmanaged systemd drop-ins: ${_fj_runner_drop_ins//$'\n'/ }. Reconcile them, then run: sudo ./${SCRIPT_NAME} repair forgejo"
+    fi
+    if forgejo_runner_has_docker_access; then
+      vr ok forgejo runner_docker_access "forgejo-runner can access the Docker daemon."
+    elif (( EUID != 0 )); then
+      vr fail forgejo runner_docker_access "Docker access as forgejo-runner is not inspectable without root. Re-run with sudo."
+    else
+      vr fail forgejo runner_docker_access "forgejo-runner cannot access the Docker daemon. Run: sudo ./${SCRIPT_NAME} repair forgejo"
+    fi
+    if forgejo_runner_declared_successfully; then
+      vr ok forgejo runner_declared "The current runner invocation declared successfully to Forgejo."
+    elif (( EUID != 0 )); then
+      vr fail forgejo runner_declared "The current runner declaration is not inspectable without root. Re-run with sudo."
+    else
+      vr fail forgejo runner_declared "The current runner invocation has not declared successfully. Check: sudo journalctl -u forgejo-runner"
+    fi
   fi
 }
 
@@ -1526,8 +1955,24 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo "Forgejo installed but not running. Likely causes: port in use, DB auth, or migrations not run. Fix: sudo systemctl restart forgejo"
       fi
+      local forgejo_config_readable=0 forgejo_config_uninspectable=0
       local forgejo_dir_perms forgejo_config_perms
-      forgejo_dir_perms="$(stat -c '%U:%G %a' /etc/forgejo 2>/dev/null || true)"
+      if [[ -r /etc/forgejo/app.ini ]]; then
+        forgejo_config_readable=1
+      elif (( EUID != 0 )) && [[ -d /etc/forgejo && ! -x /etc/forgejo ]]; then
+        forgejo_config_uninspectable=1
+        dr warn forgejo forgejo_config_file "Forgejo config is not inspectable without root. Re-run: sudo ./${SCRIPT_NAME} doctor forgejo"
+      elif [[ -f /etc/forgejo/app.ini ]]; then
+        forgejo_config_uninspectable=1
+        dr warn forgejo forgejo_config_file "Forgejo config is not readable. Re-run: sudo ./${SCRIPT_NAME} doctor forgejo"
+      else
+        dr warn forgejo forgejo_config_file "Forgejo config is missing; do not restart Forgejo. Recover app.ini from backup before repair."
+      fi
+      forgejo_dir_perms="$(
+        stat -c '%U:%G %a' /etc/forgejo 2>/dev/null \
+          || sudo -n stat -c '%U:%G %a' /etc/forgejo 2>/dev/null \
+          || true
+      )"
       forgejo_config_perms="$(
         stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
           || sudo -n stat -c '%U:%G %a' /etc/forgejo/app.ini 2>/dev/null \
@@ -1535,18 +1980,30 @@ cmd_doctor() {
       )"
       if [[ "${forgejo_dir_perms}" == "root:git 750" && "${forgejo_config_perms}" == "root:git 640" ]]; then
         dr ok forgejo forgejo_config "Forgejo config permissions are root:git 750/640."
-      elif [[ -n "${forgejo_config_perms}" ]]; then
+      elif (( forgejo_config_uninspectable )); then
+        dr warn forgejo forgejo_config "Forgejo config permissions are not inspectable without root."
+      else
         dr warn forgejo forgejo_config "Forgejo config permissions are ${forgejo_dir_perms:-unknown}/${forgejo_config_perms}; expected root:git 750/640. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+      fi
+      if (( forgejo_config_readable )) \
+          && forgejo_config_has_recovery_material; then
+        dr ok forgejo forgejo_config_recovery "Forgejo config contains the preserved database credential and security secrets."
+      elif (( forgejo_config_uninspectable )); then
+        dr warn forgejo forgejo_config_recovery "Forgejo recovery material is not inspectable without root."
+      else
+        dr warn forgejo forgejo_config_recovery "Forgejo config is missing required recovery material. Recover the original app.ini from backup."
       fi
       if systemctl is-active --quiet postgresql 2>/dev/null; then
         dr ok forgejo forgejo_db "PostgreSQL active."
       else
         dr warn forgejo forgejo_db "PostgreSQL not running (Forgejo needs it). Fix: sudo systemctl start postgresql"
       fi
-      local forgejo_host forgejo_port
-      forgejo_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-      forgejo_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-      forgejo_port="${forgejo_port:-3000}"
+      local forgejo_host="" forgejo_port=3000
+      if (( forgejo_config_readable )); then
+        forgejo_host="$(awk -F' = ' '/^DOMAIN/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+        forgejo_port="$(awk -F' = ' '/^HTTP_PORT/{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
+        forgejo_port="${forgejo_port:-3000}"
+      fi
       if command -v caddy >/dev/null 2>&1; then
         dr ok forgejo forgejo_caddy_binary "Caddy binary present."
       else
@@ -1567,7 +2024,9 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_caddy "Caddy is not running. Fix: sudo systemctl restart caddy"
       fi
-      if [[ -n "${forgejo_host}" ]] \
+      if (( ! forgejo_config_readable )); then
+        dr warn forgejo forgejo_caddy_route "Managed Caddy route cannot be checked without readable Forgejo configuration. Re-run with sudo."
+      elif [[ -n "${forgejo_host}" ]] \
           && caddyfile_has_forgejo_route /etc/caddy/Caddyfile "${forgejo_host}" "${forgejo_port}"; then
         dr ok forgejo forgejo_caddy_route "Managed Caddy route matches ${forgejo_host} -> 127.0.0.1:${forgejo_port} with internal TLS."
       else
@@ -1598,11 +2057,80 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_ca_current "Exported and active Caddy local CA roots are missing or do not match. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
-      if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+      if forgejo_runner_is_expected; then
+        local runner_config_perms runner_drop_ins
+        if [[ -x /usr/local/bin/forgejo-runner ]]; then
+          dr ok forgejo forgejo_runner_binary "Forgejo runner binary present."
+        else
+          dr warn forgejo forgejo_runner_binary "Forgejo runner binary missing. Re-run the Forgejo runner install."
+        fi
+        if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+          dr ok forgejo forgejo_runner_unit "Forgejo runner service unit present."
+        else
+          dr warn forgejo forgejo_runner_unit "Forgejo runner service unit missing. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        if systemctl is-enabled --quiet forgejo-runner.service 2>/dev/null; then
+          dr ok forgejo forgejo_runner_enabled "Forgejo runner enabled at boot."
+        else
+          dr warn forgejo forgejo_runner_enabled "Forgejo runner is not enabled at boot. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
         if systemctl is-active --quiet forgejo-runner.service 2>/dev/null; then
           dr ok forgejo forgejo_runner "Forgejo Actions runner active."
         else
           dr warn forgejo forgejo_runner "Forgejo runner not running. Check registration and Docker. Fix: sudo systemctl restart forgejo-runner"
+        fi
+        if systemctl is-active --quiet docker.service 2>/dev/null; then
+          dr ok forgejo forgejo_runner_docker "Docker service active."
+        else
+          dr warn forgejo forgejo_runner_docker "Docker is not running. Fix: sudo systemctl restart docker"
+        fi
+        if forgejo_runner_in_docker_group; then
+          dr ok forgejo forgejo_runner_group "forgejo-runner belongs to the docker group."
+        else
+          dr warn forgejo forgejo_runner_group "forgejo-runner is not in the docker group. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        if [[ -s /var/lib/forgejo-runner/.runner ]]; then
+          dr ok forgejo forgejo_runner_registration "Runner registration is present."
+        elif (( EUID != 0 )) \
+            && [[ -d /var/lib/forgejo-runner && ! -x /var/lib/forgejo-runner ]]; then
+          dr warn forgejo forgejo_runner_registration "Runner registration is not inspectable without root. Re-run with sudo."
+        else
+          dr warn forgejo forgejo_runner_registration "Runner registration is missing or empty. Re-run the Forgejo runner install."
+        fi
+        runner_config_perms="$(
+          stat -c '%U:%G %a' /var/lib/forgejo-runner/config.yaml \
+            2>/dev/null || true
+        )"
+        if [[ "${runner_config_perms}" == "root:forgejo-runner 640" ]] \
+            && forgejo_runner_config_is_managed; then
+          dr ok forgejo forgejo_runner_config "Conservative managed runner configuration is active on disk."
+        else
+          dr warn forgejo forgejo_runner_config "Runner config is missing, not inspectable, or unmanaged (${runner_config_perms:-unknown}). Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        if forgejo_runner_uses_managed_config; then
+          dr ok forgejo forgejo_runner_exec "Runner service loads the managed configuration."
+        else
+          dr warn forgejo forgejo_runner_exec "Runner service ignores the managed configuration. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+        if [[ -z "${runner_drop_ins}" ]]; then
+          dr ok forgejo forgejo_runner_drop_ins "Runner service has no unmanaged systemd drop-ins."
+        else
+          dr warn forgejo forgejo_runner_drop_ins "Runner service has unmanaged systemd drop-ins: ${runner_drop_ins//$'\n'/ }. Reconcile them before repair."
+        fi
+        if forgejo_runner_has_docker_access; then
+          dr ok forgejo forgejo_runner_docker_access "forgejo-runner can access the Docker daemon."
+        elif (( EUID != 0 )); then
+          dr warn forgejo forgejo_runner_docker_access "Docker access as forgejo-runner is not inspectable without root. Re-run with sudo."
+        else
+          dr warn forgejo forgejo_runner_docker_access "forgejo-runner cannot access Docker. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
+        fi
+        if forgejo_runner_declared_successfully; then
+          dr ok forgejo forgejo_runner_declared "Current runner invocation declared successfully to Forgejo."
+        elif (( EUID != 0 )); then
+          dr warn forgejo forgejo_runner_declared "Runner declaration is not inspectable without root. Re-run with sudo."
+        else
+          dr warn forgejo forgejo_runner_declared "Current runner invocation has not declared successfully. Check: sudo journalctl -u forgejo-runner"
         fi
       fi
     else
@@ -1733,19 +2261,57 @@ cmd_repair() {
       warn "  To install: sudo ./${SCRIPT_NAME} install forgejo"
     fi
     if [[ -d /etc/forgejo || -d /var/lib/forgejo ]]; then
-      [[ -d /etc/forgejo ]] && { chown root:git /etc/forgejo; chmod 750 /etc/forgejo; }
-      [[ -f /etc/forgejo/app.ini ]] && { chown root:git /etc/forgejo/app.ini; chmod 640 /etc/forgejo/app.ini; }
+      forgejo_config_has_recovery_material \
+        || die "Refusing to repair or restart Forgejo because /etc/forgejo/app.ini is missing, empty, or incomplete. Recover the original config from backup; recreating its secrets requires a separate, backed-up recovery procedure." \
+          1
+      chown root:git /etc/forgejo
+      chmod 750 /etc/forgejo
+      chown root:git /etc/forgejo/app.ini
+      chmod 640 /etc/forgejo/app.ini
       [[ -d /var/lib/forgejo ]] && { chown -R git:git /var/lib/forgejo; chmod 750 /var/lib/forgejo; }
       if [[ -f /etc/systemd/system/forgejo.service ]]; then
         systemctl daemon-reload
-        systemctl restart forgejo.service || warn "Forgejo failed to restart; see journalctl -u forgejo"
+        systemctl restart forgejo.service \
+          || die "Forgejo failed to restart; see journalctl -u forgejo." 1
       fi
-      if [[ -f /etc/forgejo/app.ini ]]; then
-        configure_forgejo_lan_https
-      fi
-      if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
-        chown -R forgejo-runner:forgejo-runner /var/lib/forgejo-runner 2>/dev/null || true
-        systemctl restart forgejo-runner.service || warn "Forgejo runner failed to restart; see journalctl -u forgejo-runner"
+      configure_forgejo_lan_https
+      if forgejo_runner_is_expected; then
+        [[ -x /usr/local/bin/forgejo-runner ]] \
+          || die "Forgejo runner is expected but its binary is missing; re-run the Forgejo runner install." 1
+        id forgejo-runner >/dev/null 2>&1 \
+          || die "Forgejo runner is expected but user forgejo-runner is missing; re-run the Forgejo runner install." 1
+        [[ -s /var/lib/forgejo-runner/.runner ]] \
+          || die "Forgejo runner registration is missing or empty; re-run the Forgejo runner install." 1
+        usermod -aG docker forgejo-runner
+        chown forgejo-runner:forgejo-runner /var/lib/forgejo-runner \
+          /var/lib/forgejo-runner/.runner
+        chmod 750 /var/lib/forgejo-runner
+        chmod 600 /var/lib/forgejo-runner/.runner
+        install -m 640 -o root -g forgejo-runner \
+          "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+          /var/lib/forgejo-runner/config.yaml
+        install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
+          /etc/systemd/system/forgejo-runner.service
+        remove_obsolete_forgejo_runner_drop_in
+        systemctl enable --now docker.service >/dev/null 2>&1 \
+          || die "Docker Engine failed to start; see journalctl -u docker." 1
+        systemctl daemon-reload
+        local runner_drop_ins
+        runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+        [[ -z "${runner_drop_ins}" ]] \
+          || die "Refusing to start the Forgejo runner with unmanaged systemd drop-ins: ${runner_drop_ins//$'\n'/ }. Reconcile or remove them, then re-run repair." 1
+        forgejo_runner_uses_managed_config \
+          || die "The effective forgejo-runner unit ignores the managed config; inspect systemd drop-ins." 1
+        if ! forgejo_runner_in_docker_group \
+            || ! forgejo_runner_has_docker_access; then
+          die "forgejo-runner cannot access the Docker daemon after repair." 1
+        fi
+        systemctl enable forgejo-runner.service >/dev/null \
+          || die "Could not enable forgejo-runner.service during repair." 1
+        systemctl restart forgejo-runner.service \
+          || die "Forgejo runner failed to restart; see journalctl -u forgejo-runner." 1
+        retry 6 2 -- forgejo_runner_declared_successfully \
+          || die "Forgejo runner restarted but did not declare successfully; see journalctl -u forgejo-runner." 1
       fi
       ok "Forgejo ownership and services re-asserted."
     fi
@@ -1886,7 +2452,7 @@ Optional components enabled:
 EOF
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
     cat <<EOF
-  Actions runner  co-located Forgejo Actions runner (Docker executor)
+  Actions runner  co-located Forgejo Actions runner (restricted Docker executor)
                   Docker: reuse existing engine, otherwise apt: docker.io
                   binary: /usr/local/bin/forgejo-runner
                   registers against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels:
@@ -2178,7 +2744,7 @@ _toggle_forgejo_runner() {
   else
     ZOMBIE_INSTALL_FORGEJO_RUNNER=1
     warn "Co-locating the runner with the forge is contrary to upstream guidance; enabling deliberately."
-    info "Forgejo Actions runner enabled (standard Docker executor)."
+    info "Forgejo Actions runner enabled (restricted Docker executor)."
   fi
 }
 
@@ -2202,7 +2768,7 @@ print_options_table() {
     field "1) Forgejo server"  "enabled"
     field "2) Forgejo port"    "${FORGEJO_HTTP_PORT}/tcp (loopback backend)"
     field "3) Forgejo admin"   "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD_SOURCE}"))"
-    field "4) Actions runner"  "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo 'disabled')"
+    field "4) Actions runner"  "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (restricted Docker executor, same host)' || echo 'disabled')"
     field "5) Database"        "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}"))"
     if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
       field "6) Versions"      "Forgejo ${FORGEJO_VERSION:-latest release}, runner ${FORGEJO_RUNNER_VERSION:-latest release} (labels ${FORGEJO_RUNNER_LABELS})"
@@ -2533,7 +3099,7 @@ review_forgejo_parameters() {
     field "1) Forgejo port"   "${FORGEJO_HTTP_PORT}/tcp (loopback backend)"
     field "2) Forgejo admin"  "${FORGEJO_ADMIN_USER} <${FORGEJO_ADMIN_EMAIL}> (password $(password_source_label "${FORGEJO_ADMIN_PASSWORD_SOURCE}"))"
     field "3) PostgreSQL database" "PostgreSQL ${FORGEJO_DB_NAME} (role ${FORGEJO_DB_USER}, password $(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}"))"
-    field "4) Actions runner" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (Docker executor, same host)' || echo disabled)"
+    field "4) Actions runner" "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (restricted Docker executor, same host)' || echo disabled)"
     field "5) Versions"       "Forgejo ${FORGEJO_VERSION:-latest release}"
     field "6) Core records"   "${LOG_FILE}; $([[ "${ZOMBIE_RECEIPT}" == "1" ]] && echo "${RECEIPT_FILE}" || echo 'receipt disabled')"
     field "   Host"           "${ID:-?} ${VERSION_ID:-?} ($(dpkg --print-architecture 2>/dev/null || uname -m))" "${C_DIM}"
@@ -2615,7 +3181,7 @@ receipt_start_forgejo() {
     "$(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}")"
   printf 'Forgejo version  : %s\n' "${FORGEJO_VERSION:-latest (resolved at install)}"
   printf 'Actions runner   : %s\n' \
-    "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, Docker executor)' || echo disabled)"
+    "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, restricted Docker executor)' || echo disabled)"
 }
 
 receipt_start_llama() {
@@ -2762,6 +3328,7 @@ trap 'on_error ${LINENO}' ERR
 validate_component_registry \
   "validate review dry_run receipt_start receipt_finish install manifest final legacy verify doctor repair phase_count"
 resolve_lifecycle_targets_from_manifest
+restore_forgejo_runner_intent
 validate_config
 
 if [[ "${SUBCOMMAND}" != "uninstall" ]] \
@@ -2802,6 +3369,12 @@ fi
 
 require_root
 validate_noninteractive
+
+if is_selected_component "${COMPONENT_FORGEJO}" \
+    && established_forgejo_state_present \
+    && ! forgejo_config_has_recovery_material; then
+  die "Refusing to install or update Forgejo because existing component state was found but /etc/forgejo/app.ini is missing, empty, or incomplete. Recover the original config from backup; secret rotation requires a separate, backed-up recovery procedure." 1
+fi
 
 if is_selected_component "${COMPONENT_FORGEJO}" && legacy_forgejo_present; then
   warn "An existing Forgejo installation was detected. The installer will update it in place and preserve repositories and database data."
@@ -2999,7 +3572,7 @@ if [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]; then
   printf '  - Install Forgejo + PostgreSQL with LAN HTTPS at https://%s/\n' \
     "$(forgejo_url_host)"
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
-    printf '  - Install a co-located Forgejo Actions runner (Docker executor)\n'
+    printf '  - Install a co-located Forgejo Actions runner (restricted Docker executor)\n'
   fi
   if [[ "${ZOMBIE_INSTALL_LLAMA}" == "1" ]]; then
     printf '  - Install the independent PC-wide llama.cpp service on 127.0.0.1:8080\n'
@@ -3600,17 +4173,6 @@ forgejo_latest_release() {
   return 1
 }
 
-# Read one key from one section of an ini file (first match wins), so
-# same-named keys in other sections (e.g. NAME/USER/PASSWD) never leak.
-ini_get() {
-  local file="$1" section="$2" key="$3"
-  awk -F' = ' -v s="[${section}]" -v k="${key}" '
-    $0 == s {in_s=1; next}
-    /^\[/   {in_s=0}
-    in_s && $1 == k {print $2; exit}
-  ' "${file}" 2>/dev/null
-}
-
 # Download a Codeberg release asset and verify its published .sha256 sum.
 # Usage: codeberg_fetch_verified <url> <dest_tmp_file>
 codeberg_fetch_verified() {
@@ -3680,185 +4242,6 @@ EOF
   apt_get update
 }
 
-_caddyfile_is_packaged_default() {
-  awk '
-    /^[[:space:]]*($|#)/ { next }
-    {
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      content[++count] = line
-    }
-    END {
-      exit !(count == 4 \
-        && content[1] == ":80 {" \
-        && content[2] == "root * /usr/share/caddy" \
-        && content[3] == "file_server" \
-        && content[4] == "}")
-    }
-  ' "$1"
-}
-
-caddyfile_has_forgejo_route() {
-  # Return success only for one managed block containing the expected
-  # host, loopback backend port, and internal-TLS directive.
-  local caddyfile="$1" host="$2" port="$3"
-  [[ -r "${caddyfile}" ]] || return 1
-  awk -v host="${host}" -v port="${port}" '
-    BEGIN {
-      begin_marker = "# BEGIN install.sh Forgejo"
-      end_marker = "# END install.sh Forgejo"
-    }
-    $0 == begin_marker {
-      begin_count++
-      managed = 1
-      next
-    }
-    $0 == end_marker {
-      end_count++
-      managed = 0
-      next
-    }
-    managed {
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      if (line == "https://" host " {") site_count++
-      if (line == "tls internal") tls_count++
-      if (line == "reverse_proxy 127.0.0.1:" port) proxy_count++
-    }
-    END {
-      exit !(begin_count == 1 && end_count == 1 && !managed \
-        && site_count == 1 && tls_count == 1 && proxy_count == 1)
-    }
-  ' "${caddyfile}"
-}
-
-caddy_configuration_is_valid() {
-  # Validate as the caller when possible, with passwordless sudo as the
-  # non-root doctor fallback.
-  command -v caddy >/dev/null 2>&1 || return 1
-  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
-      >/dev/null 2>&1 \
-    || sudo -n caddy validate --config /etc/caddy/Caddyfile \
-      --adapter caddyfile >/dev/null 2>&1
-}
-
-caddy_exported_ca_is_current() {
-  # Return success only when the client export matches Caddy's active root.
-  local active_ca=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
-  local exported_ca=/etc/forgejo/caddy-local-ca.crt
-  cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null \
-    || sudo -n cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null
-}
-
-configure_forgejo_lan_https() {
-  local host caddy_tmp avahi_tmp ca_source caddy_begin caddy_end
-  local caddy_begin_count caddy_end_count
-  host="$(forgejo_url_host)"
-  FORGEJO_URL_HOST="${host}"
-
-  if [[ -f /etc/forgejo/app.ini ]]; then
-    sed -i \
-      -e 's|^HTTP_ADDR = .*|HTTP_ADDR = 127.0.0.1|' \
-      -e "s|^DOMAIN = .*|DOMAIN = ${host}|" \
-      -e "s|^ROOT_URL = .*|ROOT_URL = https://${host}/|" \
-      /etc/forgejo/app.ini
-    chown root:git /etc/forgejo/app.ini
-    chmod 640 /etc/forgejo/app.ini
-  fi
-
-  [[ -f /etc/caddy/Caddyfile ]] || install -m 644 /dev/null /etc/caddy/Caddyfile
-  if _caddyfile_is_packaged_default /etc/caddy/Caddyfile; then
-    install -m 644 -o root -g root /dev/null /etc/caddy/Caddyfile
-  fi
-  caddy_begin="# BEGIN install.sh Forgejo"
-  caddy_end="# END install.sh Forgejo"
-  read -r caddy_begin_count caddy_end_count < <(
-    awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
-      BEGIN { begin_count = 0; end_count = 0 }
-      $0 == begin { begin_count++ }
-      $0 == end { end_count++ }
-      END { print begin_count + 0, end_count + 0 }
-    ' /etc/caddy/Caddyfile
-  )
-  if (( caddy_begin_count != caddy_end_count )); then
-    die "Caddyfile contains an incomplete managed Forgejo block. Restore or remove that block manually, then re-run repair forgejo." 1
-  fi
-  caddy_tmp="$(mktemp)"
-  awk -v begin="${caddy_begin}" -v end="${caddy_end}" '
-    BEGIN { managed = 0 }
-    $0 == begin { managed = 1; next }
-    $0 == end { managed = 0; next }
-    !managed { print }
-  ' /etc/caddy/Caddyfile > "${caddy_tmp}"
-  cat >> "${caddy_tmp}" <<EOF
-${caddy_begin}
-# Managed by ${SCRIPT_NAME}. Forgejo stays on loopback; Caddy is the LAN edge.
-https://${host} {
-	tls internal
-	reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}
-}
-${caddy_end}
-EOF
-  if cmp -s "${caddy_tmp}" /etc/caddy/Caddyfile; then
-    rm -f "${caddy_tmp}"
-  else
-    install -m 644 -o root -g root "${caddy_tmp}" /etc/caddy/Caddyfile
-    rm -f "${caddy_tmp}"
-  fi
-  rm -f /etc/caddy/conf.d/forgejo.caddy
-  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null \
-    || die "Caddy configuration validation failed; /etc/caddy/Caddyfile was not activated." 1
-
-  install -d -m 755 -o root -g root /etc/avahi/services
-  avahi_tmp="$(mktemp)"
-  cat > "${avahi_tmp}" <<EOF
-<?xml version="1.0" standalone="no"?>
-<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<service-group>
-  <name replace-wildcards="yes">Forgejo on %h</name>
-  <service>
-    <type>_https._tcp</type>
-    <port>443</port>
-  </service>
-</service-group>
-EOF
-  if [[ -f /etc/avahi/services/forgejo.service ]] \
-      && cmp -s "${avahi_tmp}" /etc/avahi/services/forgejo.service; then
-    rm -f "${avahi_tmp}"
-  else
-    install -m 644 -o root -g root "${avahi_tmp}" \
-      /etc/avahi/services/forgejo.service
-    rm -f "${avahi_tmp}"
-  fi
-
-  systemctl enable --now avahi-daemon.service >/dev/null 2>&1 \
-    || die "Avahi failed to start; see journalctl -u avahi-daemon." 1
-  systemctl restart forgejo.service \
-    || die "Forgejo failed to apply its HTTPS public URL; see journalctl -u forgejo." 1
-  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
-       "http://127.0.0.1:${FORGEJO_HTTP_PORT}/api/healthz"; then
-    die "Forgejo did not become healthy after applying its HTTPS public URL; see journalctl -u forgejo." 1
-  fi
-  systemctl enable --now caddy.service >/dev/null 2>&1 \
-    || die "Caddy failed to start; see journalctl -u caddy." 1
-  systemctl reload-or-restart caddy.service \
-    || die "Caddy failed to load the Forgejo HTTPS configuration; see journalctl -u caddy." 1
-
-  ca_source=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
-  retry 6 1 -- test -r "${ca_source}" \
-    || die "Caddy did not create its local CA certificate; see journalctl -u caddy." 1
-  install -m 644 -o root -g root "${ca_source}" \
-    /etc/forgejo/caddy-local-ca.crt
-  if ! retry 6 2 -- curl -fsS --max-time 5 -o /dev/null \
-       --cacert /etc/forgejo/caddy-local-ca.crt \
-       --resolve "${host}:443:127.0.0.1" \
-       "https://${host}/api/healthz"; then
-    die "Forgejo HTTPS endpoint did not become healthy; see journalctl -u caddy and journalctl -u forgejo." 1
-  fi
-}
-
 # component-hook: forgejo begin
 install_forgejo() {
   # option-sections: forgejo begin
@@ -3922,6 +4305,20 @@ install_forgejo() {
 
   systemctl enable --now postgresql >/dev/null 2>&1 \
     || die "PostgreSQL failed to start; see journalctl -u postgresql." 1
+  _fj_role_exists=0
+  _fj_database_exists=0
+  if runuser -u postgres -- psql -tAc \
+       "SELECT 1 FROM pg_roles WHERE rolname = '${FORGEJO_DB_USER}'" | grep -q 1; then
+    _fj_role_exists=1
+  fi
+  if runuser -u postgres -- psql -tAc \
+       "SELECT 1 FROM pg_database WHERE datname = '${FORGEJO_DB_NAME}'" | grep -q 1; then
+    _fj_database_exists=1
+  fi
+  if (( _fj_role_exists || _fj_database_exists )) \
+      && ! forgejo_config_has_recovery_material; then
+    die "Refusing to reuse the existing Forgejo database or role without a complete /etc/forgejo/app.ini. Recover the original config from backup; secret rotation requires a separate, backed-up recovery procedure." 1
+  fi
   # Password precedence: an operator-supplied FORGEJO_DB_PASSWORD wins;
   # otherwise reuse the password from an existing app.ini so re-runs never
   # desync the credential; otherwise generate it exactly once and record it
@@ -3933,16 +4330,6 @@ install_forgejo() {
   if [[ -z "${FORGEJO_DB_PASSWORD}" ]]; then
     FORGEJO_DB_PASSWORD="$(openssl rand -hex 24)"
     FORGEJO_DB_PASSWORD_SOURCE="generated"
-  fi
-  _fj_role_exists=0
-  _fj_database_exists=0
-  if runuser -u postgres -- psql -tAc \
-       "SELECT 1 FROM pg_roles WHERE rolname = '${FORGEJO_DB_USER}'" | grep -q 1; then
-    _fj_role_exists=1
-  fi
-  if runuser -u postgres -- psql -tAc \
-       "SELECT 1 FROM pg_database WHERE datname = '${FORGEJO_DB_NAME}'" | grep -q 1; then
-    _fj_database_exists=1
   fi
   if (( _fj_role_exists || _fj_database_exists )); then
     warn "Existing PostgreSQL state was detected for Forgejo (database ${FORGEJO_DB_NAME}, role ${FORGEJO_DB_USER}). It will be reused, never dropped."
@@ -4164,6 +4551,10 @@ EOF
     fi
     usermod -aG docker forgejo-runner
     install -d -m 750 -o forgejo-runner -g forgejo-runner /var/lib/forgejo-runner
+    forgejo_runner_in_docker_group \
+      || die "Could not add forgejo-runner to the docker group." 1
+    forgejo_runner_has_docker_access \
+      || die "forgejo-runner cannot access the Docker daemon after group setup." 1
     if [[ -n "${FORGEJO_RUNNER_VERSION}" ]]; then
       _runner_version="${FORGEJO_RUNNER_VERSION}"
       info "Forgejo runner release pinned to ${_runner_version}."
@@ -4193,30 +4584,69 @@ EOF
 
     section "Register Forgejo runner"
 
-    if [[ -f /var/lib/forgejo-runner/.runner ]]; then
+    if forgejo_runner_config_is_managed \
+        && [[ "$(stat -c '%U:%G %a' /var/lib/forgejo-runner/config.yaml \
+          2>/dev/null || true)" == "root:forgejo-runner 640" ]]; then
+      info "Managed same-host runner configuration already up to date."
+      note_satisfied
+    else
+      install -m 640 -o root -g forgejo-runner \
+        "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+        /var/lib/forgejo-runner/config.yaml
+      ok "Installed conservative same-host runner configuration."
+      note_changed
+    fi
+
+    if [[ -s /var/lib/forgejo-runner/.runner ]]; then
       info "Runner already registered; skipping registration."
       note_satisfied
     else
+      if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+        systemctl stop forgejo-runner.service \
+          || die "Could not stop the existing Forgejo runner before re-registering it." 1
+      fi
+      rm -f /var/lib/forgejo-runner/.runner
       _runner_token="$(runuser -u git -- /usr/local/bin/forgejo \
         --config /etc/forgejo/app.ini --work-path /var/lib/forgejo \
         actions generate-runner-token)"
-      runuser -u forgejo-runner -- bash -c \
-        "cd /var/lib/forgejo-runner && /usr/local/bin/forgejo-runner register \
-           --no-interactive \
-           --instance 'http://127.0.0.1:${FORGEJO_HTTP_PORT}/' \
-           --token '${_runner_token}' \
-           --name '$(hostname)' \
-           --labels '${FORGEJO_RUNNER_LABELS}'"
+      if ! runuser -u forgejo-runner -- /usr/local/bin/forgejo-runner \
+          -c /var/lib/forgejo-runner/config.yaml register \
+          --no-interactive \
+          --instance "http://127.0.0.1:${FORGEJO_HTTP_PORT}/" \
+          --token "${_runner_token}" \
+          --name "$(hostname)" \
+          --labels "${FORGEJO_RUNNER_LABELS}"; then
+        unset _runner_token
+        die "Forgejo runner registration failed." 1
+      fi
       unset _runner_token
+      [[ -s /var/lib/forgejo-runner/.runner ]] \
+        || die "Forgejo runner registration produced an empty state file." 1
       ok "Runner registered against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels: ${FORGEJO_RUNNER_LABELS}"
       note_changed
     fi
+    chown forgejo-runner:forgejo-runner /var/lib/forgejo-runner/.runner
+    chmod 600 /var/lib/forgejo-runner/.runner
     install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
       /etc/systemd/system/forgejo-runner.service
+    remove_obsolete_forgejo_runner_drop_in
     systemctl daemon-reload
-    systemctl enable --now forgejo-runner.service \
-      || warn "forgejo-runner service did not start; see journalctl -u forgejo-runner."
-    ok "Forgejo Actions runner installed and enabled."
+    local _runner_drop_ins
+    _runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+    [[ -z "${_runner_drop_ins}" ]] \
+      || die "Refusing to start the Forgejo runner with unmanaged systemd drop-ins: ${_runner_drop_ins//$'\n'/ }. Reconcile or remove them, then re-run install." 1
+    forgejo_runner_uses_managed_config \
+      || die "The effective forgejo-runner unit does not load the managed config; inspect systemd drop-ins." 1
+    systemctl enable forgejo-runner.service >/dev/null \
+      || die "Could not enable forgejo-runner.service." 1
+    systemctl restart forgejo-runner.service \
+      || die "forgejo-runner service did not start; see journalctl -u forgejo-runner." 1
+    if ! retry 6 2 -- forgejo_runner_declared_successfully; then
+      systemctl disable --now forgejo-runner.service >/dev/null 2>&1 \
+        || warn "Could not disable the runner after its declaration failed."
+      die "Forgejo runner did not declare successfully; it was stopped. See journalctl -u forgejo-runner." 1
+    fi
+    ok "Forgejo Actions runner declared successfully and is enabled."
     # option-sections: forgejo-runner end
   fi
 }
