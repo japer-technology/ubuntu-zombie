@@ -1322,6 +1322,56 @@ caddy_exported_ca_is_current() {
     || sudo -n cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null
 }
 
+forgejo_runner_config_is_managed() {
+  [[ -r "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+      && -r /var/lib/forgejo-runner/config.yaml ]] \
+    && cmp -s "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+      /var/lib/forgejo-runner/config.yaml
+}
+
+forgejo_runner_uses_managed_config() {
+  systemctl show forgejo-runner.service --property=ExecStart --value \
+      2>/dev/null \
+    | grep -F -- '-c /var/lib/forgejo-runner/config.yaml' >/dev/null
+}
+
+forgejo_runner_in_docker_group() {
+  id -nG forgejo-runner 2>/dev/null \
+    | tr ' ' '\n' \
+    | grep -Fx docker >/dev/null
+}
+
+forgejo_runner_has_docker_access() {
+  if (( EUID == 0 )); then
+    runuser -u forgejo-runner -- /usr/bin/docker info \
+      --format '{{.ServerVersion}}' >/dev/null 2>&1
+  else
+    sudo -n -u forgejo-runner -- /usr/bin/docker info \
+      --format '{{.ServerVersion}}' >/dev/null 2>&1
+  fi
+}
+
+forgejo_runner_declared_successfully() {
+  local invocation_id logs
+  systemctl is-active --quiet forgejo-runner.service 2>/dev/null || return 1
+  invocation_id="$(
+    systemctl show forgejo-runner.service --property=InvocationID --value \
+      2>/dev/null || true
+  )"
+  [[ "${invocation_id}" =~ ^[[:xdigit:]]{32}$ ]] || return 1
+  if (( EUID == 0 )); then
+    logs="$(journalctl --quiet --no-pager \
+      "_SYSTEMD_INVOCATION_ID=${invocation_id}" 2>/dev/null || true)"
+  else
+    logs="$(journalctl --quiet --no-pager \
+      "_SYSTEMD_INVOCATION_ID=${invocation_id}" 2>/dev/null \
+      || sudo -n journalctl --quiet --no-pager \
+        "_SYSTEMD_INVOCATION_ID=${invocation_id}" 2>/dev/null \
+      || true)"
+  fi
+  grep -F 'declared successfully' <<<"${logs}" >/dev/null
+}
+
 # ---------------------------------------------------------------------------
 # Subcommand: verify}
 
