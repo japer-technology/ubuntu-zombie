@@ -4350,6 +4350,10 @@ EOF
     fi
     usermod -aG docker forgejo-runner
     install -d -m 750 -o forgejo-runner -g forgejo-runner /var/lib/forgejo-runner
+    forgejo_runner_in_docker_group \
+      || die "Could not add forgejo-runner to the docker group." 1
+    forgejo_runner_has_docker_access \
+      || die "forgejo-runner cannot access the Docker daemon after group setup." 1
     if [[ -n "${FORGEJO_RUNNER_VERSION}" ]]; then
       _runner_version="${FORGEJO_RUNNER_VERSION}"
       info "Forgejo runner release pinned to ${_runner_version}."
@@ -4379,30 +4383,60 @@ EOF
 
     section "Register Forgejo runner"
 
-    if [[ -f /var/lib/forgejo-runner/.runner ]]; then
+    if forgejo_runner_config_is_managed \
+        && [[ "$(stat -c '%U:%G %a' /var/lib/forgejo-runner/config.yaml \
+          2>/dev/null || true)" == "root:forgejo-runner 640" ]]; then
+      info "Managed same-host runner configuration already up to date."
+      note_satisfied
+    else
+      install -m 640 -o root -g forgejo-runner \
+        "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+        /var/lib/forgejo-runner/config.yaml
+      ok "Installed conservative same-host runner configuration."
+      note_changed
+    fi
+
+    if [[ -s /var/lib/forgejo-runner/.runner ]]; then
       info "Runner already registered; skipping registration."
       note_satisfied
     else
+      rm -f /var/lib/forgejo-runner/.runner
       _runner_token="$(runuser -u git -- /usr/local/bin/forgejo \
         --config /etc/forgejo/app.ini --work-path /var/lib/forgejo \
         actions generate-runner-token)"
-      runuser -u forgejo-runner -- bash -c \
-        "cd /var/lib/forgejo-runner && /usr/local/bin/forgejo-runner register \
-           --no-interactive \
-           --instance 'http://127.0.0.1:${FORGEJO_HTTP_PORT}/' \
-           --token '${_runner_token}' \
-           --name '$(hostname)' \
-           --labels '${FORGEJO_RUNNER_LABELS}'"
+      if ! runuser -u forgejo-runner -- /usr/local/bin/forgejo-runner \
+          -c /var/lib/forgejo-runner/config.yaml register \
+          --no-interactive \
+          --instance "http://127.0.0.1:${FORGEJO_HTTP_PORT}/" \
+          --token "${_runner_token}" \
+          --name "$(hostname)" \
+          --labels "${FORGEJO_RUNNER_LABELS}"; then
+        unset _runner_token
+        die "Forgejo runner registration failed." 1
+      fi
       unset _runner_token
+      [[ -s /var/lib/forgejo-runner/.runner ]] \
+        || die "Forgejo runner registration produced an empty state file." 1
       ok "Runner registered against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels: ${FORGEJO_RUNNER_LABELS}"
       note_changed
     fi
+    chown forgejo-runner:forgejo-runner /var/lib/forgejo-runner/.runner
+    chmod 600 /var/lib/forgejo-runner/.runner
     install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
       /etc/systemd/system/forgejo-runner.service
     systemctl daemon-reload
-    systemctl enable --now forgejo-runner.service \
-      || warn "forgejo-runner service did not start; see journalctl -u forgejo-runner."
-    ok "Forgejo Actions runner installed and enabled."
+    forgejo_runner_uses_managed_config \
+      || die "The effective forgejo-runner unit does not load the managed config; inspect systemd drop-ins." 1
+    systemctl enable forgejo-runner.service >/dev/null \
+      || die "Could not enable forgejo-runner.service." 1
+    systemctl restart forgejo-runner.service \
+      || die "forgejo-runner service did not start; see journalctl -u forgejo-runner." 1
+    if ! retry 6 2 -- forgejo_runner_declared_successfully; then
+      systemctl disable --now forgejo-runner.service >/dev/null 2>&1 \
+        || warn "Could not disable the runner after its declaration failed."
+      die "Forgejo runner did not declare successfully; it was stopped. See journalctl -u forgejo-runner." 1
+    fi
+    ok "Forgejo Actions runner declared successfully and is enabled."
     # option-sections: forgejo-runner end
   fi
 }
