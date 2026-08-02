@@ -115,10 +115,9 @@ LOCAL_LLM_MODEL=""
 # sections, receipt records, verify/doctor/repair checks, and a reversal
 # path in uninstall.sh. Forgejo is the first component; more will follow.
 #
-# Forgejo: a self-hosted git forge backed by PostgreSQL, listening on the
-# normal network interfaces (this is a service for people on the LAN, not
-# a loopback-only agent surface). Optionally a Forgejo Actions runner is
-# co-located on the same host using the standard Docker-based executor.
+# Forgejo: a self-hosted git forge backed by PostgreSQL. Forgejo itself stays
+# on loopback; Caddy is the LAN-facing HTTPS endpoint. Optionally a Forgejo
+# Actions runner is co-located on the same host using the Docker executor.
 ZOMBIE_INSTALL_FORGEJO="${ZOMBIE_INSTALL_FORGEJO:-0}"
 ZOMBIE_INSTALL_FORGEJO_RUNNER="${ZOMBIE_INSTALL_FORGEJO_RUNNER:-0}"
 ZOMBIE_INSTALL_LLAMA="${ZOMBIE_INSTALL_LLAMA:-0}"
@@ -1266,6 +1265,61 @@ preflight() {
 
 validate_noninteractive() {
   [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] || return 0
+}
+
+# Read-only Forgejo lifecycle helpers must be defined before the early
+# verify/doctor/repair dispatch below.
+caddyfile_has_forgejo_route() {
+  # Return success only for one managed block containing the expected
+  # host, loopback backend port, and internal-TLS directive.
+  local caddyfile="$1" host="$2" port="$3"
+  [[ -r "${caddyfile}" ]] || return 1
+  awk -v host="${host}" -v port="${port}" '
+    BEGIN {
+      begin_marker = "# BEGIN install.sh Forgejo"
+      end_marker = "# END install.sh Forgejo"
+    }
+    $0 == begin_marker {
+      begin_count++
+      managed = 1
+      next
+    }
+    $0 == end_marker {
+      end_count++
+      managed = 0
+      next
+    }
+    managed {
+      line = $0
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == "https://" host " {") site_count++
+      if (line == "tls internal") tls_count++
+      if (line == "reverse_proxy 127.0.0.1:" port) proxy_count++
+    }
+    END {
+      exit !(begin_count == 1 && end_count == 1 && !managed \
+        && site_count == 1 && tls_count == 1 && proxy_count == 1)
+    }
+  ' "${caddyfile}"
+}
+
+caddy_configuration_is_valid() {
+  # Validate as the caller when possible, with passwordless sudo as the
+  # non-root doctor fallback.
+  command -v caddy >/dev/null 2>&1 || return 1
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
+      >/dev/null 2>&1 \
+    || sudo -n caddy validate --config /etc/caddy/Caddyfile \
+      --adapter caddyfile >/dev/null 2>&1
+}
+
+caddy_exported_ca_is_current() {
+  # Return success only when the client export matches Caddy's active root.
+  local active_ca=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+  local exported_ca=/etc/forgejo/caddy-local-ca.crt
+  cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null \
+    || sudo -n cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -3697,59 +3751,6 @@ _caddyfile_is_packaged_default() {
         && content[4] == "}")
     }
   ' "$1"
-}
-
-caddyfile_has_forgejo_route() {
-  # Return success only for one managed block containing the expected
-  # host, loopback backend port, and internal-TLS directive.
-  local caddyfile="$1" host="$2" port="$3"
-  [[ -r "${caddyfile}" ]] || return 1
-  awk -v host="${host}" -v port="${port}" '
-    BEGIN {
-      begin_marker = "# BEGIN install.sh Forgejo"
-      end_marker = "# END install.sh Forgejo"
-    }
-    $0 == begin_marker {
-      begin_count++
-      managed = 1
-      next
-    }
-    $0 == end_marker {
-      end_count++
-      managed = 0
-      next
-    }
-    managed {
-      line = $0
-      sub(/^[[:space:]]+/, "", line)
-      sub(/[[:space:]]+$/, "", line)
-      if (line == "https://" host " {") site_count++
-      if (line == "tls internal") tls_count++
-      if (line == "reverse_proxy 127.0.0.1:" port) proxy_count++
-    }
-    END {
-      exit !(begin_count == 1 && end_count == 1 && !managed \
-        && site_count == 1 && tls_count == 1 && proxy_count == 1)
-    }
-  ' "${caddyfile}"
-}
-
-caddy_configuration_is_valid() {
-  # Validate as the caller when possible, with passwordless sudo as the
-  # non-root doctor fallback.
-  command -v caddy >/dev/null 2>&1 || return 1
-  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile \
-      >/dev/null 2>&1 \
-    || sudo -n caddy validate --config /etc/caddy/Caddyfile \
-      --adapter caddyfile >/dev/null 2>&1
-}
-
-caddy_exported_ca_is_current() {
-  # Return success only when the client export matches Caddy's active root.
-  local active_ca=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
-  local exported_ca=/etc/forgejo/caddy-local-ca.crt
-  cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null \
-    || sudo -n cmp -s "${active_ca}" "${exported_ca}" 2>/dev/null
 }
 
 configure_forgejo_lan_https() {
