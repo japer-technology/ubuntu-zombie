@@ -538,8 +538,9 @@ the review entirely and use the supplied environment unchanged.
 
 Beyond the baseline, the installer supports **opt-in components**. The
 canonical command grammar is `scripts/install.sh <verb> [component ...]
-[flags]`; public component targets are `zombie`, `forgejo`, and `llama`. Existing
-`ZOMBIE_INSTALL_<COMPONENT>` flags remain supported for automation and
+[flags]`; public component targets are `zombie`, `forgejo`,
+`forgejo-runner`, and `llama`. Existing `ZOMBIE_INSTALL_<COMPONENT>` flags
+remain supported for automation and
 are additive with explicit targets. Every flag defaults to `0`, so a
 default install is unchanged. Enabled components appear in the
 interactive review (item `9) Options` opens a nested menu), the dry-run
@@ -554,6 +555,11 @@ legacy environment selectors are additive and execute in registry order,
 so `install forgejo zombie` and `install zombie forgejo` converge the
 same components. `ZOMBIE_INSTALL_FORGEJO=1 install` remains equivalent
 to the combined path.
+
+`install forgejo-runner` installs the co-located Actions runner and
+automatically selects its required `forgejo` dependency. It does not select
+the zombie component. The legacy `ZOMBIE_INSTALL_FORGEJO_RUNNER=1` selector
+remains additive and resolves to the same component pair.
 
 `install llama` installs a standalone application without selecting
 `zombie`. `ZOMBIE_INSTALL_LLAMA=1` remains an additive compatibility
@@ -614,7 +620,7 @@ The installer writes this hostname route as a marked block in
 | Variable                        | Default                                  | Effect |
 | ------------------------------- | ---------------------------------------- | ------ |
 | `ZOMBIE_INSTALL_FORGEJO`        | `0`                                      | Set to `1` to install Forgejo + PostgreSQL. |
-| `ZOMBIE_INSTALL_FORGEJO_RUNNER` | `0`                                      | Set to `1` to also install a co-located Actions runner for trusted repositories. Requires the server flag. |
+| `ZOMBIE_INSTALL_FORGEJO_RUNNER` | `0`                                      | Add the co-located Actions runner and its required Forgejo server component. |
 | `FORGEJO_HTTP_PORT`             | `3000`                                   | Forgejo loopback web/API port behind Caddy. |
 | `FORGEJO_ADMIN_USER`            | `forgejo-admin`                          | Initial admin account name. |
 | `FORGEJO_ADMIN_EMAIL`           | `forgejo-admin@localhost.localdomain`    | Initial admin email. |
@@ -724,9 +730,10 @@ The manifest is used by `verify`, `doctor`, and `repair` to discover
 installed components when you do not pass explicit targets. Selective
 `uninstall` uses component targets to decide which component to remove:
 `uninstall zombie` removes only the zombie account/runtime,
-`uninstall forgejo` removes only Forgejo, `uninstall llama` removes only
-the standalone local model service, and bare `uninstall` removes all
-managed components.
+`uninstall forgejo-runner` removes only the runner, `uninstall forgejo`
+removes Forgejo and its co-located runner, `uninstall llama` removes only
+the standalone local model service, and bare `uninstall` removes all managed
+components.
 
 `--archive` and `--keep-agent` are lifecycle flags for zombie removal
 only; `uninstall forgejo --archive` and
@@ -757,8 +764,8 @@ scripts/install.sh <verb> [component ...] [flags]
 ```
 
 All verbs honour the same relevant `ZOMBIE_*` environment variables
-documented above. Valid component targets are `zombie`, `forgejo`, and
-`llama`.
+documented above. Valid component targets are `zombie`, `forgejo`,
+`forgejo-runner`, and `llama`.
 
 | Verb        | Effect                                                                |
 | ----------- | --------------------------------------------------------------------- |
@@ -773,6 +780,7 @@ Examples:
 ```bash
 sudo ./scripts/install.sh install zombie
 sudo ./scripts/install.sh install forgejo
+sudo ./scripts/install.sh install forgejo-runner
 sudo ./scripts/install.sh install zombie forgejo
 sudo ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh install
 sudo ./scripts/install.sh verify zombie

@@ -8,6 +8,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Forgejo runner component target
+
+- **Direct runner installation:** `install forgejo-runner` now selects the
+  required Forgejo server dependency and installs the existing restricted,
+  checksum-verified Actions runner without selecting the zombie account or
+  runtime. The target has dedicated dry-run, receipt, manifest, verification,
+  doctor, repair, uninstall, and shell-completion support.
+- **Legacy automation preserved:** `ZOMBIE_INSTALL_FORGEJO_RUNNER=1` remains
+  additive and resolves through the same component lifecycle.
+
 ### Forgejo runner convergence
 
 - **Safe same-host runner defaults:** co-located runners now load a managed,

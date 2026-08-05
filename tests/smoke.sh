@@ -2488,7 +2488,7 @@ run_subcommands() {
       echo "${out}"
       exit 1
     fi
-    for target in zombie forgejo llama; do
+    for target in zombie forgejo forgejo-runner llama; do
       set +e
       out="$(./scripts/install.sh "${sub}" "${target}" 2>&1)"
       rc=$?
@@ -2506,7 +2506,7 @@ run_subcommands() {
   # Component-aware install grammar: targets, flags before/between/after,
   # default selection, explicit forgejo-only planning, env-additive selection,
   # and -- target validation are all safe under --dry-run.
-  local default_out zombie_out forgejo_out llama_out combined_out
+  local default_out zombie_out forgejo_out runner_out llama_out combined_out
   local forgejo_zombie_order_out env_flag_out
   default_out="$(ZOMBIE_COLOR=never ./scripts/install.sh install --dry-run)"
   zombie_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run install zombie)"
@@ -2545,6 +2545,16 @@ run_subcommands() {
     ./scripts/install.sh --dry-run install forgejo)"
   grep -q "docker.io" <<<"${forgejo_out}" \
     || { echo "FAIL: forgejo-only runner dry-run must include Docker" >&2; exit 1; }
+
+  runner_out="$(ZOMBIE_COLOR=never \
+    ./scripts/install.sh --dry-run install forgejo-runner)"
+  grep -q "Components:     forgejo forgejo-runner" <<<"${runner_out}" \
+    || { echo "FAIL: forgejo-runner must resolve its Forgejo dependency" >&2; exit 1; }
+  grep -q "Forgejo runner component" <<<"${runner_out}" \
+    && grep -q "docker.io" <<<"${runner_out}" \
+    || { echo "FAIL: forgejo-runner dry-run must include runner resources" >&2; exit 1; }
+  ! grep -Eq "Agent user:|Time to Live|/opt/ai-zombie" <<<"${runner_out}" \
+    || { echo "FAIL: forgejo-runner dry-run leaked zombie resources" >&2; exit 1; }
 
   combined_out="$(ZOMBIE_COLOR=never ZOMBIE_INSTALL_FORGEJO=1 \
     ./scripts/install.sh --dry-run install zombie)"
@@ -2813,7 +2823,7 @@ component=forgejo
 ubuntu_zombie_version=test
 converged_utc=2026-01-01T00:00:00Z
 component_version=
-suboptions=
+suboptions=runner
 EOF_MANIFEST
   cat > "${manifest_dir}/zombie" <<'EOF_MANIFEST'
 format=1
@@ -2823,6 +2833,23 @@ converged_utc=2026-01-01T00:00:00Z
 component_version=
 suboptions=
 EOF_MANIFEST
+  cat > "${manifest_dir}/forgejo-runner" <<'EOF_MANIFEST'
+format=1
+component=forgejo-runner
+ubuntu_zombie_version=test
+converged_utc=2026-01-01T00:00:00Z
+component_version=
+suboptions=
+EOF_MANIFEST
+
+  out="$(ZOMBIE_COLOR=never ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
+    ./scripts/uninstall.sh forgejo-runner --dry-run 2>&1 || true)"
+  grep -q "forgejo-runner.service" <<<"${out}" \
+    || { echo "FAIL: runner-only dry-run should remove the runner service" >&2; exit 1; }
+  grep -q "clear the legacy runner suboption" <<<"${out}" \
+    || { echo "FAIL: runner uninstall should clear legacy Forgejo runner intent" >&2; exit 1; }
+  ! grep -Eq "forgejo.service|/etc/forgejo|dropdb|dropuser" <<<"${out}" \
+    || { echo "FAIL: runner-only dry-run should not remove Forgejo server state" >&2; exit 1; }
 
   out="$(ZOMBIE_COLOR=never ZOMBIE_COMPONENT_MANIFEST_DIR="${manifest_dir}" \
     ./scripts/uninstall.sh forgejo --dry-run 2>&1 || true)"
@@ -3630,12 +3657,16 @@ EOF
     || { echo "Forgejo uninstall must remove current and legacy Caddy routes" >&2; exit 1; }
   grep -q '/etc/avahi/services/forgejo.service' scripts/uninstall.sh \
     || { echo "Forgejo uninstall must remove its Avahi service" >&2; exit 1; }
-  local confirmation_helper confirmation_out forgejo_hook repair_forgejo_body
+  local confirmation_helper confirmation_out forgejo_hook forgejo_runner_hook
+  local repair_forgejo_body repair_forgejo_runner_body
   forgejo_hook="$(sed -n \
     '/^# component-hook: forgejo begin$/,/^# component-hook: forgejo end$/p' \
     scripts/install.sh)"
   [[ -n "${forgejo_hook}" ]] \
     || { echo "could not extract the Forgejo install hook" >&2; exit 1; }
+  forgejo_runner_hook="$(install_function install_forgejo_runner)"
+  [[ -n "${forgejo_runner_hook}" ]] \
+    || { echo "could not extract the Forgejo runner install hook" >&2; exit 1; }
   awk '
     /configure_caddy_apt_repository$/ { repository = NR }
     /caddy avahi-daemon libnss-mdns/ { packages = NR }
@@ -3699,12 +3730,13 @@ EOF
     }
   ' <<<"${forgejo_hook}" \
     || { echo "missing app.ini must stop database credential rotation" >&2; exit 1; }
-  grep -Fq '[[ -s /var/lib/forgejo-runner/.runner ]]' <<<"${forgejo_hook}" \
+  grep -Fq '[[ -s /var/lib/forgejo-runner/.runner ]]' \
+      <<<"${forgejo_runner_hook}" \
     || { echo "Forgejo install must reject empty runner registrations" >&2; exit 1; }
   grep -Fq 'retry 6 2 -- forgejo_runner_declared_successfully' \
-      <<<"${forgejo_hook}" \
+      <<<"${forgejo_runner_hook}" \
     || { echo "Forgejo install must wait for the current runner declaration" >&2; exit 1; }
-  grep -Fq 'forgejo-runner-config.yaml' <<<"${forgejo_hook}" \
+  grep -Fq 'forgejo-runner-config.yaml' <<<"${forgejo_runner_hook}" \
     || { echo "Forgejo install must deploy the managed runner config" >&2; exit 1; }
   grep -Fq 'Refusing to repair or restart Forgejo because /etc/forgejo/app.ini is missing, empty, or incomplete.' \
       scripts/install.sh \
@@ -3713,11 +3745,15 @@ EOF
     || { echo "Forgejo repair must restore root ownership of runner config" >&2; exit 1; }
   repair_forgejo_body="$(sed -n \
     '/^  repair_forgejo() {$/,/^  repair_llama() {$/p' scripts/install.sh)"
-  grep -Fq 'if forgejo_runner_is_expected; then' \
+  grep -Fq 'if forgejo_runner_is_forgejo_suboption; then' \
       <<<"${repair_forgejo_body}" \
     || { echo "Forgejo repair must honor persisted runner intent" >&2; exit 1; }
+  grep -Fq 'repair_forgejo_runner' <<<"${repair_forgejo_body}" \
+    || { echo "Forgejo repair must dispatch persisted runner repair" >&2; exit 1; }
+  repair_forgejo_runner_body="$(sed -n \
+    '/^  repair_forgejo_runner() {$/,/^  repair_forgejo() {$/p' scripts/install.sh)"
   grep -Fq 'systemctl enable forgejo-runner.service' \
-      <<<"${repair_forgejo_body}" \
+      <<<"${repair_forgejo_runner_body}" \
     || { echo "Forgejo repair must restore runner boot enablement" >&2; exit 1; }
   local docker_conflict_out forgejo_docker_helper docker_stub
   forgejo_docker_helper="$(install_function ensure_forgejo_runner_docker_package)"
@@ -4703,7 +4739,7 @@ run_flags() {
     || { echo "FAIL: install.bash completion has a syntax error" >&2; exit 1; }
   [[ -r scripts/completions/_install.sh ]] \
     || { echo "FAIL: scripts/completions/_install.sh missing" >&2; exit 1; }
-  for component in zombie forgejo llama; do
+  for component in zombie forgejo forgejo-runner llama; do
     grep -q "${component}" scripts/completions/install.bash \
       || { echo "FAIL: bash completion missing ${component}" >&2; exit 1; }
     grep -q "${component}" scripts/completions/_install.sh \

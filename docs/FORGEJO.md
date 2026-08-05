@@ -50,6 +50,9 @@ sudo ./scripts/install.sh install zombie forgejo
 sudo ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh install
 
 # With a co-located Actions runner
+sudo ./scripts/install.sh install forgejo-runner
+
+# Legacy environment-selector form
 sudo ZOMBIE_INSTALL_FORGEJO=1 ZOMBIE_INSTALL_FORGEJO_RUNNER=1 \
   ./scripts/install.sh install
 
@@ -58,9 +61,10 @@ sudo ./scripts/install.sh install forgejo --dry-run
 ```
 
 Component target order does not matter; `install forgejo zombie` and
-`install zombie forgejo` converge on the same result. The runner
-requires the server (`ZOMBIE_INSTALL_FORGEJO_RUNNER=1` only makes
-sense together with the Forgejo component).
+`install zombie forgejo` converge on the same result. The
+`forgejo-runner` target automatically selects its required `forgejo`
+dependency. The legacy runner environment selector resolves to the same
+pair.
 
 ### Interactive review
 
@@ -312,6 +316,11 @@ To upgrade to the latest release, simply re-run the install; to move
 to a specific release, set `FORGEJO_VERSION`. The service is stopped
 before migration and health-checked after.
 
+Because `forgejo-runner` depends on `forgejo`, `install forgejo-runner`
+also converges the server first. On an unpinned installation this can upgrade
+Forgejo and run its normal database migration before the runner is installed.
+Set `FORGEJO_VERSION` when the server version must remain fixed.
+
 ## Files and services installed
 
 | Path | Purpose |
@@ -330,13 +339,17 @@ before migration and health-checked after.
 
 ## Verify, doctor, repair, uninstall
 
-All lifecycle subcommands accept the `forgejo` target:
+All lifecycle subcommands accept the `forgejo` and `forgejo-runner`
+targets:
 
 ```bash
 sudo ./scripts/install.sh verify forgejo    # pass/fail health checks
 sudo ./scripts/install.sh doctor forgejo    # diagnosis with fix hints
 sudo ./scripts/install.sh repair forgejo    # re-assert perms/services
+sudo ./scripts/install.sh verify forgejo-runner
+sudo ./scripts/install.sh repair forgejo-runner
 sudo ./scripts/install.sh uninstall forgejo --dry-run
+sudo ./scripts/install.sh uninstall forgejo-runner --dry-run
 ```
 
 `verify forgejo` checks the binary, unit, service and PostgreSQL

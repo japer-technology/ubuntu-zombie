@@ -15,6 +15,7 @@
 #   sudo ./uninstall.sh                # interactive (remove all managed components)
 #   sudo ./uninstall.sh zombie         # remove only the zombie component
 #   sudo ./uninstall.sh forgejo        # remove only the Forgejo component
+#   sudo ./uninstall.sh forgejo-runner # remove only the Forgejo runner
 #   sudo ./uninstall.sh llama          # remove only the standalone llama
 #   sudo ./uninstall.sh -n|--dry-run   # preview
 #   sudo ./uninstall.sh --archive      # archive then remove
@@ -59,6 +60,7 @@ KEEP_AGENT=0
 TARGET_ARGS=()
 readonly COMPONENT_ZOMBIE="zombie"
 readonly COMPONENT_FORGEJO="forgejo"
+readonly COMPONENT_FORGEJO_RUNNER="forgejo-runner"
 readonly COMPONENT_LLAMA="llama"
 COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
 # Track recoverable failures from the start so early cleanup can continue
@@ -82,9 +84,12 @@ fi
 . "${SCRIPT_DIR}/component-registry.sh"
 component_remove_zombie() { remove_component_zombie; }
 component_remove_forgejo() { remove_component_forgejo; }
+component_remove_forgejo_runner() { remove_component_forgejo_runner; }
 component_remove_llama() { remove_component_llama; }
 register_component "${COMPONENT_ZOMBIE}" "" remove=component_remove_zombie
 register_component "${COMPONENT_FORGEJO}" "" remove=component_remove_forgejo
+register_component "${COMPONENT_FORGEJO_RUNNER}" "${COMPONENT_FORGEJO}" \
+  remove=component_remove_forgejo_runner
 register_component "${COMPONENT_LLAMA}" "" remove=component_remove_llama
 
 component_names() {
@@ -139,6 +144,24 @@ remove_component_manifest() {
   rmdir --ignore-fail-on-non-empty "${manifest_parent_dir}" 2>/dev/null || true
 }
 
+clear_forgejo_runner_suboption() {
+  local path="${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}"
+  local tmp
+  [[ -f "${path}" ]] || return 0
+  grep -Fqx 'suboptions=runner' "${path}" || return 0
+  if (( DRY_RUN )); then
+    run "clear the legacy runner suboption from the Forgejo manifest"
+    return 0
+  fi
+  tmp="$(mktemp "${COMPONENT_MANIFEST_DIR}/.forgejo.XXXXXX")"
+  awk '
+    $0 == "suboptions=runner" { print "suboptions="; next }
+    { print }
+  ' "${path}" > "${tmp}"
+  install -m 644 -o root -g root "${tmp}" "${path}"
+  rm -f "${tmp}"
+}
+
 warn_remaining_components() {
   local target
   (( ${#TARGET_ARGS[@]} > 0 )) || return 0
@@ -170,6 +193,8 @@ Usage:
   sudo ./uninstall.sh -n|--dry-run    # preview
   sudo ./uninstall.sh forgejo --dry-run
                                       # remove only the Forgejo component
+  sudo ./uninstall.sh forgejo-runner
+                                      # remove only the Forgejo runner
   sudo ./uninstall.sh llama
                                       # remove only standalone llama.cpp
   sudo ./uninstall.sh zombie
@@ -364,6 +389,41 @@ confirm() {
   [[ "${ans}" == "YES" ]]
 }
 
+remove_component_forgejo_runner() {
+  local fail_count_before="${UNINSTALL_FAIL_COUNT}"
+
+  if [[ -f /etc/systemd/system/forgejo-runner.service \
+      || -x /usr/local/bin/forgejo-runner \
+      || -d /var/lib/forgejo-runner \
+      || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO_RUNNER}" ]]; then
+    info "Removing Forgejo runner component"
+    run "systemctl disable --now forgejo-runner.service 2>/dev/null || true"
+    run "rm -f /etc/systemd/system/forgejo-runner.service"
+    run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
+    run "rm -f /usr/local/bin/forgejo-runner"
+    if [[ -d /var/lib/forgejo-runner ]]; then
+      remove_tree_checked \
+        "/var/lib/forgejo-runner" \
+        "/var/lib/forgejo-runner (runner state)"
+    fi
+    if id forgejo-runner >/dev/null 2>&1; then
+      if confirm "Remove the forgejo-runner system user?"; then
+        run_or_warn "Remove user forgejo-runner" \
+          "deluser forgejo-runner >/dev/null 2>&1 || userdel forgejo-runner"
+      fi
+    fi
+    ok "Forgejo runner component removal finished."
+  fi
+
+  if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
+    clear_forgejo_runner_suboption
+    remove_component_manifest "${COMPONENT_FORGEJO_RUNNER}"
+  else
+    warn "Keeping Forgejo runner manifest because removal finished with errors."
+  fi
+  warn_remaining_components
+}
+
 remove_component_forgejo() {
   local fail_count_before="${UNINSTALL_FAIL_COUNT}"
   local _fj_db _fj_role _fj_user _fj_has_db_state=0 _fj_postgres_ready=0
@@ -470,6 +530,7 @@ remove_component_forgejo() {
   fi
 
   if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
+    remove_component_manifest "${COMPONENT_FORGEJO_RUNNER}"
     remove_component_manifest "${COMPONENT_FORGEJO}"
   else
     warn "Keeping Forgejo manifest because removal finished with errors."

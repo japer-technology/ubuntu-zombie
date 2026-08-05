@@ -30,7 +30,7 @@ sudo ./scripts/install.sh install
 This is equivalent to the explicit component form
 `sudo ./scripts/install.sh install zombie`. The canonical grammar is
 `scripts/install.sh <verb> [component ...] [flags]`; valid component
-targets are `zombie`, `forgejo`, and `llama`.
+targets are `zombie`, `forgejo`, `forgejo-runner`, and `llama`.
 
 Interactive installs open a parameter review before changing the host.
 Accept the defaults or edit the agent user, install root, chat port,
@@ -67,6 +67,15 @@ sudo ./scripts/install.sh install zombie forgejo
 
 The legacy `ZOMBIE_INSTALL_FORGEJO=1 ./scripts/install.sh install` form
 remains equivalent to that combined command.
+
+To install Forgejo with its co-located Actions runner:
+
+```bash
+sudo ./scripts/install.sh install forgejo-runner
+```
+
+The runner target automatically selects the required `forgejo` component.
+It does not select or install the zombie account and runtime.
 
 ### Install standalone llama.cpp without zombie
 
@@ -171,6 +180,9 @@ sudo ./scripts/install.sh uninstall zombie
 
 # Remove only the Forgejo component, leave zombie running:
 sudo ./scripts/install.sh uninstall forgejo
+
+# Remove only the Forgejo Actions runner:
+sudo ./scripts/install.sh uninstall forgejo-runner
 ```
 
 Selective uninstall targets only the named component. `--archive` and

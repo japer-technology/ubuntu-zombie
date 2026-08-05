@@ -155,11 +155,14 @@ FORGEJO_RUNNER_VERSION="${FORGEJO_RUNNER_VERSION:-}"
 FORGEJO_RUNNER_LABELS="${FORGEJO_RUNNER_LABELS:-ubuntu-latest:docker://node:20-bookworm}"
 # Populated at install time once the release tag is resolved.
 FORGEJO_RESOLVED_VERSION=""
+FORGEJO_RUNNER_RESOLVED_VERSION=""
 
 # True when at least one optional component is enabled — used to keep the
 # default dry-run/receipt/banner output byte-for-byte unchanged otherwise.
 any_option_enabled() {
-  [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" || "${ZOMBIE_INSTALL_LLAMA}" == "1" ]]
+  [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" \
+    || "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" \
+    || "${ZOMBIE_INSTALL_LLAMA}" == "1" ]]
 }
 
 # One-line label for where an optional-component password will come from,
@@ -288,6 +291,7 @@ on_error() {
 # this ordered registry.
 readonly COMPONENT_ZOMBIE="zombie"
 readonly COMPONENT_FORGEJO="forgejo"
+readonly COMPONENT_FORGEJO_RUNNER="forgejo-runner"
 readonly COMPONENT_LLAMA="llama"
 readonly COMPONENT_MANIFEST_FORMAT_VERSION="1"
 COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
@@ -300,42 +304,55 @@ EXPLICIT_TARGETS=0
 
 component_validate_zombie() { validate_zombie_config; }
 component_validate_forgejo() { validate_forgejo_config; }
+component_validate_forgejo_runner() { validate_forgejo_runner_config; }
 component_validate_llama() { validate_llama_config; }
 component_review_zombie() { review_parameters; }
 component_review_forgejo() { review_forgejo_parameters; }
+component_review_forgejo_runner() { review_forgejo_runner_parameters; }
 component_review_llama() { review_llama_parameters; }
 component_dry_run_zombie() { print_zombie_dry_run; }
 component_dry_run_forgejo() { print_forgejo_dry_run; }
+component_dry_run_forgejo_runner() { print_forgejo_runner_dry_run; }
 component_dry_run_llama() { print_llama_dry_run; }
 component_receipt_start_zombie() { receipt_start_zombie; }
 component_receipt_start_forgejo() { receipt_start_forgejo; }
+component_receipt_start_forgejo_runner() { receipt_start_forgejo_runner; }
 component_receipt_start_llama() { receipt_start_llama; }
 component_receipt_finish_zombie() { receipt_finish_zombie; }
 component_receipt_finish_forgejo() { receipt_finish_forgejo; }
+component_receipt_finish_forgejo_runner() { receipt_finish_forgejo_runner; }
 component_receipt_finish_llama() { receipt_finish_llama; }
 component_install_zombie() { install_zombie; }
 component_install_forgejo() { install_forgejo; }
+component_install_forgejo_runner() { install_forgejo_runner; }
 component_install_llama() { install_llama; }
 component_manifest_zombie() { write_zombie_manifest; }
 component_manifest_forgejo() { write_forgejo_manifest; }
+component_manifest_forgejo_runner() { write_forgejo_runner_manifest; }
 component_manifest_llama() { write_llama_manifest; }
 component_final_zombie() { final_zombie_summary; }
 component_final_forgejo() { final_forgejo_summary; }
+component_final_forgejo_runner() { final_forgejo_runner_summary; }
 component_final_llama() { final_llama_summary; }
 component_legacy_zombie() { legacy_zombie_present; }
 component_legacy_forgejo() { legacy_forgejo_present; }
+component_legacy_forgejo_runner() { legacy_forgejo_runner_present; }
 component_legacy_llama() { legacy_llama_present; }
 component_verify_zombie() { verify_zombie; }
 component_verify_forgejo() { verify_forgejo; }
+component_verify_forgejo_runner() { verify_forgejo_runner; }
 component_verify_llama() { verify_llama; }
 component_doctor_zombie() { doctor_zombie; }
 component_doctor_forgejo() { doctor_forgejo; }
+component_doctor_forgejo_runner() { doctor_forgejo_runner; }
 component_doctor_llama() { doctor_llama; }
 component_repair_zombie() { repair_zombie; }
 component_repair_forgejo() { repair_forgejo; }
+component_repair_forgejo_runner() { repair_forgejo_runner; }
 component_repair_llama() { repair_llama; }
 component_phase_count_zombie() { count_zombie_phases; }
 component_phase_count_forgejo() { count_forgejo_phases; }
+component_phase_count_forgejo_runner() { count_forgejo_runner_phases; }
 component_phase_count_llama() { count_llama_phases; }
 
 register_component "${COMPONENT_ZOMBIE}" "" \
@@ -354,6 +371,16 @@ register_component "${COMPONENT_FORGEJO}" "" \
   legacy=component_legacy_forgejo verify=component_verify_forgejo \
   doctor=component_doctor_forgejo repair=component_repair_forgejo \
   phase_count=component_phase_count_forgejo
+register_component "${COMPONENT_FORGEJO_RUNNER}" "${COMPONENT_FORGEJO}" \
+  validate=component_validate_forgejo_runner review=component_review_forgejo_runner \
+  dry_run=component_dry_run_forgejo_runner \
+  receipt_start=component_receipt_start_forgejo_runner \
+  receipt_finish=component_receipt_finish_forgejo_runner \
+  install=component_install_forgejo_runner \
+  manifest=component_manifest_forgejo_runner final=component_final_forgejo_runner \
+  legacy=component_legacy_forgejo_runner verify=component_verify_forgejo_runner \
+  doctor=component_doctor_forgejo_runner repair=component_repair_forgejo_runner \
+  phase_count=component_phase_count_forgejo_runner
 register_component "${COMPONENT_LLAMA}" "" \
   validate=component_validate_llama review=component_review_llama \
   dry_run=component_dry_run_llama receipt_start=component_receipt_start_llama \
@@ -535,6 +562,13 @@ legacy_forgejo_present() {
     || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]
 }
 
+legacy_forgejo_runner_present() {
+  [[ -f /etc/systemd/system/forgejo-runner.service \
+    || -x /usr/local/bin/forgejo-runner \
+    || -d /var/lib/forgejo-runner \
+    || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO_RUNNER}" ]]
+}
+
 established_forgejo_state_present() {
   local path
   [[ -f /etc/systemd/system/forgejo.service \
@@ -611,6 +645,9 @@ validate_and_resolve_targets() {
   if forgejo_config_selected; then
     add_selected_component "${COMPONENT_FORGEJO}"
   fi
+  if forgejo_runner_config_selected; then
+    add_selected_component "${COMPONENT_FORGEJO_RUNNER}"
+  fi
   if llama_config_selected; then
     add_selected_component "${COMPONENT_LLAMA}"
   fi
@@ -641,6 +678,8 @@ validate_and_resolve_targets() {
   # Compatibility mapping only: explicit registry selection keeps the legacy
   # environment selectors coherent for component-owned code.
   is_selected_component "${COMPONENT_FORGEJO}" && ZOMBIE_INSTALL_FORGEJO=1
+  is_selected_component "${COMPONENT_FORGEJO_RUNNER}" \
+    && ZOMBIE_INSTALL_FORGEJO_RUNNER=1
   is_selected_component "${COMPONENT_LLAMA}" && ZOMBIE_INSTALL_LLAMA=1
   return 0
 }
@@ -658,6 +697,11 @@ zombie_config_selected() {
 forgejo_config_selected() {
   is_selected_component "${COMPONENT_FORGEJO}" && return 0
   [[ "${ZOMBIE_INSTALL_FORGEJO}" == "1" ]]
+}
+
+forgejo_runner_config_selected() {
+  is_selected_component "${COMPONENT_FORGEJO_RUNNER}" && return 0
+  [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]
 }
 
 llama_config_selected() {
@@ -703,6 +747,8 @@ Verbs:
 Components:
   zombie      The Ubuntu Zombie account, runtime, chat UI, policy, and services.
   forgejo     Forgejo + PostgreSQL, independently installable without zombie.
+  forgejo-runner
+              Forgejo Actions runner for an existing local Forgejo installation.
   llama       PC-wide llama.cpp server on 127.0.0.1:8080, independent of zombie.
 
 Selection rules:
@@ -1114,6 +1160,18 @@ validate_forgejo_config() {
   fi
 }
 
+validate_forgejo_runner_config() {
+  if ! is_valid_option_flag "${ZOMBIE_INSTALL_FORGEJO_RUNNER}"; then
+    die "ZOMBIE_INSTALL_FORGEJO_RUNNER must be 0 or 1." 2
+  fi
+  if ! is_valid_forgejo_version "${FORGEJO_RUNNER_VERSION}"; then
+    die "FORGEJO_RUNNER_VERSION must be a release like 6.3.1 (or empty for latest)." 2
+  fi
+  if ! is_valid_forgejo_runner_labels "${FORGEJO_RUNNER_LABELS}"; then
+    die "FORGEJO_RUNNER_LABELS must use only letters, digits, and . _ : / , + - (no spaces or quotes; max 512 chars)." 2
+  fi
+}
+
 validate_llama_config() {
   local model_context_limit
   [[ "${LLAMA_PORT}" == "8080" ]] \
@@ -1507,16 +1565,28 @@ forgejo_manifest_has_runner() {
     && [[ "$(_read_manifest_value "${manifest}" suboptions)" == "runner" ]]
 }
 
+forgejo_runner_manifest_present() {
+  local manifest="${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO_RUNNER}"
+  valid_component_manifest_entry "${manifest}" "${COMPONENT_FORGEJO_RUNNER}"
+}
+
 forgejo_runner_is_expected() {
   [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+    || forgejo_runner_manifest_present \
     || forgejo_manifest_has_runner \
     || [[ -x /usr/local/bin/forgejo-runner \
       || -f /etc/systemd/system/forgejo-runner.service ]]
 }
 
+forgejo_runner_is_forgejo_suboption() {
+  forgejo_runner_is_expected \
+    && ! forgejo_runner_manifest_present \
+    && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}"
+}
+
 restore_forgejo_runner_intent() {
   is_selected_component "${COMPONENT_FORGEJO}" || return 0
-  forgejo_runner_is_expected || return 0
+  forgejo_runner_is_forgejo_suboption || return 0
   ZOMBIE_INSTALL_FORGEJO_RUNNER=1
 }
 
@@ -1748,7 +1818,7 @@ verify_forgejo() {
       fi
     fi
   fi
-  if forgejo_runner_is_expected; then
+  if forgejo_runner_is_forgejo_suboption; then
     local _fj_runner_cfg_perms _fj_runner_drop_ins
     local _fj_runner_registration_perms
     [[ -x /usr/local/bin/forgejo-runner ]] \
@@ -1816,6 +1886,73 @@ verify_forgejo() {
       vr fail forgejo runner_declared "The current runner invocation has not declared successfully. Check: sudo journalctl -u forgejo-runner"
     fi
   fi
+}
+
+verify_forgejo_runner() {
+  local component="${COMPONENT_FORGEJO_RUNNER}"
+  local config_perms registration_perms drop_ins
+  [[ -x /usr/local/bin/forgejo ]] \
+    && vr ok "${component}" forgejo_binary "Required Forgejo server binary present." \
+    || vr fail "${component}" forgejo_binary "Required Forgejo server binary missing."
+  systemctl is-active --quiet forgejo.service 2>/dev/null \
+    && vr ok "${component}" forgejo_service "Required Forgejo service active." \
+    || vr fail "${component}" forgejo_service "Required Forgejo service is not active."
+  [[ -x /usr/local/bin/forgejo-runner ]] \
+    && vr ok "${component}" binary "Forgejo runner binary present." \
+    || vr fail "${component}" binary "Forgejo runner binary missing."
+  [[ -f /etc/systemd/system/forgejo-runner.service ]] \
+    && vr ok "${component}" unit "Forgejo runner service unit present." \
+    || vr fail "${component}" unit "Forgejo runner service unit missing."
+  systemctl is-enabled --quiet forgejo-runner.service 2>/dev/null \
+    && vr ok "${component}" enabled "Forgejo runner enabled at boot." \
+    || vr fail "${component}" enabled "Forgejo runner is not enabled at boot."
+  systemctl is-active --quiet forgejo-runner.service 2>/dev/null \
+    && vr ok "${component}" service "Forgejo Actions runner active." \
+    || vr fail "${component}" service "Forgejo Actions runner is not active."
+  systemctl is-active --quiet docker.service 2>/dev/null \
+    && vr ok "${component}" docker_service "Docker service active." \
+    || vr fail "${component}" docker_service "Docker service is not active."
+  forgejo_runner_in_docker_group \
+    && vr ok "${component}" docker_group "forgejo-runner belongs to the docker group." \
+    || vr fail "${component}" docker_group "forgejo-runner is not in the docker group."
+  if [[ -s /var/lib/forgejo-runner/.runner ]]; then
+    vr ok "${component}" registration "Forgejo runner registration is present."
+  elif (( EUID != 0 )) \
+      && [[ -d /var/lib/forgejo-runner && ! -x /var/lib/forgejo-runner ]]; then
+    vr fail "${component}" registration "Runner registration is not inspectable without root. Re-run with sudo."
+  else
+    vr fail "${component}" registration "Forgejo runner registration is missing or empty."
+  fi
+  registration_perms="$(
+    stat -c '%U:%G %a' /var/lib/forgejo-runner/.runner 2>/dev/null || true
+  )"
+  [[ "${registration_perms}" == "forgejo-runner:forgejo-runner 600" ]] \
+    && vr ok "${component}" registration_perms "Runner registration permissions correct." \
+    || vr fail "${component}" registration_perms "Runner registration permissions are incorrect or not inspectable."
+  config_perms="$(
+    stat -c '%U:%G %a' /var/lib/forgejo-runner/config.yaml 2>/dev/null || true
+  )"
+  [[ "${config_perms}" == "root:forgejo-runner 640" ]] \
+    && forgejo_runner_config_is_managed \
+    && vr ok "${component}" config "Managed runner configuration is active." \
+    || vr fail "${component}" config "Runner configuration is missing, uninspectable, or unmanaged."
+  forgejo_runner_uses_managed_config \
+    && vr ok "${component}" exec "Runner service loads the managed configuration." \
+    || vr fail "${component}" exec "Runner service does not load the managed configuration."
+  drop_ins="$(forgejo_runner_drop_in_paths)"
+  [[ -z "${drop_ins}" ]] \
+    && vr ok "${component}" drop_ins "Runner service has no unmanaged systemd drop-ins." \
+    || vr fail "${component}" drop_ins "Runner service has unmanaged systemd drop-ins: ${drop_ins//$'\n'/ }."
+  if forgejo_runner_has_docker_access; then
+    vr ok "${component}" docker_access "forgejo-runner can access the Docker daemon."
+  elif (( EUID != 0 )); then
+    vr fail "${component}" docker_access "Docker access is not inspectable without root. Re-run with sudo."
+  else
+    vr fail "${component}" docker_access "forgejo-runner cannot access the Docker daemon."
+  fi
+  forgejo_runner_declared_successfully \
+    && vr ok "${component}" declared "Current runner invocation declared successfully to Forgejo." \
+    || vr fail "${component}" declared "Current runner invocation has not declared successfully."
 }
 
 verify_llama() {
@@ -2057,7 +2194,7 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_ca_current "Exported and active Caddy local CA roots are missing or do not match. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
-      if forgejo_runner_is_expected; then
+      if forgejo_runner_is_forgejo_suboption; then
         local runner_config_perms runner_drop_ins
         if [[ -x /usr/local/bin/forgejo-runner ]]; then
           dr ok forgejo forgejo_runner_binary "Forgejo runner binary present."
@@ -2136,6 +2273,37 @@ cmd_doctor() {
     else
       dr warn forgejo forgejo_missing "Forgejo artefacts missing. Fix: sudo ./${SCRIPT_NAME} install forgejo"
     fi
+  }
+
+  doctor_forgejo_runner() {
+    local component="${COMPONENT_FORGEJO_RUNNER}"
+    if ! legacy_forgejo_runner_present; then
+      dr warn "${component}" missing \
+        "Forgejo runner artefacts missing. Fix: sudo ./${SCRIPT_NAME} install forgejo-runner"
+      return
+    fi
+    systemctl is-active --quiet forgejo.service 2>/dev/null \
+      && dr ok "${component}" forgejo "Required Forgejo service active." \
+      || dr warn "${component}" forgejo "Required Forgejo service is not active."
+    systemctl is-active --quiet docker.service 2>/dev/null \
+      && dr ok "${component}" docker "Docker service active." \
+      || dr warn "${component}" docker "Docker service is not active."
+    systemctl is-active --quiet forgejo-runner.service 2>/dev/null \
+      && dr ok "${component}" service "Forgejo Actions runner active." \
+      || dr warn "${component}" service "Forgejo Actions runner is not active."
+    [[ -s /var/lib/forgejo-runner/.runner ]] \
+      && dr ok "${component}" registration "Runner registration is present." \
+      || dr warn "${component}" registration "Runner registration is missing, empty, or uninspectable."
+    forgejo_runner_config_is_managed \
+      && forgejo_runner_uses_managed_config \
+      && dr ok "${component}" config "Managed runner configuration is active." \
+      || dr warn "${component}" config "Runner configuration is missing or unmanaged."
+    forgejo_runner_in_docker_group \
+      && dr ok "${component}" docker_group "forgejo-runner belongs to the docker group." \
+      || dr warn "${component}" docker_group "forgejo-runner is not in the docker group."
+    forgejo_runner_declared_successfully \
+      && dr ok "${component}" declared "Current runner invocation declared successfully." \
+      || dr warn "${component}" declared "Current runner invocation has not declared successfully."
   }
 
   doctor_llama() {
@@ -2254,6 +2422,53 @@ cmd_repair() {
     fi
   }
 
+  repair_forgejo_runner() {
+    if ! legacy_forgejo_runner_present; then
+      warn "Component 'forgejo-runner' does not appear to be installed."
+      warn "  To install: sudo ./${SCRIPT_NAME} install forgejo-runner"
+      return
+    fi
+    [[ -x /usr/local/bin/forgejo && -s /etc/forgejo/app.ini ]] \
+      || die "Forgejo runner repair requires a complete local Forgejo installation." 1
+    systemctl is-active --quiet forgejo.service \
+      || die "Forgejo must be active before its runner can be repaired." 1
+    [[ -x /usr/local/bin/forgejo-runner ]] \
+      || die "Forgejo runner binary is missing; re-run: sudo ./${SCRIPT_NAME} install forgejo-runner" 1
+    id forgejo-runner >/dev/null 2>&1 \
+      || die "Forgejo runner user is missing; re-run: sudo ./${SCRIPT_NAME} install forgejo-runner" 1
+    [[ -s /var/lib/forgejo-runner/.runner ]] \
+      || die "Forgejo runner registration is missing or empty; re-run: sudo ./${SCRIPT_NAME} install forgejo-runner" 1
+    usermod -aG docker forgejo-runner
+    chown forgejo-runner:forgejo-runner /var/lib/forgejo-runner \
+      /var/lib/forgejo-runner/.runner
+    chmod 750 /var/lib/forgejo-runner
+    chmod 600 /var/lib/forgejo-runner/.runner
+    install -m 640 -o root -g forgejo-runner \
+      "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+      /var/lib/forgejo-runner/config.yaml
+    install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
+      /etc/systemd/system/forgejo-runner.service
+    remove_obsolete_forgejo_runner_drop_in
+    systemctl enable --now docker.service >/dev/null 2>&1 \
+      || die "Docker Engine failed to start; see journalctl -u docker." 1
+    systemctl daemon-reload
+    local runner_drop_ins
+    runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+    [[ -z "${runner_drop_ins}" ]] \
+      || die "Refusing to start the Forgejo runner with unmanaged systemd drop-ins: ${runner_drop_ins//$'\n'/ }. Reconcile them, then re-run repair." 1
+    forgejo_runner_uses_managed_config \
+      || die "The effective forgejo-runner unit ignores the managed config; inspect systemd drop-ins." 1
+    forgejo_runner_in_docker_group && forgejo_runner_has_docker_access \
+      || die "forgejo-runner cannot access the Docker daemon after repair." 1
+    systemctl enable forgejo-runner.service >/dev/null \
+      || die "Could not enable forgejo-runner.service during repair." 1
+    systemctl restart forgejo-runner.service \
+      || die "Forgejo runner failed to restart; see journalctl -u forgejo-runner." 1
+    retry 6 2 -- forgejo_runner_declared_successfully \
+      || die "Forgejo runner restarted but did not declare successfully; see journalctl -u forgejo-runner." 1
+    ok "Forgejo runner ownership, configuration, and service re-asserted."
+  }
+
   repair_forgejo() {
     if (( EXPLICIT_TARGETS )) \
         && [[ ! -d /etc/forgejo && ! -d /var/lib/forgejo && ! -x /usr/local/bin/forgejo ]]; then
@@ -2275,43 +2490,8 @@ cmd_repair() {
           || die "Forgejo failed to restart; see journalctl -u forgejo." 1
       fi
       configure_forgejo_lan_https
-      if forgejo_runner_is_expected; then
-        [[ -x /usr/local/bin/forgejo-runner ]] \
-          || die "Forgejo runner is expected but its binary is missing; re-run the Forgejo runner install." 1
-        id forgejo-runner >/dev/null 2>&1 \
-          || die "Forgejo runner is expected but user forgejo-runner is missing; re-run the Forgejo runner install." 1
-        [[ -s /var/lib/forgejo-runner/.runner ]] \
-          || die "Forgejo runner registration is missing or empty; re-run the Forgejo runner install." 1
-        usermod -aG docker forgejo-runner
-        chown forgejo-runner:forgejo-runner /var/lib/forgejo-runner \
-          /var/lib/forgejo-runner/.runner
-        chmod 750 /var/lib/forgejo-runner
-        chmod 600 /var/lib/forgejo-runner/.runner
-        install -m 640 -o root -g forgejo-runner \
-          "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
-          /var/lib/forgejo-runner/config.yaml
-        install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
-          /etc/systemd/system/forgejo-runner.service
-        remove_obsolete_forgejo_runner_drop_in
-        systemctl enable --now docker.service >/dev/null 2>&1 \
-          || die "Docker Engine failed to start; see journalctl -u docker." 1
-        systemctl daemon-reload
-        local runner_drop_ins
-        runner_drop_ins="$(forgejo_runner_drop_in_paths)"
-        [[ -z "${runner_drop_ins}" ]] \
-          || die "Refusing to start the Forgejo runner with unmanaged systemd drop-ins: ${runner_drop_ins//$'\n'/ }. Reconcile or remove them, then re-run repair." 1
-        forgejo_runner_uses_managed_config \
-          || die "The effective forgejo-runner unit ignores the managed config; inspect systemd drop-ins." 1
-        if ! forgejo_runner_in_docker_group \
-            || ! forgejo_runner_has_docker_access; then
-          die "forgejo-runner cannot access the Docker daemon after repair." 1
-        fi
-        systemctl enable forgejo-runner.service >/dev/null \
-          || die "Could not enable forgejo-runner.service during repair." 1
-        systemctl restart forgejo-runner.service \
-          || die "Forgejo runner failed to restart; see journalctl -u forgejo-runner." 1
-        retry 6 2 -- forgejo_runner_declared_successfully \
-          || die "Forgejo runner restarted but did not declare successfully; see journalctl -u forgejo-runner." 1
+      if forgejo_runner_is_forgejo_suboption; then
+        repair_forgejo_runner
       fi
       ok "Forgejo ownership and services re-asserted."
     fi
@@ -2450,18 +2630,26 @@ Optional components enabled:
                   exposure: https://$(forgejo_url_host)/ via mDNS + Caddy internal CA
                   backend: 127.0.0.1:${FORGEJO_HTTP_PORT} (not directly exposed)
 EOF
-  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
-    cat <<EOF
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+      && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}"; then
+    print_forgejo_runner_dry_run
+  fi
+}
+
+print_forgejo_runner_dry_run() {
+  cat <<EOF
+
+Forgejo runner component:
   Actions runner  co-located Forgejo Actions runner (restricted Docker executor)
                   Docker: reuse existing engine, otherwise apt: docker.io
-                  binary: /usr/local/bin/forgejo-runner
+                  binary: /usr/local/bin/forgejo-runner (${FORGEJO_RUNNER_VERSION:-latest release})
                   registers against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels:
                     ${FORGEJO_RUNNER_LABELS}
                   unit: /etc/systemd/system/forgejo-runner.service
+                  dependency: Forgejo server component
                   note: co-locating runner and forge is contrary to upstream
                         guidance and is enabled deliberately.
 EOF
-  fi
 }
 
 print_llama_dry_run() {
@@ -3126,6 +3314,26 @@ review_forgejo_parameters() {
   done
 }
 
+review_forgejo_runner_parameters() {
+  [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && return 0
+  (( ASSUME_YES )) && return 0
+  [[ -t 0 ]] || return 0
+
+  brand_banner "Forgejo runner — setup parameters"
+  field "Version" "${FORGEJO_RUNNER_VERSION:-latest release}"
+  field "Labels" "${FORGEJO_RUNNER_LABELS}"
+  field "Executor" "restricted Docker executor, co-located with Forgejo"
+  local choice
+  if ! read -r -p "$(printf '%s➜%s install these settings? [Y/n]: ' "${C_BRAND}" "${C_RESET}")" choice; then
+    info "No input (EOF); cancelling."
+    exit 0
+  fi
+  case "${choice,,}" in
+    ""|y|yes) REVIEWED=1 ;;
+    *) info "Cancelled."; exit 0 ;;
+  esac
+}
+
 review_llama_parameters() {
   [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && return 0
   (( ASSUME_YES )) && return 0
@@ -3180,8 +3388,17 @@ receipt_start_forgejo() {
     "${FORGEJO_DB_NAME}" "${FORGEJO_DB_USER}" \
     "$(password_source_label "${FORGEJO_DB_PASSWORD_SOURCE}")"
   printf 'Forgejo version  : %s\n' "${FORGEJO_VERSION:-latest (resolved at install)}"
-  printf 'Actions runner   : %s\n' \
-    "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, restricted Docker executor)' || echo disabled)"
+  if ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}"; then
+    printf 'Actions runner   : %s\n' \
+      "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo 'enabled (co-located, restricted Docker executor)' || echo disabled)"
+  fi
+}
+
+receipt_start_forgejo_runner() {
+  printf 'Actions runner   : enabled (co-located, restricted Docker executor)\n'
+  printf 'Runner version   : %s\n' \
+    "${FORGEJO_RUNNER_VERSION:-latest (resolved at install)}"
+  printf 'Runner labels    : %s\n' "${FORGEJO_RUNNER_LABELS}"
 }
 
 receipt_start_llama() {
@@ -3207,10 +3424,18 @@ receipt_finish_forgejo() {
     "$(receipt_password_line "${FORGEJO_ADMIN_PASSWORD_SOURCE}" "${FORGEJO_ADMIN_PASSWORD}")"
   printf 'Forgejo DB pw    : %s\n' \
     "$(receipt_password_line "${FORGEJO_DB_PASSWORD_SOURCE}" "${FORGEJO_DB_PASSWORD}")"
-  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+      && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}"; then
     printf 'Actions runner   : %s\n' \
       "$(systemctl is-active --quiet forgejo-runner.service 2>/dev/null && echo running || echo 'not running')"
   fi
+}
+
+receipt_finish_forgejo_runner() {
+  printf 'Runner version   : %s\n' \
+    "${FORGEJO_RUNNER_RESOLVED_VERSION:-unknown}"
+  printf 'Actions runner   : %s\n' \
+    "$(systemctl is-active --quiet forgejo-runner.service 2>/dev/null && echo running || echo 'not running')"
 }
 
 receipt_finish_llama() {
@@ -3459,10 +3684,14 @@ count_zombie_phases() {
 count_forgejo_phases() {
   local count
   count="$(_count_option_sections forgejo)"
-  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+      && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}"; then
     count=$(( count + $(_count_option_sections forgejo-runner) ))
   fi
   printf '%s\n' "${count}"
+}
+count_forgejo_runner_phases() {
+  _count_option_sections forgejo-runner
 }
 count_llama_phases() {
   _count_option_sections llama
@@ -4242,6 +4471,138 @@ EOF
   apt_get update
 }
 
+install_forgejo_runner() {
+  local runner_arch installed_runner runner_tmp runner_token runner_drop_ins
+
+  # option-sections: forgejo-runner begin
+  section "Install Forgejo runner"
+
+  [[ -x /usr/local/bin/forgejo && -s /etc/forgejo/app.ini ]] \
+    || die "Forgejo runner requires the local Forgejo server component. Run: sudo ./${SCRIPT_NAME} install forgejo-runner" 1
+  systemctl is-active --quiet forgejo.service \
+    || die "Forgejo must be active before its runner can be installed." 1
+  runner_arch="$(forgejo_release_arch)" \
+    || die "Forgejo runner releases support only amd64/arm64 hosts." 65
+
+  warn "Co-locating the Actions runner with the forge is contrary to upstream guidance; enabled deliberately."
+  ensure_forgejo_runner_docker_package /usr/bin/docker
+  systemctl enable --now docker >/dev/null 2>&1 \
+    || die "Docker Engine failed to start; see journalctl -u docker." 1
+  if id forgejo-runner >/dev/null 2>&1; then
+    info "User forgejo-runner already exists."
+    note_satisfied
+  else
+    adduser --system --group --home /var/lib/forgejo-runner \
+      --shell /bin/bash --gecos "Forgejo Actions runner" forgejo-runner
+    ok "Created system user forgejo-runner."
+    note_changed
+  fi
+  usermod -aG docker forgejo-runner
+  install -d -m 750 -o forgejo-runner -g forgejo-runner /var/lib/forgejo-runner
+  forgejo_runner_in_docker_group \
+    || die "Could not add forgejo-runner to the docker group." 1
+  forgejo_runner_has_docker_access \
+    || die "forgejo-runner cannot access the Docker daemon after group setup." 1
+  if [[ -n "${FORGEJO_RUNNER_VERSION}" ]]; then
+    FORGEJO_RUNNER_RESOLVED_VERSION="${FORGEJO_RUNNER_VERSION}"
+    info "Forgejo runner release pinned to ${FORGEJO_RUNNER_RESOLVED_VERSION}."
+  else
+    FORGEJO_RUNNER_RESOLVED_VERSION="$(forgejo_latest_release forgejo/runner)" \
+      || die "Could not resolve the latest forgejo-runner release from Forgejo release metadata (pin FORGEJO_RUNNER_VERSION to proceed)." 66
+    info "Latest forgejo-runner release: ${FORGEJO_RUNNER_RESOLVED_VERSION}."
+  fi
+  installed_runner=""
+  if [[ -x /usr/local/bin/forgejo-runner ]]; then
+    installed_runner="$(/usr/local/bin/forgejo-runner --version 2>/dev/null \
+      | awk '{print $3}' | sed 's/^v//' || true)"
+  fi
+  if [[ "${installed_runner}" == "${FORGEJO_RUNNER_RESOLVED_VERSION}" ]]; then
+    info "forgejo-runner ${FORGEJO_RUNNER_RESOLVED_VERSION} already installed."
+    note_satisfied
+  else
+    runner_tmp="$(mktemp)"
+    forgejo_fetch_release_asset forgejo/runner \
+      "${FORGEJO_RUNNER_RESOLVED_VERSION}" \
+      "forgejo-runner-${FORGEJO_RUNNER_RESOLVED_VERSION}-linux-${runner_arch}" \
+      "${runner_tmp}" \
+      || {
+        rm -f "${runner_tmp}"
+        die "Failed to download forgejo-runner ${FORGEJO_RUNNER_RESOLVED_VERSION}." 66
+      }
+    install -m 0755 -o root -g root "${runner_tmp}" \
+      /usr/local/bin/forgejo-runner
+    rm -f "${runner_tmp}"
+    ok "Installed forgejo-runner ${FORGEJO_RUNNER_RESOLVED_VERSION} (checksum verified)."
+    note_changed
+  fi
+
+  section "Register Forgejo runner"
+
+  if forgejo_runner_config_is_managed \
+      && [[ "$(stat -c '%U:%G %a' /var/lib/forgejo-runner/config.yaml \
+        2>/dev/null || true)" == "root:forgejo-runner 640" ]]; then
+    info "Managed same-host runner configuration already up to date."
+    note_satisfied
+  else
+    install -m 640 -o root -g forgejo-runner \
+      "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
+      /var/lib/forgejo-runner/config.yaml
+    ok "Installed conservative same-host runner configuration."
+    note_changed
+  fi
+
+  if [[ -s /var/lib/forgejo-runner/.runner ]]; then
+    info "Runner already registered; skipping registration."
+    note_satisfied
+  else
+    if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
+      systemctl stop forgejo-runner.service \
+        || die "Could not stop the existing Forgejo runner before re-registering it." 1
+    fi
+    rm -f /var/lib/forgejo-runner/.runner
+    runner_token="$(runuser -u git -- /usr/local/bin/forgejo \
+      --config /etc/forgejo/app.ini --work-path /var/lib/forgejo \
+      actions generate-runner-token)"
+    if ! runuser -u forgejo-runner -- /usr/local/bin/forgejo-runner \
+        -c /var/lib/forgejo-runner/config.yaml register \
+        --no-interactive \
+        --instance "http://127.0.0.1:${FORGEJO_HTTP_PORT}/" \
+        --token "${runner_token}" \
+        --name "$(hostname)" \
+        --labels "${FORGEJO_RUNNER_LABELS}"; then
+      unset runner_token
+      die "Forgejo runner registration failed." 1
+    fi
+    unset runner_token
+    [[ -s /var/lib/forgejo-runner/.runner ]] \
+      || die "Forgejo runner registration produced an empty state file." 1
+    ok "Runner registered against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels: ${FORGEJO_RUNNER_LABELS}"
+    note_changed
+  fi
+  chown forgejo-runner:forgejo-runner /var/lib/forgejo-runner/.runner
+  chmod 600 /var/lib/forgejo-runner/.runner
+  install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
+    /etc/systemd/system/forgejo-runner.service
+  remove_obsolete_forgejo_runner_drop_in
+  systemctl daemon-reload
+  runner_drop_ins="$(forgejo_runner_drop_in_paths)"
+  [[ -z "${runner_drop_ins}" ]] \
+    || die "Refusing to start the Forgejo runner with unmanaged systemd drop-ins: ${runner_drop_ins//$'\n'/ }. Reconcile or remove them, then re-run install." 1
+  forgejo_runner_uses_managed_config \
+    || die "The effective forgejo-runner unit does not load the managed config; inspect systemd drop-ins." 1
+  systemctl enable forgejo-runner.service >/dev/null \
+    || die "Could not enable forgejo-runner.service." 1
+  systemctl restart forgejo-runner.service \
+    || die "forgejo-runner service did not start; see journalctl -u forgejo-runner." 1
+  if ! retry 6 2 -- forgejo_runner_declared_successfully; then
+    systemctl disable --now forgejo-runner.service >/dev/null 2>&1 \
+      || warn "Could not disable the runner after its declaration failed."
+    die "Forgejo runner did not declare successfully; it was stopped. See journalctl -u forgejo-runner." 1
+  fi
+  ok "Forgejo Actions runner declared successfully and is enabled."
+  # option-sections: forgejo-runner end
+}
+
 # component-hook: forgejo begin
 install_forgejo() {
   # option-sections: forgejo begin
@@ -4532,122 +4893,9 @@ EOF
   ok "Forgejo is available at https://${_fj_domain}/ after trusting the local CA."
   # option-sections: forgejo end
 
-  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]]; then
-    # option-sections: forgejo-runner begin
-    section "Install Forgejo runner"
-
-    warn "Co-locating the Actions runner with the forge is contrary to upstream guidance; enabled deliberately."
-    ensure_forgejo_runner_docker_package /usr/bin/docker
-    systemctl enable --now docker >/dev/null 2>&1 \
-      || die "Docker Engine failed to start; see journalctl -u docker." 1
-    if id forgejo-runner >/dev/null 2>&1; then
-      info "User forgejo-runner already exists."
-      note_satisfied
-    else
-      adduser --system --group --home /var/lib/forgejo-runner \
-        --shell /bin/bash --gecos "Forgejo Actions runner" forgejo-runner
-      ok "Created system user forgejo-runner."
-      note_changed
-    fi
-    usermod -aG docker forgejo-runner
-    install -d -m 750 -o forgejo-runner -g forgejo-runner /var/lib/forgejo-runner
-    forgejo_runner_in_docker_group \
-      || die "Could not add forgejo-runner to the docker group." 1
-    forgejo_runner_has_docker_access \
-      || die "forgejo-runner cannot access the Docker daemon after group setup." 1
-    if [[ -n "${FORGEJO_RUNNER_VERSION}" ]]; then
-      _runner_version="${FORGEJO_RUNNER_VERSION}"
-      info "Forgejo runner release pinned to ${_runner_version}."
-    else
-      _runner_version="$(forgejo_latest_release forgejo/runner)" \
-        || die "Could not resolve the latest forgejo-runner release from codeberg.org (pin FORGEJO_RUNNER_VERSION to proceed)." 66
-      info "Latest forgejo-runner release: ${_runner_version}."
-    fi
-    _installed_runner=""
-    if [[ -x /usr/local/bin/forgejo-runner ]]; then
-      _installed_runner="$(/usr/local/bin/forgejo-runner --version 2>/dev/null \
-        | awk '{print $3}' | sed 's/^v//' || true)"
-    fi
-    if [[ "${_installed_runner}" == "${_runner_version}" ]]; then
-      info "forgejo-runner ${_runner_version} already installed."
-      note_satisfied
-    else
-      _runner_tmp="$(mktemp)"
-      forgejo_fetch_release_asset forgejo/runner "${_runner_version}" \
-        "forgejo-runner-${_runner_version}-linux-${FORGEJO_ARCH}" "${_runner_tmp}" \
-        || { rm -f "${_runner_tmp}"; die "Failed to download forgejo-runner ${_runner_version}." 66; }
-      install -m 0755 -o root -g root "${_runner_tmp}" /usr/local/bin/forgejo-runner
-      rm -f "${_runner_tmp}"
-      ok "Installed forgejo-runner ${_runner_version} (checksum verified)."
-      note_changed
-    fi
-
-    section "Register Forgejo runner"
-
-    if forgejo_runner_config_is_managed \
-        && [[ "$(stat -c '%U:%G %a' /var/lib/forgejo-runner/config.yaml \
-          2>/dev/null || true)" == "root:forgejo-runner 640" ]]; then
-      info "Managed same-host runner configuration already up to date."
-      note_satisfied
-    else
-      install -m 640 -o root -g forgejo-runner \
-        "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
-        /var/lib/forgejo-runner/config.yaml
-      ok "Installed conservative same-host runner configuration."
-      note_changed
-    fi
-
-    if [[ -s /var/lib/forgejo-runner/.runner ]]; then
-      info "Runner already registered; skipping registration."
-      note_satisfied
-    else
-      if [[ -f /etc/systemd/system/forgejo-runner.service ]]; then
-        systemctl stop forgejo-runner.service \
-          || die "Could not stop the existing Forgejo runner before re-registering it." 1
-      fi
-      rm -f /var/lib/forgejo-runner/.runner
-      _runner_token="$(runuser -u git -- /usr/local/bin/forgejo \
-        --config /etc/forgejo/app.ini --work-path /var/lib/forgejo \
-        actions generate-runner-token)"
-      if ! runuser -u forgejo-runner -- /usr/local/bin/forgejo-runner \
-          -c /var/lib/forgejo-runner/config.yaml register \
-          --no-interactive \
-          --instance "http://127.0.0.1:${FORGEJO_HTTP_PORT}/" \
-          --token "${_runner_token}" \
-          --name "$(hostname)" \
-          --labels "${FORGEJO_RUNNER_LABELS}"; then
-        unset _runner_token
-        die "Forgejo runner registration failed." 1
-      fi
-      unset _runner_token
-      [[ -s /var/lib/forgejo-runner/.runner ]] \
-        || die "Forgejo runner registration produced an empty state file." 1
-      ok "Runner registered against 127.0.0.1:${FORGEJO_HTTP_PORT} with labels: ${FORGEJO_RUNNER_LABELS}"
-      note_changed
-    fi
-    chown forgejo-runner:forgejo-runner /var/lib/forgejo-runner/.runner
-    chmod 600 /var/lib/forgejo-runner/.runner
-    install -m 644 "${PAYLOAD_DIR}/systemd/forgejo-runner.service" \
-      /etc/systemd/system/forgejo-runner.service
-    remove_obsolete_forgejo_runner_drop_in
-    systemctl daemon-reload
-    local _runner_drop_ins
-    _runner_drop_ins="$(forgejo_runner_drop_in_paths)"
-    [[ -z "${_runner_drop_ins}" ]] \
-      || die "Refusing to start the Forgejo runner with unmanaged systemd drop-ins: ${_runner_drop_ins//$'\n'/ }. Reconcile or remove them, then re-run install." 1
-    forgejo_runner_uses_managed_config \
-      || die "The effective forgejo-runner unit does not load the managed config; inspect systemd drop-ins." 1
-    systemctl enable forgejo-runner.service >/dev/null \
-      || die "Could not enable forgejo-runner.service." 1
-    systemctl restart forgejo-runner.service \
-      || die "forgejo-runner service did not start; see journalctl -u forgejo-runner." 1
-    if ! retry 6 2 -- forgejo_runner_declared_successfully; then
-      systemctl disable --now forgejo-runner.service >/dev/null 2>&1 \
-        || warn "Could not disable the runner after its declaration failed."
-      die "Forgejo runner did not declare successfully; it was stopped. See journalctl -u forgejo-runner." 1
-    fi
-    ok "Forgejo Actions runner declared successfully and is enabled."
-    # option-sections: forgejo-runner end
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+      && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}"; then
+    install_forgejo_runner
   fi
 }
 # component-hook: forgejo end
@@ -5249,9 +5497,26 @@ write_forgejo_manifest() {
     fi
   fi
   forgejo_suboptions=""
-  [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && forgejo_suboptions="runner"
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+      && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}" \
+      && ! forgejo_runner_manifest_present; then
+    forgejo_suboptions="runner"
+  fi
   write_component_manifest "${COMPONENT_FORGEJO}" \
     "${FORGEJO_RESOLVED_VERSION:-${FORGEJO_VERSION:-}}" "${forgejo_suboptions}"
+}
+
+write_forgejo_runner_manifest() {
+  RUNNER_OK=0
+  systemctl is-active --quiet forgejo-runner.service && RUNNER_OK=1
+  if (( RUNNER_OK )); then
+    status ok "Forgejo Actions runner registered and running"
+  else
+    status warn "Forgejo Actions runner is not running"
+  fi
+  write_component_manifest "${COMPONENT_FORGEJO_RUNNER}" \
+    "${FORGEJO_RUNNER_RESOLVED_VERSION:-${FORGEJO_RUNNER_VERSION:-}}" \
+    "${FORGEJO_RUNNER_LABELS}"
 }
 
 write_llama_manifest() {
@@ -5276,8 +5541,15 @@ final_forgejo_summary() {
   [[ -n "${NEXT_STEP}" ]] || NEXT_STEP="https://${FORGEJO_URL_HOST}/"
   printf 'Forgejo: https://%s/ (LAN mDNS + Caddy local CA%s)\n' \
     "${FORGEJO_URL_HOST}" \
-    "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] && echo ', runner enabled')"
+    "$([[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+      && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}" \
+      && echo ', runner enabled')"
   printf 'Trust CA: /etc/forgejo/caddy-local-ca.crt\n'
+}
+
+final_forgejo_runner_summary() {
+  [[ -n "${NEXT_STEP}" ]] || NEXT_STEP="systemctl status forgejo-runner.service"
+  printf 'Runner:  Forgejo Actions runner registered and enabled\n'
 }
 
 final_llama_summary() {
