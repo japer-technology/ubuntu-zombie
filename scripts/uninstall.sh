@@ -144,6 +144,24 @@ remove_component_manifest() {
   rmdir --ignore-fail-on-non-empty "${manifest_parent_dir}" 2>/dev/null || true
 }
 
+clear_forgejo_runner_suboption() {
+  local path="${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}"
+  local tmp
+  [[ -f "${path}" ]] || return 0
+  grep -Fqx 'suboptions=runner' "${path}" || return 0
+  if (( DRY_RUN )); then
+    run "clear the legacy runner suboption from the Forgejo manifest"
+    return 0
+  fi
+  tmp="$(mktemp "${COMPONENT_MANIFEST_DIR}/.forgejo.XXXXXX")"
+  awk '
+    $0 == "suboptions=runner" { print "suboptions="; next }
+    { print }
+  ' "${path}" > "${tmp}"
+  install -m 644 -o root -g root "${tmp}" "${path}"
+  rm -f "${tmp}"
+}
+
 warn_remaining_components() {
   local target
   (( ${#TARGET_ARGS[@]} > 0 )) || return 0
@@ -398,6 +416,7 @@ remove_component_forgejo_runner() {
   fi
 
   if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
+    clear_forgejo_runner_suboption
     remove_component_manifest "${COMPONENT_FORGEJO_RUNNER}"
   else
     warn "Keeping Forgejo runner manifest because removal finished with errors."

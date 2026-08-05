@@ -1578,9 +1578,15 @@ forgejo_runner_is_expected() {
       || -f /etc/systemd/system/forgejo-runner.service ]]
 }
 
+forgejo_runner_is_forgejo_suboption() {
+  forgejo_runner_is_expected \
+    && ! forgejo_runner_manifest_present \
+    && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}"
+}
+
 restore_forgejo_runner_intent() {
   is_selected_component "${COMPONENT_FORGEJO}" || return 0
-  forgejo_runner_is_expected || return 0
+  forgejo_runner_is_forgejo_suboption || return 0
   ZOMBIE_INSTALL_FORGEJO_RUNNER=1
 }
 
@@ -1812,7 +1818,7 @@ verify_forgejo() {
       fi
     fi
   fi
-  if forgejo_runner_is_expected; then
+  if forgejo_runner_is_forgejo_suboption; then
     local _fj_runner_cfg_perms _fj_runner_drop_ins
     local _fj_runner_registration_perms
     [[ -x /usr/local/bin/forgejo-runner ]] \
@@ -2188,7 +2194,7 @@ cmd_doctor() {
       else
         dr warn forgejo forgejo_ca_current "Exported and active Caddy local CA roots are missing or do not match. Fix: sudo ./${SCRIPT_NAME} repair forgejo"
       fi
-      if forgejo_runner_is_expected; then
+      if forgejo_runner_is_forgejo_suboption; then
         local runner_config_perms runner_drop_ins
         if [[ -x /usr/local/bin/forgejo-runner ]]; then
           dr ok forgejo forgejo_runner_binary "Forgejo runner binary present."
@@ -2484,7 +2490,7 @@ cmd_repair() {
           || die "Forgejo failed to restart; see journalctl -u forgejo." 1
       fi
       configure_forgejo_lan_https
-      if forgejo_runner_is_expected; then
+      if forgejo_runner_is_forgejo_suboption; then
         repair_forgejo_runner
       fi
       ok "Forgejo ownership and services re-asserted."
@@ -5492,7 +5498,8 @@ write_forgejo_manifest() {
   fi
   forgejo_suboptions=""
   if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
-      && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}"; then
+      && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}" \
+      && ! forgejo_runner_manifest_present; then
     forgejo_suboptions="runner"
   fi
   write_component_manifest "${COMPONENT_FORGEJO}" \

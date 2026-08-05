@@ -145,7 +145,9 @@ the current UX. Historical timer rows and audit evidence are retained.
 The installer uses the component-aware grammar `scripts/install.sh
 <verb> [component ...] [flags]`. Public targets currently are `zombie`
 (the baseline account, runtime, chat UI, policy, and services), `forgejo`,
-and `llama`. The legacy `ZOMBIE_INSTALL_*` flags remain supported and are
+`forgejo-runner`, and `llama`. The runner target depends on `forgejo`, so
+installing it converges the server before registering and starting the
+runner. The legacy `ZOMBIE_INSTALL_*` flags remain supported and are
 additive with explicit targets; all default to `0`, and specifications
 live under `options/`. Each component follows one contract: validated
 settings, an entry in the interactive Options menu, a dry-run stanza,
@@ -179,7 +181,8 @@ The installer core owns parsing, target ordering, selected configuration
 validation, host preflight, apt/download helpers, logging, receipts,
 progress, and manifest writes. Component hooks own their mutations.
 `install_zombie` converges the account, runtimes, policy, and chat stack;
-`install_forgejo` converges PostgreSQL, Forgejo, and its optional runner.
+`install_forgejo` converges PostgreSQL and Forgejo, while
+`install_forgejo_runner` converges the optional runner.
 The Forgejo hook has an explicit package set (`git`, `git-lfs`,
 `postgresql`, `postgresql-contrib`, `openssl`, `xz-utils`, `caddy`,
 `avahi-daemon`, and `libnss-mdns`, plus `docker.io` for the runner) and
@@ -212,11 +215,13 @@ scripts/install.sh <verb> [component ...] [flags]
 | `verify` | Read-only state check. |
 | `doctor` | Explain failures and likely fixes. |
 | `repair` | Re-assert permissions, re-render runtime config, redeploy skills, restart chat. |
-| `uninstall` | Delegate to `scripts/uninstall.sh`; `uninstall zombie` / `uninstall forgejo` remove only that component, and no target removes all managed components. |
+| `uninstall` | Delegate to `scripts/uninstall.sh`; explicit targets remove the selected component, while no target removes all managed components. |
 
-`install forgejo` is a standalone path: it creates neither the zombie
-account nor `/opt/ai-zombie`, and it does not deploy Node, the Python
-agent runtime, policy, audit, chat, or desktop-availability settings.
+`install forgejo` and `install forgejo-runner` are standalone paths: they
+create neither the zombie account nor `/opt/ai-zombie`, and they do not
+deploy Node, the Python agent runtime, policy, audit, chat, or
+desktop-availability settings. The runner target selects Forgejo as its
+required component dependency.
 Installer-owned transcript and receipt records remain under `/var/log/`.
 
 ## Component manifest

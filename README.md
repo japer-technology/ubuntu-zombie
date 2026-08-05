@@ -137,8 +137,8 @@ sudo ./scripts/install.sh <verb> [component ...] [flags]
 ```
 
 Valid verbs are `install`, `verify`, `doctor`, `repair`, and
-`uninstall`. Public component targets are `zombie`, `forgejo`, and
-`llama`. With
+`uninstall`. Public component targets are `zombie`, `forgejo`,
+`forgejo-runner`, and `llama`. With
 no target, `install` keeps its existing meaning: install or upgrade the
 `zombie` baseline. Examples:
 
@@ -146,6 +146,7 @@ no target, `install` keeps its existing meaning: install or upgrade the
 sudo ./scripts/install.sh install             # baseline zombie
 sudo ./scripts/install.sh install zombie      # same, explicit target
 sudo ./scripts/install.sh install forgejo      # standalone forge + PostgreSQL
+sudo ./scripts/install.sh install forgejo-runner # forge + Actions runner
 sudo ./scripts/install.sh install llama        # standalone PC-wide llama.cpp
 sudo ./scripts/install.sh install zombie forgejo
 sudo ./scripts/install.sh verify zombie
@@ -154,6 +155,9 @@ sudo ./scripts/install.sh doctor forgejo
 # Remove only the Forgejo component, leave zombie running:
 sudo ./scripts/install.sh uninstall forgejo
 
+# Remove only the Forgejo Actions runner:
+sudo ./scripts/install.sh uninstall forgejo-runner
+
 # Remove only the zombie account and runtime, leave Forgejo running:
 sudo ./scripts/install.sh uninstall zombie
 
@@ -161,11 +165,12 @@ sudo ./scripts/install.sh uninstall zombie
 sudo ./scripts/install.sh uninstall
 ```
 
-`install forgejo` and `install llama` do not create the zombie account,
-install Node or the
+`install forgejo`, `install forgejo-runner`, and `install llama` do not
+create the zombie account, install Node or the
 Python agent runtime, deploy policy or chat services, or change desktop
-sleep settings. `ZOMBIE_INSTALL_FORGEJO=1 install` remains supported and
-selects the legacy combined `zombie forgejo` path.
+sleep settings. The runner target automatically selects its required
+`forgejo` dependency. `ZOMBIE_INSTALL_FORGEJO=1 install` remains supported
+and selects the legacy combined `zombie forgejo` path.
 
 To upgrade an existing host (or refresh after fixing a bug upstream),
 pull the latest source and re-run `install`:
