@@ -3745,7 +3745,7 @@ EOF
     || { echo "Forgejo repair must restore root ownership of runner config" >&2; exit 1; }
   repair_forgejo_body="$(sed -n \
     '/^  repair_forgejo() {$/,/^  repair_llama() {$/p' scripts/install.sh)"
-  grep -Fq 'if forgejo_runner_is_expected; then' \
+  grep -Fq 'if forgejo_runner_is_forgejo_suboption; then' \
       <<<"${repair_forgejo_body}" \
     || { echo "Forgejo repair must honor persisted runner intent" >&2; exit 1; }
   grep -Fq 'repair_forgejo_runner' <<<"${repair_forgejo_body}" \
