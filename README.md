@@ -53,8 +53,10 @@ The chat administrator is **password-protected** and has a **Time to
 Live**. The installer asks for a chat password (default `braaaains`)
 and a TTL (default 7 days); only a hash of the
 password is stored. When the TTL expires — or you run `/ttl --die` in
-the chat — the zombie permanently disables itself until the next
-reinstall. Extend it from the chat with `/ttl <days>`. See
+the chat — the zombie permanently disables itself. Routine reinstalls
+preserve that tombstone and any active countdown; a full uninstall followed
+by a fresh install creates new lifecycle state. Extend a live TTL from the
+chat with `/ttl <days>`. See
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#chat-access) for details.
 The chat streams live turn progress when the browser supports
 `EventSource`, falls back automatically when it does not, and keeps one
@@ -73,8 +75,9 @@ composer and remembers that setting in the current browser.
 Use `/rebrand <title>` to rebrand the browser title, header, wordmark, and
 login/tombstone labels for this browser; `/rebrand` resets them. Use
 `/reprompt <placeholder>` to replace and remember the composer placeholder
-for this browser; `/reprompt` restores the default. The header shows the
-active model and, for a local model server, its IP address.
+for this browser; `/reprompt` restores the default. These browser-local
+settings survive an installer rerun. The header shows the active model and,
+for a local model server, its IP address.
 
 `/status` runs a full proof-of-life check: it makes a tiny completion against
 the configured LLM provider (which can incur minimal provider usage), measures
@@ -98,7 +101,9 @@ During an **interactive** install the script can also auto-detect a
 local LLM: it scans your LAN for an OpenAI-compatible server (LM
 Studio, Ollama, `llama.cpp`) and offers any models it finds as the
 starting model, wiring it up as the `lmstudio` provider so you can run
-fully offline with no cloud API key. Skip it with
+fully offline with no cloud API key. Automatic discovery is skipped when
+`ZOMBIE_MODEL` or a provider-specific model override is already configured
+in the environment or installed `secrets/env`; skip it explicitly with
 `ZOMBIE_SKIP_LLM_SCAN=1`. See
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md#optional-use-a-local-llm-auto-detected-on-your-lan)
 and [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#local-llm-discovery-lan-scan).

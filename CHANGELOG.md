@@ -8,6 +8,17 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Installer setting preservation
+
+- **Configured models suppress discovery:** interactive reinstalls no longer
+  scan the LAN for a local LLM when `ZOMBIE_MODEL` or a provider-specific model
+  override is already set in the install environment or existing
+  `secrets/env`.
+- **Lifecycle state survives reinstalls:** valid TTL state is preserved,
+  including extensions and dead tombstones, instead of being reset to the
+  install default. Browser-local branding, prompt, and width preferences and
+  SQLite-backed reactivation settings remain untouched.
+
 ### Forgejo runner component target
 
 - **Direct runner installation:** `install forgejo-runner` now selects the

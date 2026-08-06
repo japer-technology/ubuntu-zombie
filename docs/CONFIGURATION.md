@@ -35,7 +35,7 @@ Supported variables:
 | `ZOMBIE_OPENROUTER_MODEL` | Fully-qualified OpenRouter model id (e.g. `anthropic/claude-3.5-sonnet`); used only when `ZOMBIE_MODEL` is unset |
 | `ZOMBIE_CHAT_PORT`   | Loopback port for the chat UI (default `7878`) |
 | `ZOMBIE_ADMIN_PASSWORD` | Chat-UI password gate. The installer asks for it (default `braaaains`) and stores only a PBKDF2 hash as `ZOMBIE_ADMIN_PASSWORD_HASH` in `secrets/env`. |
-| `ZOMBIE_TTL_DAYS`    | Time to Live in whole days before the zombie is permanently disabled (default `7`). Each install starts a fresh countdown. |
+| `ZOMBIE_TTL_DAYS`    | Initial Time to Live in whole days before the zombie is permanently disabled (default `7`). Valid existing lifecycle state is preserved on reinstall. |
 | `LMSTUDIO_API_KEY`   | API key for a local OpenAI-compatible server (LM Studio / Ollama / llama.cpp). Pair with `ZOMBIE_PROVIDER=lmstudio` and `ZOMBIE_MODEL`; the server URL lives in `~/.pi/agent/models.json` (most local servers ignore the key). |
 | `DISPLAY`            | Pre-seeded in the generated `secrets/env` (default `:0`); vestigial, retained for compatibility and not used by the loopback-only chat service |
 
@@ -102,6 +102,9 @@ answering on `http://<ip>:1234/v1`. Servers such as
 default), Ollama, and `llama.cpp` expose a `/v1/models` endpoint; the
 installer queries each responder, collects the model ids it advertises,
 and offers them as the **starting model** in the parameter-review step.
+If `ZOMBIE_MODEL` or a provider-specific model override is already non-empty
+in the install environment or installed `secrets/env`, the automatic scan is
+skipped and that selection is preserved.
 
 When a model is chosen, the generated `/opt/ai-zombie/secrets/env`
 records it as the `lmstudio` provider:
@@ -154,8 +157,10 @@ browser title, header, wordmark, login prompt, and tombstone label for the
 current browser; `/rebrand` resets those labels to Ubuntu Zombie.
 `/reprompt <placeholder>` changes and remembers the composer placeholder for
 the current browser; `/reprompt` resets it to `AI System Administrator`. The
-chat header shows only the active model, plus its IP address when the provider
-is local. `/status`
+browser stores `/fullwidth`, `/rebrand`, and `/reprompt` preferences in local
+storage, so redeploying the chat assets does not reset them. The chat header
+shows only the active model, plus its IP address when the provider is local.
+`/status`
 makes a minimal completion against the selected provider to prove credentials and
 connectivity, so hosted providers may record a very small amount of usage.
 That probe is cached for 30 seconds to prevent rapid requests from multiplying
@@ -168,8 +173,8 @@ and `pi-ai` releases and also reports the installed Python, Node, and SQLite
 runtimes. Both commands degrade cleanly when an upstream service is offline.
 
 The scan is best-effort and skipped automatically for `--yes`,
-non-interactive, and non-TTY runs. It needs `curl` and `python3`
-(both already required by the product).
+non-interactive, non-TTY, and already-configured-model runs. It needs `curl`
+and `python3` (both already required by the product).
 
 | Variable                 | Default | Purpose                                                              |
 | ------------------------ | ------- | -------------------------------------------------------------------- |
@@ -436,7 +441,8 @@ that fails inside itself is audited as `reactivation_turn_failed`.
 Reactivation is enabled by default with a 5-second minimum and 1-hour maximum
 delay. Both limits and the enabled state are durable in `conversations.db`.
 These defaults are also the hard safety bounds, and no timer may outlive the
-remaining TTL.
+remaining TTL. Installer reruns preserve the database and therefore retain
+reactivation settings and pending timer state.
 
 | Command | Effect |
 | ------- | ------ |
@@ -458,13 +464,14 @@ session.
 
 ### Time to Live (the kill switch)
 
-Every install gives the root-capable agent a bounded lifetime. The
+The first install gives the root-capable agent a bounded lifetime. The
 **Time to Live** defaults to 7 days (`ZOMBIE_TTL_DAYS`, or set it in the
 interactive review). When the TTL elapses — or an operator runs the
 `/ttl --die` chat command — the zombie writes a durable tombstone and is
-**permanently disabled until the next reinstall**: it refuses to answer
-prompts and shows a "this zombie has died" notice. A re-run of
-`scripts/install.sh install` resets the tombstone and starts a fresh
+**permanently disabled**: it refuses to answer prompts and shows a "this
+zombie has died" notice. A re-run of `scripts/install.sh install` preserves a
+valid lifecycle file, including TTL extensions, remaining time, and a dead
+tombstone. A full uninstall followed by a fresh install creates a new
 countdown.
 
 Chat commands:
