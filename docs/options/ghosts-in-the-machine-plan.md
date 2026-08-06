@@ -179,7 +179,7 @@ dispatcher sets before each hook runs — not from generated or `eval`-ed
 function names, which would break the registry's "trusted hook
 functions" contract. Adding a ghost therefore changes data, not parser
 or dispatcher conditionals, which is the rule
-[`README.md`](README.md) already sets for components.
+[`README.md`](README.md) in this directory already sets for components.
 
 **No dependency on `zombie`.** Like the standalone `llama` component,
 ghosts register with no registry dependencies. `install flame` on a
