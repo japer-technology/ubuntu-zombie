@@ -182,6 +182,20 @@ provider_credential_configured() {
     "$1" 2>/dev/null
 }
 
+model_selection_configured() {
+  local key
+  for key in ZOMBIE_MODEL ZOMBIE_OPENAI_MODEL ZOMBIE_ANTHROPIC_MODEL \
+      ZOMBIE_GEMINI_MODEL ZOMBIE_XAI_MODEL ZOMBIE_MISTRAL_MODEL \
+      ZOMBIE_GROQ_MODEL ZOMBIE_OPENROUTER_MODEL; do
+    if [[ -v "${key}" && -n "${!key}" ]]; then
+      return 0
+    fi
+  done
+  grep -Eq \
+    '^[[:space:]]*(export[[:space:]]+)?ZOMBIE_(MODEL|(OPENAI|ANTHROPIC|GEMINI|XAI|MISTRAL|GROQ|OPENROUTER)_MODEL)[[:space:]]*=[[:space:]]*[^[:space:]#]' \
+    "${ZOMBIE_DIR}/secrets/env" 2>/dev/null
+}
+
 # UX flags (set by argument parsing below; env provides the defaults).
 #   ASSUME_YES   skip the interactive "Type YES" confirmation but keep
 #                interactive prompts for any still-missing inputs.
@@ -3120,11 +3134,23 @@ ensure_admin_password_hash() {
   printf 'ZOMBIE_ADMIN_PASSWORD_HASH=%s\n' "${hash}" >> "${file}"
 }
 
-# Initialise (or reset) the Time-to-Live kill switch. A reinstall always
-# resets the tombstone and starts a fresh countdown — that is how a dead
-# zombie is brought back to life.
+# Initialise the Time-to-Live kill switch on first install. Reinstalls preserve
+# valid lifecycle state, including extensions and tombstones, so an upgrade
+# cannot silently change an operator's existing TTL decision.
 init_lifecycle_state() {
-  local state="${ZOMBIE_DIR}/state/lifecycle.json"
+  local state="${ZOMBIE_DIR}/state/lifecycle.json" current
+  if [[ -s "${state}" ]]; then
+    chown "${AGENT_USER}:${AGENT_USER}" "${state}"
+    chmod 600 "${state}"
+    if current="$(runuser -u "${AGENT_USER}" -- env \
+          ZOMBIE_LIFECYCLE_STATE="${state}" \
+          python3 "${ZOMBIE_DIR}/agent/lifecycle.py" status 2>/dev/null)" \
+        && grep -Eq '"configured":[[:space:]]*true' <<<"${current}"; then
+      ok "Preserving existing Time to Live state."
+      return 0
+    fi
+    warn "Existing Time-to-Live state is invalid; creating a fresh countdown."
+  fi
   if ! runuser -u "${AGENT_USER}" -- env \
         ZOMBIE_LIFECYCLE_STATE="${state}" \
         python3 "${ZOMBIE_DIR}/agent/lifecycle.py" init --days "${TTL_DAYS}" >/dev/null; then
@@ -3194,6 +3220,10 @@ discover_local_llms() {
   (( ASSUME_YES )) && return 0
   [[ -t 0 ]] || return 0
   [[ "${ZOMBIE_SKIP_LLM_SCAN}" == "1" ]] && return 0
+  if model_selection_configured; then
+    info "A model is already configured; preserving it and skipping local LLM discovery."
+    return 0
+  fi
 
   scan_local_llms || return 0
 
@@ -4946,8 +4976,8 @@ install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
 install -m 644 -o "${AGENT_USER}" -g "${AGENT_USER}" \
   "${PAYLOAD_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl" "${ZOMBIE_DIR}/agent/templates/APPEND_SYSTEM.md.tmpl"
 
-# Initialise the Time-to-Live kill switch now that lifecycle.py is deployed.
-# Every install starts (or restarts) the countdown with a fresh tombstone.
+# Initialise the Time-to-Live kill switch now that lifecycle.py is deployed,
+# preserving valid state from an existing installation.
 init_lifecycle_state
 
 # Render pi-mono runtime configs into /opt/ai-zombie/pi/. Root-owned,

@@ -3645,6 +3645,77 @@ EOF
   rm -f "${provider_test_file}"
   grep -q 'GROQ|LMSTUDIO' payload/bin/health-check \
     || { echo "Local LLM credentials must satisfy deployed health checks" >&2; exit 1; }
+  local model_helper model_test_dir discover_helper
+  model_helper="$(install_function model_selection_configured)"
+  discover_helper="$(install_function discover_local_llms)"
+  grep -q 'model_selection_configured' <<<"${discover_helper}" \
+    || { echo "Local LLM discovery must preserve a configured model" >&2; exit 1; }
+  model_test_dir="$(mktemp -d)"
+  mkdir -p "${model_test_dir}/secrets"
+  cat > "${model_test_dir}/secrets/env" <<'EOF'
+# ZOMBIE_MODEL=commented-out
+ZOMBIE_MODEL=
+EOF
+  bash -c "${model_helper}
+    ZOMBIE_DIR=\"\$1\"
+    for key in ZOMBIE_MODEL ZOMBIE_OPENAI_MODEL ZOMBIE_ANTHROPIC_MODEL \
+        ZOMBIE_GEMINI_MODEL ZOMBIE_XAI_MODEL ZOMBIE_MISTRAL_MODEL \
+        ZOMBIE_GROQ_MODEL ZOMBIE_OPENROUTER_MODEL; do
+      unset \"\${key}\"
+    done
+    ! model_selection_configured
+    printf '%s\n' 'ZOMBIE_MODEL=installed-model' >> \"\${ZOMBIE_DIR}/secrets/env\"
+    model_selection_configured
+    : > \"\${ZOMBIE_DIR}/secrets/env\"
+    ZOMBIE_OPENAI_MODEL=environment-model
+    model_selection_configured" _ "${model_test_dir}" \
+    || { rm -rf "${model_test_dir}"; echo "Configured model detection failed" >&2; exit 1; }
+  rm -rf "${model_test_dir}"
+
+  local lifecycle_helper lifecycle_test_dir lifecycle_runner lifecycle_state
+  lifecycle_helper="$(install_function init_lifecycle_state)"
+  lifecycle_test_dir="$(mktemp -d)"
+  lifecycle_state="${lifecycle_test_dir}/state/lifecycle.json"
+  mkdir -p "${lifecycle_test_dir}/agent" "${lifecycle_test_dir}/state"
+  cp payload/agent/lifecycle.py "${lifecycle_test_dir}/agent/lifecycle.py"
+  lifecycle_runner="${lifecycle_helper}
+    set -euo pipefail
+    runuser() {
+      [[ \"\$1\" == '-u' ]]
+      shift 2
+      [[ \"\$1\" == '--' ]]
+      shift
+      command \"\$@\"
+    }
+    chown() { :; }
+    info() { :; }
+    warn() { :; }
+    ok() { :; }
+    die() { printf '%s\n' \"\$1\" >&2; return \"\${2:-1}\"; }
+    ZOMBIE_DIR=\"\$1\"
+    AGENT_USER=zombie
+    TTL_DAYS=7
+    init_lifecycle_state"
+  bash -c "${lifecycle_runner}" _ "${lifecycle_test_dir}"
+  ZOMBIE_LIFECYCLE_STATE="${lifecycle_state}" \
+    PYTHONPATH=payload/agent python3 -c 'import lifecycle; lifecycle.set_ttl(11)'
+  cp "${lifecycle_state}" "${lifecycle_state}.extended"
+  bash -c "${lifecycle_runner}" _ "${lifecycle_test_dir}"
+  cmp -s "${lifecycle_state}.extended" "${lifecycle_state}" \
+    || { rm -rf "${lifecycle_test_dir}"; echo "Reinstall must preserve an extended TTL" >&2; exit 1; }
+  ZOMBIE_LIFECYCLE_STATE="${lifecycle_state}" \
+    PYTHONPATH=payload/agent python3 -c 'import lifecycle; lifecycle.kill()'
+  cp "${lifecycle_state}" "${lifecycle_state}.dead"
+  bash -c "${lifecycle_runner}" _ "${lifecycle_test_dir}"
+  cmp -s "${lifecycle_state}.dead" "${lifecycle_state}" \
+    || { rm -rf "${lifecycle_test_dir}"; echo "Reinstall must preserve a TTL tombstone" >&2; exit 1; }
+  printf 'invalid\n' > "${lifecycle_state}"
+  bash -c "${lifecycle_runner}" _ "${lifecycle_test_dir}"
+  ZOMBIE_LIFECYCLE_STATE="${lifecycle_state}" \
+    PYTHONPATH=payload/agent python3 -c \
+      'import lifecycle; assert lifecycle.status()["configured"]'
+  rm -rf "${lifecycle_test_dir}"
+
   password_helper="$(install_function password_source_label)"
   bash -c "${password_helper}
     [[ \"\$(password_source_label operator)\" == 'set by operator, not recorded' ]]
