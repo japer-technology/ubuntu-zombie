@@ -107,6 +107,20 @@ Grouped by the operator need they serve. Every flag defaults to `0`.
   conformance suite, workflows) **on top of** an installed Forgejo
   server. Hard-depends on the server plan.
 
+### Agent variations
+
+- [`ghosts-in-the-machine-plan.md`](ghosts-in-the-machine-plan.md) —
+  expands `install` so the single root-capable agent becomes one
+  *ghost* among many: Ubuntu Zombie (`zombie`, port `7878`), the
+  Imaginary Friend (`friend`, port `6767`), the Curriculum Flame
+  (`flame`, port `5656`), and any number of operator-declared ghosts.
+  Each ghost is a capability **tier** enforced by the account, the
+  systemd unit, the runtime tool profile, and its own policy — not by
+  prompt text. The child-facing tier implements
+  [`curriculum-gates-local-ai-for-children.md`](curriculum-gates-local-ai-for-children.md),
+  the local specification behind
+  [`japer-technology/curriculum-flame`](https://github.com/japer-technology/curriculum-flame).
+
 Candidates still at the brainstorm stage — secrets manager
 (`ZOMBIE_INSTALL_VAULT`), local SSO (`ZOMBIE_INSTALL_SSO`), wiki
 (`ZOMBIE_INSTALL_WIKI`), curated app platform (`ZOMBIE_INSTALL_APPS`),

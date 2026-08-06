@@ -8,6 +8,21 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Documentation
+
+- **Ghosts in the machine plan:** added
+  `docs/options/ghosts-in-the-machine-plan.md`, an implementation plan for
+  expanding `install` with zombie variations — the root-capable Ubuntu
+  Zombie (`zombie`, port `7878`), the defanged Imaginary Friend
+  (`friend`, port `6767`), the curriculum-gated Curriculum Flame
+  (`flame`, port `5656`), and any number of operator-declared ghosts. It
+  specifies a data-driven ghost registry, capability tiers enforced by
+  the Linux account, a hardened systemd unit, a runtime tool profile and
+  a per-ghost policy, per-ghost trees, logs, credentials and ports, and a
+  phased build with negative verification and a red-team pass. Linked
+  from `docs/options/README.md`. Documentation only; no behaviour
+  changes.
+
 ### Installer setting preservation
 
 - **Configured models suppress discovery:** interactive reinstalls no longer
