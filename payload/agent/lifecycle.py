@@ -1,7 +1,7 @@
 """Time-to-live (TTL) kill switch for the Ubuntu Zombie.
 
 The Ubuntu Zombie Systems Administrator is a privileged, root-capable
-account. To bound the window in which it can act, every install is
+account. To bound the window in which it can act, a fresh install is
 given a *Time to Live*: a future moment after which the zombie is
 permanently disabled. Two events trip the kill switch:
 
@@ -10,8 +10,8 @@ permanently disabled. Two events trip the kill switch:
 
 Once tripped, the state is a tombstone: the ``dead`` flag is written to
 disk and never cleared at runtime, so a restart of the chat service
-cannot revive the zombie. Only a fresh install (which calls
-``initialize``) resets the lifecycle and brings the zombie back.
+cannot revive the zombie. Routine reinstalls preserve the tombstone;
+only an explicit ``initialize`` call resets the lifecycle.
 
 State lives in a small JSON file (``/opt/ai-zombie/state/lifecycle.json``
 by default, overridable with ``ZOMBIE_LIFECYCLE_STATE``)::
@@ -269,8 +269,8 @@ def kill(reason: str = "killed") -> dict[str, Any]:
 def initialize(days: float) -> dict[str, Any]:
     """Create (or reset) the lifecycle state with a fresh ``days``-day TTL.
 
-    Called by the installer. This is the *only* path that clears a
-    tombstone, which is why "the zombie is unusable until a reinstall".
+    Called by the installer only when no valid lifecycle state exists.
+    This is the only path that clears a tombstone.
     """
     if days <= 0:
         raise ValueError("days must be greater than zero")

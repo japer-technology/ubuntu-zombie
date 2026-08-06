@@ -79,7 +79,8 @@ ZOMBIE_NONINTERACTIVE="${ZOMBIE_NONINTERACTIVE:-0}"
 # so it is protected by a shared password (only a PBKDF2 hash is stored in
 # secrets/env). The TTL bounds the lifetime of the root-capable agent: once
 # it elapses (or the operator runs `/ttl --die`) the zombie is permanently
-# disabled until the next reinstall.
+# disabled until its lifecycle state is deliberately reinitialised. Routine
+# reinstalls preserve the existing countdown and tombstone.
 ZOMBIE_ADMIN_PASSWORD_DEFAULT="braaaains"
 ADMIN_PASSWORD="${ZOMBIE_ADMIN_PASSWORD:-}"
 # 1 once the operator has explicitly chosen a password (env or prompt), so a
@@ -807,7 +808,8 @@ Environment variables (selected; see docs/CONFIGURATION.md for all):
                               /var/log/ubuntu-zombie/install-receipt.txt).
   ZOMBIE_SKIP_LLM_SCAN=1     skip the interactive LAN scan that looks for an
                               OpenAI-compatible local LLM server and offers
-                              its models as the starting model.
+                              its models as the starting model. The scan is
+                              also skipped when a model is already configured.
   ZOMBIE_LLM_SCAN_PORT=<n>    port probed for the local LLM scan (default
                               1234, LM Studio's default).
   ZOMBIE_LOCAL_LLM_API_KEY=<k>  API key recorded for the discovered local LLM
@@ -2713,6 +2715,8 @@ print_parameter_table() {
   field "7) Time to Live"    "${TTL_DAYS} day(s) then permanently disabled"
   if [[ -n "${LOCAL_LLM_MODEL}" ]]; then
     field "8) Local LLM"     "${LOCAL_LLM_MODEL} @ ${LOCAL_LLM_BASE_URL}"
+  elif model_selection_configured; then
+    field "8) Local LLM"     "skipped (an existing model is configured)" "${C_DIM}"
   else
     field "8) Local LLM"     "none (scan LAN for an OpenAI-compatible server)" "${C_DIM}"
   fi
@@ -3216,11 +3220,12 @@ scan_local_llms() {
 # LOCAL_LLM_MODEL. Skipped on non-interactive / --yes / non-TTY runs and when
 # ZOMBIE_SKIP_LLM_SCAN=1.
 discover_local_llms() {
+  local force="${1:-0}"
   [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && return 0
   (( ASSUME_YES )) && return 0
   [[ -t 0 ]] || return 0
   [[ "${ZOMBIE_SKIP_LLM_SCAN}" == "1" ]] && return 0
-  if model_selection_configured; then
+  if [[ "${force}" != "1" ]] && model_selection_configured; then
     info "A model is already configured; preserving it and skipping local LLM discovery."
     return 0
   fi
@@ -3265,7 +3270,7 @@ discover_local_llms() {
 }
 
 _edit_local_llm() {
-  discover_local_llms
+  discover_local_llms 1
 }
 
 review_parameters() {
@@ -3659,7 +3664,8 @@ bootstrap_prerequisites
 # Local LLM discovery: scan the host's IPv4 /24 for an OpenAI-compatible LLM
 # server and offer the models it advertises as the starting model. Runs before
 # the parameter review so the choice shows up in the table. No-op for
-# --yes / non-interactive / non-TTY runs or when ZOMBIE_SKIP_LLM_SCAN=1.
+# --yes / non-interactive / non-TTY runs, when ZOMBIE_SKIP_LLM_SCAN=1, or when
+# an environment or installed secrets file already selects a model.
 if is_selected_component "${COMPONENT_ZOMBIE}"; then
   discover_local_llms
 fi
