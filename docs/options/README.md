@@ -8,6 +8,12 @@ with a compatible `ZOMBIE_INSTALL_<COMPONENT>` selector — off by default,
 idempotent, non-interactive-capable, audited, and reversible by
 [`scripts/uninstall.sh`](../scripts/uninstall.sh).
 
+[`ghosts-in-the-machine-plan.md`](ghosts-in-the-machine-plan.md) is the
+deliberate exception. It records the direction for an independent family
+of AI-agent products, not optional components. Those products have their
+own releases, installers, updates, security credentials, and lifecycles;
+they do not use Ubuntu Zombie's component registry.
+
 Runnable components follow the registry contract in
 [`scripts/component-registry.sh`](../scripts/component-registry.sh):
 isolated configuration and validators; install, verify, doctor, repair,
@@ -107,16 +113,16 @@ Grouped by the operator need they serve. Every flag defaults to `0`.
   conformance suite, workflows) **on top of** an installed Forgejo
   server. Hard-depends on the server plan.
 
-### Agent variations
+### Independent AI-agent family
 
 - [`ghosts-in-the-machine-plan.md`](ghosts-in-the-machine-plan.md) —
-  expands `install` so the single root-capable agent becomes one
-  *ghost* among many: Ubuntu Zombie (`zombie`, port `7878`), the
-  Imaginary Friend (`friend`, port `6767`), the Curriculum Flame
-  (`flame`, port `5656`), and any number of operator-declared ghosts.
-  Each ghost is a capability **tier** enforced by the account, the
-  systemd unit, the runtime tool profile, and its own policy — not by
-  prompt text. The child-facing tier implements
+  expands the lesson of Ubuntu Zombie into a family of separate products:
+  the root-capable Ubuntu Zombie, the less-privileged Imaginary Friend,
+  Curriculum Flame, and future helpful agents. Each product owns its
+  installer, updater, runtime, policy, security password and other
+  credentials, state, audit trail, and release. There is no shared ghost
+  registry, capability tier, payload, or family-wide lifecycle command.
+  The Curriculum Flame product follows
   [`curriculum-gates-local-ai-for-children.md`](curriculum-gates-local-ai-for-children.md),
   the local specification behind
   [`japer-technology/curriculum-flame`](https://github.com/japer-technology/curriculum-flame).

@@ -10,18 +10,17 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Documentation
 
-- **Ghosts in the machine plan:** added
-  `docs/options/ghosts-in-the-machine-plan.md`, an implementation plan for
-  expanding `install` with zombie variations — the root-capable Ubuntu
-  Zombie (`zombie`, port `7878`), the defanged Imaginary Friend
-  (`friend`, port `6767`), the curriculum-gated Curriculum Flame
-  (`flame`, port `5656`), and any number of operator-declared ghosts. It
-  specifies a data-driven ghost registry, capability tiers enforced by
-  the Linux account, a hardened systemd unit, a runtime tool profile and
-  a per-ghost policy, per-ghost trees, logs, credentials and ports, and a
-  phased build with negative verification and a red-team pass. Linked
-  from `docs/options/README.md`. Documentation only; no behaviour
-  changes.
+- **Independent AI-agent family plan:** revised
+  `docs/options/ghosts-in-the-machine-plan.md` to record the decision that
+  Ubuntu Zombie is the first of a wider family, but remains the sole
+  generally root-capable agent. Imaginary Friend, Curriculum Flame, and
+  future agents are separate products with product-owned installers,
+  updates, runtimes, policies, passwords and other credentials, state,
+  audit trails, tests, documentation, and releases. The plan replaces
+  the shared ghost registry and capability-tier proposal with a
+  copy-separate-improve process, independent update requirements,
+  co-installation boundaries, and cross-product credential-isolation
+  tests. Documentation only; no behaviour changes.
 
 ### Installer setting preservation
 
