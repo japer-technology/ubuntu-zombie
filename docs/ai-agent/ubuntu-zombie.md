@@ -6,19 +6,21 @@
 > lifecycle, and audit controls.
 
 Ubuntu Zombie is the first and currently implemented member of the
-[AI-agent family](README.md). The other products copy its proven product
-disciplines and deliberately remove its general authority; they do not run
-on or inside Ubuntu Zombie.
+[AI-agent family](README.md). It also has the **God role**: the root-level
+manager that can install and manage the other agents for the human
+operator. Those products copy its proven disciplines and deliberately
+remove its general authority while retaining independent runtimes,
+credentials, policies, data, and releases.
 
 ## Definition card
 
 | Field | Definition |
 | ----- | ---------- |
-| Status | Implemented and shipped by this repository |
+| Status | Core Systems Administrator implemented; dedicated family management is required but not yet implemented |
 | Human need | Operate and repair a complex personal Ubuntu machine without requiring the owner to translate every problem into administration commands |
 | Intended user | The owner/operator and authorised local users of one machine |
 | Operator | The human who owns the machine, provider account, chat credential, and lifecycle controls |
-| Maximum authority | Root through the installed account, policy classification, and approval flow |
+| Maximum authority | Root through the installed account, including approved management of other local agents |
 | Default Linux identity | `zombie` (renameable with `ZOMBIE_USER`) |
 | Default access | Password-protected loopback chat at `127.0.0.1:7878` |
 | Install root | `/opt/ai-zombie` |
@@ -56,7 +58,8 @@ Ubuntu Zombie demonstrates that a local AI product can combine:
 - independently verifiable release artifacts.
 
 Later products inherit these outcomes, not this live runtime. Ubuntu Zombie
-remains the only generally root-capable family member.
+remains the only generally root-capable family member and their top-level
+machine administrator.
 
 ## Implemented features
 
@@ -201,6 +204,50 @@ Other plans under [`../options/`](../options/) are designs, not implemented
 features. Imaginary Friend, Curriculum Flame, and ERIC must never become
 component targets.
 
+### Family management (“God” role)
+
+Ubuntu Zombie's root authority makes it the administrator above every other
+agent installed on the same machine. It must be able to:
+
+- discover independently installed agents from verified ownership markers;
+- show product, version, authority, health, lifecycle, and update status;
+- fetch and verify a target's release artifacts;
+- display and invoke its product-owned install or dry-run entry point;
+- run its verify, doctor, repair, backup, update, rollback, suspend, and
+  uninstall operations;
+- coordinate a serial “update all agents” operation with per-product plans,
+  approvals, health gates, results, and recovery; and
+- keep a secret-free inventory and cross-reference the manager and target
+  audit records.
+
+This dedicated management plane is a required future extension. The current
+runtime can already execute product-owned lifecycle commands with root
+authority through `shell.run`, `svc.control`, and filesystem tools, subject
+to normal classification and operator approval, but it does not yet ship an
+agent catalogue, family inventory, or specialised management UI.
+
+The management contract is deliberately narrow:
+
+1. the target product owns its installer, updater, migrations, rollback,
+   policy, receipt, and uninstaller;
+2. Ubuntu Zombie verifies and invokes those interfaces rather than
+   rewriting them;
+3. the operator sees the exact target and plan before mutation;
+4. manager actions are `system_change` or `destructive` as appropriate and
+   are audited by Ubuntu Zombie;
+5. the target independently validates ownership, authority, and inputs and
+   writes its own audit result;
+6. Zombie inventory stores identifiers, versions, health, receipt
+   references, and outcomes, never raw target credentials or private
+   content; and
+7. no subordinate agent can invoke the manager, operate a sibling, or
+   inherit Zombie's root authority.
+
+“God” is a host-administration role, not an identity, consent, guardian, or
+legal role. Ubuntu Zombie may manage ERIC's software and service lifecycle,
+for example, but it cannot turn an inference into consent, weaken a frozen
+Constitution, or manufacture Executor authority.
+
 ## People and trust boundaries
 
 ### Operator
@@ -212,7 +259,8 @@ The operator owns:
 - the chat password;
 - the TTL and reactivation controls;
 - policy configuration and approvals; and
-- service suspension, credential revocation, and uninstall.
+- service suspension, credential revocation, uninstall, and approved
+  management of subordinate agents.
 
 ### Agent identity
 
@@ -310,6 +358,7 @@ Desktop LTS machine before using a real workstation.
 | `doctor` | Explains detected drift and likely recovery |
 | `repair` | Reasserts known-safe permissions/configuration and restarts the selected service where needed |
 | `update` | Pull or unpack a release and re-run idempotent `install` |
+| manage agent | Invoke a verified target product's lifecycle interface under policy, approval, and dual audit; dedicated UX is planned |
 | revoke | Remove provider keys or stop and disable the chat service |
 | kill | Use `/ttl --die` to create the durable lifecycle tombstone |
 | `uninstall` | Removes all or selected owned components, with state/archive choices for Zombie |
@@ -365,8 +414,8 @@ packages are not treated as exclusively owned. See
 - Conversation history is local SQLite state and is not advertised as
   encrypted at rest.
 - No SSH, Tailscale, VNC, graphical automation, remote-access service,
-  fleet management, high availability, or provider failover is installed
-  by the baseline.
+  multi-machine fleet management, high availability, or provider failover
+  is installed by the baseline.
 - Only one future reactivation can be pending.
 - Supported platforms and architectures are limited to those listed in
   [`../PLATFORMS.md`](../PLATFORMS.md).
@@ -396,7 +445,9 @@ Disposable-VM validation must continue to prove:
 - update and repair convergence;
 - selective and complete removal; and
 - unchanged root-capable behaviour when later family products are
-  co-installed.
+  co-installed;
+- strict target selection and product-owned lifecycle invocation; and
+- matched, secret-redacted audit evidence for every managed operation.
 
 Run the repository's existing `make lint` and `make test` checks for every
 source change. Do not run the live installer outside a disposable Ubuntu
@@ -420,4 +471,3 @@ Desktop LTS VM.
 This document is the family-facing definition. The linked operator
 documents remain authoritative for live commands, defaults, and current
 implementation details.
-

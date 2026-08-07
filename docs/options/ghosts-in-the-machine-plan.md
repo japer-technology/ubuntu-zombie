@@ -1,4 +1,4 @@
-# Plan: ghosts in the machine — an independent family of AI agents
+# Plan: ghosts in the machine — an independent AI-agent family
 
 ## Goal
 
@@ -14,6 +14,12 @@ Ubuntu Zombie runtime with different personas. “Ghost” remains a useful
 family metaphor, but it is not a technical base class, capability tier,
 registry entry, or shared installation format.
 
+Ubuntu Zombie is the exception at the management boundary. As the only
+root-capable family member, it is the machine-level manager — the **God
+role** — and may install and manage the other products for the human
+operator. It invokes their independently owned lifecycle interfaces; it
+does not turn them into components or a shared runtime.
+
 | Product | Purpose | Maximum authority | Default identity | Default port |
 | ------- | ------- | ----------------- | ---------------- | ------------ |
 | **Ubuntu Zombie** | AI Systems Administrator | Root through its existing policy and approval boundary | `zombie` | `7878` |
@@ -23,7 +29,7 @@ registry entry, or shared installation format.
 
 Ubuntu Zombie remains the only generally root-capable agent. Every later
 agent starts with less authority and receives only the narrow permissions
-its own purpose requires.
+its own purpose requires. No later agent can manage Zombie or a sibling.
 
 ## Decisions — resolved
 
@@ -52,6 +58,11 @@ These decisions replace the earlier shared-chassis proposal:
    say or decide. It must never claim consciousness, identity,
    personhood, legal authority, or first-hand knowledge of events the
    subject did not experience.
+6. **Ubuntu Zombie manages the family.** Its root-level God role can
+   discover, install, verify, diagnose, repair, start, stop, update, back
+   up, suspend, and uninstall another local agent under operator approval.
+   The target still owns and validates the invoked lifecycle operation,
+   and both products audit it.
 
 The one human who owns the machine remains the operator. Other people may
 use a particular agent, but they do not thereby become operators of the
@@ -100,7 +111,7 @@ from changing every installed agent at once.
 | Source and release | Product-owned repository, version, changelog, artifact, SBOM, checksums, signatures, and provenance |
 | Installation | Product-owned installer, prompts, preflight, dry-run, receipt, ownership markers, and rollback |
 | Update | Product-owned compatibility checks, backup, migration, health gate, rollback, schedule, and release channel |
-| Removal | Product-owned uninstaller that cannot select or delete another agent |
+| Removal | Product-owned uninstaller that removes only that product; Ubuntu Zombie may invoke it for the operator |
 | Runtime | Product-owned code tree, dependencies, virtual environment, templates, tools, and process |
 | Identity | Unique Linux user, primary group, optional sharing groups, and service account set |
 | Authentication | Unique password or passwords, salted hashes, session-signing keys, cookies, and rotation/recovery flow |
@@ -115,7 +126,7 @@ Products may independently choose the same language or upstream library.
 They must not share a live installed copy merely because the files began
 from the same ancestor.
 
-## Expanding installation without combining installers
+## Ubuntu Zombie management without combining products
 
 [`scripts/install.sh`](../../scripts/install.sh) remains the Ubuntu
 Zombie installer. It must not gain `friend`, `flame`, arbitrary `ghost`,
@@ -123,33 +134,63 @@ or capability-tier targets. The existing component registry remains for
 software that Ubuntu Zombie itself installs; another AI agent is a
 product, not an Ubuntu Zombie component.
 
-The family can still have one discoverable front door:
+Ubuntu Zombie provides the discoverable management front door:
 
-1. A catalogue describes each agent’s purpose, authority, intended user,
-   current release, and project-owned installation entry point.
-2. The operator chooses and downloads one product’s release.
-3. That product’s release verification checks its own artifact,
-   signature, provenance, and checksums.
-4. The operator runs that product’s installer and reviews that product’s
-   requested permissions.
-5. The installer creates only that product’s identity, credentials,
+1. A signed catalogue describes each agent’s purpose, authority, intended
+   user, current release, and product-owned lifecycle entry point.
+2. Zombie discovers existing agents only through validated ownership
+   markers and records a secret-free local inventory.
+3. For a new agent, Zombie downloads and verifies that product’s artifact,
+   signature, provenance, checksums, and SBOM.
+4. Zombie displays the product-owned dry-run and requested permissions to
+   the operator.
+5. After approval, Zombie invokes the product-owned installer with
+   product-specific inputs. Raw passwords, provider keys, guardian keys,
+   and vault keys are not retained in Zombie history, logs, receipts, or
+   inventory.
+6. The installer creates only that product’s identity, credentials,
    files, services, state, receipt, and ownership markers.
-6. Installing another agent is a second, independent transaction using
-   the other product’s verified release and installer.
+7. Zombie runs the target’s health and boundary checks and correlates its
+   own management audit record with the target receipt and audit result.
 
-A future family chooser may display the catalogue and hand the operator
-to the selected release. It must remain a stateless handoff:
+Direct installation remains supported. Ubuntu Zombie management and direct
+operation call the same target entry point and produce the same target
+state. The management plane:
 
-- it does not install as root;
-- it does not collect or pass passwords, provider keys, or settings;
-- it does not provide common lifecycle hooks;
-- it does not maintain an authoritative family manifest;
-- it does not update, repair, or uninstall products;
-- it never runs several product installers as one transaction.
+- runs as root only inside Ubuntu Zombie’s existing policy and approval
+  boundary;
+- does not implement target migrations or rewrite target configuration;
+- keeps inventory metadata, not target private content or raw secrets;
+- invokes only signed, version-compatible product lifecycle interfaces;
+- selects exactly one target per mutation;
+- writes manager-side audit records for every request and outcome; and
+- cannot be invoked by a subordinate agent’s service identity.
 
-There is consequently no “update all agents” command. The operator reads
-each product’s changelog and runs each product’s update procedure
-separately.
+Ubuntu Zombie may offer “update all agents” as serial orchestration. It
+reads and presents every product’s changelog and plan, obtains the required
+approvals, and invokes each product-owned updater separately. The batch is
+not atomic: every target keeps its own result and recovery path, and a
+later failure cannot roll back or corrupt an earlier successful target.
+
+### Product management interface
+
+Every subordinate product publishes a stable, root-only interface for:
+
+- discovery and version/status reporting;
+- dry-run and required-input reporting;
+- install, verify, doctor, repair, update, rollback or recovery, suspend,
+  backup, and uninstall;
+- machine-readable plans, results, health, receipt references, and failure
+  guidance; and
+- a correlation identifier that appears in both target and Zombie audit
+  records.
+
+The interface authenticates the caller as the local root manager, not with a
+child, Friend owner, subject, guardian, or application password. It
+validates ownership markers and target state on every mutation. Root access
+permits host administration but does not manufacture the human consent,
+legal authority, evidence classification, or guardian decision required by
+a product’s internal policy.
 
 ## The Ubuntu Zombie lessons to duplicate
 
@@ -276,7 +317,7 @@ names, commands, and firewall rule names against the actual host before
 mutation. It refuses to adopt an unmarked resource. Collision detection
 does not give one product ownership of another product’s configuration.
 
-### Authority is asymmetric
+### Ubuntu Zombie is God; authority is asymmetric
 
 No non-Zombie agent receives passwordless general `sudo`, membership in
 privilege-bearing groups, a login shell, or a general command runner. If
@@ -287,10 +328,16 @@ shape.
 
 Less-privileged agents must be unable to read or write Ubuntu Zombie’s or
 one another’s secrets, policy, state, code, logs, or ports. Ubuntu Zombie
-itself is root-capable and can inspect the whole host; no same-machine
-design can honestly hide another agent from root. Co-installation
-therefore protects Zombie **from** less-privileged agents, not the other
-way around.
+itself is root-capable and can inspect and manage the whole host; no
+same-machine design can honestly hide another agent from root.
+Co-installation therefore protects Zombie **from** less-privileged agents,
+not the other way around.
+
+Zombie management actions are classified and approved like any other root
+work. Routine status may be read-only; install, repair, update, start, stop,
+and suspension are system changes; destructive uninstall or state deletion
+requires the destructive confirmation path. The target independently
+checks the request and audits its result.
 
 ## Imaginary Friend: standalone installation plan
 
@@ -318,7 +365,8 @@ Its project-owned installer:
 The Friend update procedure backs up Friend state, applies only Friend
 migrations, verifies the sandbox and workspace boundary, restarts only
 Friend units, and can roll back without reading or changing Zombie or
-Flame.
+Flame. Direct operation and Ubuntu Zombie management invoke this same
+procedure through Friend’s root-only lifecycle interface.
 
 The first improvement over Ubuntu Zombie is structural: Friend begins
 with generated credentials, root-owned code, a hardened unit, and no
@@ -357,7 +405,9 @@ failed migrations all fail closed.
 The Flame update procedure validates curriculum and profile schemas,
 backs up guardian-owned data, stages new validators, runs the full
 decision suite, and switches the service only after integrity and health
-checks pass. It never invokes a sibling product's updater.
+checks pass. It never invokes a sibling product's updater. Ubuntu Zombie
+may invoke Flame’s own updater, but cannot use a child or guardian session
+as a management credential or bypass the guardian-owned data rules.
 
 Flame improves the mechanism again: role-separated authentication,
 minimal transcript retention, local-only child data, pre- and
@@ -627,6 +677,9 @@ that answers:
    mechanisms are deleted?
 9. What does this iteration measurably improve?
 10. How will standalone and co-installation security be proved?
+11. Which lifecycle interface can Ubuntu Zombie invoke, what inventory may
+    it retain, and which human or legal decisions remain outside its God
+    role?
 
 There is no operator-authored `.ghost` record and no arbitrary persona
 loader. ERIC's living, consenting subject enrols only themself into a
@@ -650,11 +703,14 @@ prove these outcomes:
 - it records the old version, new version, migration, and outcome in its
   own audit/receipt trail;
 - it offers a product-appropriate rollback or documented recovery path;
-- it leaves every sibling agent byte-for-byte and process-for-process
-  untouched.
+- it leaves every non-target sibling byte-for-byte and
+  process-for-process untouched; a Zombie-managed operation changes only
+  Zombie’s own inventory and audit metadata in addition to the target.
 
 No release schedule, version number, update acknowledgement, migration
-format, or rollback decision is inherited from another agent.
+format, or rollback decision is inherited from another agent. Ubuntu
+Zombie may coordinate one or all updates, but each target’s updater remains
+authoritative and independently recoverable.
 
 ## Co-installation contract
 
@@ -662,18 +718,23 @@ Independent products still need to behave safely when the operator
 chooses the same machine.
 
 - Installers inspect host collisions and fail before mutation.
-- No product assumes another is installed and no agent depends on
-  Ubuntu Zombie.
+- No subordinate product requires Ubuntu Zombie for direct operation, but
+  every product supports its root-only management contract when Zombie is
+  present.
 - Each product listens on its own loopback port and owns any
   owner-matched firewall rules needed to restrict local users.
 - A product password, cookie, session token, API route, or password-reset
   mechanism is rejected by every sibling product.
-- One product cannot enumerate or read another’s protected directories.
-- Updating, repairing, suspending, or uninstalling one product does not
-  restart services, rotate credentials, rewrite policy, or remove files
-  for another.
-- Cross-agent messaging, shared memory, shared model credentials, and a
-  shared approval queue are absent.
+- A subordinate product cannot enumerate or read another product’s
+  protected directories. Ubuntu Zombie’s root manager is the documented
+  exception.
+- Direct or Zombie-managed updating, repairing, suspending, or uninstalling
+  one product does not restart services, rotate credentials, rewrite
+  policy, or remove files for a non-target sibling.
+- Subordinate peer-to-peer messaging, shared memory, shared model
+  credentials, and a shared approval queue are absent.
+- A subordinate service identity cannot invoke Zombie’s management plane
+  or request an operation against a sibling.
 
 If a root-capable Zombie and a child-facing Flame share a machine, the
 operator must use distinct strong passwords and accept that Zombie, as
@@ -683,7 +744,9 @@ deployment.
 ERIC adds a second asymmetry: its Evidence Vault may contain exceptionally
 sensitive information about the subject and third parties. Friend and
 Flame cannot query ERIC, and ERIC cannot absorb their conversations as
-evidence. A dedicated ERIC machine or separately administered encrypted
+evidence. Zombie may manage ERIC’s software lifecycle, but host root is not
+subject consent, guardian approval, a vault decryption key, or Executor
+authority. A dedicated ERIC machine or separately administered encrypted
 vault remains the stronger deployment when Zombie's root access or other
 local services are outside the subject's intended evidence boundary.
 
@@ -692,7 +755,8 @@ local services are outside the subject's intended evidence boundary.
 ### Phase 0 — record the family boundary
 
 - Update the product vision to recognise a family with one operator.
-- Mark Ubuntu Zombie as the sole generally root-capable member.
+- Mark Ubuntu Zombie as the sole generally root-capable member and explicit
+  God-level family manager.
 - Publish the copy/separate/improve rule and the namespace reservations.
 - Explicitly reject the ghost registry, generic tiers, shared payload,
   and shared updater designs.
@@ -702,8 +766,11 @@ local services are outside the subject's intended evidence boundary.
 - Tag the audited source snapshot used by the next product.
 - Record the installer, policy, audit, lifecycle, release, and test
   lessons to copy.
-- Make no multi-agent refactor in Ubuntu Zombie and prove its existing
-  install remains unchanged.
+- Specify the signed catalogue, secret-free family inventory, root-only
+  target contract, manager policy classes, dual-audit correlation, and
+  batch failure behaviour.
+- Add management without changing the default Ubuntu Zombie installation
+  or turning agents into component targets.
 
 ### Phase 2 — build Imaginary Friend independently
 
@@ -711,6 +778,7 @@ local services are outside the subject's intended evidence boundary.
 - Complete the namespace split and remove privileged code paths.
 - Build Friend’s installer, credentials, sandbox, workspace, lifecycle,
   updater, verifier, diagnostics, and uninstaller.
+- Publish Friend’s root-only management plan and result interface.
 - Prove Friend alone, then Friend beside Zombie.
 
 ### Phase 3 — harden independent co-installation
@@ -718,7 +786,8 @@ local services are outside the subject's intended evidence boundary.
 - Test identity, path, port, cookie, password, session, provider-secret,
   audit, update, and uninstall separation.
 - Red-team Friend from its service account.
-- Verify that updating either product does not alter the other.
+- Verify direct and Zombie-managed Friend lifecycle operations, including
+  dual audit and strict target selection.
 - Feed improvements back through separate, reviewed changes where useful.
 
 ### Phase 4 — build Curriculum Flame independently
@@ -727,6 +796,8 @@ local services are outside the subject's intended evidence boundary.
   not from the installed Friend runtime.
 - Build the child and guardian boundaries, curriculum gate, local-model
   boundary, retention model, integrity checks, and Flame-only lifecycle.
+- Ensure Zombie can manage software lifecycle without child or guardian
+  credentials and cannot turn root access into guardian approval.
 - Prove Flame alone, beside Friend, and beside Zombie.
 
 ### Phase 5 — build ERIC independently
@@ -739,13 +810,15 @@ local services are outside the subject's intended evidence boundary.
   ship until the frozen-model transition and governance gates pass.
 - Prove vault/Twin/Executor separation, source-backed labels, third-party
   data controls, export, destruction, and recovery before enrolment.
+- Ensure Zombie can manage services and releases without gaining vault
+  custody, consent, Constitution, guardian, or Executor authority.
 
-### Phase 6 — add the family catalogue
+### Phase 6 — complete the family management experience
 
 - Publish product identities, authority summaries, release-verification
   instructions, and project-owned install links.
-- Add a non-root, stateless chooser only if it improves discovery without
-  becoming an installer or lifecycle manager.
+- Add the Ubuntu Zombie catalogue, inventory, per-product controls, batch
+  update planning, and correlated audit views.
 - Add future agents one complete independent product at a time.
 
 Each product phase ends with that product’s own lint, tests, package,
@@ -789,10 +862,18 @@ For every combination:
 3. Confirm each non-root service account cannot read another product’s
    code, credentials, state, policy, history, or logs.
 4. Re-run each installer and updater independently.
-5. Record sibling file hashes and service start times; operating on one
-   product must not change the others.
-6. Uninstall one product and verify every remaining product.
-7. Uninstall all products with their own uninstallers and confirm each
+5. Record sibling file hashes and service start times; direct operation on
+   one product must not change the others. A managed operation may append
+   only Zombie inventory/audit metadata outside the target.
+6. Repeat install, verify, doctor, repair, update, suspend, rollback, and
+   uninstall through Ubuntu Zombie and prove only the selected target
+   changes.
+7. Confirm every managed operation has correlated, secret-redacted Zombie
+   and target audit records.
+8. Attempt to invoke Zombie management from every subordinate service
+   account and confirm denial.
+9. Uninstall one product and verify every remaining product.
+10. Uninstall all products with their own uninstallers and confirm each
    removes only its owned resources.
 
 ### Product-specific red teams
@@ -812,17 +893,24 @@ For every combination:
   Constitution, activate posthumous mode, or invoke the Executor; and
   revocation, suspension, export, and destruction workflows fail closed.
 - **Zombie:** existing policy, approval, audit, TTL, reinstall, update,
-  and root-capable behaviour remain unchanged.
+  and root-capable behaviour remain unchanged; the manager rejects
+  unsigned lifecycle interfaces, unowned targets, subordinate callers,
+  cross-target inputs, and secret-bearing inventory records.
 
 ## Non-negotiables
 
 - Ubuntu Zombie is the only generally root-capable agent.
+- Ubuntu Zombie is the God-level manager for every subordinate agent on
+  its machine.
 - A prompt, persona, password, or approval cannot increase an agent’s
   installed authority.
 - Every agent owns unique passwords and all other security material.
-- No agent reads another agent’s secrets or uses them as defaults.
+- No subordinate agent reads another agent’s secrets. Ubuntu Zombie never
+  uses target secrets as defaults or stores raw target secrets in its
+  family inventory.
 - No shared runtime, policy engine, tool registry, service template,
-  manifest, installer, updater, repair path, or uninstaller.
+  installer, updater, repair path, or uninstaller. Zombie inventory points
+  to product-owned manifests; it does not replace them.
 - Every new product copies the proven lessons and improves the mechanism.
 - Every install is idempotent, non-interactive-capable, auditable, and
   reversible.
@@ -839,9 +927,10 @@ For every combination:
   environment serving several agents.
 - Shared passwords, single sign-on, shared provider credentials, shared
   sessions, shared state, or shared audit logs.
-- A family-wide installer, update-all command, repair command, or
-  uninstaller.
-- Ghost-to-ghost messaging, a shared memory bus, or delegated authority.
+- Replacing product-owned installers, updaters, repair paths, or
+  uninstallers with one family implementation.
+- Subordinate ghost-to-ghost messaging, a shared memory bus, or delegated
+  Zombie authority.
 - Fleet orchestration or multi-machine control.
 - Claiming mutual isolation from Ubuntu Zombie’s root account on one
   host.
@@ -861,7 +950,8 @@ For every combination:
 | A later product accidentally keeps Zombie power | Remove privileged code first, use a fresh threat model, run negative tests from the service account |
 | Users assume one password works everywhere | Generate product-specific credentials, use unique cookies, document separation, and test cross-login rejection |
 | Independent installers collide on the host | Product-specific namespaces, preflight collision checks, and refusal to adopt unmarked resources |
-| A family chooser becomes a hidden orchestrator | Keep it non-root and stateless; it may verify and link, never install or manage lifecycles |
+| The God-level manager targets the wrong product or leaks target secrets | Require signed ownership metadata, exact target selection, product-owned dry-runs, per-action approval, secret-free inventory, dual audit, and non-target hash/process tests |
+| A subordinate agent reaches the management plane | Root-only entry points, caller validation, no target-callable management tool, and service-account negative tests |
 | One update damages another agent | Product-owned paths and units plus black-box hash, process, update, and uninstall tests |
 | Root Zombie is mistaken for a peer sandbox | Document the authority asymmetry and recommend a dedicated machine for stronger Flame isolation |
 | Flame is mistaken for a finished safeguard | Fail closed, retain the honesty gate, and make no child-safety claim before its own quality gates pass |
@@ -889,4 +979,7 @@ ERIC additionally owns its evidence and provenance schemas, consent
 model, Constitution and guardian format, Executor authority mapping,
 succession guide, data-protection assessment, and legal-review record.
 The family catalogue links to those authoritative documents rather than
-copying live operating instructions back into Ubuntu Zombie.
+copying live operating instructions back into Ubuntu Zombie. Ubuntu
+Zombie additionally owns the signed catalogue format, secret-free local
+inventory, target management contract, manager policy and approval rules,
+batch semantics, and correlated manager audit documentation.

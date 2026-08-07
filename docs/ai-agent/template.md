@@ -32,6 +32,7 @@ plugin manifest, or a way to add authority to an installed agent. Read the
 | State root | `/var/lib/[unique-product-name]` |
 | Log root | `/var/log/[unique-product-name]` |
 | Environment prefix | `[UNIQUE_PREFIX]_*` |
+| Ubuntu Zombie management | [Supported interface and restrictions] |
 | Authoritative repository | [Link or “not created”] |
 
 ## Product promise
@@ -75,6 +76,7 @@ already enforced.]
 | Role | May do | Must never do |
 | ---- | ------ | ------------- |
 | Operator | [Install, configure, approve, suspend, remove] | [Product-specific limits] |
+| Ubuntu Zombie manager | [Root-level product lifecycle operations] | [Human, consent, legal, and secret-use limits] |
 | Primary user | [Normal interactions] | [Administrative or unsafe actions] |
 | Service identity | [Exact runtime access] | [Everything outside the capability set] |
 | Additional role | [Optional role] | [Role boundary] |
@@ -219,10 +221,41 @@ provider receives, and how egress is restricted.]
 | Inbound | `127.0.0.1:[port]` | [Traffic] | [Open/closed] | [Authentication] |
 | Outbound | [Destination or none] | [Data] | [Allowed/blocked] | [Policy] |
 
+## Ubuntu Zombie management contract
+
+Ubuntu Zombie is the root-level family manager. Define the product-owned,
+root-only interface it may invoke without turning this product into a
+Zombie component.
+
+| Management operation | Entry point/output | Required approval | Target audit event |
+| -------------------- | ------------------ | ----------------- | ------------------ |
+| Discover/status | [Machine-readable interface] | [None/read-only] | [Event] |
+| Install/dry-run | [Product installer] | [Approval] | [Event] |
+| Verify/doctor/repair | [Lifecycle interface] | [Approval rules] | [Events] |
+| Update/rollback | [Product updater] | [Approval rules] | [Events] |
+| Suspend/uninstall | [Lifecycle interface] | [Approval/confirmation] | [Events] |
+
+Specify:
+
+- ownership-marker and release-verification rules;
+- a stable plan and result schema;
+- which non-secret inventory fields Zombie may retain;
+- how sensitive inputs reach the target without entering Zombie history,
+  logs, receipts, or long-term state;
+- matching correlation identifiers in manager and target audits;
+- failure, cancellation, timeout, rollback, and partial-batch behaviour;
+- proof that only the selected product changes; and
+- why managing software does not grant Zombie a target-specific human,
+  guardian, consent, evidence, or legal role.
+
+A subordinate agent cannot call this interface through its normal service
+identity, request management of a sibling, or increase its authority.
+
 ## Installation
 
-The product owns its installer; Ubuntu Zombie and a family chooser must not
-dispatch into it.
+The product owns its installer. Ubuntu Zombie may verify and invoke that
+installer as the family manager, but must not reimplement it or register the
+product as a Zombie component.
 
 ### Preflight
 
@@ -281,10 +314,13 @@ Define:
 5. atomic service switch and health gate;
 6. failed-migration rollback or documented recovery;
 7. release and migration audit records; and
-8. proof that no sibling file or process changes.
+8. proof that no non-target sibling file or process changes; and
+9. the stable management plan/result contract Ubuntu Zombie invokes.
 
-There is no shared release number, schedule, updater, migration format, or
-“update all agents” operation.
+There is no shared release number, schedule, updater, or migration format.
+Ubuntu Zombie may coordinate “update all agents” by invoking each verified
+product updater serially, with per-product approval, health, audit, and
+recovery. The batch is not one atomic migration.
 
 ## Co-installation
 
@@ -299,7 +335,11 @@ Prove:
 - service-account denial when reading sibling protected resources;
 - independent reinstall, repair, update, suspension, and uninstall;
 - stable sibling file hashes and service start times; and
-- honest treatment of Ubuntu Zombie's root authority.
+- honest treatment of Ubuntu Zombie's root authority;
+- successful Zombie-managed lifecycle operations against only this target;
+  and
+- denial of every attempt by this service identity to invoke Zombie's
+  management plane.
 
 ## Observability and operator control
 
@@ -327,6 +367,8 @@ Prove:
 - [ ] Update from every supported version.
 - [ ] Failed migration, rollback, and recovery.
 - [ ] Verify, doctor, repair, suspension, and uninstall.
+- [ ] Direct and Ubuntu Zombie-managed lifecycle paths produce equivalent
+      target results and matching audit evidence.
 - [ ] Artifact, checksum, signature, provenance, and SBOM verification.
 
 ### Product-specific red team
@@ -344,6 +386,8 @@ Prove:
 - [ ] Every supported three-product combination.
 - [ ] All current family products together.
 - [ ] Operate and remove each product while all siblings remain unchanged.
+- [ ] Use Ubuntu Zombie to manage each selected target while every
+      non-target sibling remains unchanged.
 
 ## Threats and mitigations
 
@@ -415,4 +459,3 @@ A release is not complete until the product's lint, tests, package,
 artifact verification, standalone VM lifecycle, negative security suite,
 co-installation matrix, changelog, and version all pass. Any unproven
 security or safety claim remains visibly labelled as planned.
-
