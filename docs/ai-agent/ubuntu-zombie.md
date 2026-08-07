@@ -28,6 +28,8 @@ credentials, policies, data, and releases.
 | State root | `/opt/ai-zombie/state` |
 | Log root | `/var/log/ubuntu-zombie` |
 | Environment prefix | `ZOMBIE_*` |
+| Family contract | Repository `family/`; installed `/opt/ai-zombie/family/` |
+| Family CLI | `/opt/ai-zombie/bin/zombie-agents` |
 | Authoritative repository | [`japer-technology/ubuntu-zombie`](https://github.com/japer-technology/ubuntu-zombie) |
 
 ## Product promise
@@ -220,11 +222,46 @@ agent installed on the same machine. It must be able to:
 - keep a secret-free inventory and cross-reference the manager and target
   audit records.
 
-This dedicated management plane is a required future extension. The current
-runtime can already execute product-owned lifecycle commands with root
-authority through `shell.run`, `svc.control`, and filesystem tools, subject
-to normal classification and operator approval, but it does not yet ship an
-agent catalogue, family inventory, or specialised management UI.
+This dedicated management plane is the next implementation work package in
+[`implementation.md`](implementation.md#implementation-order-and-hand-off-gates).
+The current runtime can already execute product-owned lifecycle commands
+with root authority through `shell.run`, `svc.control`, and filesystem tools,
+subject to normal classification and operator approval, but it does not yet
+ship the dedicated catalogue, family inventory, CLI, tools, or UI described
+below.
+
+The first manager implementation adds:
+
+| Repository source | Installed purpose |
+| ----------------- | ----------------- |
+| `family/catalog.json` and `family/schemas/` | Digest-pinned product allowlist and lifecycle schemas under `/opt/ai-zombie/family/` |
+| `payload/agent/family.py` | Strict catalogue, descriptor, marker, request, response, and inventory validation |
+| `payload/bin/zombie-agents` | Root CLI for list, status, plan, install, verify, doctor, repair, backup, update, rollback, suspend, resume, and uninstall |
+| `/var/lib/ubuntu-zombie/agents/inventory.json` | Atomic, secret-free cache of validated installed products and last outcomes |
+
+`zombie-agents` accepts only product IDs from the installed catalogue and
+invokes only the relative release entry point or absolute installed entry
+point recorded by the matching validated descriptor and ownership marker.
+It uses an argument array without a shell, applies bounded timeouts, captures
+only the common JSON response, and verifies target, operation, correlation
+ID, plan digest, and receipt before updating inventory.
+
+The chat runtime gains four closed tools:
+
+| Tool | Class | Boundary |
+| ---- | ----- | -------- |
+| `agent.list` | `read_only` | Validated catalogue and inventory summaries |
+| `agent.status` | `read_only` | One exact product ID |
+| `agent.plan` | `read_only` | Target dry-run with no secret collection |
+| `agent.manage` | `system_change` or `destructive` | Execute one approved plan for one exact product |
+
+The tool schemas use a catalogue product-ID enum and never accept a command,
+path, URL, environment map, or sibling-supplied target. Destructive uninstall
+still requires the existing confirmation phrase plus the target's
+product-specific confirmation. An operation needing a new target password,
+key, consent, or guardian decision is refused in chat and directs the
+operator to the local root CLI or target interface; model-visible text is not
+a secret-entry channel.
 
 The management contract is deliberately narrow:
 
@@ -242,6 +279,10 @@ The management contract is deliberately narrow:
    content; and
 7. no subordinate agent can invoke the manager, operate a sibling, or
    inherit Zombie's root authority.
+
+The request, response, marker, receipt, health, lock, exit-status, and audit
+formats are not product-specific design work. They are fixed by
+[`implementation.md`](implementation.md#lifecycle-entry-point).
 
 “God” is a host-administration role, not an identity, consent, guardian, or
 legal role. Ubuntu Zombie may manage ERIC's software and service lifecycle,
@@ -314,6 +355,7 @@ Core runtime modules and their responsibilities are documented in
 | Payload and helpers | `/opt/ai-zombie/agent`, `/opt/ai-zombie/bin`, `/opt/ai-zombie/pi` |
 | Secrets | `/opt/ai-zombie/secrets/env`, mode `0600` |
 | Conversation and lifecycle state | `/opt/ai-zombie/state/` |
+| Component and future family metadata | `/var/lib/ubuntu-zombie/components/`; planned `/var/lib/ubuntu-zombie/agents/` |
 | Operator policy and skill overlays | `/etc/ubuntu-zombie/` |
 | Audit and receipt | `/var/log/ubuntu-zombie/` |
 | Chat service | `ubuntu-zombie-chat.service` |
@@ -323,6 +365,9 @@ Core runtime modules and their responsibilities are documented in
 
 The installer also owns explicit manifests and receipts for selected
 components. It must not infer ownership of an unmarked sibling product.
+`/opt/ai-zombie/state/` is the authoritative chat/lifecycle state root;
+`/var/lib/ubuntu-zombie/` contains root-owned component and family-management
+metadata, not a second conversation state root.
 
 ## Installation
 
@@ -358,7 +403,7 @@ Desktop LTS machine before using a real workstation.
 | `doctor` | Explains detected drift and likely recovery |
 | `repair` | Reasserts known-safe permissions/configuration and restarts the selected service where needed |
 | `update` | Pull or unpack a release and re-run idempotent `install` |
-| manage agent | Invoke a verified target product's lifecycle interface under policy, approval, and dual audit; dedicated UX is planned |
+| manage agent | Invoke the fixed family lifecycle interface under policy, approval, strict target selection, and dual audit; implementation is specified but not shipped |
 | revoke | Remove provider keys or stop and disable the chat service |
 | kill | Use `/ttl --die` to create the durable lifecycle tombstone |
 | `uninstall` | Removes all or selected owned components, with state/archive choices for Zombie |
@@ -448,6 +493,12 @@ Disposable-VM validation must continue to prove:
   co-installed;
 - strict target selection and product-owned lifecycle invocation; and
 - matched, secret-redacted audit evidence for every managed operation.
+
+Hermetic manager tests must additionally reject unknown catalogue fields,
+duplicate JSON keys, unpinned versions and URLs, path traversal, symlinked or
+mis-owned markers/request files, mismatched product or operation responses,
+stale plan digests, secret-bearing inventory fields, subordinate callers,
+timeouts, and non-target receipt updates.
 
 Run the repository's existing `make lint` and `make test` checks for every
 source change. Do not run the live installer outside a disposable Ubuntu

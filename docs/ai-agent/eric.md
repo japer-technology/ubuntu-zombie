@@ -19,27 +19,74 @@ The strongest technical description is **Longitudinal Personal Continuity
 Agent**. “Life Apprentice”, “Continuant”, “Second Self”, “Aftermind”, and
 “The Long Twin” can name a mode or interface; ERIC is the product identity.
 
-This is a product definition, not an implemented system or a claim that
-identity, consciousness, or legal authority can be transferred.
+This is an implementation-ready living-apprenticeship definition, not an
+implemented system or a claim that identity, consciousness, or legal
+authority can be transferred. Its authoritative source root is
+`products/eric/` in this repository.
 
 ## Definition card
 
 | Field | Definition |
 | ----- | ---------- |
-| Status | Product definition and research direction; independent implementation required |
+| Status | Living-apprenticeship implementation-ready; later Executor and posthumous stages gated |
 | Human need | Preserve one person's evidence, changing views, and decision patterns with their living consent |
 | Intended users | The living subject and only the people and purposes they authorise |
 | Operator | The subject while capable, then the governance defined by their Constitution and external legal instruments |
 | Maximum authority | ERIC-owned evidence and model; optional, separately authorised Executor actions only |
-| Default Linux identity | `eric`, with separate Twin, vault, guardian, and optional Executor service identities |
-| Default access | Product-specific authenticated interfaces on loopback port `4545` |
+| Default Linux identities | `eric-twin`, `eric-vault`, and `eric-governance`; later `eric-executor` |
+| Default access | Twin on `127.0.0.1:4545`; governance on `127.0.0.1:4546` |
 | Install root | `/opt/eric` |
 | Configuration root | `/etc/eric` |
 | State root | `/var/lib/eric` |
 | Log root | `/var/log/eric` |
 | Unit and command prefix | `eric-*` |
 | Environment prefix | `ERIC_*` |
-| Authoritative repository | Not yet defined |
+| Management entry point | Source `scripts/manage.sh`; installed `/usr/local/sbin/eric-manage` |
+| Source root | `products/eric/` |
+| Authoritative repository | [`japer-technology/ubuntu-zombie`](https://github.com/japer-technology/ubuntu-zombie) |
+
+## Fixed first implementation
+
+The first release implements only living apprenticeship:
+
+| Concern | First-release decision |
+| ------- | ---------------------- |
+| Subject | One living, authenticated, consenting adult |
+| Evidence | Deliberately uploaded UTF-8 text and opaque files with metadata; no covert capture or account scraping |
+| Model | Retrieval-augmented use of an OpenAI-compatible loopback endpoint; no custom training |
+| Responses | Claim-level Recorded, Confirmed, Inferred, or Unknown labels; no posthumous label in a living session |
+| Vault | GnuPG-encrypted content-addressed objects plus append-only SQLite metadata |
+| Governance | Subject-controlled consent, corrections, Constitution, guardian nominations, export, suspension, and destruction |
+| Executor | Absent: no account, unit, socket, credential, or action API |
+| Posthumous mode | Unavailable; transition requests return `unsupported` and are audited |
+| Platforms | Ubuntu Desktop 22.04 and 24.04 LTS on `amd64` |
+| Source lesson set | Ubuntu Zombie `v2026.08.07.05.56.42` |
+
+Synthetic fixtures are used until a real subject completes authenticated
+enrolment and consent. Executor, incapacity transition, posthumous simulation,
+synthetic media, model fine-tuning, and public or remote access are later
+stages. They do not block implementation of living apprenticeship.
+
+### Configuration contract
+
+| Input | Variable or request key | Rule |
+| ----- | ----------------------- | ---- |
+| Non-interactive mode | `ERIC_NONINTERACTIVE=1` | Never prompts |
+| Subject password | `ERIC_SUBJECT_PASSWORD_FILE` / `subject_password_file` | Root-owned mode `0600`; required unattended |
+| Subject label | `ERIC_SUBJECT_LABEL` / `subject_label` | Local display label; required unattended and need not be a legal name |
+| Model endpoint | `ERIC_MODEL_BASE_URL` / `model_base_url` | HTTP loopback URL; default `http://127.0.0.1:8080/v1` |
+| Model ID | `ERIC_MODEL` / `model` | Non-empty and required unattended |
+| Vault key | `ERIC_VAULT_KEY_FILE` / `vault_key_file` | Root-owned mode `0600`, at least 32 random bytes; required unattended |
+| Constitution | `ERIC_CONSTITUTION_FILE` / `constitution_file` | Optional root-owned UTF-8 JSON; default denies posthumous and Executor use |
+| Backup destination | request `backup_destination` | Absolute encrypted operator-controlled path |
+| Retain state | request `retain_state` | Required boolean for `uninstall` |
+| Destruction authorisation | request `destruction_authorization_id` | Required for `uninstall` when `retain_state` is false |
+
+Interactive install may generate a vault key only after the operator selects
+a root-owned recovery-file destination outside ERIC state. It never prints
+the key. Unknown `ERIC_*` installer inputs and management request keys fail
+closed. Raw credentials or keys are not accepted in arguments or environment
+values. Missing required unattended input exits `64` before mutation.
 
 ## The critical distinction
 
@@ -202,6 +249,65 @@ ERIC distinguishes what the subject believed in an earlier period from what
 they believe now instead of merging a lifetime into one contradictory
 persona.
 
+## Portable first-release record contract
+
+Every persisted governance record is canonical UTF-8 JSON with
+`schema_version` equal to `eric/v1` and this common envelope:
+
+| Field | Rule |
+| ----- | ---- |
+| `record_id` | UUID |
+| `record_type` | One of the types below |
+| `subject_id` | Stable UUID for the enrolled subject |
+| `created_at` | UTC RFC 3339 timestamp |
+| `created_by` | Authenticated subject or named service identity |
+| `effective_from`, `effective_until` | UTC timestamps or `null` |
+| `supersedes` | Earlier record UUID or `null` |
+| `consent_id` | Applicable consent UUID; `null` only for the first enrolment-consent record |
+| `previous_hash` | Hash of the preceding ledger record or `null` |
+| `record_hash` | SHA-256 of `previous_hash` plus canonical record JSON without `record_hash` |
+
+The first schema defines:
+
+| Record type | Required product fields |
+| ----------- | ----------------------- |
+| `evidence` | Object SHA-256, media type, original name, source kind, capture time, provenance, purpose, audience, sensitivity, third-party state, retention action/date |
+| `claim` | Claim text, state (`true`, `false`, `uncertain`, `private`, `superseded`, `no_longer_current`), evidence IDs, applicable period |
+| `confirmation` | Generated claim ID, exact statement digest, subject decision, authenticated timestamp |
+| `correction` | Corrected record ID, reason, replacement record ID |
+| `consent` | Source/scope, purpose, audience, allowed operations, granted/expiry/revoked timestamps |
+| `relationship` | Person pseudonym, relationship type, boundaries, purpose, third-party consent state |
+| `decision` | Situation, alternatives, chosen option, reasons, uncertainty, outcome, later reflection |
+| `constitution` | Version, purposes, audiences, prohibited uses, retention, guardian rules, transition disabled, Executor disabled |
+| `guardian_nomination` | Guardian pseudonym/contact reference, powers, quorum group, active/revoked timestamps |
+| `destruction_authorization` | Instance ID, exact scope, confirmation digest, issued/expiry/used timestamps |
+
+Every enum and timestamp is validated before append. Unknown fields or record
+types are rejected in `eric/v1`; schema migration creates new records and
+never rewrites old canonical bytes. Exports contain `records/*.jsonl`, an
+ordered ledger index, encrypted evidence objects, schema files, and a
+human-readable manifest with hashes.
+
+The ledger's first record must be `consent`, created by the authenticated
+subject with scope `enrolment`, `consent_id: null`, `previous_hash: null`, and
+no `supersedes` value. Every later record, including later consent records,
+must cite an active consent record. No other bootstrap exception exists.
+
+Evidence bytes are hashed before encryption and stored as
+`/var/lib/eric/vault/objects/<sha256>.gpg`. `eric-vault` invokes GnuPG with an
+argument array, never a shell, using AES-256 symmetric encryption and the
+protected vault-key file. The key is readable only by `eric-vault`; the Twin
+receives authorised excerpts through the vault socket and never a key or
+object path. Encryption protects backups and service separation but cannot
+hide data from same-host root.
+
+`/var/lib/eric/vault/metadata.db` is SQLite owned by
+`eric-vault:eric-vault` mode `0600`. It indexes the immutable records and
+objects but does not replace the portable export. Model output can enter only
+the response/audit store. Creating a `confirmation` or `correction` requires
+a separate authenticated governance request; the Twin has no write method on
+the vault socket.
+
 ## Evidence ingestion and correction
 
 Observation is never a blanket entitlement. The subject selects each source
@@ -248,6 +354,23 @@ prediction, and later speculation. Export retains the same distinctions so
 generated statements cannot become family folklore about what the subject
 “really said”.
 
+For each turn the Twin requests authorised evidence IDs from the vault,
+sends only those excerpts to the local model, and requires a structured
+candidate containing claim text, proposed label, evidence IDs, applicable
+period, and confidence. Product code, not the model, assigns the final label:
+
+- `Recorded` requires an exact quoted span and matching immutable evidence
+  hash;
+- `Confirmed` requires a confirmation record whose statement digest matches;
+- `Inferred` requires at least one authorised supporting record and displays
+  confidence and period; and
+- every other factual assertion becomes `Unknown` or is omitted.
+
+Unknown evidence IDs, failed hash/span resolution, malformed candidate JSON,
+or revoked consent blocks the affected claim. A final response is assembled
+only from resolved claim objects and includes stable source links. The raw
+model candidate has no vault write path.
+
 ## Five-part architecture
 
 ERIC does not place evidence, interpretation, governance, and action in one
@@ -265,7 +388,8 @@ Constitution, or execute actions.
 An encrypted, integrity-protected store for source material,
 confirmations, consent receipts, corrections, and governance records. Its
 broker provides scoped retrieval and export, never arbitrary model writes.
-Hardware-backed or threshold key custody should be supported.
+Hardware-backed or threshold key custody is later work; the first release
+uses the product-owned vault key and explicit recovery copy defined above.
 
 ### The Executor
 
@@ -302,6 +426,33 @@ Each active role has an independent least-privilege identity, credential
 set, interface, policy, and audit trail. Compromise of the Twin must not
 expose vault keys or confer guardian or Executor authority.
 
+The first release maps the architecture to three services:
+
+| Service | Identity | Interface | Access |
+| ------- | -------- | --------- | ------ |
+| `eric-twin.service` | `eric-twin` | Authenticated UI at `127.0.0.1:4545`; read-only vault socket | Model endpoint, authorised evidence excerpts, response store; no vault files or governance writes |
+| `eric-vault.service` | `eric-vault` | Separate read, governance-write, and export Unix sockets | Vault key, encrypted objects, ledger, consent enforcement |
+| `eric-governance.service` | `eric-governance` | Subject/guardian UI at `127.0.0.1:4546`; governance vault socket | Enrolment, consent, correction, confirmation, Constitution, nominations, export, suspend/destroy |
+
+Sockets live below `/run/eric/` with caller-specific groups and modes. All
+services use non-login identities, `NoNewPrivileges=true`, an empty
+capability set, `ProtectSystem=strict`, private temporary/device namespaces,
+and explicit read/write paths. Only `eric-twin` can reach the configured
+loopback model endpoint. No service has a shell or general command runner.
+
+The Twin and governance cookies are respectively `eric_twin_session` and
+`eric_governance_session`, with independent signing keys. They are host-only,
+`HttpOnly`, and `SameSite=Strict`; state changes require a session-bound CSRF
+token. Passwords use `hashlib.scrypt` with a random 16-byte salt,
+`n=16384`, `r=8`, and `p=1`.
+
+The Twin interface implements login/logout, chat, claim/source expansion,
+conversation deletion, and health. Governance implements authenticated
+enrolment, evidence upload, consent grant/revoke, correction, confirmation,
+Constitution versioning, guardian nomination/revocation, export, suspension,
+resume, and destruction. The subject ID is fixed by the authenticated
+session and is never accepted from a request body.
+
 ## Consent and lifecycle
 
 ERIC has explicit states:
@@ -313,6 +464,10 @@ ERIC has explicit states:
 | Transition review | Independent death or incapacity evidence is checked using the subject's process and guardian quorum |
 | Posthumous simulation | Model and Constitution freeze; later conversation does not retrain identity; later events are speculation |
 | Retired or destroyed | Access ends and retention/deletion instructions are executed subject to applicable law and independent obligations |
+
+The first release permits only Apprenticeship, Suspended, and Retired or
+destroyed. Transition-review and posthumous-transition requests return the
+common `unsupported` result, make no state change, and create an audit event.
 
 The model never decides that its subject has died or lost capacity.
 Posthumous mode cannot activate automatically from inactivity, news, a
@@ -344,26 +499,24 @@ The ERIC installer reserves only ERIC-owned users, groups, paths, services,
 commands, ports, cookies, credentials, policies, encryption material,
 logs, receipts, and ownership markers.
 
-It:
+`products/eric/scripts/manage.sh install`:
 
-1. verifies the release, platform, custody prerequisites, and legal-review
-   state;
+1. verifies the release, platform, configured loopback model endpoint, vault
+   custody prerequisites, and living-apprenticeship scope before mutation;
 2. refuses unmarked collisions before mutation;
-3. reviews subject, guardian, consent, retention, transition, provider,
-   vault, backup, and optional Executor settings;
+3. reviews subject, consent, retention, provider, vault, and backup settings;
 4. supports a complete non-mutating dry-run;
-5. creates separate non-login identities for the Twin, vault broker,
-   guardian plane, and optional Executor without general `sudo`;
-6. creates unique subject, guardian, service, session, encryption, and
-   signing credentials;
+5. creates the `eric-twin`, `eric-vault`, and `eric-governance` non-login
+   identities without general `sudo`;
+6. creates unique subject, service, session, encryption, and integrity
+   credentials;
 7. installs root-owned code, policies, schemas, units, and validators;
 8. creates the append-only evidence ledger, effective-dated claims,
    consent receipts, and product-owned state;
-9. installs supervised ingestion, correction, testing, provenance,
-   export, succession, suspension, and deletion workflows;
-10. keeps the Twin away from vault keys and keeps the Executor absent until
-    deliberately configured;
-11. enables services only after integrity, custody, policy, audit, and
+9. installs supervised ingestion, correction, testing, provenance, export,
+   suspension, and deletion workflows;
+10. keeps the Twin away from vault keys and installs no Executor resources;
+11. enables services only after integrity, custody, policy, audit, model, and
     recovery checks pass; and
 12. validates role separation and negative capabilities before enrolment.
 
@@ -377,11 +530,10 @@ that require authenticated human action remain explicit gates.
 ERIC owns:
 
 - a unique living-subject credential;
-- separate guardian identities, credentials, quorum, and recovery;
-- unique credentials and cookies for every service plane;
+- a separate governance credential and later guardian records;
+- unique credentials and cookies for the Twin and governance planes;
 - vault encryption, integrity, and signing keys;
-- provider credentials isolated from every sibling;
-- optional Executor credentials and external-authority references; and
+- loopback model configuration isolated from every sibling; and
 - backup and export custody keys.
 
 Raw credentials and private evidence never appear in ordinary receipts,
@@ -402,6 +554,11 @@ Tamper-evident, access-controlled audits record:
 
 Audit access itself is authorised and audited because it can reveal
 sensitive relationships and activity.
+
+Audit records use the common management fields plus event type, record IDs,
+consent ID, provenance label, decision, and result. Each record includes the
+previous record hash and its own canonical SHA-256 hash. Audit payloads never
+contain evidence bytes, prompt text, generated text, credentials, or keys.
 
 ## Data portability, backup, and recovery
 
@@ -427,8 +584,9 @@ obligations.
 
 ## Ubuntu Zombie management contract
 
-Ubuntu Zombie is ERIC's God-level host manager. ERIC exposes a root-only,
-product-owned interface for:
+Ubuntu Zombie is ERIC's God-level host manager. ERIC implements the common
+root-only product interface in
+[`implementation.md`](implementation.md#lifecycle-entry-point) for:
 
 - product discovery, version, ownership, service health, integrity, and
   lifecycle state;
@@ -453,12 +611,34 @@ custody, external legal authority, or a destructive-data confirmation fails
 closed until that authority is supplied through ERIC's own interface.
 Zombie root is not an acceptable substitute.
 
-The Twin, vault, guardian, and Executor service identities cannot invoke
-Zombie management or select another agent. A dedicated ERIC machine or
+The Twin, vault, and governance service identities cannot invoke Zombie
+management or select another agent. A dedicated ERIC machine or
 separately administered encrypted vault is required when Zombie's host
 authority falls outside the subject's intended evidence boundary.
 
 ## Updates and migration
+
+The common operations have these product-specific outcomes:
+
+| Operation | ERIC outcome |
+| --------- | ------------ |
+| Describe/status | Report product, schema, lifecycle, service, and integrity state without subject data |
+| Verify/doctor | Read-only identity, permissions, socket, key-presence, ledger, object, consent, provenance, backup, and service checks |
+| Repair | Restore known-safe code, permissions, sockets, and indexes; never rewrite evidence, consent, or the Constitution |
+| Backup/rollback | Verify encrypted objects, ledger chain, schemas, key recovery, and compatible restoration |
+| Suspend | End sessions and stop ingestion, retrieval, generation, export, and any future execution |
+| Resume | Require subject authorisation plus vault, consent, Constitution, audit, and service integrity |
+| Uninstall | Preserve encrypted state when `retain_state` is true; complete destruction requires subject confirmation through governance and operator confirmation through lifecycle |
+
+For complete destruction the subject re-authenticates to governance and
+types `DESTROY ERIC <instance_id>`. Governance appends a
+`destruction_authorization` limited to complete uninstall of that instance,
+stores only the phrase digest, and expires it after 15 minutes. The lifecycle
+request must set `retain_state` false, cite that record ID, and carry the
+operator's normal destructive confirmation. `eric-manage` validates the
+record through the governance socket under the product operation lock and
+marks it used before deletion. A failed deletion requires a new subject
+authorization; a state-preserving uninstall requires no destruction record.
 
 ERIC's updater:
 
@@ -483,10 +663,11 @@ ERIC-specific gate or make the batch atomic.
 
 ### Stage 1: living apprenticeship
 
-Define portable schemas and governance before model training. Build
-authenticated enrolment, supervised ingestion, corrections,
-effective-dated records, counterfactual tests, provenance rendering,
-consent, export, suspension, and destruction. Prove the Twin/Vault boundary
+Implement the portable schemas above before model integration. Build
+authenticated enrolment, supervised ingestion, corrections, effective-dated
+records, counterfactual tests, provenance rendering, consent, export,
+suspension, and destruction. Use retrieval over the subject's records; do
+not train custom weights in the first release. Prove the Twin/Vault boundary
 and third-party controls.
 
 ### Stage 2: governed action
@@ -505,23 +686,22 @@ stage is available.
 
 ## Validation and red-team requirements
 
-Tests must prove:
+Living-apprenticeship tests must prove:
 
-- source, confirmation, inference, unknown, and posthumous labels resolve
-  correctly at claim level;
+- source, confirmation, inference, and unknown labels resolve correctly at
+  claim level;
 - fabricated citations cannot become Recorded or Confirmed;
 - summaries and generated conversations cannot enter the Vault as source;
 - old and current beliefs remain effective-dated;
 - unauthorised third-party material is rejected or restricted;
 - consent changes take effect without rewriting history;
-- posthumous events are never presented as lived memories;
-- later conversations cannot retrain the frozen identity;
 - a compromised Twin cannot obtain unrestricted evidence, keys, guardian
   powers, Constitution changes, lifecycle transition, or Executor access;
-- one guardian cannot bypass quorum or broaden authority;
+- transition and Executor requests remain unsupported and create no account,
+  unit, socket, key, or action;
 - Zombie can manage software but cannot satisfy subject, guardian, vault,
   Constitution, or Executor gates;
-- revocation, suspension, export, succession, recovery, retirement, and
+- revocation, suspension, export, recovery, retirement, and
   destruction fail closed; and
 - direct and managed operations produce correlated, secret-redacted audits
   without changing non-target siblings.
@@ -529,6 +709,11 @@ Tests must prove:
 Disposable VMs cover ERIC alone and every supported co-installation.
 Dedicated-host tests cover the stronger evidence boundary. Backup tests
 include lost key holders and corrupted or incompatible state.
+
+Stage 2 adds Executor capability, external-authority, expiry, and quorum
+tests. Stage 3 adds posthumous labels, frozen identity/Constitution,
+transition evidence, grief controls, succession, and guardian-quorum tests.
+Those suites gate their stages but do not block the Stage 1 codebase.
 
 ## Legal, ethical, and research boundaries
 
@@ -552,10 +737,13 @@ jurisdiction and remains unsettled. The
 [Australian Law Reform Commission discussion of deceased individuals](https://www.alrc.gov.au/publication/for-your-information-australian-privacy-law-and-practice-alrc-report-108/8-privacy-of-deceased-individuals/introduction-117/)
 illustrates one gap.
 
-Before activation, ERIC requires jurisdiction-specific legal and
-data-protection review and records which external instrument governs each
-Executor capability. Software controls and Ubuntu Zombie root access cannot
-manufacture legal authority. Product documentation is not legal advice.
+Development and synthetic fixtures do not require a legal instrument.
+Enrolling a real subject requires a recorded privacy and data-protection
+review for that deployment. Executor or posthumous activation additionally
+requires jurisdiction-specific legal review and records which external
+instrument governs each Executor capability. Software controls and Ubuntu
+Zombie root access cannot manufacture legal authority. Product documentation
+is not legal advice.
 
 ## Honest claims and out of scope
 
@@ -584,7 +772,7 @@ process.
 
 ## Product-owned documentation
 
-ERIC's repository must own:
+`products/eric/` must own:
 
 - product vision, architecture, threat model, security, privacy, and
   disclosure;
@@ -600,6 +788,8 @@ ERIC's repository must own:
 - release, red-team, standalone, dedicated-host, and co-installation
   evidence.
 
-This file is the family definition. The original
+These documents live in this repository. This file is the family definition
+and first-release contract. The original
 [`ghosts-in-the-machine-plan.md`](../options/ghosts-in-the-machine-plan.md)
-retains the cross-product rationale and implementation sequence.
+retains historical cross-product rationale; this directory controls the
+implementation sequence.

@@ -23,7 +23,7 @@ their installed trust boundaries.
 | ------- | ------------------------- | ------- | ----------------- | ---------------- | ------------ |
 | [Ubuntu Zombie](ubuntu-zombie.md) | Core implemented; family manager implementation-ready | AI Systems Administrator and family manager | Root through its policy and approval boundary | `zombie` | `7878` |
 | [Imaginary Friend](imaginary-friend.md) | Implementation-ready first-release specification | Private conversational companion and workspace | Its own files and nominated workspace only | `friend` | `6767` |
-| [Curriculum Flame](curriculum-flame.md) | Implementation-ready first-release specification | Curriculum-gated local AI for children | Its own state and nominated learner workspaces | `flame-*` services | `5656`, `5657` |
+| [Curriculum Flame](curriculum-flame.md) | Implementation-ready first-release specification | Curriculum-gated local AI for children | Its own state; learner workspaces are later | `flame-*` services | `5656`, `5657` |
 | [ERIC](eric.md) | Living-apprenticeship implementation-ready; later stages gated | Longitudinal personal continuity agent | Its own evidence and model; Executor absent in first release | `eric-*` services | `4545`, `4546` |
 
 “Implemented” means this repository currently ships and tests the product.
@@ -186,7 +186,7 @@ the real host and refuse to adopt an unmarked resource.
 | Configuration | `/etc/ubuntu-zombie` | `/etc/imaginary-friend` | `/etc/curriculum-flame` | `/etc/eric` |
 | State | `/var/lib/ubuntu-zombie` and `/opt/ai-zombie/state` | `/var/lib/imaginary-friend` | `/var/lib/curriculum-flame` | `/var/lib/eric` |
 | Logs | `/var/log/ubuntu-zombie` | `/var/log/imaginary-friend` | `/var/log/curriculum-flame` | `/var/log/eric` |
-| Service identities | `zombie` | `friend` | `flame-child`, `flame-policy`, `flame-guardian`, `flame-model` | `eric-twin`, `eric-vault`, `eric-governance`; later `eric-executor` |
+| Service identities | `zombie` | `friend` | `flame-child`, `flame-policy`, `flame-guardian`, `flame-model`, `flame-validator` | `eric-twin`, `eric-vault`, `eric-governance`; later `eric-executor` |
 | Service prefix | `ubuntu-zombie-*` | `imaginary-friend-*` | `curriculum-flame-*` | `eric-*` |
 | Command prefix | `zombie-*` | `friend-*` | `flame-*` | `eric-*` |
 | Environment prefix | `ZOMBIE_*` | `FRIEND_*` | `FLAME_*` | `ERIC_*` |

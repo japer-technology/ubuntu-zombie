@@ -39,7 +39,12 @@ these exact roots:
 family/
   catalog.json
   schemas/
+    audit-event-v1.schema.json
+    catalog-v1.schema.json
+    installation-v1.schema.json
+    inventory-v1.schema.json
     product-v1.schema.json
+    receipt-v1.schema.json
     request-v1.schema.json
     response-v1.schema.json
 products/
@@ -142,7 +147,7 @@ the following fields:
 | `environment_prefix` | Exact uppercase product prefix |
 | `accounts` | Complete, non-empty array of product-owned identities |
 | `units` | Complete array of product-owned systemd units |
-| `ports` | Complete array of integer loopback ports |
+| `ports` | Complete array of product-owned listening ports |
 | `cookie_names` | Complete array of unique cookie names |
 | `operations` | Operations implemented by the lifecycle entry point |
 
@@ -151,13 +156,34 @@ canonical absolute paths without `..`. An installed descriptor is copied
 unchanged to `<configuration_root>/PRODUCT.json`, owned by `root:root` and
 mode `0644`.
 
+`ports` never includes a provider or model endpoint that the product calls
+but does not own. The shared default `127.0.0.1:8080` model endpoint is an
+external local prerequisite, not a product resource, so co-installed
+products do not claim or collide on that port.
+
 ## Family catalogue
 
 `family/catalog.json` is the only list of products Ubuntu Zombie may manage.
-It contains schema version `1` and one entry per product. An entry contains
-the product ID, descriptor path, enabled release version, Git tag, artifact
-name and URL, and SHA-256 digests for the artifact, SBOM, provenance bundle,
-and signature bundle.
+Its top-level object contains `schema_version` (`1`), `repository`
+(`japer-technology/ubuntu-zombie`), `generated_at` (UTC RFC 3339), and a
+`products` array. Each product entry contains:
+
+| Field | Rule |
+| ----- | ---- |
+| `product_id` | Exact descriptor product ID |
+| `descriptor` | Repository-relative `products/<product-id>/PRODUCT.json` |
+| `version` | Exact product date-time version |
+| `tag` | Exact product tag defined below |
+| `artifact` | Name, HTTPS release URL, and lowercase SHA-256 |
+| `sbom` | Name, HTTPS release URL, and lowercase SHA-256 |
+| `provenance` | Name, HTTPS release URL, and lowercase SHA-256 |
+| `signature_bundle` | Name, HTTPS release URL, and lowercase SHA-256 |
+| `certificate_identity` | Expected GitHub Actions signing identity |
+
+Unknown or duplicate fields are rejected. Every URL must use HTTPS, the
+catalogue repository, exact tag, and exact listed asset name. Redirects are
+accepted only when every hop uses HTTPS and a GitHub-owned release-asset
+host; the final bytes still must match the pinned digest.
 
 The initial manager is deliberately digest-pinned. CI verifies the product's
 checksum, signature, provenance, and SBOM before a catalogue digest update
@@ -169,6 +195,19 @@ as a trust root.
 Development from a checkout may invoke a product's source lifecycle script
 on a disposable VM. It must identify the result as an un-released source
 install and may not add it to a production catalogue.
+
+`family/schemas/catalog-v1.schema.json` validates the catalogue.
+`inventory-v1.schema.json` validates manager state. The installation,
+receipt, and audit schemas encode the structures below; product schemas may
+add namespaced detail fields but cannot weaken required common fields.
+
+The inventory top-level object contains schema version, generated timestamp,
+and a `products` object keyed by exact product ID. Each value contains only
+instance ID, installed and available versions, descriptor and marker digests,
+high-level lifecycle and health status, last correlation ID, last operation
+and result, receipt path/digest, and last checked timestamp. Schema
+validation rejects any credential, request input, private-content,
+conversation, learner, evidence, consent, or key field.
 
 ## Ownership marker and receipt
 
@@ -199,7 +238,7 @@ root. The current receipt is `management-receipt.json`; historical receipts
 use `receipts/<correlation-id>.json`. Receipt files are regular files,
 `root:root`, mode `0640`, and contain the common response envelope, product
 and instance versions, changed resource names, recovery guidance, and the
-SHA-256 digest of the target audit event. They never contain request values
+preallocated target `audit_event_id`. They never contain request values
 marked secret, password hashes, keys, private content, prompts, or model
 output.
 
@@ -360,6 +399,10 @@ phase, actor, decision, result, changed, receipt_digest
 
 Ubuntu Zombie uses the same correlation ID in its manager-side audit event.
 The target creates its audit event even when validation denies the request.
+For a completed mutation, the target preallocates `event_id`, writes that ID
+into the receipt, atomically writes the receipt, computes its digest, and
+then appends the audit event with `receipt_digest`. Denied or pre-receipt
+events use `receipt_digest: null`; there is no circular digest.
 Product-specific audit details may add fields but must not replace or change
 the common field meanings. Audit writes are append-only, mode-restricted,
 redacted before serialization, and tested with representative secret values.
@@ -394,6 +437,15 @@ to one product does not bump another product's version.
 Later features must be absent or return `unsupported`; they must not be
 partially enabled. The product definitions specify concrete defaults and
 data contracts for these slices.
+
+The model endpoint is operator-provided infrastructure. It may be the
+standalone Ubuntu Zombie `llama` component or another OpenAI-compatible
+server, but no subordinate product installs, owns, updates, or removes it.
+Install health gates require the configured endpoint to answer a bounded
+model-list and completion probe. Hermetic tests start a product-owned
+loopback fixture implementing those two calls; tests never need a real model
+or network. The actual install performs this probe during preflight; a
+missing endpoint exits `69` before mutation.
 
 ## Implementation order and hand-off gates
 
@@ -441,4 +493,3 @@ A product is implemented only when:
 - its own package, version, changelog, SBOM, checksum, signature, and
   provenance gates pass; and
 - documentation labels every deferred or unreviewed capability unavailable.
-

@@ -8,14 +8,15 @@ Imaginary Friend is the first less-privileged variation on the
 authentication, lifecycle, policy, audit, diagnostics, and release
 discipline while deleting general host-administration power.
 
-This is a product definition, not a claim that deployable Friend software
-exists in this repository.
+This is an implementation-ready product definition, not a claim that
+deployable Friend software already exists. Its authoritative source root is
+`products/imaginary-friend/` in this repository.
 
 ## Definition card
 
 | Field | Definition |
 | ----- | ---------- |
-| Status | Product definition; independent implementation required |
+| Status | Implementation-ready first-release specification; source not yet implemented |
 | Human need | A persistent private place for conversation and work without granting an AI authority over the machine |
 | Intended user | One human owner |
 | Operator | The machine owner; Ubuntu Zombie may perform approved host-level lifecycle management |
@@ -29,7 +30,54 @@ exists in this repository.
 | Unit prefix | `imaginary-friend-*` |
 | Command prefix | `friend-*` |
 | Environment prefix | `FRIEND_*` |
-| Authoritative repository | Not yet defined |
+| Management entry point | Source `scripts/manage.sh`; installed `/usr/local/sbin/friend-manage` |
+| Source root | `products/imaginary-friend/` |
+| Authoritative repository | [`japer-technology/ubuntu-zombie`](https://github.com/japer-technology/ubuntu-zombie) |
+
+## Fixed first implementation
+
+The first release implements one owner, text conversation, bounded local
+workspaces, and the complete lifecycle contract. These decisions are fixed:
+
+| Concern | First-release decision |
+| ------- | ---------------------- |
+| Platforms | Ubuntu Desktop 22.04 and 24.04 LTS on `amd64` |
+| Runtime | Product-owned Python 3.10 or 3.12 service and SQLite state |
+| Model | OpenAI-compatible loopback endpoint only; default `http://127.0.0.1:8080/v1` |
+| Authentication | Mandatory generated or supplied owner password; independent `imaginary_friend_session` cookie |
+| Workspace | Product-created `/srv/imaginary-friend/workspace` by default; additional roots require explicit validation |
+| Conversation retention | Enabled for 30 days by default; configurable from 1 to 365 days |
+| Operational audit retention | 90 days by default; message and file contents excluded |
+| Session lifetime | 12 hours, revoked on password rotation, suspension, or uninstall |
+| Backup | Friend state and metadata; nominated workspace contents are excluded |
+| Network | Loopback UI and configured loopback model endpoint only |
+| Source lesson set | Ubuntu Zombie `v2026.08.07.05.56.42` |
+
+Cloud providers, multiple owners, arbitrary adoption of existing directory
+trees, voice, image, remote access, and proactive messaging are absent from
+the first release. Their absence does not block implementation.
+
+### Configuration contract
+
+Interactive install reviews every value. Unattended install accepts only:
+
+| Input | Variable or request key | Rule |
+| ----- | ----------------------- | ---- |
+| Non-interactive mode | `FRIEND_NONINTERACTIVE=1` | Never prompts |
+| Human owner | `FRIEND_OWNER_USER` / `owner_user` | Existing non-root local account; required unattended |
+| Owner password | `FRIEND_OWNER_PASSWORD_FILE` / `owner_password_file` | Root-owned mode `0600` file; required unattended |
+| Model endpoint | `FRIEND_MODEL_BASE_URL` / `model_base_url` | HTTP loopback URL; default above |
+| Model ID | `FRIEND_MODEL` / `model` | Non-empty and required unattended |
+| Workspace roots | `FRIEND_WORKSPACES_FILE` / `workspaces_file` | Optional root-owned JSON array; default product-created root |
+| History retention | `FRIEND_HISTORY_RETENTION_DAYS` / `history_retention_days` | Integer `1..365`, default `30` |
+| Audit retention | `FRIEND_AUDIT_RETENTION_DAYS` / `audit_retention_days` | Integer `30..3650`, default `90` |
+| Backup destination | request `backup_destination` | Absolute operator-controlled path, used only by `backup` |
+| Retain state | request `retain_state` | Required boolean for `uninstall` |
+
+Unknown `FRIEND_*` installer inputs and unknown management request keys are
+errors. Raw passwords and model credentials are never accepted in an
+environment value or command argument. Missing required unattended input
+exits `64` before mutation.
 
 ## Product promise
 
@@ -146,9 +194,9 @@ The product must provide:
 - suspension or kill control; and
 - complete or state-preserving uninstall choices.
 
-Exact conversation memory, model selection, retention defaults, and
-lifecycle expiry remain open product decisions and must be resolved before
-implementation.
+The fixed first-release model and retention defaults are listed above.
+Friend has no automatic Time to Live. It remains active until the owner
+suspends or uninstalls it; session expiry does not delete product state.
 
 ## Architecture and trust boundaries
 
@@ -157,7 +205,7 @@ A minimal design contains:
 1. a password-protected loopback web service;
 2. a conversation service running as `friend`;
 3. a closed workspace API that canonicalises and enforces nominated roots;
-4. a product-owned provider bridge with only Friend credentials;
+4. a product-owned OpenAI-compatible loopback client;
 5. product-owned history and lifecycle state;
 6. policy and audit code for every workspace mutation; and
 7. root-only lifecycle commands used directly or by Ubuntu Zombie.
@@ -172,6 +220,56 @@ The provider sees only prompts, conversation context, and workspace
 material that Friend deliberately includes. Provider transport does not
 create a model-callable general network tool.
 
+`imaginary-friend-chat.service` runs as `friend` with
+`NoNewPrivileges=true`, `PrivateTmp=true`, `PrivateDevices=true`,
+`ProtectSystem=strict`, kernel and control-group protections, an empty
+capability set, and explicit `ReadWritePaths` for Friend state, logs, and
+nominated workspace roots. IP access is denied except for loopback. The
+service has no shell, package, service, or arbitrary HTTP tool.
+
+The installer creates `friend-share`, adds only `friend` and the nominated
+human owner, and creates the default workspace as `root:friend-share` mode
+`2770`. Friend-created directories are mode `2770`; files are
+`friend:friend-share` mode `0660`. An additional existing root is accepted
+only when the operator names it explicitly, it is not a mount point or
+symlink, its current group access already permits the declared sharing
+model, and changing it is not necessary. The installer never recursively
+changes an existing tree.
+
+Workspace operations hold an open root directory descriptor and resolve each
+relative component with `openat`-style calls, `O_NOFOLLOW`, and type checks.
+They reject absolute child paths, `..`, symlinks, mount/device boundaries,
+hard links to files outside the workspace, sockets, devices, and a root whose
+device/inode changed after nomination. Destructive operations require the
+owner to confirm the canonical relative path.
+
+### HTTP and data contract
+
+The loopback service exposes authenticated routes for login/logout, chat,
+conversation list/delete/export, workspace list/read/write/move/delete,
+settings, password rotation, session revocation, health, and suspension.
+State-changing routes require a same-origin request and a session-bound CSRF
+token. Workspace and conversation identifiers are opaque server-generated
+IDs; the server never accepts a filesystem root or owner identity from a chat
+message.
+
+`/var/lib/imaginary-friend/friend.db` is SQLite owned by `friend:friend` mode
+`0600`. Its first schema contains:
+
+| Record | Required fields |
+| ------ | --------------- |
+| `conversations` | ID, title, created/updated timestamps, expiry |
+| `messages` | ID, conversation ID, role, content, created timestamp |
+| `workspaces` | ID, canonical root, device/inode, sharing mode, enabled |
+| `workspace_events` | ID, workspace ID, relative path, operation, result, timestamp |
+| `sessions` | Token digest, created/expiry timestamps, revoked timestamp |
+| `settings` | Schema version, model endpoint/model, retention values |
+
+Exports are versioned JSON containing conversations and configuration
+metadata. They exclude session material, password hashes, audit internals,
+and workspace file contents. Deleting a conversation removes its messages;
+removing a workspace nomination never deletes workspace files.
+
 ## Authentication and secrets
 
 Friend creates:
@@ -180,13 +278,19 @@ Friend creates:
 - a product-specific salted password hash;
 - a fresh session-signing key;
 - a Friend-only cookie name;
-- its own provider credential file and model selection; and
+- its own loopback model selection; and
 - any workspace-sharing metadata required by the chosen ownership model.
 
 Raw credentials never enter audit logs, diagnostics, receipts, management
 inventory, or conversation history. Reinstall and update preserve valid
 credentials unless the owner explicitly rotates them. A Zombie, Flame, or
 ERIC password, cookie, API token, or reset flow is always rejected.
+
+Password hashes use product-owned `hashlib.scrypt` records with a random
+16-byte salt, `n=16384`, `r=8`, and `p=1`, and verification is constant-time.
+The service must not start without a valid password hash and independent
+session-signing key. Cookies are host-only, `HttpOnly`, and
+`SameSite=Strict`; they never use another product's name.
 
 ## Policy, audit, and observability
 
@@ -195,7 +299,7 @@ The closed policy surface needs, at minimum:
 | Class | Example | Default |
 | ----- | ------- | ------- |
 | Conversation-only | Generate a response without a tool | Allowed within session and retention policy |
-| Workspace read | List or read an approved path | Product-defined; visible and audited |
+| Workspace read | List or read an approved path | Allowed within an enabled root; audited without contents |
 | Workspace change | Create, edit, move, or remove an approved file | Policy-gated; destructive changes need explicit confirmation |
 | Product administration | Change workspace roots, retention, provider, or credentials | Owner-only administrative flow |
 | Host or sibling action | Shell, service, package, network, or protected-path access | Absent and denied |
@@ -215,7 +319,8 @@ unless a separately documented retention purpose requires it.
 ## Ubuntu Zombie management contract
 
 Ubuntu Zombie is Friend's root-level manager on a shared machine. Friend
-must publish a root-only, machine-readable interface for:
+implements the root-only, machine-readable interface in
+[`implementation.md`](implementation.md#lifecycle-entry-point) for:
 
 - discovery, version, ownership, health, and lifecycle status;
 - install and dry-run;
@@ -237,9 +342,10 @@ every non-target product unchanged.
 
 ## Installation
 
-The independent Friend installer:
+`products/imaginary-friend/scripts/manage.sh install`:
 
-1. verifies platform support and the Friend release;
+1. verifies platform support, the Friend release, and the configured
+   loopback model endpoint before mutation;
 2. checks that `friend` and every reserved path, unit, command, port, and
    cookie are unused or carry valid Friend ownership markers;
 3. reviews owner authentication, provider, workspace, retention, and
@@ -252,7 +358,8 @@ The independent Friend installer:
 7. creates only Friend configuration, secrets, state, logs, receipt, and
    ownership markers;
 8. creates and validates the nominated workspace boundary;
-9. starts the loopback UI only after integrity and sandbox checks pass; and
+9. starts the loopback UI only after integrity, sandbox, and model health
+   checks pass; and
 10. verifies positive capabilities and negative host/sibling boundaries.
 
 Unattended installation uses only `FRIEND_*` inputs, never `ZOMBIE_*`
@@ -267,6 +374,7 @@ Friend does not become a target in `scripts/install.sh`.
 
 | Operation | Required Friend outcome |
 | --------- | ----------------------- |
+| Describe/status | Return validated identity, version, ownership, lifecycle, and health data |
 | Install | Converge Friend without touching a sibling |
 | Verify | Read-only identity, ownership, permission, sandbox, workspace, credential-presence, and health checks |
 | Doctor | Explain drift and product-owned recovery |
@@ -275,6 +383,7 @@ Friend does not become a target in `scripts/install.sh`.
 | Update | Back up state, stage Friend migrations, validate sandbox/workspace policy, switch, and health-check |
 | Rollback/recovery | Restore the previous Friend version and compatible state |
 | Suspend | Stop conversations and workspace operations while following retention policy |
+| Resume | Re-enable service only after credential, policy, sandbox, workspace, and model checks pass |
 | Uninstall | Remove only Friend-owned resources, with an explicit retained-state choice |
 
 An update restarts only Friend units. It cannot read or modify Zombie,
@@ -283,28 +392,34 @@ checks, migration rules, audit events, and recovery path.
 
 ## Data and privacy requirements
 
-Before release, Friend must define:
+History is enabled with the fixed 30-day default and can be shortened,
+disabled for future turns, deleted, or exported by the owner. Workspace
+content enters model context only after an authenticated request selects a
+specific file and the UI identifies it; bulk or background ingestion is
+absent. Structured workspace events retain paths and outcomes for 90 days
+but not file contents. Third-party material remains the owner's
+responsibility and is not used for training.
 
-- whether history is opt-in or enabled by default;
-- transcript and operational-event retention periods;
-- storage encryption and backup key custody;
-- exactly when workspace content can enter model context;
-- local versus cloud model options and disclosure;
-- export and deletion formats;
-- third-party data handling in shared files and conversations; and
-- what suspension, uninstall, and account loss do to retained state.
+Suspension ends active sessions and model/workspace access but preserves
+state. State-preserving uninstall leaves the protected state root and marker
+needed for explicit recovery; complete uninstall requires the common
+destructive confirmation and removes Friend state, not workspace files.
+Account loss requires root-assisted password rotation and invalidates every
+session.
 
-The least-data default should favour short retention and explicit owner
-choices. Friend is private in product intent, but same-host root — including
-Ubuntu Zombie — can inspect unencrypted local data. Documentation must not
-claim stronger isolation than the storage and key-custody design proves.
+The first release provides filesystem permissions, not application-level
+encryption at rest. Backup archives are mode `0600` and likewise are not
+claimed to be encrypted. Operators needing stronger protection must use
+encrypted storage and protected backup media. Same-host root — including
+Ubuntu Zombie — can inspect local data, so documentation must not claim
+otherwise.
 
 ## Validation before release
 
 ### Positive tests
 
 - owner login, logout, password rotation, and session invalidation;
-- conversation through every supported provider mode;
+- conversation through the configured OpenAI-compatible loopback model;
 - read and mutation operations within each nominated root;
 - retention, export, deletion, suspension, and recovery;
 - direct and Ubuntu Zombie-managed lifecycle commands; and
@@ -352,20 +467,14 @@ Out of scope includes host administration, sibling-to-sibling messaging,
 shared credentials or memory, arbitrary workspace discovery, privilege
 delegation, and using Friend as a generic persona loader.
 
-## Open decisions
+## Deferred, non-blocking work
 
-Implementation cannot begin without owners and acceptance tests for:
+Cloud providers, multiple owners, encrypted application storage, remote
+access, voice/image input, arbitrary existing-tree adoption, workspace
+versioning, and proactive conversation require later definitions and tests.
+They are not part of the first release and do not block its implementation.
 
-- authoritative repository and release ownership;
-- local and cloud provider policy;
-- conversation memory and default retention;
-- workspace sharing, ownership, conflict, backup, and deletion semantics;
-- service sandbox and path-race controls;
-- owner lifecycle and kill behaviour;
-- management interface schemas and inventory fields; and
-- supported platforms and co-installation matrix.
-
-The product-owned repository must ultimately provide its own vision,
-architecture, threat model, security and privacy documents, configuration,
-installation, upgrading, recovery, troubleshooting, disclosure, release,
-and test evidence.
+`products/imaginary-friend/` owns its vision, architecture, threat model,
+security and privacy documents, configuration, installation, upgrading,
+recovery, troubleshooting, disclosure, release, and test evidence in this
+repository.
