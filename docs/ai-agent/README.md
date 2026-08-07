@@ -1,9 +1,10 @@
 # AI agent catalogue
 
-This directory describes the independent AI-agent product family that began
+This directory specifies the independent AI-agent product family that began
 with Ubuntu Zombie. It turns the agent definitions in
 [`ghosts-in-the-machine-plan.md`](../options/ghosts-in-the-machine-plan.md)
-into one readable document per named product and provides a
+into one implementation-ready document per named product, provides a
+normative [`implementation contract`](implementation.md), and provides a
 [`template.md`](template.md) for defining the next product by hand.
 
 Ubuntu Zombie comes first because it is the implemented reference product
@@ -12,43 +13,49 @@ are variations on its proven product lessons, not modes, personas,
 components, or subclasses of its runtime. Each remains a separate
 installation with its own authority, security boundary, lifecycle,
 documentation, and release, while Ubuntu Zombie can install and manage it
-on the operator's behalf.
+on the operator's behalf. Their source and release automation live in this
+repository under separate product roots; source co-location does not combine
+their installed trust boundaries.
 
 ## Catalogue
 
 | Product | Status in this repository | Purpose | Maximum authority | Default identity | Default port |
 | ------- | ------------------------- | ------- | ----------------- | ---------------- | ------------ |
-| [Ubuntu Zombie](ubuntu-zombie.md) | Implemented; family management is a required extension | AI Systems Administrator and family manager | Root through its policy and approval boundary | `zombie` | `7878` |
-| [Imaginary Friend](imaginary-friend.md) | Product definition | Private conversational companion and workspace | Its own files and nominated workspace only | `friend` | `6767` |
-| [Curriculum Flame](curriculum-flame.md) | Product definition and detailed specification | Curriculum-gated local AI for children | Its own state and nominated learner workspaces | `flame` | `5656` |
-| [ERIC](eric.md) | Product definition | Longitudinal personal continuity agent | Its own evidence and model; separately authorised Executor actions only | `eric` | `4545` |
+| [Ubuntu Zombie](ubuntu-zombie.md) | Core implemented; family manager implementation-ready | AI Systems Administrator and family manager | Root through its policy and approval boundary | `zombie` | `7878` |
+| [Imaginary Friend](imaginary-friend.md) | Implementation-ready first-release specification | Private conversational companion and workspace | Its own files and nominated workspace only | `friend` | `6767` |
+| [Curriculum Flame](curriculum-flame.md) | Implementation-ready first-release specification | Curriculum-gated local AI for children | Its own state and nominated learner workspaces | `flame-*` services | `5656`, `5657` |
+| [ERIC](eric.md) | Living-apprenticeship implementation-ready; later stages gated | Longitudinal personal continuity agent | Its own evidence and model; Executor absent in first release | `eric-*` services | `4545`, `4546` |
 
 “Implemented” means this repository currently ships and tests the product.
-A product definition records the intended product and its acceptance gates;
-it does not claim that the software is complete or safe to deploy.
-Curriculum Flame implementation belongs to its
-[product-owned repository](https://github.com/japer-technology/curriculum-flame).
-Imaginary Friend and ERIC likewise require their own repositories before
-implementation.
+“Implementation-ready” means the source root, first scope, interfaces,
+defaults, and acceptance gates are fixed; it does not claim that software
+exists or is safe to deploy. Imaginary Friend, Curriculum Flame, and ERIC are
+to be implemented in this repository at the roots reserved by
+[`implementation.md`](implementation.md). No external repository needs to be
+created or consulted.
 
 ## Reading order
 
-1. Read [Ubuntu Zombie](ubuntu-zombie.md) for the working reference:
+1. Read the [implementation contract](implementation.md) for the authoritative
+   source layout, lifecycle protocol, release model, and work order.
+2. Read [Ubuntu Zombie](ubuntu-zombie.md) for the working reference:
    installation, policy, audit, lifecycle, updates, and removal.
-2. Read the later product documents to see which lessons are retained and
+3. Read the later product documents to see which lessons are retained and
    which privileged mechanisms are removed.
-3. Use the [AI agent definition template](template.md) for a new proposal.
-4. Use the original
-   [family plan](../options/ghosts-in-the-machine-plan.md) for rationale,
-   implementation sequencing, risks, and the full co-installation matrix.
+4. Use the [AI agent definition template](template.md) for a new proposal.
+5. Use the original
+   [family plan](../options/ghosts-in-the-machine-plan.md) for rationale and
+   historical context. If it conflicts with this directory, this directory
+   controls implementation.
 
 ## The family rule: copy, separate, improve
 
 Every new family member follows the same progression:
 
-1. **Copy the lessons.** Begin from a pinned, audited Ubuntu Zombie release
-   and retain only useful installer, lifecycle, audit, test, packaging, and
-   documentation disciplines.
+1. **Copy the lessons.** Begin in the reserved product source root from the
+   pinned, audited Ubuntu Zombie lesson set named in
+   [`implementation.md`](implementation.md), retaining only useful installer,
+   lifecycle, audit, test, packaging, and documentation disciplines.
 2. **Separate the product.** Rename every account, group, path, unit,
    command, environment variable, cookie, port, log, manifest, receipt, and
    package before the first install.
@@ -65,9 +72,10 @@ Every new family member follows the same progression:
 
 After the copy there is no runtime import, shared payload, common virtual
 environment, source submodule, service template, policy package, or
-automatic code synchronisation. A useful fix can be ported manually, but it
-is reviewed, tested, versioned, and released independently by every product
-that adopts it.
+automatic code synchronisation. The data-only family schemas and black-box
+conformance tests are the sole shared source contract. A useful fix can be
+ported manually, but it is reviewed, tested, versioned, and released
+independently by every product that adopts it.
 
 ## Lessons every product must preserve
 
@@ -104,7 +112,7 @@ These are acceptance outcomes, not a shared implementation:
 
 | Concern | Each product owns |
 | ------- | ----------------- |
-| Source and release | Repository, version, changelog, artifact, SBOM, checksums, signatures, and provenance |
+| Source and release | Product root in this repository, version, changelog, artifact, SBOM, checksums, signatures, and provenance |
 | Installation | Installer, prompts, preflight, dry-run, receipt, ownership markers, and rollback |
 | Update | Compatibility checks, backup, migration, health gate, rollback, schedule, and release channel |
 | Removal | An uninstaller that removes only its product; Ubuntu Zombie may invoke it for the operator |
@@ -120,7 +128,7 @@ These are acceptance outcomes, not a shared implementation:
 
 Products may independently select the same language or upstream dependency.
 They do not share a live installed copy merely because they have a common
-ancestor.
+ancestor or Git repository.
 
 ## Ubuntu Zombie is the family manager (“God” role)
 
@@ -131,9 +139,9 @@ diagnose, repair, update, suspend, back up, and uninstall another local
 agent when the human operator approves the action.
 
 The current Ubuntu Zombie runtime already has the underlying root tools to
-operate product-owned commands. A dedicated family inventory and management
-experience is a required extension, not an implemented UI or installer
-target yet. Documentation must keep that distinction visible.
+operate product-owned commands. A dedicated family inventory and management experience is a required
+extension with a fixed implementation contract, not an implemented UI or
+installer target yet. Documentation must keep that distinction visible.
 
 Management does not turn the products into components or one runtime:
 
@@ -178,9 +186,11 @@ the real host and refuse to adopt an unmarked resource.
 | Configuration | `/etc/ubuntu-zombie` | `/etc/imaginary-friend` | `/etc/curriculum-flame` | `/etc/eric` |
 | State | `/var/lib/ubuntu-zombie` and `/opt/ai-zombie/state` | `/var/lib/imaginary-friend` | `/var/lib/curriculum-flame` | `/var/lib/eric` |
 | Logs | `/var/log/ubuntu-zombie` | `/var/log/imaginary-friend` | `/var/log/curriculum-flame` | `/var/log/eric` |
+| Service identities | `zombie` | `friend` | `flame-child`, `flame-policy`, `flame-guardian`, `flame-model` | `eric-twin`, `eric-vault`, `eric-governance`; later `eric-executor` |
 | Service prefix | `ubuntu-zombie-*` | `imaginary-friend-*` | `curriculum-flame-*` | `eric-*` |
 | Command prefix | `zombie-*` | `friend-*` | `flame-*` | `eric-*` |
 | Environment prefix | `ZOMBIE_*` | `FRIEND_*` | `FLAME_*` | `ERIC_*` |
+| Loopback ports | `7878` | `6767` | `5656` child, `5657` guardian | `4545` Twin, `4546` governance |
 
 Every web product also owns a unique session-signing key and cookie name.
 Passwords, provider keys, local-model tokens, guardian credentials, and
@@ -189,10 +199,11 @@ copied, linked, inherited, or accepted across products.
 
 ## Installation and lifecycle contract
 
-There is no generic family payload and another agent is not an Ubuntu
-Zombie component target. Ubuntu Zombie can nevertheless manage installation
-as the root controller. Each installation remains one product-owned
-transaction:
+There is no generic family payload and another agent is not an Ubuntu Zombie
+component target. Product source is co-located under `products/`, but every
+package and installation remains independent. Ubuntu Zombie can nevertheless
+manage installation as the root controller. Each installation remains one
+product-owned transaction:
 
 1. obtain that product's release and verify its artifact, checksum,
    signature, provenance, and SBOM;
@@ -207,12 +218,13 @@ transaction:
 6. let Ubuntu Zombie record a secret-free inventory result and the target's
    receipt reference when it initiated the transaction.
 
-Direct installation runs the target entry point. Managed installation has
-Ubuntu Zombie fetch and verify the target release, display the target's
-plan, collect or reference product-specific inputs without retaining their
-raw secrets, invoke the same entry point, and preserve both audit trails.
-It must not add `friend`, `flame`, `eric`, or arbitrary persona targets to
-Ubuntu Zombie's component registry.
+Direct installation runs the target entry point. Managed installation uses
+the catalogue-pinned lifecycle and JSON contracts in
+[`implementation.md`](implementation.md): Ubuntu Zombie fetches and verifies
+the target release, displays the target's plan, references product-specific
+secret files without retaining their values, invokes the same entry point,
+and preserves both audit trails. It must not add `friend`, `flame`, `eric`,
+or arbitrary persona targets to Ubuntu Zombie's component registry.
 
 Every product defines these lifecycle operations:
 
@@ -265,8 +277,9 @@ When products share a host:
   directories;
 - direct or Zombie-managed update, repair, suspension, and uninstall affect
   only the selected target;
-- every target exposes a root-only, machine-readable management contract
-  for status, plan, execution result, receipt, and recovery guidance;
+- every target implements the root-only, machine-readable request, response,
+  ownership-marker, receipt, health, and audit contracts in
+  [`implementation.md`](implementation.md);
 - a target cannot invoke Ubuntu Zombie or issue management requests for a
   sibling; and
 - peer-to-peer messaging, shared memory, shared credentials, shared
@@ -275,8 +288,8 @@ When products share a host:
 ## Defining the next agent
 
 A future member is a deliberately designed and released product, not an
-operator-authored persona file. Copy [`template.md`](template.md) and answer
-at least:
+operator-authored persona file. Reserve a unique `products/<product-id>/`
+root, copy [`template.md`](template.md), and answer at least:
 
 1. What single human need does it serve?
 2. Who uses it and who operates it?
@@ -299,8 +312,8 @@ owner and an acceptance test.
 
 ## Validation before hand-off
 
-Each product repository must test clean interactive and unattended
-installation, required-input exit `64`, dry-run accuracy, idempotent
+Each product root must test clean interactive and unattended installation,
+required-input exit `64`, dry-run accuracy, idempotent
 reinstall, permissions, unique authentication, malformed state, capability
 allow and deny lists, updates from supported versions, migration failure,
 rollback, diagnostics redaction, suspension, and uninstall.
@@ -329,10 +342,10 @@ The product-specific negative suites begin with:
 ## Documentation ownership
 
 This catalogue records family definitions and links. Ubuntu Zombie's live
-operating instructions remain in this repository. Every later product must
-own its README, vision, architecture, security and privacy models,
+operating instructions remain at the repository root. Every later product
+owns its README, vision, architecture, security and privacy models,
 configuration, installation, upgrading, troubleshooting, release, and
-disclosure documents.
+disclosure documents below its reserved `products/<product-id>/` root.
 
 ERIC must additionally own evidence and provenance schemas, its consent
 model, Constitution and guardian formats, Executor authority mapping,

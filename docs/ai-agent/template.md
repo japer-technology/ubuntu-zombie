@@ -5,10 +5,11 @@ developed. Replace every bracketed instruction, remove sections that are
 genuinely not applicable, and link evidence for every completed acceptance
 gate.
 
-This template defines an independent product. It is not a persona file, a
+This template defines an independent product implemented below a dedicated
+`products/<product-id>/` root in this repository. It is not a persona file, a
 plugin manifest, or a way to add authority to an installed agent. Read the
-[family catalogue](README.md) and
-[Ubuntu Zombie reference](ubuntu-zombie.md) first.
+[family catalogue](README.md), [implementation contract](implementation.md),
+and [Ubuntu Zombie reference](ubuntu-zombie.md) first.
 
 ---
 
@@ -21,6 +22,7 @@ plugin manifest, or a way to add authority to an installed agent. Read the
 | Field | Definition |
 | ----- | ---------- |
 | Status | [Idea, product definition, prototype, release candidate, or implemented] |
+| Product ID | `[unique-kebab-case-id]` |
 | Human need | [One specific need] |
 | Intended users | [People who interact with it] |
 | Operator | [Person responsible for installation, policy, and removal] |
@@ -33,7 +35,8 @@ plugin manifest, or a way to add authority to an installed agent. Read the
 | Log root | `/var/log/[unique-product-name]` |
 | Environment prefix | `[UNIQUE_PREFIX]_*` |
 | Ubuntu Zombie management | [Supported interface and restrictions] |
-| Authoritative repository | [Link or “not created”] |
+| Source root | `products/[unique-product-name]` |
+| Authoritative repository | `japer-technology/ubuntu-zombie` |
 
 ## Product promise
 
@@ -61,6 +64,8 @@ already enforced.]
 | Gate | State | Evidence or owner |
 | ---- | ----- | ----------------- |
 | Product definition reviewed | [Open/passed] | [Link or owner] |
+| First implementation slice fixed | [Open/passed] | [Link or owner] |
+| Configuration and data contracts fixed | [Open/passed] | [Link or owner] |
 | Threat model reviewed | [Open/passed] | [Link or owner] |
 | Installer lifecycle complete | [Open/passed] | [Link or owner] |
 | Security boundary tested | [Open/passed] | [Link or owner] |
@@ -137,6 +142,9 @@ human approval crosses a boundary.]
 
 All values must be checked against the host before mutation. The installer
 must refuse to adopt an existing resource without a valid ownership marker.
+Use the marker and receipt formats in
+[`implementation.md`](implementation.md#ownership-marker-and-receipt); do
+not invent a product-specific discovery format.
 
 | Resource | Reserved value |
 | -------- | -------------- |
@@ -151,7 +159,8 @@ must refuse to adopt an existing resource without a valid ownership marker.
 | Loopback ports | `[ports]` |
 | Cookie names | `[unique names]` |
 | Package names | `[unique names]` |
-| Receipt and manifest | `[paths]` |
+| Ownership marker | `/var/lib/[name]/installation.json` |
+| Receipt | `/var/log/[name]/management-receipt.json` |
 | Firewall rules | `[names or none]` |
 
 ## Authentication and secrets
@@ -225,7 +234,12 @@ provider receives, and how egress is restricted.]
 
 Ubuntu Zombie is the root-level family manager. Define the product-owned,
 root-only interface it may invoke without turning this product into a
-Zombie component.
+Zombie component. The entry point, flags, request and response envelopes,
+exit codes, ownership marker, receipt, health checks, plan digest, locks, and
+audit correlation are fixed by
+[`implementation.md`](implementation.md#lifecycle-entry-point). This section
+defines product-specific inputs, approvals, checks, and retained inventory;
+it must not fork the common protocol.
 
 | Management operation | Entry point/output | Required approval | Target audit event |
 | -------------------- | ------------------ | ----------------- | ------------------ |
@@ -237,8 +251,8 @@ Zombie component.
 
 Specify:
 
-- ownership-marker and release-verification rules;
-- a stable plan and result schema;
+- product-specific release-verification additions, if any;
+- every accepted `inputs` key and whether it is a secret-file reference;
 - which non-secret inventory fields Zombie may retain;
 - how sensitive inputs reach the target without entering Zombie history,
   logs, receipts, or long-term state;
@@ -271,12 +285,15 @@ product as a Zombie component.
 | ----- | --------------------- | ------------------------ | ---------- |
 | [Input] | [Prompt/default] | `[PRODUCT_INPUT]` | [Rules] |
 
-Unattended mode must never prompt and must exit `64` when a required input
-is missing.
+`[PREFIX]_NONINTERACTIVE=1` and `--non-interactive` are equivalent.
+Unattended mode must never prompt and must exit `64` before mutation when a
+required input is missing. Secret inputs use `[PREFIX]_*_FILE`; raw secrets
+must not enter arguments or environment values.
 
 ### Dry-run and mutation order
 
-1. [Render the complete plan without mutation.]
+1. [Render the complete common response envelope and plan digest without
+   filesystem writes, locks, downloads, or network access.]
 2. [Create identities and protected directories.]
 3. [Write credentials and configuration atomically.]
 4. [Install root-owned executable code and confined services.]
@@ -303,6 +320,10 @@ collision.]
 | `suspend` or kill | [Stop useful operation] | Yes | [Lifecycle state] |
 | `uninstall` | [Remove only owned resources] | Yes | [Removal report] |
 
+Every row must define product-specific health checks and stable error codes.
+The common operation names, JSON response fields, and exit statuses are not
+open design choices.
+
 ## Update and migration design
 
 Define:
@@ -315,7 +336,8 @@ Define:
 6. failed-migration rollback or documented recovery;
 7. release and migration audit records; and
 8. proof that no non-target sibling file or process changes; and
-9. the stable management plan/result contract Ubuntu Zombie invokes.
+9. conformance with the stable management plan/result contract Ubuntu Zombie
+   invokes.
 
 There is no shared release number, schedule, updater, or migration format.
 Ubuntu Zombie may coordinate “update all agents” by invoking each verified
@@ -413,8 +435,8 @@ claiming impossible isolation.
 **Measurable improvement:** [Name at least one improvement and the test or
 metric that proves it.]
 
-**Pinned source lesson set:** [Exact Ubuntu Zombie tag or “not yet
-selected”.]
+**Pinned source lesson set:** [Exact Ubuntu Zombie tag. A product is not
+implementation-ready while this remains unselected.]
 
 ## Honest claims and out of scope
 
@@ -439,7 +461,15 @@ selected”.]
 | ------------- | -------------- | ----- | --------------- |
 | [Item] | [Authority, data, lifecycle, or user impact] | [Owner] | [Milestone] |
 
+An item may remain open only when it is explicitly outside the fixed first
+implementation slice. Any open decision about first-slice authority, data,
+credentials, interfaces, defaults, dependencies, installation, or removal
+keeps the definition in proposal status.
+
 ## Product-owned documentation
+
+These documents live below the product's reserved source root in this
+repository; no external repository is required.
 
 - [ ] README and product vision.
 - [ ] Architecture and data-flow diagrams.
