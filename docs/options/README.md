@@ -118,7 +118,11 @@ Grouped by the operator need they serve. Every flag defaults to `0`.
 - [`ghosts-in-the-machine-plan.md`](ghosts-in-the-machine-plan.md) —
   expands the lesson of Ubuntu Zombie into a family of separate products:
   the root-capable Ubuntu Zombie, the less-privileged Imaginary Friend,
-  Curriculum Flame, and future helpful agents. Each product owns its
+  Curriculum Flame, ERIC (Evolving Representation of Individual
+  Continuity), and future helpful agents. ERIC is a longitudinal personal
+  continuity agent that learns from one consenting person while they are
+  alive, preserves source provenance, and can become an authorised but
+  explicitly non-conscious simulation after death. Each product owns its
   installer, updater, runtime, policy, security password and other
   credentials, state, audit trail, and release. There is no shared ghost
   registry, capability tier, payload, or family-wide lifecycle command.
