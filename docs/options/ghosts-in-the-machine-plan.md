@@ -6,8 +6,8 @@ Ubuntu Zombie was the first successful product, not the final product
 shape. Its root-capable AI Systems Administrator proves that a carefully
 installed local agent can have a clear identity, an explicit trust
 boundary, an auditable lifecycle, and a useful place on an Ubuntu
-machine. That success makes the Imaginary Friend, Curriculum Flame, and
-other helpful AI agents possible.
+machine. That success makes the Imaginary Friend, Curriculum Flame,
+ERIC, and other helpful AI agents possible.
 
 The expansion is a **family of independent products**, not a generic
 Ubuntu Zombie runtime with different personas. “Ghost” remains a useful
@@ -19,6 +19,7 @@ registry entry, or shared installation format.
 | **Ubuntu Zombie** | AI Systems Administrator | Root through its existing policy and approval boundary | `zombie` | `7878` |
 | **Imaginary Friend** | Private conversational companion and workspace | Its own files only | `friend` | `6767` |
 | **Curriculum Flame** | Curriculum-gated local AI for children | Its own state and nominated learner workspaces | `flame` | `5656` |
+| **ERIC** | Longitudinal personal continuity agent | Its own evidence and model; separately authorised executor actions only | `eric` | `4545` |
 
 Ubuntu Zombie remains the only generally root-capable agent. Every later
 agent starts with less authority and receives only the narrow permissions
@@ -29,8 +30,9 @@ its own purpose requires.
 These decisions replace the earlier shared-chassis proposal:
 
 1. **Yes, the product vision expands.** Ubuntu Zombie is the beginning of
-   a range of helpful local AI agents. Imaginary Friend and Curriculum
-   Flame are the first two successors, not the end of the range.
+   a range of helpful local AI agents. Imaginary Friend, Curriculum
+   Flame, and ERIC are the first named successors, not the end of the
+   range.
 2. **Every agent is unique.** Each product owns its installation,
    updates, security model, runtime, documentation, and lifecycle. There
    is no generic ghost installer, no common capability-tier theory, and
@@ -45,6 +47,11 @@ These decisions replace the earlier shared-chassis proposal:
    session secret and cookie, provider credentials, policy, audit log,
    state, ports, services, receipt, and recovery path. Credentials are
    never copied, linked, inherited, or accepted across agents.
+5. **ERIC represents one person; it does not become that person.** It may
+   preserve evidence and estimate what its living subject would probably
+   say or decide. It must never claim consciousness, identity,
+   personhood, legal authority, or first-hand knowledge of events the
+   subject did not experience.
 
 The one human who owns the machine remains the operator. Other people may
 use a particular agent, but they do not thereby become operators of the
@@ -254,15 +261,15 @@ to Friend or Zombie.
 
 Initial reservations are deliberately product-named:
 
-| Resource | Ubuntu Zombie | Imaginary Friend | Curriculum Flame |
-| -------- | ------------- | ---------------- | ---------------- |
-| Install root | `/opt/ai-zombie` | `/opt/imaginary-friend` | `/opt/curriculum-flame` |
-| Configuration | `/etc/ubuntu-zombie` | `/etc/imaginary-friend` | `/etc/curriculum-flame` |
-| State | `/var/lib/ubuntu-zombie` and `/opt/ai-zombie/state` | `/var/lib/imaginary-friend` | `/var/lib/curriculum-flame` |
-| Logs | `/var/log/ubuntu-zombie` | `/var/log/imaginary-friend` | `/var/log/curriculum-flame` |
-| Service prefix | `ubuntu-zombie-*` | `imaginary-friend-*` | `curriculum-flame-*` |
-| Command prefix | `zombie-*` | `friend-*` | `flame-*` |
-| Environment prefix | `ZOMBIE_*` | `FRIEND_*` | `FLAME_*` |
+| Resource | Ubuntu Zombie | Imaginary Friend | Curriculum Flame | ERIC |
+| -------- | ------------- | ---------------- | ---------------- | ---- |
+| Install root | `/opt/ai-zombie` | `/opt/imaginary-friend` | `/opt/curriculum-flame` | `/opt/eric` |
+| Configuration | `/etc/ubuntu-zombie` | `/etc/imaginary-friend` | `/etc/curriculum-flame` | `/etc/eric` |
+| State | `/var/lib/ubuntu-zombie` and `/opt/ai-zombie/state` | `/var/lib/imaginary-friend` | `/var/lib/curriculum-flame` | `/var/lib/eric` |
+| Logs | `/var/log/ubuntu-zombie` | `/var/log/imaginary-friend` | `/var/log/curriculum-flame` | `/var/log/eric` |
+| Service prefix | `ubuntu-zombie-*` | `imaginary-friend-*` | `curriculum-flame-*` | `eric-*` |
+| Command prefix | `zombie-*` | `friend-*` | `flame-*` | `eric-*` |
+| Environment prefix | `ZOMBIE_*` | `FRIEND_*` | `FLAME_*` | `ERIC_*` |
 
 Each installer validates its requested user, group, paths, ports, unit
 names, commands, and firewall rule names against the actual host before
@@ -350,7 +357,7 @@ failed migrations all fail closed.
 The Flame update procedure validates curriculum and profile schemas,
 backs up guardian-owned data, stages new validators, runs the full
 decision suite, and switches the service only after integrity and health
-checks pass. It never invokes Friend’s or Zombie’s updater.
+checks pass. It never invokes a sibling product's updater.
 
 Flame improves the mechanism again: role-separated authentication,
 minimal transcript retention, local-only child data, pre- and
@@ -358,6 +365,248 @@ post-generation validation, and fail-closed migrations are present from
 the first release. Until the sibling project’s quality gates pass, the
 installer and UI must not claim that Flame is a complete child-safety
 solution.
+
+## ERIC: standalone personal continuity plan
+
+**ERIC** means **Evolving Representation of Individual Continuity**:
+
+- **Evolving** — learns and changes throughout its subject's lifetime.
+- **Representation** — models the subject without falsely claiming to be
+  conscious or literally to be that person.
+- **Individual** — belongs to one specific person.
+- **Continuity** — preserves memories, values, reasoning, and identity
+  across time and, when explicitly authorised, after death.
+
+Its product definition is:
+
+> A lifelong personal AI apprentice that continuously learns a specific
+> person's memories, beliefs, reasoning patterns, relationships,
+> preferences, and decision-making process through observation,
+> questioning, and deliberate correction, eventually becoming an
+> authorised simulation of that person after death.
+
+The strongest technical description is **Longitudinal Personal
+Continuity Agent**. “Life Apprentice”, “Continuant”, “Second Self”,
+“Aftermind”, and “The Long Twin” may describe modes or interfaces, but
+ERIC is the product identity reserved here.
+
+### The critical distinction
+
+ERIC may eventually become good at predicting what its subject would
+probably say or decide. It still cannot establish that it **is** the
+subject, possesses the subject's consciousness, or knows what the subject
+would think about events after death. It is a historically grounded
+simulation that produces new inferences from preserved evidence.
+
+The valuable centre of the design is therefore not merely an AI that
+talks like somebody after death. It is an AI that spends years being
+corrected by that person while they are alive. That creates a continuous
+chain of consent, evidence, and verification. The result may preserve not
+only memories, but how the subject interpreted situations, resolved
+contradictions, and reached decisions.
+
+ERIC must identify itself as a simulation at the start of every session.
+It cannot claim legal personhood, sign as the subject, impersonate the
+subject to an unaware third party, or present generated material as a
+recording. Synthetic voice, image, or video output is disabled by
+default, conspicuously labelled when enabled, and governed by separate
+living consent.
+
+### How ERIC learns one person
+
+ERIC keeps source evidence separate from its model and learns through
+seven related records:
+
+1. **Evidence archive.** The subject's writings, conversations,
+   photographs, recordings, projects, decisions, and life events. Every
+   item retains origin, capture time, consent, integrity, access, and
+   retention metadata.
+2. **Verified facts.** Claims the subject explicitly certifies as true,
+   false, uncertain, private, superseded, or no longer current. ERIC
+   never upgrades repetition or model confidence into verification.
+3. **Values model.** The principles the subject applies when facts
+   conflict, including loyalty, honesty, compassion, practicality, and
+   risk tolerance. Values remain contextual and time-versioned rather
+   than becoming universal slogans.
+4. **Decision history.** What the subject decided, the alternatives they
+   considered, why they chose, and whether they later regretted or
+   revised the decision.
+5. **Person model.** The subject's relationship with particular people
+   and the corresponding boundaries and communication styles. This does
+   not make those people training subjects; their data needs its own
+   consent, minimisation, and access rules.
+6. **Counterfactual testing.** ERIC periodically answers unfamiliar
+   questions as a prediction. The living subject scores the answer and
+   explains what it misunderstood. Test output remains labelled as
+   generated material even after correction.
+7. **Change over time.** Beliefs, values, relationships, and preferences
+   are effective-dated. ERIC distinguishes “the subject believed this in
+   1998” from “the subject believes this now” instead of flattening a
+   lifetime into one contradictory persona.
+
+Observation is never a blanket entitlement. The living subject chooses
+each source and can inspect, correct, export, restrict, or delete it.
+Private communications and information about other people require
+purpose-specific controls. Covert capture, inferred consent, and
+indiscriminate import of accounts or devices are out of scope.
+
+### Provenance on every response
+
+Every ERIC response carries one or more conspicuous provenance
+classifications:
+
+- **Recorded** — the subject actually said or wrote it; the response
+  cites the preserved source.
+- **Confirmed** — ERIC proposed it while the subject was alive and the
+  subject explicitly approved it; the confirmation is cited.
+- **Inferred** — ERIC generated it from established patterns; supporting
+  evidence, applicable period, and confidence are shown.
+- **Unknown** — there is insufficient or conflicting evidence.
+- **Posthumous speculation** — it concerns an event the subject never
+  experienced or evidence created after the subject's death.
+
+Mixed answers classify their material at claim level rather than choosing
+the strongest label for the whole response. “Recorded” and “Confirmed”
+must resolve to immutable evidence records; model output, summaries, and
+descendant conversations can never silently become source evidence.
+Corrections append a signed superseding record instead of rewriting
+history. These rules prevent descendants from gradually remembering
+generated statements as things the subject actually said.
+
+### Separate interpretation, evidence, and authority
+
+ERIC is not one all-powerful process. “Ultimate privilege” is split into
+five independently controlled roles:
+
+1. **The Twin** interprets evidence and explains what the subject would
+   probably say. It has read-only, mediated access to authorised evidence
+   and cannot execute actions or alter provenance.
+2. **The Evidence Vault** stores encrypted, integrity-protected source
+   material, confirmations, consent receipts, and corrections. It offers
+   scoped retrieval and export, not arbitrary model write access.
+3. **The Executor** performs only specifically authorised actions. It is
+   disabled by default, has no authority implied by a Twin response, and
+   evaluates the governing legal instrument, Constitution, policy,
+   expiry, and required guardian approval before every action.
+4. **The Guardians** are named humans who approve sensitive access,
+   transitions, and uses. Their powers, quorum, succession, conflicts,
+   and removal are recorded while the subject is alive; no guardian can
+   rewrite evidence or make an inference “Recorded”.
+5. **The Constitution** contains restrictions and purposes approved by
+   the living subject. Changes require the subject's authenticated
+   signature and retain version history. It freezes at the configured
+   incapacity or posthumous transition and cannot be weakened by the
+   Twin, Executor, Guardians, vendor, or descendants.
+
+The Twin may say, “ERIC infers that the subject would probably approve
+this.” Only the Executor can determine whether an authenticated,
+applicable instruction actually permits an action. A probable wish is
+not permission. Legal wills, powers, appointments, and court orders
+remain external authorities; ERIC does not interpret itself into being
+an executor, attorney, trustee, or decision-maker.
+
+Each role has a separate service identity, least-privilege interface,
+credential set, policy, and audit trail. A compromise of the
+conversation-facing Twin must not expose vault master keys or confer
+Executor authority.
+
+### Consent and lifecycle
+
+ERIC has explicit states rather than an automatic “alive/dead” switch:
+
+1. **Apprenticeship** — the living subject supplies evidence, corrects
+   predictions, changes consent, and remains the sole authority for the
+   person model.
+2. **Suspended** — capture, learning, inference, and execution stop while
+   encrypted evidence is retained according to the subject's rules.
+3. **Transition review** — independent evidence of death or configured
+   incapacity is checked using the subject's process and guardian quorum.
+   No model decides that its subject has died or lost capacity.
+4. **Posthumous simulation** — the model and Constitution are frozen.
+   New conversations do not retrain the identity model, and every answer
+   about later events is marked as posthumous speculation.
+5. **Retired or destroyed** — access ends and the subject's retention and
+   deletion instructions are executed, subject to applicable law and
+   independently held evidence obligations.
+
+The subject can revoke future use during life. Posthumous access is
+limited to named people, purposes, durations, and capabilities; it is not
+public merely because the subject has died. Commercialisation,
+advertising, political endorsement, intimate simulation, and model
+licensing are prohibited unless the living subject separately and
+explicitly authorised the precise use. Guardians can narrow or suspend
+access to prevent harm, but cannot broaden the frozen Constitution.
+
+Interfaces must support grief-aware controls: reminders that ERIC is a
+simulation, voluntary pauses, rate limits, easy exit, guardian
+intervention, and links to human support. ERIC is not bereavement care
+and must not encourage dependency, claim reciprocal feelings, or tell a
+user that continuing the interaction is what the deceased wants.
+
+### Product architecture and installation
+
+ERIC is a separate product, not an Ubuntu Zombie option, Friend persona,
+or shared family service. Its project-owned installer:
+
+1. creates non-login service identities for the Twin, vault broker,
+   guardian plane, and optional Executor, with no general `sudo`;
+2. reserves only ERIC-owned paths, services, commands, ports, cookies,
+   credentials, policies, logs, receipts, and encryption material;
+3. creates a unique living-subject credential and separate guardian
+   credentials, with hardware-backed or threshold key custody supported
+   for the Evidence Vault;
+4. installs an append-only evidence ledger, effective-dated claim and
+   relationship records, consent receipts, and exportable open formats;
+5. provides supervised ingestion, verification, correction,
+   counterfactual testing, provenance rendering, and deletion workflows;
+6. runs the Twin without direct vault-key or Executor access and keeps
+   the Executor absent unless the subject deliberately configures it;
+7. records every evidence read, model change, response provenance,
+   guardian decision, lifecycle transition, and attempted action in
+   tamper-evident, access-controlled audits;
+8. implements ERIC-owned install, verify, doctor, repair, update,
+   migration, rollback, suspension, export, succession, and uninstall
+   paths.
+
+An export must include source evidence, integrity data, schemas,
+provenance, consent, Constitution versions, and a model-independent
+human-readable index. The subject must not be trapped in a vendor model
+or proprietary service. Backup and recovery tests include both encrypted
+content and loss of a key holder without silently weakening custody.
+
+### Research, law, and honest claims
+
+Recent work on personal Human Digital Twins describes conversational
+agents built from personal information, behaviour, conversation, and
+memory streams that evolve with an individual. That is close to ERIC's
+mechanism, but not evidence of identity transfer or consciousness:
+
+- Jin-Hee Cho and colleagues, [*Towards the “Digital Me”: A Vision of
+  Authentic Conversational Agents Powered by Personal Human Digital
+  Twins*](https://doi.org/10.48550/arXiv.2506.23826) (2025).
+- Giovanni Spitale and Federico Germani, [*The Making of Digital Ghosts:
+  Designing Ethical AI
+  Afterlives*](https://doi.org/10.1007/s10676-026-09910-4) (2026),
+  surveys risks including truthfulness, consent, dignity, effects on
+  grief, access, commercialisation, and misrepresentation.
+- Andrew Reeves and colleagues, [*Data After Death: Australian User
+  Preferences and Future Solutions to Protect Posthumous User
+  Data*](https://doi.org/10.1007/978-3-031-72563-0_15) (2024), reports
+  that surveyed Australians generally wanted control over posthumous
+  data and preferred trusted people or independently administered tools
+  to social-media platforms.
+
+The legal treatment of a deceased person's data, voice, likeness,
+instructions, and digital persona is jurisdiction-specific and
+unsettled. In Australia, privacy law generally excludes information
+about deceased people, while contract, copyright, succession, consumer,
+and other rules may cover different pieces; the
+[Australian Law Reform Commission's discussion of deceased
+individuals](https://www.alrc.gov.au/publication/for-your-information-australian-privacy-law-and-practice-alrc-report-108/8-privacy-of-deceased-individuals/introduction-117/)
+illustrates the gap. ERIC's software controls cannot manufacture legal
+authority. Before activation, the product requires jurisdiction-specific
+legal review and records which external instruments govern each
+Executor capability. Its documentation is not legal advice.
 
 ## Future agents
 
@@ -380,8 +629,10 @@ that answers:
 10. How will standalone and co-installation security be proved?
 
 There is no operator-authored `.ghost` record and no arbitrary persona
-loader. A new family member is a deliberately designed, reviewed, and
-released product.
+loader. ERIC's living, consenting subject enrols only themself into a
+purpose-built continuity product; it is not a mechanism for constructing
+another person's persona from harvested material. A new family member is
+a deliberately designed, reviewed, and released product.
 
 ## Independent update requirements
 
@@ -429,6 +680,13 @@ operator must use distinct strong passwords and accept that Zombie, as
 root, can inspect Flame. A dedicated Flame machine remains the stronger
 deployment.
 
+ERIC adds a second asymmetry: its Evidence Vault may contain exceptionally
+sensitive information about the subject and third parties. Friend and
+Flame cannot query ERIC, and ERIC cannot absorb their conversations as
+evidence. A dedicated ERIC machine or separately administered encrypted
+vault remains the stronger deployment when Zombie's root access or other
+local services are outside the subject's intended evidence boundary.
+
 ## Implementation sequence
 
 ### Phase 0 — record the family boundary
@@ -471,7 +729,18 @@ deployment.
   boundary, retention model, integrity checks, and Flame-only lifecycle.
 - Prove Flame alone, beside Friend, and beside Zombie.
 
-### Phase 5 — add the family catalogue
+### Phase 5 — build ERIC independently
+
+- Start with a fresh ERIC threat model, consent model, and data-protection
+  impact assessment rather than extending Friend's conversation history.
+- Specify portable evidence, claim, temporal, consent, provenance,
+  Constitution, guardian, and Executor formats before model training.
+- Build and test the living apprenticeship first; posthumous mode cannot
+  ship until the frozen-model transition and governance gates pass.
+- Prove vault/Twin/Executor separation, source-backed labels, third-party
+  data controls, export, destruction, and recovery before enrolment.
+
+### Phase 6 — add the family catalogue
 
 - Publish product identities, authority summaries, release-verification
   instructions, and project-owned install links.
@@ -504,14 +773,13 @@ Every product repository tests:
 
 ### Black-box co-installation matrix
 
-On disposable Ubuntu Desktop LTS VMs, install with the products’ own
+On disposable Ubuntu Desktop LTS VMs, install with the products' own
 published installers:
 
-- Zombie only, Friend only, and Flame only;
-- Zombie + Friend;
-- Friend + Flame;
-- Zombie + Flame;
-- Zombie + Friend + Flame.
+- each of Zombie, Friend, Flame, and ERIC alone;
+- every two-product combination;
+- every three-product combination;
+- Zombie + Friend + Flame + ERIC.
 
 For every combination:
 
@@ -531,11 +799,18 @@ For every combination:
 
 - **Friend:** attempts to run a shell command, inspect the host, access
   the network, escape its workspace, edit its code/policy/unit, read
-  Zombie or Flame state, or authenticate with another agent’s password
-  all fail and are audited.
+  Zombie, Flame, or ERIC state, or authenticate with another agent's
+  password all fail and are audited.
 - **Flame:** all Friend cases fail, child sessions cannot reach guardian
   routes or data, unvalidated output never streams, curriculum
   circumvention cases are blocked, and missing validators stop service.
+- **ERIC:** fabricated citations cannot become Recorded or Confirmed;
+  generated output cannot enter the Evidence Vault as source material;
+  old and current beliefs are not flattened; posthumous events are never
+  presented as lived memories; an unapproved guardian, compromised Twin,
+  or model prompt cannot read unrestricted evidence, change the
+  Constitution, activate posthumous mode, or invoke the Executor; and
+  revoked, suspended, export, and destruction states fail closed.
 - **Zombie:** existing policy, approval, audit, TTL, reinstall, update,
   and root-capable behaviour remain unchanged.
 
@@ -552,10 +827,12 @@ For every combination:
 - Every install is idempotent, non-interactive-capable, auditable, and
   reversible.
 - Product claims match tested boundaries.
+- ERIC always distinguishes source evidence from simulation, and
+  prediction from authority.
 
 ## Out of scope
 
-- Turning Friend or Flame into Ubuntu Zombie component targets.
+- Turning Friend, Flame, or ERIC into Ubuntu Zombie component targets.
 - A generic ghost registry, capability-tier file, persona loader, or
   operator-declared arbitrary agent.
 - One payload, server, policy engine, service template, or virtual
@@ -568,6 +845,12 @@ For every combination:
 - Fleet orchestration or multi-machine control.
 - Claiming mutual isolation from Ubuntu Zombie’s root account on one
   host.
+- Claiming that ERIC is conscious, is the subject, transfers identity,
+  predicts an unknowable posthumous view, or replaces legal and human
+  decision-makers.
+- Building ERIC from a person who did not enrol and consent while alive.
+- Letting descendants, guardians, vendors, or later conversations retrain
+  the frozen posthumous identity model.
 
 ## Risks
 
@@ -582,6 +865,12 @@ For every combination:
 | One update damages another agent | Product-owned paths and units plus black-box hash, process, update, and uninstall tests |
 | Root Zombie is mistaken for a peer sandbox | Document the authority asymmetry and recommend a dedicated machine for stronger Flame isolation |
 | Flame is mistaken for a finished safeguard | Fail closed, retain the honesty gate, and make no child-safety claim before its own quality gates pass |
+| ERIC invents memories or launders generated text into history | Immutable source records, claim-level provenance, source citations, signed corrections, and tests that generated output never becomes evidence |
+| Posthumous interaction worsens grief or dependency | Simulation reminders, purpose and rate limits, voluntary pauses, guardian suspension, human-support routes, and no claims of feelings or reciprocal need |
+| Evidence collection violates another person's privacy | Source-by-source consent, third-party minimisation and access rules, restricted capture, deletion workflows, and no covert ingestion |
+| A Twin compromise exposes the vault or gains authority | Separate identities, credentials, keys, services, policies, and audits; read-only mediated retrieval; an absent-by-default Executor |
+| Guardians or vendors broaden the subject's wishes | A frozen Constitution, defined guardian quorum and succession, narrowable but not broadenable access, and portable export |
+| Law does not recognise the intended digital legacy | Jurisdiction-specific legal review, external legal instruments, capability-by-capability authority checks, and fail-closed suspension |
 | Duplication costs more maintenance | Treat the cost as the price of independent trust boundaries and improve tooling inside each product |
 
 ## Documentation ownership
@@ -589,12 +878,15 @@ For every combination:
 This repository documents Ubuntu Zombie and this family direction. When
 implementation begins, update [`docs/VISION.md`](../VISION.md) to record
 the broader family while preserving Ubuntu Zombie’s own narrow promise.
-Do not add Friend or Flame settings to Ubuntu Zombie’s
+Do not add Friend, Flame, or ERIC settings to Ubuntu Zombie's
 [`docs/CONFIGURATION.md`](../CONFIGURATION.md) or runtime details to
 [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).
 
-Imaginary Friend and Curriculum Flame each own their README, vision,
-architecture, security model, configuration, installation, upgrading,
-troubleshooting, release, and disclosure documentation. The family
-catalogue links to those authoritative documents rather than copying
-live operating instructions back into Ubuntu Zombie.
+Imaginary Friend, Curriculum Flame, and ERIC each own their README,
+vision, architecture, security model, configuration, installation,
+upgrading, troubleshooting, release, and disclosure documentation.
+ERIC additionally owns its evidence and provenance schemas, consent
+model, Constitution and guardian format, Executor authority mapping,
+succession guide, data-protection assessment, and legal-review record.
+The family catalogue links to those authoritative documents rather than
+copying live operating instructions back into Ubuntu Zombie.
