@@ -369,4 +369,3 @@ The product-owned repository must ultimately provide its own vision,
 architecture, threat model, security and privacy documents, configuration,
 installation, upgrading, recovery, troubleshooting, disclosure, release,
 and test evidence.
-

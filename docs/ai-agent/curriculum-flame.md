@@ -554,4 +554,3 @@ artifacts, and test evidence.
 The full current requirement set remains in
 [`../options/curriculum-gates-local-ai-for-children.md`](../options/curriculum-gates-local-ai-for-children.md);
 this file is the family catalogue definition and management contract.
-

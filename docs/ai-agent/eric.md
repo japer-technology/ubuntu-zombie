@@ -603,4 +603,3 @@ ERIC's repository must own:
 This file is the family definition. The original
 [`ghosts-in-the-machine-plan.md`](../options/ghosts-in-the-machine-plan.md)
 retains the cross-product rationale and implementation sequence.
-
