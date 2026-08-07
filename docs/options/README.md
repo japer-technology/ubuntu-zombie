@@ -12,7 +12,10 @@ idempotent, non-interactive-capable, audited, and reversible by
 deliberate exception. It records the direction for an independent family
 of AI-agent products, not optional components. Those products have their
 own releases, installers, updates, security credentials, and lifecycles;
-they do not use Ubuntu Zombie's component registry.
+they do not use Ubuntu Zombie's component registry. Their extracted
+definitions and hand-authored template live in
+[`docs/ai-agent/`](../ai-agent/). Ubuntu Zombie is the root-level family
+manager and invokes each product's independently owned lifecycle interface.
 
 Runnable components follow the registry contract in
 [`scripts/component-registry.sh`](../scripts/component-registry.sh):
@@ -115,8 +118,14 @@ Grouped by the operator need they serve. Every flag defaults to `0`.
 
 ### Independent AI-agent family
 
+- [`docs/ai-agent/`](../ai-agent/) — the readable catalogue and canonical
+  family definitions for Ubuntu Zombie, Imaginary Friend, Curriculum Flame,
+  and ERIC, plus the template for future agents. Ubuntu Zombie has the
+  God-level host-management role; the other products remain unprivileged
+  and independent.
 - [`ghosts-in-the-machine-plan.md`](ghosts-in-the-machine-plan.md) —
-  expands the lesson of Ubuntu Zombie into a family of separate products:
+  records the rationale and implementation plan for a family of separate
+  products:
   the root-capable Ubuntu Zombie, the less-privileged Imaginary Friend,
   Curriculum Flame, ERIC (Evolving Representation of Individual
   Continuity), and future helpful agents. ERIC is a longitudinal personal
@@ -125,7 +134,9 @@ Grouped by the operator need they serve. Every flag defaults to `0`.
   explicitly non-conscious simulation after death. Each product owns its
   installer, updater, runtime, policy, security password and other
   credentials, state, audit trail, and release. There is no shared ghost
-  registry, capability tier, payload, or family-wide lifecycle command.
+  registry, capability tier, payload, or lifecycle implementation; Ubuntu
+  Zombie manages them by verifying and invoking their product-owned
+  interfaces under operator approval and dual audit.
   The Curriculum Flame product follows
   [`curriculum-gates-local-ai-for-children.md`](curriculum-gates-local-ai-for-children.md),
   the local specification behind

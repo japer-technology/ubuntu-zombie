@@ -1,5 +1,11 @@
 # Plan: ghosts in the machine — an independent AI-agent family
 
+> The named product definitions have been extracted into the
+> [`docs/ai-agent/`](../ai-agent/) catalogue, beginning with
+> [Ubuntu Zombie](../ai-agent/ubuntu-zombie.md). This document remains the
+> cross-product rationale, implementation sequence, validation plan, and
+> risk record.
+
 ## Goal
 
 Ubuntu Zombie was the first successful product, not the final product

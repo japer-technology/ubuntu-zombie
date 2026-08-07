@@ -31,6 +31,9 @@ Zombie before.
   not, trying to be.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — components, action classes,
   policy gate, audit log, and trust boundaries.
+- [`ai-agent/`](ai-agent/) — the AI-agent family catalogue: Ubuntu Zombie
+  first, the independent products it manages, their security and lifecycle
+  contracts, and a hand-authored definition template.
 - [`INTERNET-ACCESS.md`](INTERNET-ACCESS.md) — design note on giving
   the chat agent outbound internet access.
 - [`OPENSSF-SCORECARD.md`](OPENSSF-SCORECARD.md) — how the repository

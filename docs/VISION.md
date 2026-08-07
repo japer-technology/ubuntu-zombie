@@ -19,6 +19,29 @@ That sentence is the entire MVP. It is deliberately narrow, and every
 line of code in this repository exists to make it true, observable,
 and reversible.
 
+## The first member of a family
+
+Ubuntu Zombie is also the first of an independent
+[AI-agent family](ai-agent/). Imaginary Friend, Curriculum Flame, ERIC,
+and future products copy its proven installation, policy, audit, lifecycle,
+update, and release lessons while removing the authority they do not need.
+They remain separate products with separate credentials, data, installers,
+updaters, policies, audits, and releases.
+
+As the only generally root-capable member, Ubuntu Zombie is the
+machine-level family manager — the **God role**. With explicit operator
+approval it is intended to discover, install, verify, diagnose, repair,
+update, suspend, and remove subordinate agents by invoking each product's
+own verified lifecycle interface. It does not share their runtime or turn
+them into installer components.
+
+The existing root-capable tools can operate product-owned commands, but the
+dedicated catalogue, secret-free inventory, target interfaces, and family
+management experience are documented requirements, not implemented MVP
+features. Ubuntu Zombie remains under human control; “God” describes host
+authority, not autonomous ownership, consent, identity, guardianship, or
+legal authority.
+
 ## Why this exists
 
 Personal computers have become powerful enough to run real workloads
@@ -54,7 +77,8 @@ the machine the whole time.
 - **Autonomous ownership of the machine.** The operator is the
   principal. The agent is a tool with hands, not a tenant.
 - **Multi-tenant or fleet management.** One machine, one operator,
-  one trust boundary. Fleet orchestration is out of scope.
+  one trust boundary. Multi-machine fleet orchestration is out of scope;
+  same-host subordinate-agent management is a post-MVP family direction.
 - **Replacement of the human users on the desktop.** Existing logins,
   files, and workflows are left alone. Ubuntu Zombie installs
   *beside* the user, not *over* them.
@@ -77,6 +101,8 @@ Zombie exposes only a loopback chat service by default.
   provider sees, and the disclosure policy.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — components, action classes,
   and the approval pipeline.
+- [`ai-agent/`](ai-agent/) — Ubuntu Zombie's family-manager role, the
+  subordinate product definitions, and the new-agent template.
 - [`ROADMAP.md`](ROADMAP.md) — what is intentionally post-MVP and
   what we have committed *not* to ship until the MVP is solid.
 
