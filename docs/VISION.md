@@ -15,9 +15,11 @@
 > plain language, under explicit human approval, with every action
 > written to an auditable log.**
 
-That sentence is the entire MVP. It is deliberately narrow, and every
-line of code in this repository exists to make it true, observable,
-and reversible.
+That sentence is the entire Ubuntu Zombie MVP. It is deliberately narrow,
+and the root product remains organised to make it true, observable, and
+reversible. Independently packaged family products may also be developed in
+this repository under the contract below; they do not expand the authority
+or default installation of Ubuntu Zombie.
 
 ## The first member of a family
 
@@ -26,7 +28,9 @@ Ubuntu Zombie is also the first of an independent
 and future products copy its proven installation, policy, audit, lifecycle,
 update, and release lessons while removing the authority they do not need.
 They remain separate products with separate credentials, data, installers,
-updaters, policies, audits, and releases.
+updaters, policies, audits, and releases. Their source is co-located below
+dedicated `products/<product-id>/` roots so one repository can test every
+namespace and co-installation boundary without creating a shared runtime.
 
 As the only generally root-capable member, Ubuntu Zombie is the
 machine-level family manager — the **God role**. With explicit operator
@@ -36,11 +40,12 @@ own verified lifecycle interface. It does not share their runtime or turn
 them into installer components.
 
 The existing root-capable tools can operate product-owned commands, but the
-dedicated catalogue, secret-free inventory, target interfaces, and family
-management experience are documented requirements, not implemented MVP
-features. Ubuntu Zombie remains under human control; “God” describes host
-authority, not autonomous ownership, consent, identity, guardianship, or
-legal authority.
+dedicated catalogue, secret-free inventory, and family management experience
+are specified, not implemented MVP features. The target interfaces and work
+order are fixed by the
+[AI-agent implementation contract](ai-agent/implementation.md). Ubuntu
+Zombie remains under human control; “God” describes host authority, not
+autonomous ownership, consent, identity, guardianship, or legal authority.
 
 ## Why this exists
 
@@ -106,5 +111,7 @@ Zombie exposes only a loopback chat service by default.
 - [`ROADMAP.md`](ROADMAP.md) — what is intentionally post-MVP and
   what we have committed *not* to ship until the MVP is solid.
 
-If a feature request or pull request expands beyond the one-sentence
-promise above, it belongs in `ROADMAP.md` first, not in `main`.
+If an Ubuntu Zombie feature request expands beyond the one-sentence promise
+above, it belongs in `ROADMAP.md` first. Family-product work instead follows
+the fixed source, authority, sequencing, and release gates in
+[`ai-agent/`](ai-agent/).

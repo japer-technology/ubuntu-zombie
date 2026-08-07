@@ -10,6 +10,16 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Documentation
 
+- **Implementation-ready in-repository AI-agent family:** made
+  `docs/ai-agent/` authoritative for implementing Imaginary Friend,
+  Curriculum Flame, ERIC, and Ubuntu Zombie family management in this
+  repository. The new contract fixes product source roots, schemas,
+  ownership markers, lifecycle requests/results, receipts, audit
+  correlation, secret handling, release identities, CI expectations, and
+  dependency order. Each product definition now fixes its first-release
+  scope, inputs, identities, services, storage, safety boundaries, and
+  deferred features; linked vision and option documents no longer require
+  external product repositories or conflicting platform layouts.
 - **Complete AI-agent catalogue and God-level management contract:** added
   `docs/ai-agent/` with an Ubuntu-Zombie-first catalogue, complete product
   definitions for Ubuntu Zombie, Imaginary Friend, Curriculum Flame, and

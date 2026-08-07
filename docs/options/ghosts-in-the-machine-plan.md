@@ -2,9 +2,11 @@
 
 > The named product definitions have been extracted into the
 > [`docs/ai-agent/`](../ai-agent/) catalogue, beginning with
-> [Ubuntu Zombie](../ai-agent/ubuntu-zombie.md). This document remains the
-> cross-product rationale, implementation sequence, validation plan, and
-> risk record.
+> [Ubuntu Zombie](../ai-agent/ubuntu-zombie.md). The normative
+> [implementation contract](../ai-agent/implementation.md) now fixes the
+> monorepo source layout, lifecycle protocol, first-release scopes, and work
+> order. This document remains rationale, validation background, and a risk
+> record; the contract and product definitions control when text differs.
 
 ## Goal
 
@@ -30,8 +32,8 @@ does not turn them into components or a shared runtime.
 | ------- | ------- | ----------------- | ---------------- | ------------ |
 | **Ubuntu Zombie** | AI Systems Administrator | Root through its existing policy and approval boundary | `zombie` | `7878` |
 | **Imaginary Friend** | Private conversational companion and workspace | Its own files only | `friend` | `6767` |
-| **Curriculum Flame** | Curriculum-gated local AI for children | Its own state and nominated learner workspaces | `flame` | `5656` |
-| **ERIC** | Longitudinal personal continuity agent | Its own evidence and model; separately authorised executor actions only | `eric` | `4545` |
+| **Curriculum Flame** | Curriculum-gated local AI for children | Its own state; workspaces are later | `flame-*` | `5656`, `5657` |
+| **ERIC** | Longitudinal personal continuity agent | Its own evidence and model; Executor is later | `eric-*` | `4545`, `4546` |
 
 Ubuntu Zombie remains the only generally root-capable agent. Every later
 agent starts with less authority and receives only the narrow permissions
@@ -50,10 +52,10 @@ These decisions replace the earlier shared-chassis proposal:
    is no generic ghost installer, no common capability-tier theory, and
    no shared runtime payload.
 3. **Duplicate the lesson, not the implementation dependency.** A new
-   agent begins by copying the proven Ubuntu Zombie mechanisms into its
-   own project. It then removes inappropriate power, specialises the
-   design, and improves at least one part of the mechanism. Once split,
-   it evolves and releases independently.
+   agent begins by copying proven Ubuntu Zombie mechanisms into its reserved
+   `products/<product-id>/` root in this repository. It then removes
+   inappropriate power, specialises the design, and improves at least one
+   part of the mechanism. Once split, it evolves and releases independently.
 4. **Every security boundary is product-specific.** Each agent has its
    own Linux identity, security password or passwords, password hash,
    session secret and cookie, provider credentials, policy, audit log,
@@ -81,8 +83,8 @@ audited Ubuntu Zombie release and then deliberately separate it.
 
 For each new agent:
 
-1. Start a product-owned repository and release stream from a pinned
-   Ubuntu Zombie tag.
+1. Start a product-owned source root and release stream in this repository
+   from the pinned Ubuntu Zombie lesson tag.
 2. Copy the installer disciplines, lifecycle commands, audit approach,
    tests, packaging, and documentation structure that are still useful.
 3. Rename every product namespace before the first install: accounts,
@@ -114,7 +116,7 @@ from changing every installed agent at once.
 
 | Concern | Required separation |
 | ------- | ------------------- |
-| Source and release | Product-owned repository, version, changelog, artifact, SBOM, checksums, signatures, and provenance |
+| Source and release | Product-owned source root, version, changelog, artifact, SBOM, checksums, signatures, and provenance in this repository |
 | Installation | Product-owned installer, prompts, preflight, dry-run, receipt, ownership markers, and rollback |
 | Update | Product-owned compatibility checks, backup, migration, health gate, rollback, schedule, and release channel |
 | Removal | Product-owned uninstaller that removes only that product; Ubuntu Zombie may invoke it for the operator |
@@ -351,7 +353,8 @@ Imaginary Friend is not Ubuntu Zombie with a `hermit` setting. It is a
 separate companion product whose entire useful authority is conversation
 and a private shared workspace.
 
-Its project-owned installer:
+Its product-owned installer at
+`products/imaginary-friend/scripts/manage.sh`:
 
 1. validates that the `friend` identity and all Friend namespaces are
    unused or carry valid Friend ownership markers;
@@ -381,11 +384,11 @@ privileged tools in its process. These are not optional profile settings.
 ## Curriculum Flame: standalone installation plan
 
 Curriculum Flame is not Friend plus a `tutor` setting. It is a separate
-child-facing product built around the specification in
+child-facing product at `products/curriculum-flame/`, built from the
+authoritative [product definition](../ai-agent/curriculum-flame.md). This
+directory's earlier
 [`curriculum-gates-local-ai-for-children.md`](curriculum-gates-local-ai-for-children.md)
-and the product-owned
-[`japer-technology/curriculum-flame`](https://github.com/japer-technology/curriculum-flame)
-project.
+is background where the product definition has narrowed or resolved it.
 
 Its installer and update path are owned by Curriculum Flame. They create:
 
@@ -418,7 +421,7 @@ as a management credential or bypass the guardian-owned data rules.
 Flame improves the mechanism again: role-separated authentication,
 minimal transcript retention, local-only child data, pre- and
 post-generation validation, and fail-closed migrations are present from
-the first release. Until the sibling project’s quality gates pass, the
+the first release. Until the product’s quality gates pass, the
 installer and UI must not claim that Flame is a complete child-safety
 solution.
 
@@ -601,8 +604,8 @@ user that continuing the interaction is what the deceased wants.
 
 ### Product architecture and installation
 
-ERIC is a separate product, not an Ubuntu Zombie option, Friend persona,
-or shared family service. Its project-owned installer:
+ERIC is a separate product at `products/eric/`, not an Ubuntu Zombie option,
+Friend persona, or shared family service. Its product-owned installer:
 
 1. creates non-login service identities for the Twin, vault broker,
    guardian plane, and optional Executor, with no general `sudo`;
@@ -758,74 +761,61 @@ local services are outside the subject's intended evidence boundary.
 
 ## Implementation sequence
 
-### Phase 0 — record the family boundary
+The exact dependency order is maintained in
+[`implementation.md`](../ai-agent/implementation.md#implementation-order-and-hand-off-gates):
 
-- Update the product vision to recognise a family with one operator.
-- Mark Ubuntu Zombie as the sole generally root-capable member and explicit
-  God-level family manager.
-- Publish the copy/separate/improve rule and the namespace reservations.
-- Explicitly reject the ghost registry, generic tiers, shared payload,
-  and shared updater designs.
+### Phase 0 — define the in-repository contract
 
-### Phase 1 — preserve the Ubuntu Zombie reference
+- Reserve `family/`, `products/imaginary-friend/`,
+  `products/curriculum-flame/`, and `products/eric/`.
+- Pin the Ubuntu Zombie lesson set and publish the product, request, result,
+  marker, receipt, inventory, and audit schemas.
+- Add hermetic family conformance fixtures and reject shared installed
+  runtimes or component targets.
 
-- Tag the audited source snapshot used by the next product.
-- Record the installer, policy, audit, lifecycle, release, and test
-  lessons to copy.
-- Specify the signed catalogue, secret-free family inventory, root-only
-  target contract, manager policy classes, dual-audit correlation, and
-  batch failure behaviour.
-- Add management without changing the default Ubuntu Zombie installation
-  or turning agents into component targets.
+### Phase 1 — build Imaginary Friend standalone
 
-### Phase 2 — build Imaginary Friend independently
+- Copy useful mechanisms into `products/imaginary-friend/`, complete the
+  namespace split, and remove privileged code paths.
+- Build the fixed first-release conversation, workspace, credentials,
+  sandbox, lifecycle, package, and tests.
+- Prove direct install alone and beside Ubuntu Zombie.
 
-- Copy the useful mechanisms into the Friend project.
-- Complete the namespace split and remove privileged code paths.
-- Build Friend’s installer, credentials, sandbox, workspace, lifecycle,
-  updater, verifier, diagnostics, and uninstaller.
-- Publish Friend’s root-only management plan and result interface.
-- Prove Friend alone, then Friend beside Zombie.
+### Phase 2 — implement Ubuntu Zombie family management
 
-### Phase 3 — harden independent co-installation
+- Add the digest-pinned catalogue, schema validator, secret-free inventory,
+  root CLI, closed manager tools, strict target selection, and dual audit.
+- Invoke Friend's exact product lifecycle contract; do not turn it into a
+  component target.
+- Prove direct and managed outcomes are equivalent and non-target state is
+  unchanged.
 
-- Test identity, path, port, cookie, password, session, provider-secret,
-  audit, update, and uninstall separation.
-- Red-team Friend from its service account.
-- Verify direct and Zombie-managed Friend lifecycle operations, including
-  dual audit and strict target selection.
-- Feed improvements back through separate, reviewed changes where useful.
+### Phase 3 — build Curriculum Flame standalone and managed
 
-### Phase 4 — build Curriculum Flame independently
+- Implement the fixed one-guardian, one-learner, synthetic-mathematics slice
+  under `products/curriculum-flame/`.
+- Prove child, guardian, policy, generator, and validator separation,
+  buffered delivery, fail-closed behavior, and local-only inference.
+- Add Flame to the catalogue only after standalone gates pass.
 
-- Start the Flame project from the newest suitable audited lesson set,
-  not from the installed Friend runtime.
-- Build the child and guardian boundaries, curriculum gate, local-model
-  boundary, retention model, integrity checks, and Flame-only lifecycle.
-- Ensure Zombie can manage software lifecycle without child or guardian
-  credentials and cannot turn root access into guardian approval.
-- Prove Flame alone, beside Friend, and beside Zombie.
+### Phase 4 — build ERIC living apprenticeship
 
-### Phase 5 — build ERIC independently
+- Implement the portable `eric/v1` records, encrypted Vault, read-only Twin,
+  governance, provenance resolver, export, suspension, and destruction under
+  `products/eric/`.
+- Keep Executor and posthumous resources absent and return `unsupported` for
+  their requests.
+- Add ERIC to the catalogue only after standalone and dedicated-host gates
+  pass.
 
-- Start with a fresh ERIC threat model, consent model, and data-protection
-  impact assessment rather than extending Friend's conversation history.
-- Specify portable evidence, claim, temporal, consent, provenance,
-  Constitution, guardian, and Executor formats before model training.
-- Build and test the living apprenticeship first; posthumous mode cannot
-  ship until the frozen-model transition and governance gates pass.
-- Prove vault/Twin/Executor separation, source-backed labels, third-party
-  data controls, export, destruction, and recovery before enrolment.
-- Ensure Zombie can manage services and releases without gaining vault
-  custody, consent, Constitution, guardian, or Executor authority.
+### Phase 5 — complete the family release gate
 
-### Phase 6 — complete the family management experience
-
-- Publish product identities, authority summaries, release-verification
-  instructions, and project-owned install links.
-- Add the Ubuntu Zombie catalogue, inventory, per-product controls, batch
-  update planning, and correlated audit views.
-- Add future agents one complete independent product at a time.
+- Run all standalone and co-installation combinations, direct and managed
+  lifecycle operations, negative service-account tests, and selective
+  removal.
+- Build and verify each independent artifact, SBOM, provenance, signature,
+  changelog, and product version.
+- Add future agents one complete product root and release at a time.
 
 Each product phase ends with that product’s own lint, tests, package,
 release verification, disposable-VM matrix, changelog, and version bump.
@@ -834,7 +824,7 @@ release verification, disposable-VM matrix, changelog, and version bump.
 
 ### Product validation
 
-Every product repository tests:
+Every product source root tests:
 
 - clean interactive and non-interactive installs;
 - required-input exit `64`;
@@ -971,21 +961,22 @@ For every combination:
 
 ## Documentation ownership
 
-This repository documents Ubuntu Zombie and this family direction. When
-implementation begins, update [`docs/VISION.md`](../VISION.md) to record
-the broader family while preserving Ubuntu Zombie’s own narrow promise.
-Do not add Friend, Flame, or ERIC settings to Ubuntu Zombie's
+This repository owns Ubuntu Zombie and every family product source root.
+[`docs/VISION.md`](../VISION.md) records the broader family while preserving
+Ubuntu Zombie’s own narrow promise. Do not add Friend, Flame, or ERIC
+settings to Ubuntu Zombie's
 [`docs/CONFIGURATION.md`](../CONFIGURATION.md) or runtime details to
 [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 Imaginary Friend, Curriculum Flame, and ERIC each own their README,
 vision, architecture, security model, configuration, installation,
-upgrading, troubleshooting, release, and disclosure documentation.
+upgrading, troubleshooting, release, and disclosure documentation below
+their `products/<product-id>/` root.
 ERIC additionally owns its evidence and provenance schemas, consent
 model, Constitution and guardian format, Executor authority mapping,
 succession guide, data-protection assessment, and legal-review record.
 The family catalogue links to those authoritative documents rather than
-copying live operating instructions back into Ubuntu Zombie. Ubuntu
-Zombie additionally owns the signed catalogue format, secret-free local
-inventory, target management contract, manager policy and approval rules,
-batch semantics, and correlated manager audit documentation.
+copying live operating instructions back into Ubuntu Zombie. Ubuntu Zombie
+additionally owns `family/`, the secret-free local inventory, manager policy
+and approval rules, batch semantics, and correlated manager audit
+documentation.
