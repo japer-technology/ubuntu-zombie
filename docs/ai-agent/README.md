@@ -139,9 +139,10 @@ diagnose, repair, update, suspend, back up, and uninstall another local
 agent when the human operator approves the action.
 
 The current Ubuntu Zombie runtime already has the underlying root tools to
-operate product-owned commands. A dedicated family inventory and management experience is a required
-extension with a fixed implementation contract, not an implemented UI or
-installer target yet. Documentation must keep that distinction visible.
+operate product-owned commands. A dedicated family inventory and management
+experience is a required extension with a fixed implementation contract, not
+an implemented UI or installer target yet. Documentation must keep that
+distinction visible.
 
 Management does not turn the products into components or one runtime:
 
