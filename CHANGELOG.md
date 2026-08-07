@@ -10,6 +10,17 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Documentation
 
+- **Complete AI-agent catalogue and God-level management contract:** added
+  `docs/ai-agent/` with an Ubuntu-Zombie-first catalogue, complete product
+  definitions for Ubuntu Zombie, Imaginary Friend, Curriculum Flame, and
+  ERIC, shared installation/update/co-installation contracts, and a
+  hand-authored agent template. Ubuntu Zombie is now explicitly the
+  root-level family manager: it may orchestrate product-owned lifecycle
+  operations under operator approval and dual audit without sharing target
+  credentials, data, runtimes, or lifecycle implementations. The existing
+  family plan, vision, options index, and documentation indexes now link to
+  the extracted definitions. Documentation only; the dedicated family
+  inventory and management experience are not yet implemented.
 - **ERIC personal continuity agent:** expanded
   `docs/options/ghosts-in-the-machine-plan.md` with ERIC (Evolving
   Representation of Individual Continuity), a lifelong AI apprentice for
