@@ -581,7 +581,7 @@ agents built from personal information, behaviour, conversation, and
 memory streams that evolve with an individual. That is close to ERIC's
 mechanism, but not evidence of identity transfer or consciousness:
 
-- Jin-Hee Cho and colleagues, [*Towards the “Digital Me”: A Vision of
+- Lluís C. Coll and colleagues, [*Towards the “Digital Me”: A Vision of
   Authentic Conversational Agents Powered by Personal Human Digital
   Twins*](https://doi.org/10.48550/arXiv.2506.23826) (2025).
 - Giovanni Spitale and Federico Germani, [*The Making of Digital Ghosts:
@@ -810,7 +810,7 @@ For every combination:
   presented as lived memories; an unapproved guardian, compromised Twin,
   or model prompt cannot read unrestricted evidence, change the
   Constitution, activate posthumous mode, or invoke the Executor; and
-  revoked, suspended, export, and destruction states fail closed.
+  revocation, suspension, export, and destruction workflows fail closed.
 - **Zombie:** existing policy, approval, audit, TTL, reinstall, update,
   and root-capable behaviour remain unchanged.
 
