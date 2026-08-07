@@ -10,6 +10,15 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Documentation
 
+- **ERIC personal continuity agent:** expanded
+  `docs/options/ghosts-in-the-machine-plan.md` with ERIC (Evolving
+  Representation of Individual Continuity), a lifelong AI apprentice for
+  one consenting person. The plan separates source evidence from
+  inference, requires provenance on every response, preserves beliefs and
+  decisions over time, splits the Twin, Evidence Vault, Executor,
+  Guardians, and Constitution, and defines consent, posthumous,
+  co-installation, validation, legal, grief, and misrepresentation
+  boundaries. Documentation only; no behaviour changes.
 - **Independent AI-agent family plan:** revised
   `docs/options/ghosts-in-the-machine-plan.md` to record the decision that
   Ubuntu Zombie is the first of a wider family, but remains the sole
