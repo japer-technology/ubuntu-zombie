@@ -86,6 +86,20 @@ class DatabaseTests(unittest.TestCase):
         backup = Database(backup_path)
         self.assertIsNone(backup.active_session("token-digest"))
 
+    def test_export_and_unbounded_listing_include_every_conversation(self) -> None:
+        expected: set[str] = set()
+        for index in range(105):
+            conversation = self.database.create_conversation(f"Conversation {index}")
+            self.database.add_message(conversation, "user", f"Message {index}")
+            expected.add(conversation)
+
+        listed = self.database.list_conversations(limit=None)
+        exported = self.database.export()["conversations"]
+
+        self.assertEqual({item["id"] for item in listed}, expected)
+        self.assertEqual({item["id"] for item in exported}, expected)
+        self.assertTrue(all(len(item["messages"]) == 1 for item in exported))
+
 
 if __name__ == "__main__":
     unittest.main()

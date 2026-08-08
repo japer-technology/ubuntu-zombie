@@ -414,16 +414,22 @@ class Database:
             )
         return message_id
 
-    def list_conversations(self, limit: int = 100) -> list[dict[str, Any]]:
+    def list_conversations(self, limit: int | None = 100) -> list[dict[str, Any]]:
         self.prune()
-        bounded = max(1, min(limit, 100))
+        parameters: tuple[int, ...] = ()
+        limit_clause = ""
+        if limit is not None:
+            bounded = max(1, min(limit, 100))
+            limit_clause = " LIMIT ?"
+            parameters = (bounded,)
         with self._connect() as connection:
             rows = connection.execute(
                 """
                 SELECT id, title, created_at, updated_at, expires_at
-                FROM conversations ORDER BY updated_at DESC LIMIT ?
-                """,
-                (bounded,),
+                FROM conversations ORDER BY updated_at DESC
+                """
+                + limit_clause,
+                parameters,
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -459,6 +465,7 @@ class Database:
             raise NotFoundError("Conversation does not exist.")
 
     def export(self) -> dict[str, Any]:
+        self.prune()
         settings = self.settings()
         safe_settings = {
             key: settings[key]
@@ -472,14 +479,41 @@ class Database:
                 "suspended",
             )
         }
+        with self._connect() as connection:
+            connection.execute("BEGIN")
+            conversation_rows = connection.execute(
+                """
+                SELECT id, title, created_at, updated_at, expires_at
+                FROM conversations ORDER BY updated_at DESC
+                """
+            ).fetchall()
+            message_rows = connection.execute(
+                """
+                SELECT id, conversation_id, role, content, created_at
+                FROM messages ORDER BY conversation_id, created_at, id
+                """
+            ).fetchall()
+        conversations = [dict(row) for row in conversation_rows]
+        by_id = {str(item["id"]): item for item in conversations}
+        for item in conversations:
+            item["messages"] = []
+        for row in message_rows:
+            conversation = by_id.get(str(row["conversation_id"]))
+            if conversation is not None:
+                conversation["messages"].append(
+                    {
+                        "id": row["id"],
+                        "role": row["role"],
+                        "content": row["content"],
+                        "created_at": row["created_at"],
+                    }
+                )
         return {
             "export_version": 1,
             "product_id": "imaginary-friend",
             "exported_at": time.time(),
             "configuration": safe_settings,
-            "conversations": [
-                self.conversation(item["id"]) for item in self.list_conversations()
-            ],
+            "conversations": conversations,
             "workspaces": self.list_workspaces(),
         }
 

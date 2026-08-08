@@ -410,7 +410,7 @@ class FriendApplication:
         return self.database.workspace_events()
 
     def conversations(self) -> list[dict[str, Any]]:
-        return self.database.list_conversations()
+        return self.database.list_conversations(limit=None)
 
     def conversation(self, conversation_id: str) -> dict[str, Any]:
         return self.database.conversation(conversation_id)
