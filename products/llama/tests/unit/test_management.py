@@ -168,6 +168,9 @@ class ManagementTests(unittest.TestCase):
                 self.invocation(), configuration, snapshot_on_change=True
             )
         self.assertEqual(events, ["checks", "marker"])
+        patched["_ensure_directory"].assert_any_call(
+            self.paths.log_root, 0o750, 0, 100, mock.ANY
+        )
 
     def test_failed_boundary_check_never_writes_marker(self) -> None:
         configuration = Configuration(
@@ -220,6 +223,31 @@ class ManagementTests(unittest.TestCase):
         with self.assertRaises(ManagementError) as raised:
             self.manager._backup_destination(invocation)
         self.assertEqual(raised.exception.code, "INVALID_BACKUP_DESTINATION")
+
+    def test_backup_destination_cannot_resolve_inside_product_state(self) -> None:
+        root = self.paths.install_root.parents[1]
+        alias = root / "backup-alias"
+        alias.symlink_to(self.paths.state_root, target_is_directory=True)
+        invocation = self.invocation(
+            "backup",
+            inputs={"backup_destination": str(alias / "backup")},
+        )
+        with self.assertRaises(ManagementError) as raised:
+            self.manager._backup_destination(invocation)
+        self.assertEqual(raised.exception.code, "INVALID_BACKUP_DESTINATION")
+
+    def test_configuration_rejects_model_path_that_resolves_outside_models(
+        self,
+    ) -> None:
+        configuration = self.manager.configuration(self.invocation())
+        value = configuration.object()
+        value["model_path"] = str(
+            self.paths.models
+            / ".."
+            / "outside"
+            / configuration.model_path.name
+        )
+        self.assertFalse(self.manager._configuration_paths_valid(value))
 
     def test_unknown_operation_input_is_rejected(self) -> None:
         args = mock.Mock(
@@ -274,6 +302,93 @@ class ManagementTests(unittest.TestCase):
             )
         run.assert_any_call(["systemctl", "restart", "llama-server.service"])
         self.assertIn("llama-server.service:restarted", changed)
+
+    def test_disabled_boot_stops_and_disables_service(self) -> None:
+        configuration = Configuration(
+            "smollm2-360m-instruct-q4_k_m",
+            2048,
+            2,
+            "disabled",
+            "b10054",
+            self.paths.versions / "b10054-amd64",
+            self.paths.models / "SmolLM2-360M-Instruct-Q4_K_M.gguf",
+        )
+        changed: list[str] = []
+        with (
+            mock.patch.object(self.manager, "_run"),
+            mock.patch.object(
+                self.manager, "_stop_service", return_value=True
+            ) as stop_service,
+        ):
+            self.manager._apply_service_state(
+                configuration,
+                changed,
+                verify_health=False,
+                restart_required=False,
+            )
+        stop_service.assert_called_once_with(disable=True)
+        self.assertEqual(changed, ["llama-server.service:disabled-stopped"])
+
+    def test_suspended_install_preserves_service_enablement(self) -> None:
+        configuration = Configuration(
+            "smollm2-360m-instruct-q4_k_m",
+            2048,
+            2,
+            "disabled",
+            "b10054",
+            self.paths.versions / "b10054-amd64",
+            self.paths.models / "SmolLM2-360M-Instruct-Q4_K_M.gguf",
+        )
+        self.paths.suspended.parent.mkdir(parents=True)
+        self.paths.suspended.write_text("{}\n", encoding="utf-8")
+        with (
+            mock.patch.object(self.manager, "_run"),
+            mock.patch.object(
+                self.manager, "_stop_service", return_value=False
+            ) as stop_service,
+        ):
+            self.manager._apply_service_state(
+                configuration,
+                [],
+                verify_health=False,
+                restart_required=False,
+            )
+        stop_service.assert_called_once_with(disable=False)
+
+    def test_stop_service_verifies_disabled_post_condition(self) -> None:
+        with (
+            mock.patch.object(
+                self.manager, "_service_active", side_effect=[True, False]
+            ),
+            mock.patch.object(
+                self.manager,
+                "_service_enabled",
+                side_effect=["enabled", "disabled"],
+            ),
+            mock.patch.object(self.manager, "_run") as run,
+        ):
+            changed = self.manager._stop_service(disable=True)
+        self.assertTrue(changed)
+        run.assert_called_once_with(
+            ["systemctl", "disable", "--now", "llama-server.service"],
+            check=False,
+        )
+
+    def test_stop_service_fails_when_service_remains_active(self) -> None:
+        with (
+            mock.patch.object(
+                self.manager, "_service_active", side_effect=[True, True]
+            ),
+            mock.patch.object(
+                self.manager,
+                "_service_enabled",
+                side_effect=["enabled", "disabled"],
+            ),
+            mock.patch.object(self.manager, "_run"),
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager._stop_service(disable=True)
+        self.assertEqual(raised.exception.code, "SERVICE_STOP_FAILED")
 
     def test_resume_is_unchanged_when_service_is_already_active(self) -> None:
         marker = {"version": self.manager.version}

@@ -409,8 +409,8 @@ def atomic_write(
 
 def _is_relative_to(path: Path, root: Path) -> bool:
     try:
-        path.relative_to(root)
-    except ValueError:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
         return False
     return True
 
@@ -1467,6 +1467,14 @@ class Manager:
         if configuration.boot == "enabled" and not self.paths.suspended.exists():
             checks.append(
                 self.check(
+                    "service_enabled",
+                    self._service_enabled() == "enabled",
+                    "Llama service is enabled at boot.",
+                    "Enable llama-server.service.",
+                )
+            )
+            checks.append(
+                self.check(
                     "service_active",
                     self._service_active(),
                     "Llama service is active.",
@@ -1482,6 +1490,23 @@ class Manager:
                         "Inspect llama-server.service.",
                     )
                 )
+        elif configuration.boot == "disabled" and not self.paths.suspended.exists():
+            checks.extend(
+                (
+                    self.check(
+                        "service_disabled",
+                        self._service_enabled() != "enabled",
+                        "Llama service is disabled at boot.",
+                        "Disable llama-server.service.",
+                    ),
+                    self.check(
+                        "service_stopped",
+                        not self._service_active(),
+                        "Llama service is stopped.",
+                        "Stop llama-server.service.",
+                    ),
+                )
+            )
         return checks
 
     @staticmethod
@@ -1622,6 +1647,29 @@ class Manager:
             timeout=15,
         )
         return result.stdout.strip() if result.returncode == 0 else "disabled"
+
+    def _stop_service(self, *, disable: bool) -> bool:
+        """Stop the service and verify the requested systemd post-condition."""
+        was_active = self._service_active()
+        was_enabled = disable and self._service_enabled() == "enabled"
+        if not was_active and not was_enabled:
+            return False
+        command = (
+            ["systemctl", "disable", "--now", "llama-server.service"]
+            if disable
+            else ["systemctl", "stop", "llama-server.service"]
+        )
+        self._run(command, check=False)
+        active = self._service_active()
+        enabled = disable and self._service_enabled() == "enabled"
+        if active or enabled:
+            raise ManagementError(
+                1,
+                "SERVICE_STOP_FAILED",
+                "llama-server.service did not reach the requested stopped state.",
+                recovery=["Inspect systemctl status llama-server.service."],
+            )
+        return True
 
     @staticmethod
     def _health() -> bool:
@@ -2325,8 +2373,7 @@ class Manager:
     ) -> None:
         self._run(["systemctl", "daemon-reload"])
         if self.paths.suspended.exists():
-            if self._service_active():
-                self._run(["systemctl", "stop", "llama-server.service"])
+            if self._stop_service(disable=False):
                 changed.append("llama-server.service:stopped")
             return
         if configuration.boot == "enabled":
@@ -2353,13 +2400,8 @@ class Manager:
                         "llama-server did not become healthy on 127.0.0.1:8080.",
                         recovery=["Inspect journalctl -u llama-server.service."],
                     )
-        else:
-            if self._service_active() or self._service_enabled() == "enabled":
-                self._run(
-                    ["systemctl", "disable", "--now", "llama-server.service"],
-                    check=False,
-                )
-                changed.append("llama-server.service:disabled-stopped")
+        elif self._stop_service(disable=True):
+            changed.append("llama-server.service:disabled-stopped")
 
     def _write_marker(
         self,
@@ -2484,7 +2526,7 @@ class Manager:
             self.paths.runtime_state, 0o750, service_uid, service_gid, changed
         )
         self._ensure_directory(
-            self.paths.log_root, 0o750, service_uid, service_gid, changed
+            self.paths.log_root, 0o750, 0, service_gid, changed
         )
         self._ensure_directory(self.paths.receipts, 0o750, 0, service_gid, changed)
         self._ensure_log_ownership(changed)
@@ -2717,7 +2759,7 @@ class Manager:
         )
         if not all(path.exists() for path in required):
             raise ManagementError(78, "INVALID_ROLLBACK", "Rollback snapshot is incomplete.")
-        self._run(["systemctl", "disable", "--now", "llama-server.service"], check=False)
+        self._stop_service(disable=True)
         changed: list[str] = []
         restored_product = self.paths.rollback_root / "product"
         current_product = self.paths.install_root / f".product-current.{uuid.uuid4().hex}"
@@ -2782,8 +2824,7 @@ class Manager:
     def _execute_suspend(self) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=True)
         changed: list[str] = []
-        if self._service_active():
-            self._run(["systemctl", "stop", "llama-server.service"])
+        if self._stop_service(disable=False):
             changed.append("llama-server.service:stopped")
         if not self.paths.suspended.exists():
             content = canonical_json(
@@ -2882,7 +2923,7 @@ class Manager:
             if invocation.retain_state and self.paths.config.is_file()
             else None
         )
-        self._run(["systemctl", "disable", "--now", "llama-server.service"], check=False)
+        self._stop_service(disable=True)
         for path in (
             self.paths.unit,
             self.paths.logrotate,

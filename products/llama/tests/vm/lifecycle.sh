@@ -249,6 +249,8 @@ assert_response "${work}/install.json" install ok
 assert_response "${work}/verify.json" verify ok
 [[ "$(stat -c '%U:%G:%a' /var/lib/llama.cpp/models/fixture.gguf)" \
   == "llama-cpp:llama-cpp:640" ]]
+[[ "$(stat -c '%U:%G:%a' /var/log/llama.cpp)" \
+  == "root:llama-cpp:750" ]]
 [[ "$(stat -c '%U:%G:%a' /var/log/llama.cpp/product-ownership)" \
   == "root:root:600" ]]
 [[ "$(systemctl show llama-server.service --property=MainPID --value)" != "0" ]]
@@ -261,6 +263,40 @@ with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=5) as respon
     value = json.load(response)
 assert value["ubuntu_zombie_visible"] is False, value
 PY
+
+"${manage_v1}" doctor --json > "${work}/doctor.json"
+assert_response "${work}/doctor.json" doctor ok
+"${manage_v1}" repair --yes --json > "${work}/repair.json"
+assert_response "${work}/repair.json" repair ok
+python3 - "${work}/repair.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+assert json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))["changed"] is False
+PY
+
+LLAMA_BOOT=disabled \
+  "${manage_v1}" repair --yes --json > "${work}/disable.json"
+assert_response "${work}/disable.json" repair ok
+if systemctl is-active --quiet llama-server.service; then
+  echo "Disabled Llama service remained active." >&2
+  exit 1
+fi
+if systemctl is-enabled --quiet llama-server.service; then
+  echo "Disabled Llama service remained enabled." >&2
+  exit 1
+fi
+if curl -fsS --max-time 2 http://127.0.0.1:8080/health >/dev/null 2>&1; then
+  echo "Disabled Llama service still owns its loopback listener." >&2
+  exit 1
+fi
+LLAMA_BOOT=enabled \
+  "${manage_v1}" repair --yes --json > "${work}/enable.json"
+assert_response "${work}/enable.json" repair ok
+systemctl is-active --quiet llama-server.service
+systemctl is-enabled --quiet llama-server.service
+llama-manager test
 
 "${manage_v1}" install --yes --json > "${work}/reinstall.json"
 assert_response "${work}/reinstall.json" install ok
