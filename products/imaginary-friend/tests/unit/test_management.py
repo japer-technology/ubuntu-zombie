@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from friend.auth import hash_password
@@ -16,8 +17,14 @@ SOURCE_ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeDatabase:
+    def __init__(self, *, suspended: bool = False) -> None:
+        self.suspended = suspended
+
+    def settings(self) -> dict[str, bool]:
+        return {"suspended": self.suspended}
+
     def set_suspended(self, _suspended: bool) -> None:
-        return
+        self.suspended = _suspended
 
 
 class ManagementUnitTests(unittest.TestCase):
@@ -170,6 +177,111 @@ class ManagementUnitTests(unittest.TestCase):
         patched["_restore_failed_switch"].assert_called_once_with(
             runtime_switched=True
         )
+
+    def test_reinstall_preserves_suspension_and_keeps_service_stopped(self) -> None:
+        names = {
+            "_platform_preflight": mock.DEFAULT,
+            "_validate_owner": mock.DEFAULT,
+            "_collision_preflight": mock.DEFAULT,
+            "_workspace_preflight": mock.DEFAULT,
+            "_probe_model": mock.DEFAULT,
+            "_snapshot_recovery": mock.DEFAULT,
+            "_ensure_transaction": mock.DEFAULT,
+            "_ensure_accounts": mock.DEFAULT,
+            "_ensure_paths": mock.DEFAULT,
+            "_stage_runtime": mock.DEFAULT,
+            "_deploy_configuration": mock.DEFAULT,
+            "_initialize_database": mock.DEFAULT,
+            "_deploy_unit": mock.DEFAULT,
+            "_validate_runtime_as_friend": mock.DEFAULT,
+            "_start_service": mock.DEFAULT,
+            "_stop_service": mock.DEFAULT,
+            "verify_checks": mock.DEFAULT,
+            "_write_marker": mock.DEFAULT,
+            "_restore_failed_switch": mock.DEFAULT,
+        }
+        with mock.patch.multiple(self.manager, **names) as patched, mock.patch.object(
+            self.manager, "load_marker", return_value=self.marker
+        ), mock.patch("friend.management.grp.getgrnam") as group:
+            patched["_ensure_transaction"].return_value = self.instance_id
+            patched["_ensure_accounts"].return_value = (100, 200)
+            patched["_stage_runtime"].return_value = self.manager.version
+            patched["_initialize_database"].return_value = FakeDatabase(
+                suspended=True
+            )
+            patched["verify_checks"].return_value = [
+                self.manager.check("boundaries", True, "Boundaries passed.")
+            ]
+            group.return_value.gr_gid = 100
+            self.manager._execute_install(self.invocation())
+        patched["_start_service"].assert_not_called()
+        patched["_stop_service"].assert_called_once_with(disable=False)
+        patched["verify_checks"].assert_called_once_with(
+            probe_runtime=False,
+            allow_transaction=False,
+        )
+
+    def test_service_identity_rejects_unexpected_supplementary_group(self) -> None:
+        account = SimpleNamespace(
+            pw_gid=100,
+            pw_shell="/usr/sbin/nologin",
+            pw_dir=str(self.paths.state_root),
+        )
+        groups = [
+            SimpleNamespace(gr_name="friend", gr_gid=100, gr_mem=[]),
+            SimpleNamespace(gr_name="friend-share", gr_gid=200, gr_mem=["friend"]),
+            SimpleNamespace(gr_name="unexpected", gr_gid=300, gr_mem=["friend"]),
+        ]
+
+        def group_by_name(name: str) -> SimpleNamespace:
+            return {
+                "friend": groups[0],
+                "friend-share": groups[1],
+            }[name]
+
+        with mock.patch("friend.management.pwd.getpwnam", return_value=account):
+            with mock.patch(
+                "friend.management.grp.getgrnam", side_effect=group_by_name
+            ):
+                with mock.patch("friend.management.grp.getgrall", return_value=groups):
+                    with self.assertRaises(ManagementError) as raised:
+                        self.manager._ensure_accounts("owner")
+        self.assertEqual(raised.exception.code, "UNSAFE_COLLISION")
+
+    def test_resume_request_rejects_configuration_inputs(self) -> None:
+        request = {
+            "schema_version": 1,
+            "product_id": "imaginary-friend",
+            "operation": "resume",
+            "correlation_id": str(uuid.uuid4()),
+            "requested_by": "ubuntu-zombie",
+            "inputs": {"history_retention_days": 60},
+            "confirmation": None,
+        }
+        with mock.patch("friend.management.check_secure_file"):
+            with mock.patch("friend.management.read_json", return_value=request):
+                with self.assertRaises(ManagementError) as raised:
+                    self.manager._request(Path("/request.json"), "resume")
+        self.assertEqual(raised.exception.code, "UNKNOWN_INPUT")
+
+    def test_unexpected_failure_keeps_correlation_and_is_audited(self) -> None:
+        invocation = self.invocation("suspend")
+        with mock.patch("friend.management.Manager") as manager_type:
+            manager = manager_type.return_value
+            manager.version = self.manager.version
+            manager.invocation.return_value = invocation
+            manager.run.side_effect = OSError("simulated failure")
+            manager.instance_id.return_value = self.instance_id
+            manager.steps_for.return_value = []
+            with mock.patch("friend.management._print_result") as output:
+                exit_code = __import__(
+                    "friend.management", fromlist=["main"]
+                ).main(["suspend", "--json"])
+        self.assertEqual(exit_code, 1)
+        result = output.call_args.args[0]
+        self.assertEqual(result.correlation_id, invocation.correlation_id)
+        self.assertEqual(result.instance_id, self.instance_id)
+        manager.audit_failure.assert_called_once_with(invocation)
 
     def test_resume_prepares_installed_model_configuration(self) -> None:
         self.paths.state_root.mkdir(parents=True)
