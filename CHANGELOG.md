@@ -8,6 +8,22 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Independent Llama product
+
+- **Complete product extraction:** added `products/llama/` with an independent
+  descriptor, version, lifecycle, package, signed-release workflow, guarded
+  disposable-VM harness, tests, catalogues, audit/receipt boundary, and
+  operator documentation.
+- **Delegating compatibility targets:** `install`, `verify`, `doctor`,
+  `repair`, and `uninstall llama` now invoke the product-owned lifecycle.
+  Duplicate root Llama runtime, model catalogue, service, manager, installation,
+  and removal implementations were removed while preserving existing paths,
+  identity, API, and automation inputs.
+- **Safe migration and removal:** exact supported legacy installations can be
+  adopted or removed only after their markers, identity, configuration, unit,
+  runtime, and model checksum validate. Safe removal retains model state;
+  complete deletion requires the product's explicit destructive confirmation.
+
 ### Documentation
 
 - **ERIC identity and cognition record:** renamed ERIC to Evolving Record of

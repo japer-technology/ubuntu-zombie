@@ -3289,7 +3289,7 @@ run_noninteractive() {
     ./scripts/install.sh install llama --dry-run)"
   local llama_release
   llama_release="$(python3 -c \
-    'import json; print(json.load(open("payload/etc/llama-builds.json"))["release"])')"
+    'import json; print(json.load(open("products/llama/payload/etc/llama-builds.json"))["release"])')"
   grep -q "llama.cpp ${llama_release}" <<<"${llama_out}" \
     && grep -q "127.0.0.1:8080" <<<"${llama_out}" \
     || { echo "FAIL: standalone llama dry-run stanza missing" >&2; exit 1; }
@@ -3937,8 +3937,9 @@ EOF
   grep -q "ZOMBIE_INSTALL_FORGEJO" scripts/uninstall.sh 2>/dev/null \
     || grep -q "Removing optional Forgejo component" scripts/uninstall.sh \
     || { echo "uninstall.sh must reverse the Forgejo component" >&2; exit 1; }
-  grep -q "Removing standalone llama component" scripts/uninstall.sh \
-    || { echo "uninstall.sh must reverse the llama component" >&2; exit 1; }
+  grep -q "Delegating standalone Llama removal" scripts/uninstall.sh \
+    && grep -q "llama_product_manage" scripts/uninstall.sh \
+    || { echo "uninstall.sh must delegate llama removal" >&2; exit 1; }
   grep -q "_LOCAL_API_LAN_PORTS = (1234, 8080, 11434, 51234)" \
     payload/agent/providers.py \
     || { echo "/locals must probe standard API ports across the LAN" >&2; exit 1; }
@@ -3980,7 +3981,7 @@ EOF
     && grep -q 'plural(bucket.reactivations, "reactivation")' \
       payload/agent/templates/index.html \
     || { echo "verbose mode must count reactivations" >&2; exit 1; }
-  python3 payload/bin/llama-manager --help >/dev/null
+  python3 products/llama/payload/bin/llama-manager --help >/dev/null
   python3 - <<'PY'
 import importlib.machinery
 import importlib.util
@@ -3991,22 +3992,27 @@ from pathlib import Path
 from types import SimpleNamespace
 
 for name in ("llama-builds.json", "llama-models.json"):
-    data = json.loads((Path("payload/etc") / name).read_text())
+    data = json.loads((Path("products/llama/payload/etc") / name).read_text())
     if data.get("schema_version") != 1:
         raise SystemExit(f"{name} has wrong schema")
 
 loader = importlib.machinery.SourceFileLoader(
-    "llama_manager", "payload/bin/llama-manager"
+    "llama_manager", "products/llama/payload/bin/llama-manager"
 )
 spec = importlib.util.spec_from_loader(loader.name, loader)
 manager = importlib.util.module_from_spec(spec)
 loader.exec_module(manager)
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)
-    runtime = root / "runtime"
-    runtime.mkdir()
-    (runtime / "llama-server").touch()
-    model = root / "model.gguf"
+    manager.INSTALL_ROOT = root / "opt/llama.cpp"
+    manager.STATE_ROOT = root / "var/lib/llama.cpp"
+    runtime = manager.INSTALL_ROOT / "current"
+    runtime.mkdir(parents=True)
+    executable = runtime / "llama-server"
+    executable.touch()
+    executable.chmod(0o755)
+    model = manager.STATE_ROOT / "models/model.gguf"
+    model.parent.mkdir(parents=True)
     model.touch()
     config = root / "config.json"
     config.write_text(json.dumps({

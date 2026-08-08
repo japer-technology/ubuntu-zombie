@@ -20,6 +20,7 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=false
+InaccessiblePaths=-/opt/ai-zombie -/etc/ubuntu-zombie -/var/lib/ubuntu-zombie
 ReadWritePaths=/var/lib/llama.cpp/state /var/log/llama.cpp
 
 [Install]

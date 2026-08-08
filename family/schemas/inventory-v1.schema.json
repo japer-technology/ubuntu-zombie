@@ -23,7 +23,8 @@
         "enum": [
           "imaginary-friend",
           "curriculum-flame",
-          "eric"
+          "eric",
+          "llama"
         ]
       },
       "additionalProperties": {

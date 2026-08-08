@@ -25,6 +25,7 @@ removals, and trigger changes are easy to review.
 | `dependency-review.yml` | Dependency Review | Block vulnerable or incompatible new dependencies in PRs | Pull requests targeting `main` |
 | `imaginary-friend-release.yml` | Imaginary Friend Release | Build, attest, sign, and publish the independent Friend artifact | Friend `VERSION` changes, product tags, manual dispatch |
 | `integration.yml` | Integration | Best-effort installer dry-run and container checks outside the lint sandbox | Nightly schedule and manual dispatch |
+| `llama-release.yml` | Llama Release | Build, attest, sign, and publish the independent Llama artifact | Llama `VERSION` changes, product tags, manual dispatch |
 | `release.yml` | Release | Build, attest, sign, upload, and publish release artifacts | `VERSION` changes on `main`, version tags, manual dispatch |
 | `scorecard.yml` | OpenSSF Scorecard | Produce OpenSSF Scorecard SARIF and publish it to code scanning | Pushes to `main`, weekly schedule, branch protection changes |
 
@@ -52,7 +53,8 @@ same categories of checks contributors are expected to run locally:
 - `bash tests/smoke.sh standards` for repository policy and standards
   checks.
 - `python3 -m pytest tests/python -q` for policy and audit regression tests.
-- `make package` to prove the source tarball can be produced.
+- Independent Imaginary Friend and Llama product lint and test suites.
+- Root, Imaginary Friend, and Llama package builds.
 - A final `git grep` scan for long `sk-`, `sk-ant-`, and
   `tskey-auth-` token-shaped strings.
 
@@ -119,7 +121,7 @@ same as local installation testing on a disposable Ubuntu Desktop VM.
 Instead, it provides best-effort coverage for install paths that are too
 heavy or too system-specific for the normal CI workflow.
 
-It contains three jobs:
+It contains four jobs:
 
 ### `dry-run`
 
@@ -153,6 +155,23 @@ suspend, resume, retained-state recovery, and complete removal on disposable
 Ubuntu 22.04 and 24.04 runners against a hermetic loopback model fixture. The
 harness requires an explicit disposable-VM sentinel before it will mutate a
 host.
+
+### `llama-lifecycle`
+
+This job uses checksum-pinned tiny loopback fixtures to exercise clean Llama
+install, health, idempotent reinstall, backup, suspend, resume, update,
+rollback, retained-state recovery, complete removal, and post-purge reinstall
+on Ubuntu 22.04 and 24.04 runners. The harness refuses to mutate a host without
+the explicit `LLAMA_DISPOSABLE_VM_TEST=1` sentinel and rejects pre-existing
+Llama resources.
+
+## `llama-release.yml` — Llama Release
+
+This workflow validates and packages only `products/llama/` plus the
+applicable family schemas and repository license. Product tags use
+`llama-v<VERSION>`. The workflow publishes a checksum, SPDX SBOM, test
+evidence, provenance, and keyless cosign material independently of the root
+Ubuntu Zombie release.
 
 ## `release.yml` — Release
 

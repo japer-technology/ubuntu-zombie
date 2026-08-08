@@ -127,7 +127,6 @@ LLAMA_MODEL_ID="${LLAMA_MODEL_ID:-smollm2-360m-instruct-q4_k_m}"
 LLAMA_CONTEXT_SIZE="${LLAMA_CONTEXT_SIZE:-2048}"
 LLAMA_CPU_THREADS="${LLAMA_CPU_THREADS:-$(nproc 2>/dev/null || echo 1)}"
 LLAMA_BOOT="${LLAMA_BOOT:-enabled}"
-readonly LLAMA_HEALTH_ATTEMPTS=60
 FORGEJO_HTTP_PORT="${FORGEJO_HTTP_PORT:-3000}"
 FORGEJO_ADMIN_USER="${FORGEJO_ADMIN_USER:-forgejo-admin}"
 FORGEJO_ADMIN_EMAIL="${FORGEJO_ADMIN_EMAIL:-forgejo-admin@localhost.localdomain}"
@@ -219,10 +218,38 @@ note_satisfied() { STEPS_SATISFIED=$((STEPS_SATISFIED + 1)); }
 note_changed()   { STEPS_CHANGED=$((STEPS_CHANGED + 1)); }
 
 PAYLOAD_DIR="${PAYLOAD_DIR:-${REPO_ROOT}/payload}"
+LLAMA_PRODUCT_ROOT="${LLAMA_PRODUCT_ROOT:-${REPO_ROOT}/products/llama}"
 
 llama_catalog_release() {
+  local catalogue="${LLAMA_PRODUCT_ROOT}/payload/etc/llama-builds.json"
+  [[ -r "${catalogue}" ]] || catalogue="/etc/llama.cpp/builds.json"
+  [[ -r "${catalogue}" ]] || return 1
   awk -F'"' '/"release":[[:space:]]*"/ {print $4; exit}' \
-    "${PAYLOAD_DIR}/etc/llama-builds.json"
+    "${catalogue}"
+}
+
+llama_product_entrypoint() {
+  if [[ -x "${LLAMA_PRODUCT_ROOT}/scripts/manage.sh" ]]; then
+    printf '%s\n' "${LLAMA_PRODUCT_ROOT}/scripts/manage.sh"
+  elif [[ -x /usr/local/sbin/llama-manage ]]; then
+    printf '%s\n' /usr/local/sbin/llama-manage
+  else
+    printf 'Llama product lifecycle is unavailable. Use the independent Llama artifact or a complete source checkout.\n' >&2
+    return 66
+  fi
+}
+
+llama_product_manage() {
+  local entrypoint
+  entrypoint="$(llama_product_entrypoint)" || return $?
+  env \
+    LLAMA_MODEL_ID="${LLAMA_MODEL_ID}" \
+    LLAMA_CONTEXT_SIZE="${LLAMA_CONTEXT_SIZE}" \
+    LLAMA_CPU_THREADS="${LLAMA_CPU_THREADS}" \
+    LLAMA_BOOT="${LLAMA_BOOT}" \
+    LLAMA_PORT="${LLAMA_PORT}" \
+    LLAMA_NONINTERACTIVE="${ZOMBIE_NONINTERACTIVE}" \
+    "${entrypoint}" "$@"
 }
 
 # Known-good versions of the Node bridges. The install path replaces these
@@ -320,15 +347,20 @@ EXPLICIT_TARGETS=0
 component_validate_zombie() { validate_zombie_config; }
 component_validate_forgejo() { validate_forgejo_config; }
 component_validate_forgejo_runner() { validate_forgejo_runner_config; }
-component_validate_llama() { validate_llama_config; }
+component_validate_llama() {
+  local validation
+  if ! validation="$(llama_product_manage install --dry-run --json 2>&1)"; then
+    die "Llama product configuration validation failed: ${validation}" 2
+  fi
+}
 component_review_zombie() { review_parameters; }
 component_review_forgejo() { review_forgejo_parameters; }
 component_review_forgejo_runner() { review_forgejo_runner_parameters; }
-component_review_llama() { review_llama_parameters; }
+component_review_llama() { :; }
 component_dry_run_zombie() { print_zombie_dry_run; }
 component_dry_run_forgejo() { print_forgejo_dry_run; }
 component_dry_run_forgejo_runner() { print_forgejo_runner_dry_run; }
-component_dry_run_llama() { print_llama_dry_run; }
+component_dry_run_llama() { llama_product_manage install --dry-run; }
 component_receipt_start_zombie() { receipt_start_zombie; }
 component_receipt_start_forgejo() { receipt_start_forgejo; }
 component_receipt_start_forgejo_runner() { receipt_start_forgejo_runner; }
@@ -340,7 +372,11 @@ component_receipt_finish_llama() { receipt_finish_llama; }
 component_install_zombie() { install_zombie; }
 component_install_forgejo() { install_forgejo; }
 component_install_forgejo_runner() { install_forgejo_runner; }
-component_install_llama() { install_llama; }
+component_install_llama() {
+  local -a arguments=(install --yes)
+  [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && arguments+=(--non-interactive)
+  llama_product_manage "${arguments[@]}"
+}
 component_manifest_zombie() { write_zombie_manifest; }
 component_manifest_forgejo() { write_forgejo_manifest; }
 component_manifest_forgejo_runner() { write_forgejo_runner_manifest; }
@@ -356,19 +392,39 @@ component_legacy_llama() { legacy_llama_present; }
 component_verify_zombie() { verify_zombie; }
 component_verify_forgejo() { verify_forgejo; }
 component_verify_forgejo_runner() { verify_forgejo_runner; }
-component_verify_llama() { verify_llama; }
+component_verify_llama() {
+  if llama_product_manage verify --json >/dev/null 2>&1; then
+    vr ok llama delegated "Independent Llama product verification passed."
+  else
+    vr fail llama delegated \
+      "Independent Llama verification failed. Run: sudo llama-manage verify"
+  fi
+}
 component_doctor_zombie() { doctor_zombie; }
 component_doctor_forgejo() { doctor_forgejo; }
 component_doctor_forgejo_runner() { doctor_forgejo_runner; }
-component_doctor_llama() { doctor_llama; }
+component_doctor_llama() {
+  local response
+  if response="$(llama_product_manage doctor --json 2>/dev/null)" \
+      && python3 -c \
+        'import json,sys; raise SystemExit(json.load(sys.stdin)["status"] != "ok")' \
+        <<<"${response}"; then
+    dr ok llama delegated "Independent Llama product reports healthy."
+  else
+    dr warn llama delegated \
+      "Independent Llama product reports drift. Run: llama-manage doctor"
+  fi
+}
 component_repair_zombie() { repair_zombie; }
 component_repair_forgejo() { repair_forgejo; }
 component_repair_forgejo_runner() { repair_forgejo_runner; }
-component_repair_llama() { repair_llama; }
+component_repair_llama() {
+  llama_product_manage repair --yes --non-interactive
+}
 component_phase_count_zombie() { count_zombie_phases; }
 component_phase_count_forgejo() { count_forgejo_phases; }
 component_phase_count_forgejo_runner() { count_forgejo_runner_phases; }
-component_phase_count_llama() { count_llama_phases; }
+component_phase_count_llama() { printf '1\n'; }
 
 register_component "${COMPONENT_ZOMBIE}" "" \
   validate=component_validate_zombie review=component_review_zombie \
@@ -601,6 +657,10 @@ established_forgejo_state_present() {
 
 llama_installation_is_managed() {
   local marker
+  if [[ -e /var/lib/llama.cpp/installation.json ]] \
+      && llama_product_manage verify --json >/dev/null 2>&1; then
+    return 0
+  fi
   for marker in /etc/llama.cpp/managed-by-ubuntu-zombie \
       /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
     valid_component_ownership_marker "${marker}" "${COMPONENT_LLAMA}" && return 0
@@ -990,23 +1050,6 @@ curl_get() {
   retry 5 3 -- curl -fsSL --retry 3 --retry-delay 2 "$@"
 }
 
-download_verified_file() {
-  local url="$1" sha256="$2" destination="$3" label="$4" actual
-  if [[ -f "${destination}" ]]; then
-    actual="$(sha256sum "${destination}" | awk '{print $1}')"
-    [[ "${actual}" == "${sha256}" ]] && return 0
-    rm -f "${destination}"
-  fi
-  rm -f "${destination}.part"
-  info "Downloading ${label}…"
-  curl_get -o "${destination}.part" "${url}" \
-    || { rm -f "${destination}.part"; die "Could not download ${label}." 1; }
-  actual="$(sha256sum "${destination}.part" | awk '{print $1}')"
-  [[ "${actual}" == "${sha256}" ]] \
-    || { rm -f "${destination}.part"; die "${label} checksum mismatch." 1; }
-  mv -f "${destination}.part" "${destination}"
-}
-
 is_supported_agent_username() {
   # Either 2-32 chars starting with a letter and ending alphanumeric, with
   # underscore/hyphen allowed in the middle, or 1-32 alphanumeric chars.
@@ -1186,32 +1229,6 @@ validate_forgejo_runner_config() {
   if ! is_valid_forgejo_runner_labels "${FORGEJO_RUNNER_LABELS}"; then
     die "FORGEJO_RUNNER_LABELS must use only letters, digits, and . _ : / , + - (no spaces or quotes; max 512 chars)." 2
   fi
-}
-
-validate_llama_config() {
-  local model_context_limit
-  [[ "${LLAMA_PORT}" == "8080" ]] \
-    || die "LLAMA_PORT is fixed at 8080 for this release." 2
-  model_context_limit="$(awk -v id="${LLAMA_MODEL_ID}" '
-    index($0, "\"id\": \"" id "\"") { found=1 }
-    found && /"context_size":/ {
-      value=$0
-      sub(/^.*"context_size":[[:space:]]*/, "", value)
-      sub(/[^0-9].*$/, "", value)
-      print value
-      exit
-    }
-  ' "${PAYLOAD_DIR}/etc/llama-models.json")"
-  [[ "${model_context_limit}" =~ ^[0-9]+$ ]] \
-    || die "LLAMA_MODEL_ID is not present in the approved model catalogue." 2
-  [[ "${LLAMA_CONTEXT_SIZE}" =~ ^[0-9]+$ ]] \
-    && (( LLAMA_CONTEXT_SIZE >= 512 && LLAMA_CONTEXT_SIZE <= model_context_limit )) \
-    || die "LLAMA_CONTEXT_SIZE must be between 512 and the approved model maximum of ${model_context_limit}." 2
-  [[ "${LLAMA_CPU_THREADS}" =~ ^[0-9]+$ ]] \
-    && (( LLAMA_CPU_THREADS >= 1 && LLAMA_CPU_THREADS <= 1024 )) \
-    || die "LLAMA_CPU_THREADS must be between 1 and 1024." 2
-  [[ "${LLAMA_BOOT}" == "enabled" || "${LLAMA_BOOT}" == "disabled" ]] \
-    || die "LLAMA_BOOT must be enabled or disabled." 2
 }
 
 # Validate common settings, then dispatch only the selected components.
@@ -1971,32 +1988,6 @@ verify_forgejo_runner() {
     || vr fail "${component}" declared "Current runner invocation has not declared successfully."
 }
 
-verify_llama() {
-  [[ -f /etc/llama.cpp/managed-by-ubuntu-zombie ]] \
-    && vr ok llama marker "Managed ownership marker present." \
-    || vr fail llama marker "Managed ownership marker missing; refusing to adopt this installation."
-  [[ -x /usr/local/bin/llama-manager ]] \
-    && vr ok llama manager "llama-manager present." \
-    || vr fail llama manager "llama-manager missing. Run 'sudo ./${SCRIPT_NAME} repair llama'."
-  [[ -x /opt/llama.cpp/current/llama-server ]] \
-    && vr ok llama runtime "Pinned llama.cpp runtime present." \
-    || vr fail llama runtime "llama.cpp runtime missing. Run 'sudo ./${SCRIPT_NAME} repair llama'."
-  [[ -f /var/lib/llama.cpp/models/SmolLM2-360M-Instruct-Q4_K_M.gguf ]] \
-    && vr ok llama model "Managed SmolLM2 model present." \
-    || vr fail llama model "Managed model missing. Run 'sudo ./${SCRIPT_NAME} repair llama'."
-  [[ -f /etc/systemd/system/llama-server.service ]] \
-    && vr ok llama unit "llama-server systemd unit present." \
-    || vr fail llama unit "llama-server systemd unit missing."
-  systemctl is-active --quiet llama-server.service 2>/dev/null \
-    && vr ok llama service "llama-server active on 127.0.0.1:8080." \
-    || vr fail llama service "llama-server not active. Run: sudo llama-manager start"
-  if systemctl is-active --quiet llama-server.service 2>/dev/null; then
-    curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:8080/health \
-      && vr ok llama health "llama-server health endpoint responds." \
-      || vr fail llama health "llama-server health endpoint is unavailable."
-  fi
-}
-
 cmd_verify() {
   local -a v_status=() v_component=() v_id=() v_msg=()
   vr() { v_status+=("$1"); v_component+=("$2"); v_id+=("$3"); v_msg+=("$4"); }
@@ -2322,24 +2313,6 @@ cmd_doctor() {
       || dr warn "${component}" declared "Current runner invocation has not declared successfully."
   }
 
-  doctor_llama() {
-    if ! llama_installation_is_managed; then
-      dr warn llama marker "Managed llama ownership marker missing. Fix: sudo ./${SCRIPT_NAME} install llama"
-      return
-    fi
-    [[ -x /usr/local/bin/llama-manager ]] \
-      && dr ok llama manager "llama-manager is installed." \
-      || dr warn llama manager "llama-manager is missing. Fix: sudo ./${SCRIPT_NAME} repair llama"
-    [[ -x /opt/llama.cpp/current/llama-server ]] \
-      && dr ok llama runtime "Pinned llama.cpp runtime is installed." \
-      || dr warn llama runtime "Pinned runtime is missing. Fix: sudo ./${SCRIPT_NAME} repair llama"
-    if systemctl is-active --quiet llama-server.service 2>/dev/null; then
-      dr ok llama service "llama-server is active on loopback port 8080."
-    else
-      dr warn llama service "llama-server is stopped or failed. Fix: sudo llama-manager restart"
-    fi
-  }
-
   local component
   for component in "${SELECTED_COMPONENTS[@]}"; do
     component_dispatch_hook "${component}" doctor
@@ -2513,33 +2486,6 @@ cmd_repair() {
     fi
   }
 
-  repair_llama() {
-    if [[ ! -f /etc/llama.cpp/managed-by-ubuntu-zombie ]]; then
-      warn "Component 'llama' is not managed by this installer."
-      warn "  To install: sudo ./${SCRIPT_NAME} install llama"
-      return
-    fi
-    local -a current=()
-    mapfile -t current < <(python3 - /etc/llama.cpp/config.json <<'PY'
-import json
-import sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-print(data["context_size"])
-print(data["threads"])
-PY
-    ) || die "Could not read the managed llama configuration." 1
-    (( ${#current[@]} == 2 )) \
-      || die "Managed llama configuration is incomplete." 1
-    local boot=disabled
-    systemctl is-enabled --quiet llama-server.service 2>/dev/null \
-      && boot=enabled
-    info "Re-running the idempotent llama installer to verify and repair assets."
-    env ZOMBIE_NONINTERACTIVE=1 ZOMBIE_INSTALL_LLAMA=0 \
-      LLAMA_CONTEXT_SIZE="${current[0]}" LLAMA_CPU_THREADS="${current[1]}" \
-      LLAMA_BOOT="${boot}" \
-      "${SCRIPT_DIR}/install.sh" install llama --yes
-  }
-
   local component
   for component in "${SELECTED_COMPONENTS[@]}"; do
     component_dispatch_hook "${component}" repair
@@ -2665,22 +2611,6 @@ Forgejo runner component:
                   dependency: Forgejo server component
                   note: co-locating runner and forge is contrary to upstream
                         guidance and is enabled deliberately.
-EOF
-}
-
-print_llama_dry_run() {
-  cat <<EOF
-
-Llama component:
-  Runtime:        llama.cpp $(llama_catalog_release) (checksum-verified upstream CPU binary)
-  Model:          SmolLM2 360M Instruct Q4_K_M (Apache-2.0, verified GGUF)
-  API:            http://127.0.0.1:${LLAMA_PORT}/v1 (loopback only)
-  Context:        ${LLAMA_CONTEXT_SIZE} tokens
-  CPU threads:    ${LLAMA_CPU_THREADS}
-  Start at boot:  ${LLAMA_BOOT}
-  Manager:        /usr/local/bin/llama-manager
-  Data:           /var/lib/llama.cpp
-  Zombie impact:  none; this is an independent component
 EOF
 }
 
@@ -3369,28 +3299,6 @@ review_forgejo_runner_parameters() {
   esac
 }
 
-review_llama_parameters() {
-  [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && return 0
-  (( ASSUME_YES )) && return 0
-  [[ -t 0 ]] || return 0
-
-  brand_banner "Standalone llama — setup parameters"
-  field "API" "http://127.0.0.1:${LLAMA_PORT}/v1 (PC-wide loopback)"
-  field "Model" "${LLAMA_MODEL_ID} (about 271 MB)"
-  field "Context" "${LLAMA_CONTEXT_SIZE} tokens"
-  field "CPU threads" "${LLAMA_CPU_THREADS}"
-  field "Start at boot" "${LLAMA_BOOT}"
-  local choice
-  if ! read -r -p "$(printf '%s➜%s install these settings? [Y/n]: ' "${C_BRAND}" "${C_RESET}")" choice; then
-    info "No input (EOF); cancelling."
-    exit 0
-  fi
-  case "${choice,,}" in
-    ""|y|yes) REVIEWED=1 ;;
-    *) info "Cancelled."; exit 0 ;;
-  esac
-}
-
 # ---------------------------------------------------------------------------
 # Install receipt (start + finish records)
 # ---------------------------------------------------------------------------
@@ -3728,9 +3636,6 @@ count_forgejo_phases() {
 }
 count_forgejo_runner_phases() {
   _count_option_sections forgejo-runner
-}
-count_llama_phases() {
-  _count_option_sections llama
 }
 ZOMBIE_PHASE_TOTAL=0
 for component in "${SELECTED_COMPONENTS[@]}"; do
@@ -5321,195 +5226,6 @@ install_zombie() {
   install_zombie_runtime
 }
 
-assert_llama_installation_safe() {
-  if ! llama_installation_is_managed; then
-    local path
-    for path in /opt/llama.cpp /etc/llama.cpp /var/lib/llama.cpp \
-        /var/log/llama.cpp /usr/local/bin/llama-manager \
-        /etc/systemd/system/llama-server.service; do
-      [[ ! -e "${path}" ]] \
-        || die "Refusing to adopt unmanaged llama path: ${path}" 1
-    done
-    id llama-cpp >/dev/null 2>&1 \
-      && die "Refusing to adopt unmanaged system account: llama-cpp" 1
-  fi
-  if command -v ss >/dev/null 2>&1 \
-      && ss -H -ltn "sport = :${LLAMA_PORT}" 2>/dev/null | grep -q . \
-      && ! systemctl is-active --quiet llama-server.service 2>/dev/null; then
-    die "Port ${LLAMA_PORT} is already in use by an unmanaged service." 1
-  fi
-}
-
-install_llama() {
-  local build_catalog="${PAYLOAD_DIR}/etc/llama-builds.json"
-  local model_catalog="${PAYLOAD_DIR}/etc/llama-models.json"
-  local arch runtime_url runtime_sha archive_root model_url model_sha
-  local model_filename model_size runtime_dir runtime_archive runtime_stage
-  local model_path
-  local -a llama_build_data=() llama_model_data=()
-
-  # option-sections: llama begin
-  section "Validate standalone llama ownership and catalogue"
-  assert_llama_installation_safe
-  arch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
-  case "${arch}" in
-    x86_64) arch=amd64 ;;
-    aarch64) arch=arm64 ;;
-  esac
-  mapfile -t llama_build_data < <(python3 - "${build_catalog}" "${arch}" <<'PY'
-import json
-import sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-asset = data["assets"][sys.argv[2]]
-print(data["release"])
-print(asset["url"])
-print(asset["sha256"])
-print(asset["archive_root"])
-PY
-  ) || die "Could not read the llama build catalogue for ${arch}." 1
-  (( ${#llama_build_data[@]} == 4 )) \
-    || die "No approved llama.cpp runtime for architecture ${arch}." 65
-  LLAMA_RUNTIME_RELEASE="${llama_build_data[0]}"
-  runtime_url="${llama_build_data[1]}"
-  runtime_sha="${llama_build_data[2]}"
-  archive_root="${llama_build_data[3]}"
-  mapfile -t llama_model_data < <(python3 - "${model_catalog}" "${LLAMA_MODEL_ID}" <<'PY'
-import json
-import sys
-data = json.load(open(sys.argv[1], encoding="utf-8"))
-model = next(item for item in data["models"] if item["id"] == sys.argv[2])
-print(model["url"])
-print(model["sha256"])
-print(model["filename"])
-print(model["size_bytes"])
-PY
-  ) || die "Could not read approved llama model ${LLAMA_MODEL_ID}." 1
-  (( ${#llama_model_data[@]} == 4 )) \
-    || die "Approved llama model metadata is incomplete." 1
-  model_url="${llama_model_data[0]}"
-  model_sha="${llama_model_data[1]}"
-  model_filename="${llama_model_data[2]}"
-  model_size="${llama_model_data[3]}"
-  runtime_dir="/opt/llama.cpp/versions/${LLAMA_RUNTIME_RELEASE}-${arch}"
-  runtime_archive="/var/cache/llama.cpp/${LLAMA_RUNTIME_RELEASE}-${arch}.tar.gz"
-  model_path="/var/lib/llama.cpp/models/${model_filename}"
-
-  section "Create standalone llama account and directories"
-  if ! id llama-cpp >/dev/null 2>&1; then
-    adduser --system --group --home /var/lib/llama.cpp --no-create-home llama-cpp
-    note_changed
-  else
-    note_satisfied
-  fi
-  install -d -m 755 -o root -g root /opt/llama.cpp /opt/llama.cpp/versions
-  install -d -m 755 -o root -g root /etc/llama.cpp /var/cache/llama.cpp
-  install -d -m 755 -o root -g root /var/lib/llama.cpp
-  install -d -m 750 -o llama-cpp -g llama-cpp \
-    /var/lib/llama.cpp/models \
-    /var/lib/llama.cpp/state /var/log/llama.cpp
-  local marker
-  for marker in /etc/llama.cpp/managed-by-ubuntu-zombie \
-      /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
-    printf 'component=llama\nformat=1\n' \
-      | install -m 644 -o root -g root /dev/stdin "${marker}"
-  done
-
-  section "Install pinned llama.cpp CPU runtime"
-  local runtime_valid=0
-  if [[ -x "${runtime_dir}/llama-server" \
-      && -f "${runtime_dir}/.tree-sha256" ]] \
-      && (cd "${runtime_dir}" && sha256sum -c .tree-sha256 >/dev/null 2>&1); then
-    runtime_valid=1
-  fi
-  if (( ! runtime_valid )); then
-    download_verified_file "${runtime_url}" "${runtime_sha}" \
-      "${runtime_archive}" "pinned llama.cpp ${LLAMA_RUNTIME_RELEASE}"
-    if tar -tzf "${runtime_archive}" \
-        | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
-      die "Pinned llama.cpp archive contains an unsafe path." 1
-    fi
-    runtime_stage="$(mktemp -d /opt/llama.cpp/versions/.stage.XXXXXX)"
-    tar -xzf "${runtime_archive}" -C "${runtime_stage}"
-    [[ -x "${runtime_stage}/${archive_root}/llama-server" \
-        && -x "${runtime_stage}/${archive_root}/llama-cli" \
-        && -x "${runtime_stage}/${archive_root}/llama-bench" ]] \
-      || { rm -rf "${runtime_stage}"; die "llama.cpp archive is missing expected binaries." 1; }
-    rm -rf "${runtime_dir}"
-    mv "${runtime_stage}/${archive_root}" "${runtime_dir}"
-    rm -rf "${runtime_stage}"
-    chown -R root:root "${runtime_dir}"
-    (
-      cd "${runtime_dir}"
-      find . -type f ! -name .tree-sha256 -print0 \
-        | sort -z | xargs -0 sha256sum > .tree-sha256
-    )
-    chmod -R a-w "${runtime_dir}"
-    note_changed
-  else
-    note_satisfied
-  fi
-  ln -sfn "${runtime_dir}" /opt/llama.cpp/current.new
-  mv -Tf /opt/llama.cpp/current.new /opt/llama.cpp/current
-
-  section "Install verified default llama model"
-  local model_present=0
-  [[ -f "${model_path}" ]] \
-    && [[ "$(sha256sum "${model_path}" | awk '{print $1}')" == "${model_sha}" ]] \
-    && model_present=1
-  download_verified_file "${model_url}" "${model_sha}" \
-    "${model_path}" "approved llama model"
-  [[ "$(stat -c %s "${model_path}")" == "${model_size}" ]] \
-    || { rm -f "${model_path}"; die "llama model size mismatch." 1; }
-  if (( model_present )); then
-    note_satisfied
-  else
-    note_changed
-  fi
-  chown llama-cpp:llama-cpp "${model_path}"
-  chmod 640 "${model_path}"
-
-  section "Configure llama-manager and loopback service"
-  install -m 755 -o root -g root \
-    "${PAYLOAD_DIR}/bin/llama-manager" /usr/local/bin/llama-manager
-  install -m 644 -o root -g root "${build_catalog}" /etc/llama.cpp/builds.json
-  install -m 644 -o root -g root "${model_catalog}" /etc/llama.cpp/models.json
-  cat > /etc/llama.cpp/config.json <<EOF
-{
-  "schema_version": 1,
-  "port": ${LLAMA_PORT},
-  "model_id": "${LLAMA_MODEL_ID}",
-  "model_path": "${model_path}",
-  "context_size": ${LLAMA_CONTEXT_SIZE},
-  "threads": ${LLAMA_CPU_THREADS},
-  "runtime_release": "${LLAMA_RUNTIME_RELEASE}",
-  "runtime_dir": "/opt/llama.cpp/current"
-}
-EOF
-  chown root:root /etc/llama.cpp/config.json
-  chmod 644 /etc/llama.cpp/config.json
-  install -m 644 -o root -g root \
-    "${PAYLOAD_DIR}/systemd/llama-server.service" \
-    /etc/systemd/system/llama-server.service
-  systemctl daemon-reload
-  if [[ "${LLAMA_BOOT}" == "enabled" ]]; then
-    systemctl enable --now llama-server.service
-    local ready=0
-    for _ in $(seq 1 "${LLAMA_HEALTH_ATTEMPTS}"); do
-      if curl -fsS --max-time 2 -o /dev/null \
-          "http://127.0.0.1:${LLAMA_PORT}/health"; then
-        ready=1
-        break
-      fi
-      sleep 1
-    done
-    (( ready )) \
-      || die "llama-server did not become healthy; check journalctl -u llama-server." 1
-  else
-    systemctl disable --now llama-server.service 2>/dev/null || true
-  fi
-  # option-sections: llama end
-}
-
 write_zombie_manifest() {
   write_component_manifest "${COMPONENT_ZOMBIE}" "${SCRIPT_VERSION}" ""
 }
@@ -5557,7 +5273,7 @@ write_forgejo_runner_manifest() {
 
 write_llama_manifest() {
   write_component_manifest "${COMPONENT_LLAMA}" \
-    "${LLAMA_RUNTIME_RELEASE:?llama runtime release was not resolved}" \
+    "$(llama_catalog_release)" \
     "${LLAMA_MODEL_ID}"
 }
 

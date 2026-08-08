@@ -77,18 +77,22 @@ sudo ./scripts/install.sh install forgejo-runner
 The runner target automatically selects the required `forgejo` component.
 It does not select or install the zombie account and runtime.
 
-### Install standalone llama.cpp without zombie
+### Install the independent Llama product
 
 To install a CPU local model for applications and users on this PC:
 
 ```bash
-sudo ./scripts/install.sh install llama
+products/llama/scripts/manage.sh install --dry-run
+sudo products/llama/scripts/manage.sh install --yes
+llama-manage status
 llama-manager status
 ```
 
-This independent component exposes an OpenAI-compatible API only at
+The compatibility command `sudo ./scripts/install.sh install llama` delegates
+to the same product-owned lifecycle. Llama exposes an OpenAI-compatible API at
 `http://127.0.0.1:8080/v1`. It does not create or modify the Zombie
-account or runtime.
+account or runtime. See [`products/llama/docs/INSTALLATION.md`](../products/llama/docs/INSTALLATION.md)
+for update, rollback, retained-state removal, and complete purge commands.
 
 For unattended installs:
 
@@ -183,11 +187,15 @@ sudo ./scripts/install.sh uninstall forgejo
 
 # Remove only the Forgejo Actions runner:
 sudo ./scripts/install.sh uninstall forgejo-runner
+
+# Safely remove the Llama runtime while retaining its models and state:
+sudo ./scripts/install.sh uninstall llama
 ```
 
 Selective uninstall targets only the named component. `--archive` and
 `--keep-agent` are valid only when the `zombie` component is being
-removed.
+removed. Complete Llama state deletion requires the product command and its
+exact destructive confirmation; see the product installation guide above.
 
 The uninstaller removes Ubuntu Zombie services, sudoers entries,
 payload files, policy, logrotate rules, and optionally the agent account

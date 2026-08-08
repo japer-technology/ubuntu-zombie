@@ -24,8 +24,8 @@ flowchart TD
 The default install does **not** provision SSH, Tailscale, VNC, Docker,
 graphical autologin, or GUI automation. The baseline product access
 surface is the chat service on
-`127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}`; the optional standalone llama
-component adds only a loopback listener on port `8080`.
+`127.0.0.1:${ZOMBIE_CHAT_PORT:-7878}`. The independently managed Llama
+product adds only a loopback listener on port `8080` when selected.
 
 ## Runtime components
 
@@ -142,18 +142,20 @@ the current UX. Historical timer rows and audit evidence are retained.
 
 ## Optional components
 
-The installer uses the component-aware grammar `scripts/install.sh
-<verb> [component ...] [flags]`. Public targets currently are `zombie`
-(the baseline account, runtime, chat UI, policy, and services), `forgejo`,
-`forgejo-runner`, and `llama`. The runner target depends on `forgejo`, so
-installing it converges the server before registering and starting the
-runner. The legacy `ZOMBIE_INSTALL_*` flags remain supported and are
-additive with explicit targets; all default to `0`, and specifications
-live under `options/`. Each component follows one contract: validated
-settings, an entry in the interactive Options menu, a dry-run stanza,
-guarded idempotent install sections, receipt records,
-`verify`/`doctor`/`repair` checks, and a reversal path in
-`uninstall.sh`.
+The installer uses the component-aware grammar `scripts/install.sh <verb>
+[component ...] [flags]`. Public compatibility targets currently are
+`zombie` (the baseline account, runtime, chat UI, policy, and services),
+`forgejo`, `forgejo-runner`, and `llama`. The runner target depends on
+`forgejo`, so installing it converges the server before registering and
+starting the runner. The legacy `ZOMBIE_INSTALL_*` flags remain supported and
+are additive with explicit targets; all default to `0`.
+
+Zombie, Forgejo, and Forgejo Runner still use installer-owned component hooks.
+The Llama target is different: every Llama operation delegates to the
+independently versioned lifecycle under `products/llama/` (or the installed
+`/usr/local/sbin/llama-manage`). The root installer retains only target
+selection, compatibility inputs, summary/receipt integration, and its
+component-manifest reference; it contains no Llama mutation implementation.
 
 The first component is the **Forgejo server**
 (`ZOMBIE_INSTALL_FORGEJO`): a git forge backed by PostgreSQL, running
@@ -188,15 +190,17 @@ The Forgejo hook has an explicit package set (`git`, `git-lfs`,
 `avahi-daemon`, and `libnss-mdns`, plus `docker.io` for the runner) and
 does not depend on zombie-owned state.
 
-The standalone **llama** component has no dependency on `zombie`. It
-installs a pinned upstream CPU runtime under `/opt/llama.cpp`, a verified
-model under `/var/lib/llama.cpp`, fixed configuration under
+The independent **Llama** infrastructure product has no dependency on
+`zombie`. It owns the pinned upstream CPU runtime under `/opt/llama.cpp`, the
+verified model under `/var/lib/llama.cpp`, fixed configuration under
 `/etc/llama.cpp`, and a hardened `llama-server.service` running as the
 non-login `llama-cpp` account. Its OpenAI-compatible listener is fixed to
 `127.0.0.1:8080`; it is intentionally available PC-wide to local users but
-never LAN-facing. `/usr/local/bin/llama-manager` is the lifecycle and
-health contract. The installer refuses to adopt paths, accounts, units, or
-ports without its ownership marker.
+never LAN-facing. `/usr/local/sbin/llama-manage` is the complete lifecycle
+entry point; `/usr/local/bin/llama-manager` is the restricted runtime helper.
+The product refuses to adopt paths, accounts, units, ports, models, or runtime
+trees unless its product marker or the exact supported legacy installation
+validates.
 
 Chat `/locals` discovery scans the configured LM Studio port across the
 local `/24`, plus loopback-only probes for the managed standalone port
@@ -222,6 +226,8 @@ create neither the zombie account nor `/opt/ai-zombie`, and they do not
 deploy Node, the Python agent runtime, policy, audit, chat, or
 desktop-availability settings. The runner target selects Forgejo as its
 required component dependency.
+`install llama` is a compatibility path to the independent product lifecycle
+and likewise does not select or modify Zombie.
 Installer-owned transcript and receipt records remain under `/var/log/`.
 
 ## Component manifest
