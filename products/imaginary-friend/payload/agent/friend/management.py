@@ -1621,6 +1621,7 @@ class Manager:
         workspace_ok = True
         if database is not None:
             try:
+                share_gid = grp.getgrnam("friend-share").gr_gid
                 for record in database.list_workspaces():
                     details = validate_nominated_root(
                         Path(record["canonical_root"]),
@@ -1630,9 +1631,12 @@ class Manager:
                     if (
                         details.st_dev != int(record["root_device"])
                         or details.st_ino != int(record["root_inode"])
+                        or details.st_gid != share_gid
+                        or stat.S_IMODE(details.st_mode) & 0o070 != 0o070
+                        or not details.st_mode & stat.S_ISGID
                     ):
                         workspace_ok = False
-            except (FriendError, OSError):
+            except (FriendError, OSError, KeyError):
                 workspace_ok = False
         else:
             workspace_ok = False
@@ -2572,6 +2576,14 @@ class Manager:
                 )
             database = Database(self.paths.database)
             database.require_ready()
+            try:
+                share_gid = grp.getgrnam("friend-share").gr_gid
+            except KeyError as exc:
+                raise ManagementError(
+                    78,
+                    "WORKSPACE_SHARING_INVALID",
+                    "Friend workspace sharing group is unavailable.",
+                ) from exc
             for record in database.list_workspaces():
                 details = validate_nominated_root(
                     Path(record["canonical_root"]),
@@ -2580,9 +2592,14 @@ class Manager:
                 if (
                     details.st_dev != int(record["root_device"])
                     or details.st_ino != int(record["root_inode"])
+                    or details.st_gid != share_gid
+                    or stat.S_IMODE(details.st_mode) & 0o070 != 0o070
+                    or not details.st_mode & stat.S_ISGID
                 ):
                     raise ManagementError(
-                        78, "WORKSPACE_CHANGED", "A workspace changed after nomination."
+                        78,
+                        "WORKSPACE_CHANGED",
+                        "A workspace changed or lost its sharing boundary after nomination.",
                     )
             self._probe_model(invocation)
             self._validate_runtime_as_friend()

@@ -236,6 +236,19 @@ class Workspace:
         finally:
             os.close(current)
 
+    @staticmethod
+    def _require_shared_parent(root_fd: int, parent_fd: int) -> None:
+        root = os.fstat(root_fd)
+        parent = os.fstat(parent_fd)
+        if (
+            parent.st_gid != root.st_gid
+            or stat.S_IMODE(parent.st_mode) & 0o070 != 0o070
+            or not parent.st_mode & stat.S_ISGID
+        ):
+            raise ValidationError(
+                "Workspace parent must preserve friend-share group inheritance."
+            )
+
     def list(self, relative_path: str = ".") -> dict[str, Any]:
         parts = normalize_relative_path(relative_path, allow_root=True)
         with self._root_fd() as root_fd, self._directory_fd(root_fd, parts) as fd:
@@ -327,6 +340,7 @@ class Workspace:
         with self._root_fd() as root_fd, self._directory_fd(
             root_fd, parts[:-1]
         ) as parent_fd:
+            self._require_shared_parent(root_fd, parent_fd)
             try:
                 existing_fd = os.open(
                     parts[-1], os.O_RDONLY | _NOFOLLOW | _CLOEXEC, dir_fd=parent_fd
@@ -420,6 +434,7 @@ class Workspace:
         with self._root_fd() as root_fd, self._directory_fd(
             root_fd, parts[:-1]
         ) as parent_fd:
+            self._require_shared_parent(root_fd, parent_fd)
             try:
                 os.mkdir(parts[-1], 0o2770, dir_fd=parent_fd)
             except FileExistsError as exc:

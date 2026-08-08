@@ -146,6 +146,7 @@
     let conversationId = null;
     let selectedFile = null;
     let loadedDigest = null;
+    let turnPending = false;
     const byId = id => document.getElementById(id);
 
     async function api(path, options = {}) {
@@ -235,8 +236,14 @@
 
     byId("composer").addEventListener("submit", async event => {
       event.preventDefault();
+      if (turnPending) return;
       const prompt = byId("prompt").value.trim();
       if (!prompt) return;
+      const disclosedFile = selectedFile;
+      clearSelectedFile();
+      turnPending = true;
+      const submit = byId("composer").querySelector('button[type="submit"]');
+      submit.disabled = true;
       byId("notice").textContent = "Thinking locally…";
       appendMessage("user", prompt);
       byId("prompt").value = "";
@@ -246,17 +253,19 @@
           body: {
             message: prompt,
             conversation_id: conversationId,
-            selected_files: selectedFile ? [selectedFile] : []
+            selected_files: disclosedFile ? [disclosedFile] : []
           }
         });
         conversationId = value.conversation_id;
-        clearSelectedFile();
         appendMessage("assistant", value.message);
         byId("notice").textContent = value.history_persisted ? "Saved locally." : "History storage is off.";
         await refresh();
       } catch (error) {
         appendMessage("assistant", `Request failed: ${error.message}`);
         byId("notice").textContent = "";
+      } finally {
+        turnPending = false;
+        submit.disabled = false;
       }
     });
 

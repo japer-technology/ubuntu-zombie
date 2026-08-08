@@ -74,9 +74,14 @@ class BoundaryAssetTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("function clearSelectedFile()", interface)
         self.assertIn(
-            "conversationId = value.conversation_id;\n        clearSelectedFile();",
+            "const disclosedFile = selectedFile;\n      clearSelectedFile();",
             interface,
         )
+        self.assertIn(
+            "selected_files: disclosedFile ? [disclosedFile] : []",
+            interface,
+        )
+        self.assertIn("if (turnPending) return;", interface)
         self.assertGreaterEqual(interface.count("clearSelectedFile();"), 3)
 
 

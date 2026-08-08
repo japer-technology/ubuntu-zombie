@@ -13,6 +13,7 @@ class WorkspaceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name).resolve()
+        self.root.chmod(0o2770)
         details = validate_nominated_root(self.root)
         self.workspace = Workspace(
             WorkspaceRoot(
@@ -78,6 +79,21 @@ class WorkspaceTests(unittest.TestCase):
         self.workspace.delete("folder/b.txt")
         self.workspace.delete("folder")
         self.assertEqual(self.workspace.list()["entries"], [])
+
+    def test_mutations_require_shared_group_inheritance(self) -> None:
+        unsafe = self.root / "unsafe"
+        unsafe.mkdir(mode=0o0770)
+        unsafe.chmod(0o0770)
+        with self.assertRaises(ValidationError):
+            self.workspace.write("unsafe/file.txt", "content")
+        with self.assertRaises(ValidationError):
+            self.workspace.mkdir("unsafe/folder")
+
+        unsafe.chmod(0o2770)
+        self.workspace.write("unsafe/file.txt", "content")
+        self.workspace.mkdir("unsafe/folder")
+        self.assertEqual((unsafe / "file.txt").stat().st_gid, self.root.stat().st_gid)
+        self.assertEqual((unsafe / "folder").stat().st_gid, self.root.stat().st_gid)
 
 
 if __name__ == "__main__":

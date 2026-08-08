@@ -25,6 +25,7 @@ class HTTPTests(unittest.TestCase):
         root = Path(self.temporary.name)
         self.workspace = root / "workspace"
         self.workspace.mkdir()
+        self.workspace.chmod(0o2770)
         key = root / "session.key"
         key.write_bytes(b"s" * 32)
         database = Database(root / "friend.db")

@@ -22,6 +22,7 @@ class ApplicationTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.workspace = self.root / "workspace"
         self.workspace.mkdir()
+        self.workspace.chmod(0o2770)
         self.database_path = self.root / "friend.db"
         self.audit_path = self.root / "audit.log"
         self.key_path = self.root / "session.key"
@@ -141,6 +142,26 @@ class ApplicationTests(unittest.TestCase):
             self.audit_path.read_text(encoding="utf-8").splitlines()[-1]
         )
         self.assertEqual(event["event_type"], "policy_decision")
+        self.assertEqual(event["decision"], "denied")
+        self.assertEqual(event["relative_path"], "../outside")
+
+        self.application.write_file(
+            self.workspace_id,
+            "move-me.txt",
+            "content",
+            expected_sha256=None,
+            confirmation=None,
+        )
+        with self.assertRaises(ValidationError):
+            self.application.move_path(
+                self.workspace_id,
+                "move-me.txt",
+                "../outside",
+                confirmation="move-me.txt",
+            )
+        event = json.loads(
+            self.audit_path.read_text(encoding="utf-8").splitlines()[-1]
+        )
         self.assertEqual(event["decision"], "denied")
         self.assertEqual(event["relative_path"], "../outside")
 

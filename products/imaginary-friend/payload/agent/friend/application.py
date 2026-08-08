@@ -229,9 +229,10 @@ class FriendApplication:
         path: str,
         destructive: bool = False,
         confirmation: str | None = None,
+        allow_root: bool = False,
     ) -> None:
         try:
-            parts = normalize_relative_path(path, allow_root=not destructive)
+            parts = normalize_relative_path(path, allow_root=allow_root)
         except ValidationError as exc:
             attempted_path = path[:512] if isinstance(path, str) else "<non-text>"
             self.audit.event(
@@ -292,7 +293,10 @@ class FriendApplication:
 
     def list_directory(self, workspace_id: str, path: str = ".") -> dict[str, Any]:
         self._workspace_decision(
-            "workspace.read", workspace_id=workspace_id, path=path
+            "workspace.read",
+            workspace_id=workspace_id,
+            path=path,
+            allow_root=True,
         )
         _, workspace = self._workspace(workspace_id)
         try:
@@ -372,7 +376,11 @@ class FriendApplication:
             destructive=True,
             confirmation=confirmation,
         )
-        normalize_relative_path(destination)
+        self._workspace_decision(
+            "workspace.change",
+            workspace_id=workspace_id,
+            path=destination,
+        )
         _, workspace = self._workspace(workspace_id)
         try:
             result = workspace.move(source, destination)
