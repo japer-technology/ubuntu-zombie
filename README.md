@@ -43,8 +43,7 @@ sudo systemctl restart ubuntu-zombie-chat.service
 # open http://127.0.0.1:7878/ locally
 ```
 
-The installer no longer provisions remote access or a secondary desktop
-viewing path. It installs one access surface: the password-protected
+It installs one access surface: the password-protected
 chat UI bound to `127.0.0.1`. An LLM API key is added *after* install.
 The full list of inputs and their defaults is in
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md#parameters-required-to-allow-the-install-to-proceed).
