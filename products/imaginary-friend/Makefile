@@ -21,7 +21,7 @@ lint:
 	  echo "shellcheck $$file"; \
 	  shellcheck --severity=warning "$$file"; \
 	  bash -n "$$file"; \
-	done < <(find scripts payload/bin -type f -print | sort)
+	done < <(find scripts payload/bin tests/vm -type f -print | sort)
 	@set -e; \
 	while IFS= read -r file; do \
 	  echo "$(PYTHON) -m py_compile $$file"; \

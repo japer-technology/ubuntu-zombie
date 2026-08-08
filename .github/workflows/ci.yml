@@ -77,8 +77,15 @@ jobs:
           python3 -m pip install pytest
           python3 -m pytest tests/python -q
 
+      - name: Imaginary Friend lint and tests
+        run: |
+          make -C products/imaginary-friend lint PYTHON=python3
+          make -C products/imaginary-friend test PYTHON=python3
+
       - name: Package source bundle
-        run: make package
+        run: |
+          make package
+          make -C products/imaginary-friend package
 
       - name: Secret pattern scan
         run: |
