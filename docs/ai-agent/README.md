@@ -22,17 +22,20 @@ their installed trust boundaries.
 | Product | Status in this repository | Purpose | Maximum authority | Default identity | Default port |
 | ------- | ------------------------- | ------- | ----------------- | ---------------- | ------------ |
 | [Ubuntu Zombie](ubuntu-zombie.md) | Core implemented; family manager implementation-ready | AI Systems Administrator and family manager | Root through its policy and approval boundary | `zombie` | `7878` |
-| [Imaginary Friend](imaginary-friend.md) | Implementation-ready first-release specification | Private conversational companion and workspace | Its own files and nominated workspace only | `friend` | `6767` |
+| [Imaginary Friend](imaginary-friend.md) | Standalone source and release implemented; production family admission gated | Private conversational companion and workspace | Its own files and nominated workspace only | `friend` | `6767` |
 | [Curriculum Flame](curriculum-flame.md) | Implementation-ready first-release specification | Curriculum-gated local AI for children | Its own state; learner workspaces are later | `flame-*` services | `5656`, `5657` |
 | [ERIC](eric.md) | Living-apprenticeship implementation-ready; later stages gated | Longitudinal personal continuity agent | Its own evidence and model; Executor absent in first release | `eric-*` services | `4545`, `4546` |
 
-“Implemented” means this repository currently ships and tests the product.
-“Implementation-ready” means the source root, first scope, interfaces,
+“Implemented” means this repository currently ships and tests the named
+scope. “Implementation-ready” means the source root, first scope, interfaces,
 defaults, and acceptance gates are fixed; it does not claim that software
-exists or is safe to deploy. Imaginary Friend, Curriculum Flame, and ERIC are
-to be implemented in this repository at the roots reserved by
-[`implementation.md`](implementation.md). No external repository needs to be
-created or consulted.
+exists or is safe to deploy. Imaginary Friend now has standalone source,
+tests, lifecycle, documentation, and an independent release, but remains
+absent from the production family catalogue while manager, recorded
+disposable-VM, co-installation, and final release-verification gates remain
+open. Curriculum Flame and ERIC are to be implemented at the roots reserved
+by [`implementation.md`](implementation.md). No external repository needs to
+be created or consulted.
 
 ## Reading order
 
