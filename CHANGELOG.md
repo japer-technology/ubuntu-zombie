@@ -10,6 +10,10 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Documentation
 
+- **ERIC identity and cognition record:** renamed ERIC to Evolving Record of
+  Identity and Cognition and clarified that its primary purpose is to preserve
+  an attributable, verifiable history of who a person is, what they know, and
+  how they think, rather than merely generating a simulation.
 - **Implementation-ready in-repository AI-agent family:** made
   `docs/ai-agent/` authoritative for implementing Imaginary Friend,
   Curriculum Flame, ERIC, and Ubuntu Zombie family management in this
@@ -33,7 +37,7 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   inventory and management experience are not yet implemented.
 - **ERIC personal continuity agent:** expanded
   `docs/options/ghosts-in-the-machine-plan.md` with ERIC (Evolving
-  Representation of Individual Continuity), a lifelong AI apprentice for
+  Record of Identity and Cognition), a lifelong AI apprentice for
   one consenting person. The plan separates source evidence from
   inference, requires provenance on every response, preserves beliefs and
   decisions over time, splits the Twin, Evidence Vault, Executor,

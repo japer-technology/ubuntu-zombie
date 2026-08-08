@@ -24,7 +24,7 @@ their installed trust boundaries.
 | [Ubuntu Zombie](ubuntu-zombie.md) | Core implemented; family manager implementation-ready | AI Systems Administrator and family manager | Root through its policy and approval boundary | `zombie` | `7878` |
 | [Imaginary Friend](imaginary-friend.md) | Standalone source and release implemented; production family admission gated | Private conversational companion and workspace | Its own files and nominated workspace only | `friend` | `6767` |
 | [Curriculum Flame](curriculum-flame.md) | Implementation-ready first-release specification | Curriculum-gated local AI for children | Its own state; learner workspaces are later | `flame-*` services | `5656`, `5657` |
-| [ERIC](eric.md) | Living-apprenticeship implementation-ready; later stages gated | Longitudinal personal continuity agent | Its own evidence and model; Executor absent in first release | `eric-*` services | `4545`, `4546` |
+| [ERIC](eric.md) | Living-apprenticeship implementation-ready; later stages gated | Evolving record of identity and cognition | Its own evidence and model; Executor absent in first release | `eric-*` services | `4545`, `4546` |
 
 “Implemented” means this repository currently ships and tests the named
 scope. “Implementation-ready” means the source root, first scope, interfaces,

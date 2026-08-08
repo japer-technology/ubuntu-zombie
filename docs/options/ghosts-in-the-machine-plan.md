@@ -425,16 +425,20 @@ the first release. Until the product’s quality gates pass, the
 installer and UI must not claim that Flame is a complete child-safety
 solution.
 
-## ERIC: standalone personal continuity plan
+## ERIC — Evolving Record of Identity and Cognition
 
-**ERIC** means **Evolving Representation of Individual Continuity**:
+- **Evolving:** continuously develops as the individual learns, experiences,
+  decides, and changes over time.
+- **Record:** preserves an attributable and verifiable history rather than
+  merely generating a simulation of the individual.
+- **Identity:** captures the characteristics, relationships, experiences,
+  preferences, values, and history that distinguish one individual from
+  another.
+- **Cognition:** captures how the individual understands, reasons, evaluates,
+  remembers, decides, and responds.
 
-- **Evolving** — learns and changes throughout its subject's lifetime.
-- **Representation** — models the subject without falsely claiming to be
-  conscious or literally to be that person.
-- **Individual** — belongs to one specific person.
-- **Continuity** — preserves memories, values, reasoning, and identity
-  across time and, when explicitly authorised, after death.
+**ERIC is an evolving record of who a person is, what they know, and how they
+think.**
 
 Its product definition is:
 
@@ -444,9 +448,9 @@ Its product definition is:
 > questioning, and deliberate correction, eventually becoming an
 > authorised simulation of that person after death.
 
-The strongest technical description is **Longitudinal Personal
-Continuity Agent**. “Life Apprentice”, “Continuant”, “Second Self”,
-“Aftermind”, and “The Long Twin” may describe modes or interfaces, but
+The product is a **longitudinal identity and cognition record** with a
+conversational agent interface. “Life Apprentice”, “Continuant”, “Second
+Self”, “Aftermind”, and “The Long Twin” may describe modes or interfaces, but
 ERIC is the product identity reserved here.
 
 ### The critical distinction
@@ -454,8 +458,9 @@ ERIC is the product identity reserved here.
 ERIC may eventually become good at predicting what its subject would
 probably say or decide. It still cannot establish that it **is** the
 subject, possesses the subject's consciousness, or knows what the subject
-would think about events after death. It is a historically grounded
-simulation that produces new inferences from preserved evidence.
+would think about events after death. It is an attributable, verifiable
+record that can ground clearly labelled simulations producing new inferences
+from preserved evidence.
 
 The valuable centre of the design is therefore not merely an AI that
 talks like somebody after death. It is an AI that spends years being

@@ -129,11 +129,11 @@ Grouped by the operator need they serve. Every flag defaults to `0`.
   records the rationale and implementation plan for a family of separate
   products:
   the root-capable Ubuntu Zombie, the less-privileged Imaginary Friend,
-  Curriculum Flame, ERIC (Evolving Representation of Individual
-  Continuity), and future helpful agents. ERIC is a longitudinal personal
-  continuity agent that learns from one consenting person while they are
-  alive, preserves source provenance, and can become an authorised but
-  explicitly non-conscious simulation after death. Each product owns its
+  Curriculum Flame, ERIC (Evolving Record of Identity and Cognition), and
+  future helpful agents. ERIC records who one consenting person is, what they
+  know, and how they think while preserving source provenance; it can later
+  ground an authorised but explicitly non-conscious simulation after death.
+  Each product owns its
   installer, updater, runtime, policy, security password and other
   credentials, state, audit trail, and release. There is no shared ghost
   registry, capability tier, payload, or lifecycle implementation; Ubuntu
