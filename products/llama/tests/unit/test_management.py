@@ -390,6 +390,22 @@ class ManagementTests(unittest.TestCase):
                 self.manager._stop_service(disable=True)
         self.assertEqual(raised.exception.code, "SERVICE_STOP_FAILED")
 
+    def test_stop_service_fails_when_service_remains_enabled(self) -> None:
+        with (
+            mock.patch.object(
+                self.manager, "_service_active", side_effect=[True, False]
+            ),
+            mock.patch.object(
+                self.manager,
+                "_service_enabled",
+                side_effect=["enabled", "enabled"],
+            ),
+            mock.patch.object(self.manager, "_run"),
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager._stop_service(disable=True)
+        self.assertEqual(raised.exception.code, "SERVICE_STOP_FAILED")
+
     def test_resume_is_unchanged_when_service_is_already_active(self) -> None:
         marker = {"version": self.manager.version}
         config = {
