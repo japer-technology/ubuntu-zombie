@@ -26,6 +26,12 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Documentation
 
+- **Product-defined family authority:** removed the family-wide rule that
+  reserved general root authority to Ubuntu Zombie. Future
+  systems-administrator products may retain full root capability when their
+  definitions justify it and preserve policy, approval, audit, revocation, and
+  root-equivalent risk disclosure. Existing Imaginary Friend, Curriculum
+  Flame, and ERIC authority boundaries are unchanged.
 - **ERIC identity and cognition record:** renamed ERIC to Evolving Record of
   Identity and Cognition and clarified that its primary purpose is to preserve
   an attributable, verifiable history of who a person is, what they know, and
@@ -62,15 +68,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   boundaries. Documentation only; no behaviour changes.
 - **Independent AI-agent family plan:** revised
   `docs/options/ghosts-in-the-machine-plan.md` to record the decision that
-  Ubuntu Zombie is the first of a wider family, but remains the sole
-  generally root-capable agent. Imaginary Friend, Curriculum Flame, and
-  future agents are separate products with product-owned installers,
-  updates, runtimes, policies, passwords and other credentials, state,
-  audit trails, tests, documentation, and releases. The plan replaces
-  the shared ghost registry and capability-tier proposal with a
+  Ubuntu Zombie is the first of a wider family and its designated manager.
+  Family members are separate products with product-owned installers, updates,
+  runtimes, policies, passwords and other credentials, state, audit trails,
+  tests, documentation, releases, and purpose-defined authority. The plan
+  replaces the shared ghost registry and capability-tier proposal with a
   copy-separate-improve process, independent update requirements,
-  co-installation boundaries, and cross-product credential-isolation
-  tests. Documentation only; no behaviour changes.
+  co-installation boundaries, and cross-product credential-isolation tests.
+  Documentation only; no behaviour changes.
 
 ### Installer setting preservation
 
