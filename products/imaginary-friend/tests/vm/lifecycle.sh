@@ -37,6 +37,13 @@ credential_file="${work}/owner-credential"
 printf '%s\n' "disposable-vm-owner-password" > "${credential_file}"
 chmod 600 "${credential_file}"
 
+set +e
+FRIEND_NONINTERACTIVE=1 "${manage}" install --dry-run --json \
+  > "${work}/missing-input.json"
+missing_input_status=$?
+set -e
+[[ "${missing_input_status}" -eq 64 ]]
+
 PYTHONPATH="${product_root}/payload/agent" \
   python3 "${product_root}/tests/fixtures/openai_fixture.py" --port 18080 &
 fixture_pid=$!
@@ -95,6 +102,18 @@ assert_response "${work}/install-plan.json" install ok
 assert_response "${work}/install.json" install ok
 "${manage}" verify --json > "${work}/verify.json"
 assert_response "${work}/verify.json" verify ok
+[[ "$(stat -c '%U:%G:%a' /etc/imaginary-friend/session.key)" == "root:friend:640" ]]
+[[ "$(stat -c '%U:%G:%a' /var/lib/imaginary-friend/friend.db)" == "friend:friend:600" ]]
+[[ "$(id -nG friend | tr ' ' '\n' | sort | paste -sd ' ' -)" == "friend friend-share" ]]
+runuser -u friend -- test ! -w /etc/imaginary-friend/policy.json
+runuser -u friend -- test ! -w /opt/imaginary-friend/agent/friend/server.py
+set +e
+runuser -u friend -- /usr/local/sbin/friend-manage suspend --yes --json \
+  > "${work}/service-account-manage.json"
+service_account_status=$?
+set -e
+[[ "${service_account_status}" -eq 73 ]]
+! grep -Fq "disposable-vm-owner-password" /var/log/imaginary-friend/audit.log
 
 unset FRIEND_OWNER_PASSWORD_FILE
 "${manage}" install --yes --json > "${work}/reinstall.json"
@@ -104,6 +123,23 @@ assert_response "${work}/reinstall.json" install ok
 assert_response "${work}/suspend.json" suspend ok
 "${manage}" status --json > "${work}/suspended-status.json"
 assert_response "${work}/suspended-status.json" status ok
+"${manage}" install --yes --json > "${work}/suspended-reinstall.json"
+assert_response "${work}/suspended-reinstall.json" install ok
+"${manage}" status --json > "${work}/reinstalled-suspended-status.json"
+assert_response "${work}/reinstalled-suspended-status.json" status ok
+python3 - "${work}/reinstalled-suspended-status.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+assert value["details"]["imaginary_friend"]["lifecycle"] == "suspended", value
+assert any(
+    check["id"] == "suspension" and check["status"] == "warn"
+    for check in value["checks"]
+), value
+PY
+! systemctl is-active --quiet imaginary-friend-chat.service
 "${manage}" resume --yes --json > "${work}/resume.json"
 assert_response "${work}/resume.json" resume ok
 

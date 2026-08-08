@@ -280,6 +280,12 @@ class Database:
                     int(merged["history_enabled"]),
                 ),
             )
+            if "history_retention_days" in changes:
+                connection.execute(
+                    "UPDATE conversations "
+                    "SET expires_at = updated_at + ?",
+                    (history_days * 86_400,),
+                )
         self.prune()
         return self.settings()
 

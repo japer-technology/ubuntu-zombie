@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from friend.auth import hash_password
 from friend.database import Database
@@ -67,6 +68,16 @@ class DatabaseTests(unittest.TestCase):
         self.database.prune(now=10**12)
         self.assertEqual(self.database.list_conversations(), [])
         self.assertEqual(self.database.workspace_events(), [])
+
+    def test_retention_change_recomputes_existing_conversation_expiry(self) -> None:
+        with mock.patch("friend.database.time.time", return_value=100.0):
+            conversation = self.database.create_conversation("Rolling retention")
+            self.database.add_message(conversation, "user", "private")
+            self.database.update_settings({"history_retention_days": 1})
+            stored = self.database.conversation(conversation)
+        self.assertEqual(stored["expires_at"], 86_500.0)
+        self.database.prune(now=86_501.0)
+        self.assertEqual(self.database.list_conversations(), [])
 
     def test_backup_drops_session_material(self) -> None:
         self.database.create_session("token-digest", "csrf-digest")

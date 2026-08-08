@@ -61,6 +61,7 @@ MUTATING = {
     "resume",
     "uninstall",
 }
+READ_ONLY = {"describe", "status", "verify", "doctor"}
 KNOWN_ENV = {
     "FRIEND_NONINTERACTIVE",
     "FRIEND_OWNER_USER",
@@ -71,7 +72,7 @@ KNOWN_ENV = {
     "FRIEND_HISTORY_RETENTION_DAYS",
     "FRIEND_AUDIT_RETENTION_DAYS",
 }
-INPUT_KEYS = {
+CONFIGURATION_INPUT_KEYS = {
     "owner_user",
     "owner_password_file",
     "model_base_url",
@@ -79,13 +80,35 @@ INPUT_KEYS = {
     "workspaces_file",
     "history_retention_days",
     "audit_retention_days",
-    "backup_destination",
 }
+OPERATION_INPUT_KEYS = {
+    "describe": set(),
+    "status": set(),
+    "install": CONFIGURATION_INPUT_KEYS,
+    "verify": set(),
+    "doctor": set(),
+    "repair": CONFIGURATION_INPUT_KEYS,
+    "backup": {"backup_destination"},
+    "update": CONFIGURATION_INPUT_KEYS,
+    "rollback": set(),
+    "suspend": set(),
+    "resume": set(),
+    "uninstall": set(),
+}
+CONFIGURATION_OPERATIONS = {"install", "repair", "update"}
 SECRET_INPUTS = {"owner_password_file"}
 DEFAULT_MODEL_BASE_URL = "http://127.0.0.1:8080/v1"
 DEFAULT_WORKSPACE = Path("/srv/imaginary-friend/workspace")
 DELETE_CONFIRMATION = "DELETE IMAGINARY FRIEND STATE"
 VERSION_PATTERN_PARTS = 6
+
+
+def _operation_phase(operation: str, *, dry_run: bool) -> str:
+    if dry_run and operation in MUTATING:
+        return "plan"
+    if operation in READ_ONLY:
+        return "read"
+    return "execute"
 
 
 @dataclass(frozen=True)
@@ -457,12 +480,12 @@ class Manager:
             raise ManagementError(65, "INVALID_REQUEST", "requested_by is invalid.")
         if not isinstance(value["inputs"], dict):
             raise ManagementError(65, "INVALID_REQUEST", "Request inputs must be an object.")
-        input_unknown = set(value["inputs"]) - INPUT_KEYS
+        input_unknown = set(value["inputs"]) - OPERATION_INPUT_KEYS[operation]
         if input_unknown:
             raise ManagementError(
                 65,
                 "UNKNOWN_INPUT",
-                f"Unknown management input: {sorted(input_unknown)[0]}",
+                f"Input is not accepted for {operation}: {sorted(input_unknown)[0]}",
             )
         if not all(isinstance(key, str) for key in value["inputs"]):
             raise ManagementError(65, "INVALID_REQUEST", "Input keys must be strings.")
@@ -507,6 +530,8 @@ class Manager:
 
     def invocation(self, args: argparse.Namespace) -> Invocation:
         environment = self._environment_inputs()
+        if args.operation not in CONFIGURATION_OPERATIONS:
+            environment = {}
         env_noninteractive = os.environ.get("FRIEND_NONINTERACTIVE")
         if env_noninteractive not in {None, "", "0", "1"}:
             raise ManagementError(
@@ -883,7 +908,11 @@ class Manager:
                 ("credentials", "Create or preserve authentication and session material", True),
                 ("runtime", "Stage root-owned code, policy, service, and helpers", True),
                 ("state", "Initialize or migrate Friend SQLite state", True),
-                ("service", "Validate and start only imaginary-friend-chat.service", True),
+                (
+                    "service",
+                    "Validate Friend and start its service unless suspension is preserved",
+                    True,
+                ),
                 ("health", "Verify positive capabilities and structural denials", False),
                 ("marker", "Atomically record ownership after health succeeds", True),
             ],
@@ -1012,12 +1041,9 @@ class Manager:
 
     def run(self, invocation: Invocation) -> tuple[Result, int]:
         instance_id = self.instance_id()
-        phase = (
-            "plan"
-            if invocation.dry_run and invocation.operation in MUTATING
-            else "read"
-            if invocation.operation in {"describe", "status", "verify", "doctor"}
-            else "execute"
+        phase = _operation_phase(
+            invocation.operation,
+            dry_run=invocation.dry_run,
         )
         result = Result(
             operation=invocation.operation,
@@ -1477,10 +1503,8 @@ class Manager:
             account_ok = (
                 primary == "friend"
                 and account.pw_shell in {"/usr/sbin/nologin", "/bin/false"}
-                and "friend-share" in groups
-                and not groups.intersection(
-                    {"sudo", "adm", "docker", "lxd", "systemd-journal"}
-                )
+                and account.pw_dir == str(self.paths.state_root)
+                and groups == {"friend", "friend-share"}
             )
         except KeyError:
             account_ok = False
@@ -1674,12 +1698,16 @@ class Manager:
                 )
             )
         elif suspended:
+            stopped = not self._systemctl_is_active()
             checks.append(
                 self.check(
                     "suspension",
-                    True,
-                    "Friend is suspended and useful service is stopped.",
-                    warning=True,
+                    stopped,
+                    "Friend is suspended and useful service is stopped."
+                    if stopped
+                    else "Friend is suspended but its service is still active.",
+                    "Stop imaginary-friend-chat.service before treating suspension as complete.",
+                    warning=stopped,
                 )
             )
         return checks
@@ -1901,7 +1929,8 @@ class Manager:
             if (
                 account.pw_gid != friend_group.gr_gid
                 or account.pw_shell not in {"/usr/sbin/nologin", "/bin/false"}
-                or groups.intersection({"sudo", "adm", "docker", "lxd", "systemd-journal"})
+                or account.pw_dir != str(self.paths.state_root)
+                or groups - {"friend", "friend-share"}
             ):
                 raise ManagementError(
                     73,
@@ -2283,19 +2312,24 @@ class Manager:
                     friend_gid=friend_gid,
                     workspaces=invocation.workspaces,
                 )
-                database.set_suspended(False)
+                suspended = bool(database.settings()["suspended"])
                 self._deploy_unit(invocation.workspaces)
                 self._validate_runtime_as_friend()
-                self._start_service()
-                if not self._service_health():
-                    raise ManagementError(
-                        1,
-                        "HEALTH_FAILED",
-                        "Friend service did not pass its loopback health gate.",
-                        recovery=["Run friend-manage doctor and inspect redacted diagnostics."],
-                    )
+                if suspended:
+                    self._stop_service(disable=False)
+                else:
+                    self._start_service()
+                    if not self._service_health():
+                        raise ManagementError(
+                            1,
+                            "HEALTH_FAILED",
+                            "Friend service did not pass its loopback health gate.",
+                            recovery=[
+                                "Run friend-manage doctor and inspect redacted diagnostics."
+                            ],
+                        )
                 checks = self.verify_checks(
-                    probe_runtime=True,
+                    probe_runtime=not suspended,
                     allow_transaction=marker is None,
                 )
                 failed = [item for item in checks if item["status"] == "fail"]
@@ -3076,6 +3110,7 @@ class Manager:
             outcome: str,
             changed: bool,
             receipt_digest: str | None,
+            failure_type: str | None = None,
     ) -> None:
             if not self.paths.log_root.exists():
                 return
@@ -3093,6 +3128,8 @@ class Manager:
                 "changed": changed,
                 "receipt_digest": receipt_digest,
             }
+            if failure_type is not None:
+                entry["failure_type"] = failure_type
             line = canonical_json(entry) + b"\n"
             flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
             fd = os.open(self.paths.audit, flags, 0o640)
@@ -3133,12 +3170,38 @@ class Manager:
                     correlation_id=invocation.correlation_id,
                     instance_id=self.instance_id(),
                     operation=invocation.operation,
-                    phase="plan" if invocation.dry_run else "execute",
+                    phase=_operation_phase(
+                        invocation.operation,
+                        dry_run=invocation.dry_run,
+                    ),
                     actor=invocation.actor,
                     decision="denied",
                     outcome="blocked" if error.exit_code != 1 else "failed",
                     changed=False,
                     receipt_digest=None,
+                )
+            except Exception:
+                return
+
+    def audit_failure(self, invocation: Invocation, error: Exception) -> None:
+            if not self.paths.audit.exists():
+                return
+            try:
+                self._append_lifecycle_audit(
+                    event_id=str(uuid.uuid4()),
+                    correlation_id=invocation.correlation_id,
+                    instance_id=self.instance_id(),
+                    operation=invocation.operation,
+                    phase=_operation_phase(
+                        invocation.operation,
+                        dry_run=invocation.dry_run,
+                    ),
+                    actor=invocation.actor,
+                    decision="allowed",
+                    outcome="failed",
+                    changed=False,
+                    receipt_digest=None,
+                    failure_type=type(error).__name__,
                 )
             except Exception:
                 return
@@ -3224,13 +3287,7 @@ def main(argv: list[str] | None = None) -> int:
                 validate_uuid(correlation, label="correlation_id")
             except ManagementError:
                 correlation = str(uuid.uuid4())
-            phase = (
-                "plan"
-                if args.dry_run and args.operation in MUTATING
-                else "read"
-                if args.operation in {"describe", "status", "verify", "doctor"}
-                else "execute"
-            )
+            phase = _operation_phase(args.operation, dry_run=args.dry_run)
             result = Result(
                 operation=args.operation,
                 correlation_id=correlation,
@@ -3256,15 +3313,33 @@ def main(argv: list[str] | None = None) -> int:
             if manager is not None:
                 manager.audit_denial(invocation, exc)
             exit_code = exc.exit_code
-    except (FriendError, OSError) as exc:
+    except Exception as exc:
             version = manager.version if manager is not None else "0000.00.00.00.00.00"
+            correlation = (
+                invocation.correlation_id
+                if invocation is not None
+                else args.correlation_id
+                if args.correlation_id
+                else str(uuid.uuid4())
+            )
+            try:
+                validate_uuid(correlation, label="correlation_id")
+            except ManagementError:
+                correlation = str(uuid.uuid4())
+            instance_id = None
+            if manager is not None:
+                try:
+                    instance_id = manager.instance_id()
+                except Exception:
+                    pass
             result = Result(
                 operation=args.operation,
-                correlation_id=str(uuid.uuid4()),
+                correlation_id=correlation,
                 product_version=version,
-                instance_id=None,
-                phase="execute",
+                instance_id=instance_id,
+                phase=_operation_phase(args.operation, dry_run=args.dry_run),
                 status="failed",
+                steps=manager.steps_for(args.operation) if manager is not None else [],
                 errors=[
                     {
                         "code": getattr(exc, "code", "OPERATION_FAILED"),
@@ -3273,6 +3348,8 @@ def main(argv: list[str] | None = None) -> int:
                     }
                 ],
             )
+            if manager is not None and invocation is not None:
+                manager.audit_failure(invocation, exc)
             exit_code = 1
     _print_result(result, as_json=args.json)
     return exit_code

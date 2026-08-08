@@ -8,15 +8,17 @@ Imaginary Friend is the first less-privileged variation on the
 authentication, lifecycle, policy, audit, diagnostics, and release
 discipline while deleting general host-administration power.
 
-This is an implementation-ready product definition, not a claim that
-deployable Friend software already exists. Its authoritative source root is
-`products/imaginary-friend/` in this repository.
+This definition now has a standalone implementation and independent release
+below `products/imaginary-friend/`. It is not yet a claim of production family
+support: catalogue admission remains gated on the Ubuntu Zombie manager,
+recorded disposable-VM and co-installation evidence, and final release
+verification.
 
 ## Definition card
 
 | Field | Definition |
 | ----- | ---------- |
-| Status | Implementation-ready first-release specification; source not yet implemented |
+| Status | Standalone source and release implemented; production family admission gated |
 | Human need | A persistent private place for conversation and work without granting an AI authority over the machine |
 | Intended user | One human owner |
 | Operator | The machine owner; Ubuntu Zombie may perform approved host-level lifecycle management |
@@ -33,6 +35,24 @@ deployable Friend software already exists. Its authoritative source root is
 | Management entry point | Source `scripts/manage.sh`; installed `/usr/local/sbin/friend-manage` |
 | Source root | `products/imaginary-friend/` |
 | Authoritative repository | [`japer-technology/ubuntu-zombie`](https://github.com/japer-technology/ubuntu-zombie) |
+
+## Status and evidence
+
+Implemented source is not the same as an admitted production family target.
+The current evidence and remaining gates are:
+
+| Gate | State | Evidence or owner |
+| ---- | ----- | ----------------- |
+| Product definition and first slice | Passed | This document and [`implementation.md`](implementation.md) |
+| Configuration and data contracts | Implemented | [`PRODUCT.json`](../../products/imaginary-friend/PRODUCT.json), family schemas, and product tests |
+| Threat and privacy models | Documented; review continues | Product [`SECURITY.md`](../../products/imaginary-friend/docs/SECURITY.md) and [`PRIVACY.md`](../../products/imaginary-friend/docs/PRIVACY.md) |
+| Standalone runtime and lifecycle | Implemented | [`products/imaginary-friend/`](../../products/imaginary-friend/) |
+| Non-root and hermetic tests | Automated | Unit, integration, HTTP, model, and family conformance suites |
+| Security boundary | Automated baseline; release red team remains open | Workspace, model, policy, HTTP, asset, and guarded VM tests |
+| Update, backup, and rollback | Implemented; supported-VM evidence required per release | Product lifecycle and guarded VM harness |
+| Standalone VM validation | Open release gate | Record clean 22.04 and 24.04 LTS lifecycle passes |
+| Ubuntu Zombie management and co-installation | Open family gate | Manager and sibling implementation slices |
+| Independent artifact | Released; production catalogue admission open | Product release workflow, SBOM, checksums, provenance, signatures, and test evidence |
 
 ## Fixed first implementation
 
@@ -474,7 +494,17 @@ access, voice/image input, arbitrary existing-tree adoption, workspace
 versioning, and proactive conversation require later definitions and tests.
 They are not part of the first release and do not block its implementation.
 
-`products/imaginary-friend/` owns its vision, architecture, threat model,
-security and privacy documents, configuration, installation, upgrading,
-recovery, troubleshooting, disclosure, release, and test evidence in this
+`products/imaginary-friend/` owns its
+[`README`](../../products/imaginary-friend/README.md),
+[`vision`](../../products/imaginary-friend/docs/VISION.md),
+[`architecture`](../../products/imaginary-friend/docs/ARCHITECTURE.md),
+[`security and disclosure`](../../products/imaginary-friend/docs/SECURITY.md),
+[`privacy`](../../products/imaginary-friend/docs/PRIVACY.md),
+[`configuration`](../../products/imaginary-friend/docs/CONFIGURATION.md),
+[`installation`](../../products/imaginary-friend/docs/INSTALLATION.md),
+[`upgrading`](../../products/imaginary-friend/docs/UPGRADING.md),
+[`recovery`](../../products/imaginary-friend/docs/RECOVERY.md),
+[`troubleshooting`](../../products/imaginary-friend/docs/TROUBLESHOOTING.md),
+[`release`](../../products/imaginary-friend/docs/RELEASE.md), and
+[`test evidence`](../../products/imaginary-friend/docs/TESTING.md) in this
 repository.
