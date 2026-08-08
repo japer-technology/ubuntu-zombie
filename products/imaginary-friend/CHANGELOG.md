@@ -7,6 +7,12 @@ Imaginary Friend uses independent UTC date-time versions in
 
 ### Fixed
 
+- Preserve the paired previous-version runtime and recovery snapshot across
+  same-version repair and reinstall, while retaining failure recovery for the
+  active operation.
+- Prevent workspace moves from replacing a concurrently created destination,
+  keep the live audit path writable across log rotation, reject fractional
+  lifecycle retention inputs, and create diagnostics archives exclusively.
 - Export every retained conversation from one consistent database snapshot,
   keep conversations beyond the UI's former 100-record ceiling accessible,
   and disclose an explicitly selected workspace file for one turn only.

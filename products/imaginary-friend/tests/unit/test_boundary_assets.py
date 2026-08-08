@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -61,7 +64,28 @@ class BoundaryAssetTests(unittest.TestCase):
             "InaccessiblePaths=/usr/bin/bash",
         ):
             self.assertIn(required, unit)
+        self.assertIn("ReadWritePaths=/var/log/imaginary-friend\n", unit)
+        self.assertNotIn(
+            "ReadWritePaths=/var/log/imaginary-friend/audit.log", unit
+        )
         self.assertNotIn("ExecStart=/bin/", unit)
+
+    def test_diagnostics_creates_an_exclusive_restricted_archive(self) -> None:
+        diagnostics = PRODUCT_ROOT / "payload" / "bin" / "friend-diagnostics"
+        with tempfile.TemporaryDirectory() as directory:
+            completed = subprocess.run(
+                [str(diagnostics), "--output-directory", directory],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            archive = Path(completed.stdout.strip())
+            self.assertEqual(archive.parent, Path(directory))
+            self.assertTrue(archive.is_file())
+            self.assertFalse(archive.is_symlink())
+            self.assertEqual(os.stat(archive).st_mode & 0o777, 0o600)
 
     def test_selected_workspace_file_is_disclosed_for_one_turn_only(self) -> None:
         interface = (

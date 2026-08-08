@@ -49,7 +49,7 @@ ReadOnlyPaths=/opt/imaginary-friend /etc/imaginary-friend
 ReadWritePaths=/var/lib/imaginary-friend/friend.db
 ReadWritePaths=/var/lib/imaginary-friend/friend.db-journal
 ReadWritePaths=/var/lib/imaginary-friend/exports
-ReadWritePaths=/var/log/imaginary-friend/audit.log
+ReadWritePaths=/var/log/imaginary-friend
 __FRIEND_WORKSPACE_PATHS__
 InaccessiblePaths=/opt/ai-zombie /etc/ubuntu-zombie /var/lib/ubuntu-zombie
 InaccessiblePaths=/opt/curriculum-flame /etc/curriculum-flame /var/lib/curriculum-flame

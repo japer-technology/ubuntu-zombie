@@ -142,6 +142,10 @@ class Paths:
         return self.state_root / "recovery"
 
     @property
+    def operation_recovery(self) -> Path:
+        return self.state_root / ".operation-recovery"
+
+    @property
     def audit(self) -> Path:
         return self.log_root / "audit.log"
 
@@ -388,6 +392,8 @@ class Manager:
     def __init__(self, source_root: Path, paths: Paths = Paths()) -> None:
         self.source_root = source_root
         self.paths = paths
+        self._transient_runtime: Path | None = None
+        self._rollback_switch_active = False
         self.descriptor_path = source_root / "PRODUCT.json"
         self.version_path = source_root / "VERSION"
         self.descriptor = read_json(self.descriptor_path)
@@ -722,10 +728,12 @@ class Manager:
     def _bounded_integer(value: Any, name: str, minimum: int, maximum: int) -> int:
         if isinstance(value, bool):
             raise ManagementError(65, "INVALID_INPUT", f"{name} must be an integer.")
-        try:
+        if isinstance(value, int):
+            parsed = value
+        elif isinstance(value, str) and value.isascii() and value.isdecimal():
             parsed = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ManagementError(65, "INVALID_INPUT", f"{name} must be an integer.") from exc
+        else:
+            raise ManagementError(65, "INVALID_INPUT", f"{name} must be an integer.")
         if not minimum <= parsed <= maximum:
             raise ManagementError(
                 65,
@@ -2054,10 +2062,74 @@ class Manager:
                         os.chown(path, 0, 0)
                         os.chmod(path, 0o755 if path.is_dir() else 0o644)
 
-    def _stage_runtime(self) -> str | None:
+    def _switch_staged_runtime(
+            self, stage: Path, *, preserve_rollback: bool
+    ) -> str | None:
+            previous_version: str | None = None
+            self._transient_runtime = None
+            self._rollback_switch_active = False
+            if not self.paths.install_root.exists():
+                os.rename(stage, self.paths.install_root)
+                return None
+            try:
+                previous_version = (
+                    self.paths.install_root / "VERSION"
+                ).read_text(encoding="utf-8").strip()
+            except OSError:
+                previous_version = None
+            if preserve_rollback:
+                previous_runtime = self.paths.install_root.parent / (
+                    f".imaginary-friend-previous-{uuid.uuid4().hex}"
+                )
+                os.rename(self.paths.install_root, previous_runtime)
+                try:
+                    os.rename(stage, self.paths.install_root)
+                except Exception:
+                    os.rename(previous_runtime, self.paths.install_root)
+                    raise
+                self._transient_runtime = previous_runtime
+                return previous_version
+            if self.paths.rollback_root.exists():
+                details = self.paths.rollback_root.lstat()
+                if (
+                    not stat.S_ISDIR(details.st_mode)
+                    or stat.S_ISLNK(details.st_mode)
+                    or details.st_uid != 0
+                ):
+                    raise ManagementError(
+                        73, "UNSAFE_COLLISION", "Rollback path is not product-controlled."
+                    )
+                shutil.rmtree(self.paths.rollback_root)
+            os.rename(self.paths.install_root, self.paths.rollback_root)
+            self._rollback_switch_active = True
+            try:
+                os.rename(stage, self.paths.install_root)
+            except Exception:
+                os.rename(self.paths.rollback_root, self.paths.install_root)
+                self._rollback_switch_active = False
+                raise
+            return previous_version
+
+    def _commit_runtime_switch(self) -> None:
+            previous_runtime = self._transient_runtime
+            if previous_runtime is None or not previous_runtime.exists():
+                self._transient_runtime = None
+                self._rollback_switch_active = False
+                return
+            discarded = previous_runtime.with_name(
+                f".imaginary-friend-discarded-{uuid.uuid4().hex}"
+            )
+            os.rename(previous_runtime, discarded)
+            self._transient_runtime = None
+            self._rollback_switch_active = False
+            try:
+                shutil.rmtree(discarded)
+            except OSError:
+                pass
+
+    def _stage_runtime(self, *, preserve_rollback: bool = False) -> str | None:
             parent = self.paths.install_root.parent
             stage = parent / f".imaginary-friend-stage-{uuid.uuid4().hex}"
-            previous_version: str | None = None
             try:
                 stage.mkdir(mode=0o755)
                 for name in ("agent", "bin", "etc", "systemd", "logrotate"):
@@ -2073,32 +2145,10 @@ class Manager:
                 os.chmod(stage, 0o755)
                 for executable in [*(stage / "bin").iterdir(), stage / "scripts" / "manage.sh"]:
                     os.chmod(executable, 0o755)
-                if self.paths.install_root.exists():
-                    try:
-                        previous_version = (
-                            self.paths.install_root / "VERSION"
-                        ).read_text(encoding="utf-8").strip()
-                    except OSError:
-                        previous_version = None
-                    if self.paths.rollback_root.exists():
-                        details = self.paths.rollback_root.lstat()
-                        if (
-                            not stat.S_ISDIR(details.st_mode)
-                            or stat.S_ISLNK(details.st_mode)
-                            or details.st_uid != 0
-                        ):
-                            raise ManagementError(
-                                73, "UNSAFE_COLLISION", "Rollback path is not product-controlled."
-                            )
-                        shutil.rmtree(self.paths.rollback_root)
-                    os.rename(self.paths.install_root, self.paths.rollback_root)
-                    try:
-                        os.rename(stage, self.paths.install_root)
-                    except Exception:
-                        os.rename(self.paths.rollback_root, self.paths.install_root)
-                        raise
-                else:
-                    os.rename(stage, self.paths.install_root)
+                previous_version = self._switch_staged_runtime(
+                    stage,
+                    preserve_rollback=preserve_rollback,
+                )
             finally:
                 if stage.exists():
                     shutil.rmtree(stage)
@@ -2307,8 +2357,27 @@ class Manager:
             self._workspace_preflight(invocation.workspaces)
             self._probe_model(invocation)
             marker = self.load_marker()
+            if (
+                marker is not None
+                and marker["version"] != self.version
+                and invocation.operation != "update"
+            ):
+                raise ManagementError(
+                    78,
+                    "VERSION_MISMATCH",
+                    "Installed Friend version differs; use update or rollback.",
+                )
+            preserve_rollback = (
+                marker is not None and marker["version"] == self.version
+            )
+            recovery_source: Path | None = None
             if marker is not None:
-                self._snapshot_recovery()
+                recovery_source = (
+                    self.paths.operation_recovery
+                    if preserve_rollback
+                    else self.paths.recovery
+                )
+                self._snapshot_state(recovery_source)
             runtime_switched = False
             previous_version: str | None = None
             try:
@@ -2321,7 +2390,9 @@ class Manager:
                     share_gid=share_gid,
                     workspaces=invocation.workspaces,
                 )
-                previous_version = self._stage_runtime()
+                previous_version = self._stage_runtime(
+                    preserve_rollback=preserve_rollback
+                )
                 runtime_switched = True
                 self._deploy_configuration(
                     invocation,
@@ -2365,11 +2436,20 @@ class Manager:
                 self._write_marker(instance_id, previous=marker)
                 self.load_marker(required=True)
                 self.paths.transaction.unlink(missing_ok=True)
+                self._commit_runtime_switch()
             except Exception:
-                self._restore_failed_switch(runtime_switched=runtime_switched)
+                self._restore_failed_switch(
+                    runtime_switched=runtime_switched,
+                    recovery_source=recovery_source,
+                )
                 if marker is None and self.paths.marker.exists():
                     self.paths.marker.unlink(missing_ok=True)
                 raise
+            if recovery_source == self.paths.operation_recovery:
+                try:
+                    shutil.rmtree(recovery_source)
+                except OSError:
+                    pass
             return (
                 [
                     "friend",
@@ -2400,7 +2480,8 @@ class Manager:
             )
             self._validate_owner(owner)
             self._workspace_preflight(invocation.workspaces)
-            self._snapshot_recovery()
+            recovery_source = self.paths.operation_recovery
+            self._snapshot_state(recovery_source)
             runtime_switched = False
             previous_version: str | None = None
             try:
@@ -2412,7 +2493,7 @@ class Manager:
                     share_gid=share_gid,
                     workspaces=invocation.workspaces,
                 )
-                previous_version = self._stage_runtime()
+                previous_version = self._stage_runtime(preserve_rollback=True)
                 runtime_switched = True
                 self._deploy_configuration(
                     invocation,
@@ -2448,9 +2529,17 @@ class Manager:
                     raise ManagementError(
                         1, "REPAIR_FAILED", f"Repair check failed: {failed[0]['id']}"
                     )
+                self._commit_runtime_switch()
             except Exception:
-                self._restore_failed_switch(runtime_switched=runtime_switched)
+                self._restore_failed_switch(
+                    runtime_switched=runtime_switched,
+                    recovery_source=recovery_source,
+                )
                 raise
+            try:
+                shutil.rmtree(recovery_source)
+            except OSError:
+                pass
             return (
                 [
                     str(self.paths.install_root),
@@ -2780,9 +2869,6 @@ class Manager:
                 digest.update(b"\0")
             return f"source-tree-sha256:{digest.hexdigest()}"
 
-    def _snapshot_recovery(self) -> None:
-            self._snapshot_state(self.paths.recovery)
-
     def _snapshot_state(self, destination: Path) -> None:
             if destination.exists() or destination.is_symlink():
                 details = destination.lstat()
@@ -2911,18 +2997,39 @@ class Manager:
                 )
                 self.load_marker(required=True)
 
-    def _restore_failed_switch(self, *, runtime_switched: bool) -> None:
+    def _restore_failed_switch(
+            self,
+            *,
+            runtime_switched: bool,
+            recovery_source: Path | None = None,
+    ) -> None:
             self._stop_service(disable=False)
             failed = self.paths.install_root.parent / f".imaginary-friend-failed-{uuid.uuid4().hex}"
             try:
-                if runtime_switched and self.paths.rollback_root.is_dir():
+                if runtime_switched and (
+                    self._transient_runtime is not None
+                    and self._transient_runtime.is_dir()
+                ):
+                    if self.paths.install_root.exists():
+                        os.rename(self.paths.install_root, failed)
+                    os.rename(self._transient_runtime, self.paths.install_root)
+                    self._transient_runtime = None
+                    if failed.exists():
+                        shutil.rmtree(failed)
+                elif (
+                    runtime_switched
+                    and self._rollback_switch_active
+                    and self.paths.rollback_root.is_dir()
+                ):
                     if self.paths.install_root.exists():
                         os.rename(self.paths.install_root, failed)
                     os.rename(self.paths.rollback_root, self.paths.install_root)
+                    self._rollback_switch_active = False
                     if failed.exists():
                         shutil.rmtree(failed)
-                if (self.paths.recovery / "snapshot.json").is_file():
-                    self._restore_recovery_state()
+                snapshot_root = recovery_source or self.paths.recovery
+                if (snapshot_root / "snapshot.json").is_file():
+                    self._restore_state(snapshot_root)
                 if (
                     self.paths.install_root.is_dir()
                     and self.paths.database.is_file()
@@ -2937,6 +3044,11 @@ class Manager:
                     self._deploy_unit(workspaces)
                     if not database.settings()["suspended"]:
                         self._start_service()
+                if (
+                    recovery_source == self.paths.operation_recovery
+                    and recovery_source.is_dir()
+                ):
+                    shutil.rmtree(recovery_source)
             except Exception:
                 # Preserve both trees and recovery data for an explicit doctor run.
                 return

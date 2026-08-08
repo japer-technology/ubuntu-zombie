@@ -41,8 +41,9 @@ loopback-only IP policy.
 
 Workspace operations keep the nominated root open by descriptor, walk each
 relative component with `O_NOFOLLOW`, compare device and inode identity, reject
-hard links and special files, and use conflict-checked atomic replacement.
-Destructive changes require the canonical relative path as confirmation.
+hard links and special files, use conflict-checked atomic replacement, and
+perform moves with atomic no-replace semantics. Destructive changes require the
+canonical relative path as confirmation.
 
 ## Lifecycle boundary
 
@@ -51,3 +52,6 @@ same JSON contract. Mutations require root, a reviewed plan, the product lock,
 and a valid marker or clean-install transaction. Ubuntu Zombie may eventually
 invoke that exact entry point; it does not become part of the chat runtime and
 does not receive Friend credentials or private content.
+
+Same-version repair and reinstall use a transient recovery point and preserve
+the previous-version runtime and state snapshot reserved for explicit rollback.

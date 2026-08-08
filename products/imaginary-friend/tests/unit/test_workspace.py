@@ -4,7 +4,9 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from friend import workspace as workspace_module
 from friend.errors import ConflictError, ValidationError
 from friend.workspace import Workspace, WorkspaceRoot, validate_nominated_root
 
@@ -80,6 +82,44 @@ class WorkspaceTests(unittest.TestCase):
         self.workspace.delete("folder")
         self.assertEqual(self.workspace.list()["entries"], [])
 
+    def test_move_never_replaces_a_concurrent_destination(self) -> None:
+        self.workspace.write("source.txt", "source")
+        rename_noreplace = workspace_module._rename_noreplace
+
+        def race(
+            source_parent: int,
+            source: str,
+            destination_parent: int,
+            destination: str,
+        ) -> None:
+            destination_fd = os.open(
+                destination,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o660,
+                dir_fd=destination_parent,
+            )
+            try:
+                os.write(destination_fd, b"concurrent")
+            finally:
+                os.close(destination_fd)
+            rename_noreplace(
+                source_parent,
+                source,
+                destination_parent,
+                destination,
+            )
+
+        with mock.patch(
+            "friend.workspace._rename_noreplace", side_effect=race
+        ):
+            with self.assertRaises(ConflictError):
+                self.workspace.move("source.txt", "destination.txt")
+
+        self.assertEqual(
+            self.workspace.read("destination.txt")["content"], "concurrent"
+        )
+        self.assertEqual(self.workspace.read("source.txt")["content"], "source")
+
     def test_mutations_require_shared_group_inheritance(self) -> None:
         unsafe = self.root / "unsafe"
         unsafe.mkdir(mode=0o0770)
@@ -88,6 +128,9 @@ class WorkspaceTests(unittest.TestCase):
             self.workspace.write("unsafe/file.txt", "content")
         with self.assertRaises(ValidationError):
             self.workspace.mkdir("unsafe/folder")
+        self.workspace.write("move-source.txt", "content")
+        with self.assertRaises(ValidationError):
+            self.workspace.move("move-source.txt", "unsafe/moved.txt")
 
         unsafe.chmod(0o2770)
         self.workspace.write("unsafe/file.txt", "content")
