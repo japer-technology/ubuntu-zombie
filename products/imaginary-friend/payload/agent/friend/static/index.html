@@ -146,6 +146,7 @@
     let conversationId = null;
     let selectedFile = null;
     let loadedDigest = null;
+    let turnPending = false;
     const byId = id => document.getElementById(id);
 
     async function api(path, options = {}) {
@@ -207,7 +208,13 @@
       element.scrollIntoView({block: "end"});
     }
 
+    function clearSelectedFile() {
+      selectedFile = null;
+      byId("selected-file").textContent = "No file selected for model context.";
+    }
+
     async function loadConversation(id) {
+      if (turnPending) return;
       const value = await api(`/api/conversations/${encodeURIComponent(id)}`);
       conversationId = id;
       byId("messages").replaceChildren();
@@ -230,8 +237,14 @@
 
     byId("composer").addEventListener("submit", async event => {
       event.preventDefault();
+      if (turnPending) return;
       const prompt = byId("prompt").value.trim();
       if (!prompt) return;
+      const disclosedFile = selectedFile;
+      clearSelectedFile();
+      turnPending = true;
+      const submit = byId("composer").querySelector('button[type="submit"]');
+      submit.disabled = true;
       byId("notice").textContent = "Thinking locally…";
       appendMessage("user", prompt);
       byId("prompt").value = "";
@@ -241,7 +254,7 @@
           body: {
             message: prompt,
             conversation_id: conversationId,
-            selected_files: selectedFile ? [selectedFile] : []
+            selected_files: disclosedFile ? [disclosedFile] : []
           }
         });
         conversationId = value.conversation_id;
@@ -251,11 +264,16 @@
       } catch (error) {
         appendMessage("assistant", `Request failed: ${error.message}`);
         byId("notice").textContent = "";
+      } finally {
+        turnPending = false;
+        submit.disabled = false;
       }
     });
 
     byId("new-conversation").addEventListener("click", () => {
+      if (turnPending) return;
       conversationId = null;
+      clearSelectedFile();
       byId("messages").replaceChildren();
       appendMessage("assistant", "A new conversation is ready.");
     });
@@ -313,7 +331,7 @@
         await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/path`, {
           method: "DELETE", body: {path, confirmation: path}
         });
-        selectedFile = null;
+        clearSelectedFile();
         byId("workspace-dialog").close();
       } catch (error) { alert(error.message); }
     });

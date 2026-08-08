@@ -11,7 +11,13 @@ from unittest import mock
 
 from friend.auth import hash_password
 from friend.database import Database
-from friend.management import Invocation, ManagementError, Manager, Paths
+from friend.management import (
+    Invocation,
+    ManagementError,
+    Manager,
+    Paths,
+    read_secret_file,
+)
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -359,6 +365,17 @@ class ManagementUnitTests(unittest.TestCase):
         self.assertEqual(invocation.inputs["owner_user"], "owner")
         self.assertEqual(invocation.inputs["model"], "fixture-friend")
 
+    def test_interactive_install_rejects_short_owner_password(self) -> None:
+        invocation = self.invocation()
+        invocation.non_interactive = False
+        with mock.patch(
+            "friend.management.getpass.getpass",
+            side_effect=["short", "short"],
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager._prepare_configuration_inputs(invocation)
+        self.assertEqual(raised.exception.code, "INVALID_SECRET")
+
     def test_repair_preserves_restricted_workspace_without_new_file(self) -> None:
         self.paths.state_root.mkdir(parents=True)
         workspace = Path(self.temporary.name) / "workspace"
@@ -391,6 +408,25 @@ class ManagementUnitTests(unittest.TestCase):
             )["enabled"]
         )
 
+    def test_existing_workspace_requires_setgid_group_inheritance(self) -> None:
+        parent = Path(self.temporary.name) / "workspaces"
+        default = parent / "workspace"
+        additional = parent / "projects"
+        default.mkdir(parents=True)
+        additional.mkdir()
+        default.chmod(0o2770)
+        additional.chmod(0o0770)
+        group = SimpleNamespace(gr_gid=os.getgid())
+
+        with mock.patch("friend.management.DEFAULT_WORKSPACE", default):
+            with mock.patch("friend.management.grp.getgrnam", return_value=group):
+                with self.assertRaises(ManagementError) as raised:
+                    self.manager._workspace_preflight([default, additional])
+                self.assertEqual(raised.exception.code, "UNSAFE_WORKSPACE")
+
+                additional.chmod(0o2770)
+                self.manager._workspace_preflight([default, additional])
+
     def test_dry_run_preflight_reports_missing_installation(self) -> None:
         invocation = self.invocation("suspend")
         invocation.dry_run = True
@@ -403,6 +439,19 @@ class ManagementUnitTests(unittest.TestCase):
         with self.assertRaises(ManagementError) as raised:
             self.manager._validate_backup_destination(missing, dry_run=True)
         self.assertEqual(raised.exception.exit_code, 66)
+
+    def test_password_file_must_be_one_bounded_utf8_line(self) -> None:
+        password_file = Path(self.temporary.name) / "password"
+        for value in ("long enough\nsecond line", "x" * 1025):
+            password_file.write_text(value, encoding="utf-8")
+            details = password_file.stat()
+            with mock.patch(
+                "friend.management.check_secure_file",
+                return_value=details,
+            ):
+                with self.assertRaises(ManagementError) as raised:
+                    read_secret_file(password_file)
+            self.assertEqual(raised.exception.code, "INVALID_SECRET")
 
 
 if __name__ == "__main__":

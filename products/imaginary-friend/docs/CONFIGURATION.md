@@ -42,9 +42,9 @@ The product-created `/srv/imaginary-friend/workspace` remains nominated
 automatically. New roots must be direct children of
 `/srv/imaginary-friend`. An existing additional root is accepted only after a
 prior Friend install created `friend-share` and the root already uses that
-group with group read, write, and execute access. Repair with a reviewed
-workspace file adds or restricts root-controlled nominations; it never
-recursively changes an existing tree.
+group with group read, write, and execute access plus setgid inheritance.
+Repair with a reviewed workspace file adds or restricts root-controlled
+nominations; it never recursively changes an existing tree.
 
 ## Runtime owner controls
 

@@ -197,6 +197,8 @@ class ModelClient:
         content = message["content"].strip()
         if not content:
             raise ValidationError("Local model returned an empty response.")
+        if len(content) > MAX_MESSAGE_CHARS:
+            raise ValidationError("Local model completion content is too large.")
         return content
 
     def probe(self) -> dict[str, Any]:

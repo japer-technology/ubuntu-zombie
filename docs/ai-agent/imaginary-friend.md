@@ -252,9 +252,9 @@ human owner, and creates the default workspace as `root:friend-share` mode
 `2770`. Friend-created directories are mode `2770`; files are
 `friend:friend-share` mode `0660`. An additional existing root is accepted
 only when the operator names it explicitly, it is not a mount point or
-symlink, its current group access already permits the declared sharing
-model, and changing it is not necessary. The installer never recursively
-changes an existing tree.
+symlink, its current group access and setgid inheritance already permit the
+declared sharing model, and changing it is not necessary. The installer never
+recursively changes an existing tree.
 
 Workspace operations hold an open root directory descriptor and resolve each
 relative component with `openat`-style calls, `O_NOFOLLOW`, and type checks.

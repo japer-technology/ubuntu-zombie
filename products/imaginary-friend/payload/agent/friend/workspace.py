@@ -52,14 +52,18 @@ class WorkspaceRoot:
     path: Path
     device: int
     inode: int
+    group: int | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "WorkspaceRoot":
+    def from_record(
+        cls, record: dict[str, Any], *, group: int | None = None
+    ) -> "WorkspaceRoot":
         return cls(
             workspace_id=str(record["id"]),
             path=Path(str(record["canonical_root"])),
             device=int(record["root_device"]),
             inode=int(record["root_inode"]),
+            group=group,
         )
 
 
@@ -186,6 +190,12 @@ class Workspace:
                 not stat.S_ISDIR(details.st_mode)
                 or details.st_dev != self.root.device
                 or details.st_ino != self.root.inode
+                or (
+                    self.root.group is not None
+                    and details.st_gid != self.root.group
+                )
+                or stat.S_IMODE(details.st_mode) & 0o070 != 0o070
+                or not details.st_mode & stat.S_ISGID
             ):
                 raise ValidationError(
                     "Workspace root changed after it was nominated."
@@ -235,6 +245,19 @@ class Workspace:
             yield current
         finally:
             os.close(current)
+
+    @staticmethod
+    def _require_shared_parent(root_fd: int, parent_fd: int) -> None:
+        root = os.fstat(root_fd)
+        parent = os.fstat(parent_fd)
+        if (
+            parent.st_gid != root.st_gid
+            or stat.S_IMODE(parent.st_mode) & 0o070 != 0o070
+            or not parent.st_mode & stat.S_ISGID
+        ):
+            raise ValidationError(
+                "Workspace parent must preserve friend-share group inheritance."
+            )
 
     def list(self, relative_path: str = ".") -> dict[str, Any]:
         parts = normalize_relative_path(relative_path, allow_root=True)
@@ -327,6 +350,7 @@ class Workspace:
         with self._root_fd() as root_fd, self._directory_fd(
             root_fd, parts[:-1]
         ) as parent_fd:
+            self._require_shared_parent(root_fd, parent_fd)
             try:
                 existing_fd = os.open(
                     parts[-1], os.O_RDONLY | _NOFOLLOW | _CLOEXEC, dir_fd=parent_fd
@@ -420,6 +444,7 @@ class Workspace:
         with self._root_fd() as root_fd, self._directory_fd(
             root_fd, parts[:-1]
         ) as parent_fd:
+            self._require_shared_parent(root_fd, parent_fd)
             try:
                 os.mkdir(parts[-1], 0o2770, dir_fd=parent_fd)
             except FileExistsError as exc:

@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "fixtures"))
 
@@ -22,6 +23,7 @@ class ApplicationTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.workspace = self.root / "workspace"
         self.workspace.mkdir()
+        self.workspace.chmod(0o2770)
         self.database_path = self.root / "friend.db"
         self.audit_path = self.root / "audit.log"
         self.key_path = self.root / "session.key"
@@ -42,16 +44,18 @@ class ApplicationTests(unittest.TestCase):
             root_device=details.st_dev,
             root_inode=details.st_ino,
         )
-        self.application = FriendApplication(
-            Config(
-                owner_user="owner",
-                port=6767,
-                database_path=self.database_path,
-                audit_path=self.audit_path,
-                signing_key_path=self.key_path,
-                allowed_workspaces=(self.workspace,),
+        with mock.patch("friend.application.grp.getgrnam") as share_group:
+            share_group.return_value.gr_gid = self.workspace.stat().st_gid
+            self.application = FriendApplication(
+                Config(
+                    owner_user="owner",
+                    port=6767,
+                    database_path=self.database_path,
+                    audit_path=self.audit_path,
+                    signing_key_path=self.key_path,
+                    allowed_workspaces=(self.workspace,),
+                )
             )
-        )
 
     def tearDown(self) -> None:
         self.fixture.__exit__(None, None, None)
@@ -133,11 +137,59 @@ class ApplicationTests(unittest.TestCase):
             self.workspace_id, "note.txt", confirmation="note.txt"
         )
 
+    def test_invalid_workspace_path_is_denied_and_audited(self) -> None:
+        with self.assertRaises(ValidationError):
+            self.application.read_file(self.workspace_id, "../outside")
+
+        event = json.loads(
+            self.audit_path.read_text(encoding="utf-8").splitlines()[-1]
+        )
+        self.assertEqual(event["event_type"], "policy_decision")
+        self.assertEqual(event["decision"], "denied")
+        self.assertEqual(event["relative_path"], "../outside")
+
+        self.application.write_file(
+            self.workspace_id,
+            "move-me.txt",
+            "content",
+            expected_sha256=None,
+            confirmation=None,
+        )
+        with self.assertRaises(ValidationError):
+            self.application.move_path(
+                self.workspace_id,
+                "move-me.txt",
+                "../outside",
+                confirmation="move-me.txt",
+            )
+        event = json.loads(
+            self.audit_path.read_text(encoding="utf-8").splitlines()[-1]
+        )
+        self.assertEqual(event["decision"], "denied")
+        self.assertEqual(event["relative_path"], "../outside")
+
     def test_settings_reject_non_loopback_provider(self) -> None:
         with self.assertRaises(ValidationError):
             self.application.update_settings(
                 {"model_base_url": "http://example.com/v1"}
             )
+
+    def test_workspace_reenable_requires_complete_sharing_boundary(self) -> None:
+        self.application.set_workspace_enabled(self.workspace_id, False)
+        self.workspace.chmod(0o0770)
+        with self.assertRaises(ValidationError):
+            self.application.set_workspace_enabled(self.workspace_id, True)
+
+        self.workspace.chmod(0o2770)
+        self.application.set_workspace_enabled(self.workspace_id, True)
+
+    def test_password_rotation_rejects_unsupported_password_text(self) -> None:
+        for password in ("x" * 1025, "long enough\nbut multiline"):
+            with self.assertRaises(ValidationError):
+                self.application.rotate_password(
+                    "initial owner password", password
+                )
+        self.application.login("initial owner password")
 
     def test_suspension_revokes_sessions_and_capabilities(self) -> None:
         login = self.application.login("initial owner password")

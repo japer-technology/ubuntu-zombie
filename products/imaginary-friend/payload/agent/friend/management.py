@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from .audit import redact
-from .auth import hash_password, new_signing_key
+from .auth import MAX_PASSWORD_BYTES, hash_password, new_signing_key
 from .database import Database
 from .errors import FriendError, ValidationError
 from .model import ModelClient, validate_model_base_url, validate_model_id
@@ -353,12 +353,30 @@ def check_secure_file(path: Path, *, missing_code: int = 66) -> os.stat_result:
 
 def read_secret_file(path: Path) -> str:
     details = check_secure_file(path)
-    if details.st_size > 4096:
+    if details.st_size > MAX_PASSWORD_BYTES + 2:
         raise ManagementError(65, "INVALID_SECRET", "Owner password file is too large.")
     try:
-        value = path.read_text(encoding="utf-8").rstrip("\r\n")
+        value = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as exc:
         raise ManagementError(65, "INVALID_SECRET", "Owner password file is unreadable.") from exc
+    if value.endswith("\n"):
+        value = value[:-1]
+    return validate_owner_password(value)
+
+
+def validate_owner_password(value: str) -> str:
+    if "\r" in value or "\n" in value:
+        raise ManagementError(
+            65, "INVALID_SECRET", "Owner password must contain exactly one line."
+        )
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ManagementError(
+            65, "INVALID_SECRET", "Owner password must be valid UTF-8."
+        ) from exc
+    if len(encoded) > MAX_PASSWORD_BYTES:
+        raise ManagementError(65, "INVALID_SECRET", "Owner password file is too large.")
     if len(value) < 12:
         raise ManagementError(
             65, "INVALID_SECRET", "Owner password must be at least 12 characters."
@@ -657,7 +675,7 @@ class Manager:
                 second = getpass.getpass("Repeat owner password: ")
                 if not secrets.compare_digest(first, second):
                     raise ManagementError(64, "PASSWORD_MISMATCH", "Passwords did not match.")
-                invocation.password = first
+                invocation.password = validate_owner_password(first)
             else:
                 invocation.generated_password = secrets.token_urlsafe(24)
                 invocation.password = invocation.generated_password
@@ -1427,11 +1445,12 @@ class Manager:
                     share_gid is None
                     or details.st_gid != share_gid
                     or stat.S_IMODE(details.st_mode) & 0o070 != 0o070
+                    or not details.st_mode & stat.S_ISGID
                 ):
                     raise ManagementError(
                         73,
                         "UNSAFE_WORKSPACE",
-                        "Existing additional roots must already use friend-share with group rwx.",
+                        "Existing additional roots must use friend-share with group rwx and setgid.",
                     )
             elif path.parent != self.paths.workspace_parent:
                 raise ManagementError(
@@ -1606,6 +1625,7 @@ class Manager:
         workspace_ok = True
         if database is not None:
             try:
+                share_gid = grp.getgrnam("friend-share").gr_gid
                 for record in database.list_workspaces():
                     details = validate_nominated_root(
                         Path(record["canonical_root"]),
@@ -1615,9 +1635,12 @@ class Manager:
                     if (
                         details.st_dev != int(record["root_device"])
                         or details.st_ino != int(record["root_inode"])
+                        or details.st_gid != share_gid
+                        or stat.S_IMODE(details.st_mode) & 0o070 != 0o070
+                        or not details.st_mode & stat.S_ISGID
                     ):
                         workspace_ok = False
-            except (FriendError, OSError):
+            except (FriendError, OSError, KeyError):
                 workspace_ok = False
         else:
             workspace_ok = False
@@ -2557,6 +2580,14 @@ class Manager:
                 )
             database = Database(self.paths.database)
             database.require_ready()
+            try:
+                share_gid = grp.getgrnam("friend-share").gr_gid
+            except KeyError as exc:
+                raise ManagementError(
+                    78,
+                    "WORKSPACE_SHARING_INVALID",
+                    "Friend workspace sharing group is unavailable.",
+                ) from exc
             for record in database.list_workspaces():
                 details = validate_nominated_root(
                     Path(record["canonical_root"]),
@@ -2565,9 +2596,14 @@ class Manager:
                 if (
                     details.st_dev != int(record["root_device"])
                     or details.st_ino != int(record["root_inode"])
+                    or details.st_gid != share_gid
+                    or stat.S_IMODE(details.st_mode) & 0o070 != 0o070
+                    or not details.st_mode & stat.S_ISGID
                 ):
                     raise ManagementError(
-                        78, "WORKSPACE_CHANGED", "A workspace changed after nomination."
+                        78,
+                        "WORKSPACE_CHANGED",
+                        "A workspace changed or lost its sharing boundary after nomination.",
                     )
             self._probe_model(invocation)
             self._validate_runtime_as_friend()

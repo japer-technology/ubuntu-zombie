@@ -17,8 +17,9 @@ conformance suites. Model tests use
 external network.
 
 Coverage includes scrypt authentication, session and CSRF revocation, strict
-configuration, retention, secret redaction, loopback-only model transport,
-bounded conversation context, policy denial, workspace traversal/symlink/
+configuration, complete and consistent exports, retention, secret redaction,
+loopback-only model transport, bounded conversation context, one-turn selected
+file disclosure, policy denial and audit evidence, workspace traversal/symlink/
 hard-link/special-file controls, atomic conflicts, systemd boundary assets,
 lifecycle plans and errors, descriptor validation, and source independence.
 

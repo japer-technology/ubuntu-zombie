@@ -8,6 +8,7 @@ import threading
 import unittest
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "fixtures"))
 
@@ -25,6 +26,7 @@ class HTTPTests(unittest.TestCase):
         root = Path(self.temporary.name)
         self.workspace = root / "workspace"
         self.workspace.mkdir()
+        self.workspace.chmod(0o2770)
         key = root / "session.key"
         key.write_bytes(b"s" * 32)
         database = Database(root / "friend.db")
@@ -43,16 +45,18 @@ class HTTPTests(unittest.TestCase):
             root_device=details.st_dev,
             root_inode=details.st_ino,
         )
-        app = FriendApplication(
-            Config(
-                owner_user="owner",
-                port=6767,
-                database_path=root / "friend.db",
-                audit_path=root / "audit.log",
-                signing_key_path=key,
-                allowed_workspaces=(self.workspace,),
+        with mock.patch("friend.application.grp.getgrnam") as share_group:
+            share_group.return_value.gr_gid = self.workspace.stat().st_gid
+            app = FriendApplication(
+                Config(
+                    owner_user="owner",
+                    port=6767,
+                    database_path=root / "friend.db",
+                    audit_path=root / "audit.log",
+                    signing_key_path=key,
+                    allowed_workspaces=(self.workspace,),
+                )
             )
-        )
         self.server = FriendHTTPServer(("127.0.0.1", 0), app)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -171,6 +175,9 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(response.status, 400)
         response.read()
         connection.close()
+
+    def test_server_socket_supports_prompt_service_restarts(self) -> None:
+        self.assertTrue(FriendHTTPServer.allow_reuse_address)
 
 
 if __name__ == "__main__":
