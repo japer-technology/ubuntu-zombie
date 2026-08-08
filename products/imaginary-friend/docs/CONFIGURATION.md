@@ -26,7 +26,8 @@ rejected instead of ignored. `uninstall` also requires the top-level boolean
 Secret values never belong in arguments, ordinary environment variables,
 plans, JSON output, receipts, diagnostics, or audit fields. A password file
 contains the password as one UTF-8 line and should use root ownership and mode
-`0600`.
+`0600`. Owner passwords must contain at least 12 characters and no more than
+1,024 UTF-8 bytes.
 
 ## Workspace nomination file
 

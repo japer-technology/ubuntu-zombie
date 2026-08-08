@@ -85,7 +85,7 @@ Interactive install reviews every value. Unattended install accepts only:
 | ----- | ----------------------- | ---- |
 | Non-interactive mode | `FRIEND_NONINTERACTIVE=1` | Never prompts |
 | Human owner | `FRIEND_OWNER_USER` / `owner_user` | Existing non-root local account; required unattended |
-| Owner password | `FRIEND_OWNER_PASSWORD_FILE` / `owner_password_file` | Root-owned mode `0600` file; required unattended |
+| Owner password | `FRIEND_OWNER_PASSWORD_FILE` / `owner_password_file` | Root-owned mode `0600` file containing one line of 12 or more characters and at most 1,024 UTF-8 bytes; required for first unattended install |
 | Model endpoint | `FRIEND_MODEL_BASE_URL` / `model_base_url` | HTTP loopback URL; default above |
 | Model ID | `FRIEND_MODEL` / `model` | Non-empty and required unattended |
 | Workspace roots | `FRIEND_WORKSPACES_FILE` / `workspaces_file` | Optional root-owned JSON array; default product-created root |
@@ -192,7 +192,7 @@ The boundary must:
   sockets, and paths that resolve outside a nominated root;
 - separate Friend executable/configuration paths from writable workspaces;
 - expose the exact path and operation before destructive changes;
-- use atomic writes where practical and define conflict behaviour;
+- use atomic writes and no-clobber moves, and define conflict behaviour;
 - preserve file ownership expected by the human owner; and
 - audit mutations without copying private file contents into ordinary
   logs.
@@ -416,9 +416,9 @@ History is enabled with the fixed 30-day default and can be shortened,
 disabled for future turns, deleted, or exported by the owner. Workspace
 content enters model context only after an authenticated request selects a
 specific file and the UI identifies it; bulk or background ingestion is
-absent. Structured workspace events retain paths and outcomes for 90 days
-but not file contents. Third-party material remains the owner's
-responsibility and is not used for training.
+absent. Structured workspace events retain paths and outcomes for the configured
+audit-retention period, 90 days by default, but not file contents. Third-party
+material remains the owner's responsibility and is not used for training.
 
 Suspension ends active sessions and model/workspace access but preserves
 state. State-preserving uninstall leaves the protected state root and marker

@@ -37,6 +37,8 @@ If a switch fails, the updater attempts to restore the current runtime and
 state and leaves root-only recovery data for `doctor`. Do not delete
 `/opt/.imaginary-friend-rollback` or
 `/var/lib/imaginary-friend/recovery` while diagnosing a failed update.
+Same-version repair and reinstall also preserve those paired rollback
+resources.
 
 The first schema has no historical migration. Future releases must document
 supported source versions, migration validation, and rollback compatibility

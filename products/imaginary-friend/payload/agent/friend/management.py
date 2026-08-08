@@ -2869,9 +2869,6 @@ class Manager:
                 digest.update(b"\0")
             return f"source-tree-sha256:{digest.hexdigest()}"
 
-    def _snapshot_recovery(self) -> None:
-            self._snapshot_state(self.paths.recovery)
-
     def _snapshot_state(self, destination: Path) -> None:
             if destination.exists() or destination.is_symlink():
                 details = destination.lstat()

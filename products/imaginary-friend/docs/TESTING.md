@@ -20,8 +20,10 @@ Coverage includes scrypt authentication, session and CSRF revocation, strict
 configuration, complete and consistent exports, retention, secret redaction,
 loopback-only model transport, bounded conversation context, one-turn selected
 file disclosure, policy denial and audit evidence, workspace traversal/symlink/
-hard-link/special-file controls, atomic conflicts, systemd boundary assets,
-lifecycle plans and errors, descriptor validation, and source independence.
+hard-link/special-file controls, atomic no-clobber conflicts, systemd boundary
+assets and rotation paths, exclusive diagnostic archives, lifecycle plans,
+rollback preservation, strict input types, descriptor validation, and source
+independence.
 
 ## Disposable-VM lifecycle
 
