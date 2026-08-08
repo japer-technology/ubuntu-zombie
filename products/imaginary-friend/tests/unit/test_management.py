@@ -397,6 +397,25 @@ class ManagementUnitTests(unittest.TestCase):
             )["enabled"]
         )
 
+    def test_existing_workspace_requires_setgid_group_inheritance(self) -> None:
+        parent = Path(self.temporary.name) / "workspaces"
+        default = parent / "workspace"
+        additional = parent / "projects"
+        default.mkdir(parents=True)
+        additional.mkdir()
+        default.chmod(0o2770)
+        additional.chmod(0o0770)
+        group = SimpleNamespace(gr_gid=os.getgid())
+
+        with mock.patch("friend.management.DEFAULT_WORKSPACE", default):
+            with mock.patch("friend.management.grp.getgrnam", return_value=group):
+                with self.assertRaises(ManagementError) as raised:
+                    self.manager._workspace_preflight([default, additional])
+                self.assertEqual(raised.exception.code, "UNSAFE_WORKSPACE")
+
+                additional.chmod(0o2770)
+                self.manager._workspace_preflight([default, additional])
+
     def test_dry_run_preflight_reports_missing_installation(self) -> None:
         invocation = self.invocation("suspend")
         invocation.dry_run = True

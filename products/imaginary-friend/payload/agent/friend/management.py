@@ -1441,11 +1441,12 @@ class Manager:
                     share_gid is None
                     or details.st_gid != share_gid
                     or stat.S_IMODE(details.st_mode) & 0o070 != 0o070
+                    or not details.st_mode & stat.S_ISGID
                 ):
                     raise ManagementError(
                         73,
                         "UNSAFE_WORKSPACE",
-                        "Existing additional roots must already use friend-share with group rwx.",
+                        "Existing additional roots must use friend-share with group rwx and setgid.",
                     )
             elif path.parent != self.paths.workspace_parent:
                 raise ManagementError(

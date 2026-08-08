@@ -63,6 +63,22 @@ class BoundaryAssetTests(unittest.TestCase):
             self.assertIn(required, unit)
         self.assertNotIn("ExecStart=/bin/", unit)
 
+    def test_selected_workspace_file_is_disclosed_for_one_turn_only(self) -> None:
+        interface = (
+            PRODUCT_ROOT
+            / "payload"
+            / "agent"
+            / "friend"
+            / "static"
+            / "index.html"
+        ).read_text(encoding="utf-8")
+        self.assertIn("function clearSelectedFile()", interface)
+        self.assertIn(
+            "conversationId = value.conversation_id;\n        clearSelectedFile();",
+            interface,
+        )
+        self.assertGreaterEqual(interface.count("clearSelectedFile();"), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

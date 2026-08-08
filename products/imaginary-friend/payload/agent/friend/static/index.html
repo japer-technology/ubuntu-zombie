@@ -207,6 +207,11 @@
       element.scrollIntoView({block: "end"});
     }
 
+    function clearSelectedFile() {
+      selectedFile = null;
+      byId("selected-file").textContent = "No file selected for model context.";
+    }
+
     async function loadConversation(id) {
       const value = await api(`/api/conversations/${encodeURIComponent(id)}`);
       conversationId = id;
@@ -245,6 +250,7 @@
           }
         });
         conversationId = value.conversation_id;
+        clearSelectedFile();
         appendMessage("assistant", value.message);
         byId("notice").textContent = value.history_persisted ? "Saved locally." : "History storage is off.";
         await refresh();
@@ -256,6 +262,7 @@
 
     byId("new-conversation").addEventListener("click", () => {
       conversationId = null;
+      clearSelectedFile();
       byId("messages").replaceChildren();
       appendMessage("assistant", "A new conversation is ready.");
     });
@@ -313,7 +320,7 @@
         await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/path`, {
           method: "DELETE", body: {path, confirmation: path}
         });
-        selectedFile = null;
+        clearSelectedFile();
         byId("workspace-dialog").close();
       } catch (error) { alert(error.message); }
     });
