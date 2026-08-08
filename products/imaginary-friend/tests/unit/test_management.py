@@ -160,7 +160,7 @@ class ManagementUnitTests(unittest.TestCase):
             "_collision_preflight": mock.DEFAULT,
             "_workspace_preflight": mock.DEFAULT,
             "_probe_model": mock.DEFAULT,
-            "_snapshot_recovery": mock.DEFAULT,
+            "_snapshot_state": mock.DEFAULT,
             "_ensure_transaction": mock.DEFAULT,
             "_ensure_accounts": mock.DEFAULT,
             "_ensure_paths": mock.DEFAULT,
@@ -181,7 +181,8 @@ class ManagementUnitTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 self.manager._execute_install(self.invocation())
         patched["_restore_failed_switch"].assert_called_once_with(
-            runtime_switched=True
+            runtime_switched=True,
+            recovery_source=self.paths.operation_recovery,
         )
 
     def test_reinstall_preserves_suspension_and_keeps_service_stopped(self) -> None:
@@ -191,7 +192,7 @@ class ManagementUnitTests(unittest.TestCase):
             "_collision_preflight": mock.DEFAULT,
             "_workspace_preflight": mock.DEFAULT,
             "_probe_model": mock.DEFAULT,
-            "_snapshot_recovery": mock.DEFAULT,
+            "_snapshot_state": mock.DEFAULT,
             "_ensure_transaction": mock.DEFAULT,
             "_ensure_accounts": mock.DEFAULT,
             "_ensure_paths": mock.DEFAULT,
@@ -439,6 +440,74 @@ class ManagementUnitTests(unittest.TestCase):
         with self.assertRaises(ManagementError) as raised:
             self.manager._validate_backup_destination(missing, dry_run=True)
         self.assertEqual(raised.exception.exit_code, 66)
+
+    def test_lifecycle_retention_rejects_fractional_values(self) -> None:
+        with self.assertRaises(ManagementError) as raised:
+            self.manager._bounded_integer(
+                30.5, "history_retention_days", 1, 365
+            )
+        self.assertEqual(raised.exception.code, "INVALID_INPUT")
+
+    def test_same_version_switch_preserves_previous_rollback(self) -> None:
+        self.paths.install_root.mkdir(parents=True)
+        (self.paths.install_root / "VERSION").write_text(
+            self.manager.version, encoding="utf-8"
+        )
+        self.paths.rollback_root.mkdir()
+        previous_version = "2026.08.07.00.00.00"
+        (self.paths.rollback_root / "VERSION").write_text(
+            previous_version, encoding="utf-8"
+        )
+        stage = self.paths.install_root.parent / ".stage"
+        stage.mkdir()
+        (stage / "VERSION").write_text(self.manager.version, encoding="utf-8")
+        (stage / "replacement").write_text("new runtime", encoding="utf-8")
+
+        switched_from = self.manager._switch_staged_runtime(
+            stage, preserve_rollback=True
+        )
+
+        self.assertEqual(switched_from, self.manager.version)
+        self.assertTrue((self.paths.install_root / "replacement").is_file())
+        self.assertEqual(
+            (self.paths.rollback_root / "VERSION").read_text(encoding="utf-8"),
+            previous_version,
+        )
+        self.manager._commit_runtime_switch()
+        self.assertEqual(
+            (self.paths.rollback_root / "VERSION").read_text(encoding="utf-8"),
+            previous_version,
+        )
+
+    def test_failed_same_version_switch_restores_current_runtime(self) -> None:
+        self.paths.install_root.mkdir(parents=True)
+        (self.paths.install_root / "VERSION").write_text(
+            self.manager.version, encoding="utf-8"
+        )
+        (self.paths.install_root / "current").write_text(
+            "current runtime", encoding="utf-8"
+        )
+        self.paths.rollback_root.mkdir()
+        previous_version = "2026.08.07.00.00.00"
+        (self.paths.rollback_root / "VERSION").write_text(
+            previous_version, encoding="utf-8"
+        )
+        stage = self.paths.install_root.parent / ".stage"
+        stage.mkdir()
+        (stage / "VERSION").write_text(self.manager.version, encoding="utf-8")
+
+        self.manager._switch_staged_runtime(stage, preserve_rollback=True)
+        with mock.patch.object(self.manager, "_stop_service"):
+            self.manager._restore_failed_switch(
+                runtime_switched=True,
+                recovery_source=self.paths.operation_recovery,
+            )
+
+        self.assertTrue((self.paths.install_root / "current").is_file())
+        self.assertEqual(
+            (self.paths.rollback_root / "VERSION").read_text(encoding="utf-8"),
+            previous_version,
+        )
 
     def test_password_file_must_be_one_bounded_utf8_line(self) -> None:
         password_file = Path(self.temporary.name) / "password"

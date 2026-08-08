@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import hashlib
 import os
 import stat
@@ -17,6 +19,18 @@ MAX_FILE_BYTES = 1_048_576
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 _DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+_RENAME_NOREPLACE = 1
+_LIBC = ctypes.CDLL(None, use_errno=True)
+_RENAMEAT2 = getattr(_LIBC, "renameat2", None)
+if _RENAMEAT2 is not None:
+    _RENAMEAT2.argtypes = (
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_uint,
+    )
+    _RENAMEAT2.restype = ctypes.c_int
 _FORBIDDEN_ROOTS = (
     Path("/boot"),
     Path("/dev"),
@@ -167,6 +181,32 @@ def _digest_fd(fd: int) -> str:
         digest.update(chunk)
     os.lseek(fd, 0, os.SEEK_SET)
     return f"sha256:{digest.hexdigest()}"
+
+
+def _rename_noreplace(
+    source_parent: int,
+    source: str,
+    destination_parent: int,
+    destination: str,
+) -> None:
+    """Atomically move one path without replacing a concurrent destination."""
+    if _RENAMEAT2 is None:
+        raise ValidationError("Atomic no-replace workspace moves are unavailable.")
+    result = _RENAMEAT2(
+        source_parent,
+        os.fsencode(source),
+        destination_parent,
+        os.fsencode(destination),
+        _RENAME_NOREPLACE,
+    )
+    if result == 0:
+        return
+    error = ctypes.get_errno()
+    if error in {errno.EEXIST, errno.ENOTEMPTY}:
+        raise ConflictError("Workspace destination already exists.")
+    if error == errno.ENOENT:
+        raise NotFoundError("Workspace source does not exist.")
+    raise ValidationError("Workspace path could not be moved safely.")
 
 
 class Workspace:
@@ -469,6 +509,7 @@ class Workspace:
         ) as source_parent, self._directory_fd(
             root_fd, destination_parts[:-1]
         ) as destination_parent:
+            self._require_shared_parent(root_fd, destination_parent)
             try:
                 details = os.stat(
                     source_parts[-1],
@@ -483,21 +524,11 @@ class Workspace:
                 raise ValidationError("Hard-linked files are not accepted.")
             if not stat.S_ISREG(details.st_mode) and not stat.S_ISDIR(details.st_mode):
                 raise ValidationError("Workspace source has an unsupported type.")
-            try:
-                os.stat(
-                    destination_parts[-1],
-                    dir_fd=destination_parent,
-                    follow_symlinks=False,
-                )
-            except FileNotFoundError:
-                pass
-            else:
-                raise ConflictError("Workspace destination already exists.")
-            os.rename(
+            _rename_noreplace(
+                source_parent,
                 source_parts[-1],
+                destination_parent,
                 destination_parts[-1],
-                src_dir_fd=source_parent,
-                dst_dir_fd=destination_parent,
             )
             os.fsync(source_parent)
             if source_parent != destination_parent:
