@@ -61,6 +61,7 @@ MUTATING = {
     "resume",
     "uninstall",
 }
+READ_ONLY = {"describe", "status", "verify", "doctor"}
 KNOWN_ENV = {
     "FRIEND_NONINTERACTIVE",
     "FRIEND_OWNER_USER",
@@ -100,6 +101,14 @@ DEFAULT_MODEL_BASE_URL = "http://127.0.0.1:8080/v1"
 DEFAULT_WORKSPACE = Path("/srv/imaginary-friend/workspace")
 DELETE_CONFIRMATION = "DELETE IMAGINARY FRIEND STATE"
 VERSION_PATTERN_PARTS = 6
+
+
+def _operation_phase(operation: str, *, dry_run: bool) -> str:
+    if dry_run and operation in MUTATING:
+        return "plan"
+    if operation in READ_ONLY:
+        return "read"
+    return "execute"
 
 
 @dataclass(frozen=True)
@@ -1032,12 +1041,9 @@ class Manager:
 
     def run(self, invocation: Invocation) -> tuple[Result, int]:
         instance_id = self.instance_id()
-        phase = (
-            "plan"
-            if invocation.dry_run and invocation.operation in MUTATING
-            else "read"
-            if invocation.operation in {"describe", "status", "verify", "doctor"}
-            else "execute"
+        phase = _operation_phase(
+            invocation.operation,
+            dry_run=invocation.dry_run,
         )
         result = Result(
             operation=invocation.operation,
@@ -3161,7 +3167,10 @@ class Manager:
                     correlation_id=invocation.correlation_id,
                     instance_id=self.instance_id(),
                     operation=invocation.operation,
-                    phase="plan" if invocation.dry_run else "execute",
+                    phase=_operation_phase(
+                        invocation.operation,
+                        dry_run=invocation.dry_run,
+                    ),
                     actor=invocation.actor,
                     decision="denied",
                     outcome="blocked" if error.exit_code != 1 else "failed",
@@ -3180,7 +3189,10 @@ class Manager:
                     correlation_id=invocation.correlation_id,
                     instance_id=self.instance_id(),
                     operation=invocation.operation,
-                    phase="plan" if invocation.dry_run else "execute",
+                    phase=_operation_phase(
+                        invocation.operation,
+                        dry_run=invocation.dry_run,
+                    ),
                     actor=invocation.actor,
                     decision="allowed",
                     outcome="failed",
@@ -3271,13 +3283,7 @@ def main(argv: list[str] | None = None) -> int:
                 validate_uuid(correlation, label="correlation_id")
             except ManagementError:
                 correlation = str(uuid.uuid4())
-            phase = (
-                "plan"
-                if args.dry_run and args.operation in MUTATING
-                else "read"
-                if args.operation in {"describe", "status", "verify", "doctor"}
-                else "execute"
-            )
+            phase = _operation_phase(args.operation, dry_run=args.dry_run)
             result = Result(
                 operation=args.operation,
                 correlation_id=correlation,
@@ -3327,13 +3333,7 @@ def main(argv: list[str] | None = None) -> int:
                 correlation_id=correlation,
                 product_version=version,
                 instance_id=instance_id,
-                phase=(
-                    "plan"
-                    if args.dry_run and args.operation in MUTATING
-                    else "read"
-                    if args.operation in {"describe", "status", "verify", "doctor"}
-                    else "execute"
-                ),
+                phase=_operation_phase(args.operation, dry_run=args.dry_run),
                 status="failed",
                 steps=manager.steps_for(args.operation) if manager is not None else [],
                 errors=[

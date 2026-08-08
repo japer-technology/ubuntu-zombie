@@ -283,6 +283,16 @@ class ManagementUnitTests(unittest.TestCase):
         self.assertEqual(result.instance_id, self.instance_id)
         manager.audit_failure.assert_called_once_with(invocation)
 
+    def test_read_failure_audit_uses_read_phase(self) -> None:
+        self.paths.audit.parent.mkdir(parents=True)
+        self.paths.audit.touch()
+        invocation = self.invocation("status")
+        with mock.patch.object(
+            self.manager, "_append_lifecycle_audit"
+        ) as append_audit:
+            self.manager.audit_failure(invocation)
+        self.assertEqual(append_audit.call_args.kwargs["phase"], "read")
+
     def test_resume_prepares_installed_model_configuration(self) -> None:
         self.paths.state_root.mkdir(parents=True)
         self.paths.configuration_root.mkdir(parents=True)

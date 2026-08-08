@@ -10,7 +10,8 @@ Imaginary Friend uses independent UTC date-time versions in
 - Preserve suspension across reinstall and update, recompute existing history
   expiry when its retention window changes, reject lifecycle inputs that the
   selected operation cannot apply, and retain correlation in unexpected
-  failure responses and audit events.
+  failure responses and audit events while recording the correct operation
+  phase.
 - Require the `friend` service identity to have only its product groups and
   verify that a suspended service is stopped.
 
