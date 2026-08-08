@@ -51,12 +51,12 @@ and receipt reference.
 The eventual operator interface may offer one selectable command surface:
 
 ```text
-ubuntu-ai install ubuntu-zombie
-ubuntu-ai install llama
-ubuntu-ai install forgejo
-ubuntu-ai install forgejo-runner
-ubuntu-ai install imaginary-friend
-ubuntu-ai update --all
+ubuntu-zombie install zombie
+ubuntu-zombie install llama
+ubuntu-zombie install forgejo
+ubuntu-zombie install forgejo-runner
+ubuntu-zombie install imaginary-friend
+ubuntu-zombie update --all
 ```
 
 This is one management experience, not one installer implementation. The
