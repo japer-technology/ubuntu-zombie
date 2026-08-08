@@ -23,6 +23,7 @@ removals, and trigger changes are easy to review.
 | `ci.yml` | CI | Lint, syntax, smoke, pytest, package, and secret-pattern checks | Pull requests and pushes to `main` |
 | `codeql.yml` | CodeQL | Static analysis for Python and JavaScript security/quality issues | Pull requests, pushes to `main`, weekly schedule |
 | `dependency-review.yml` | Dependency Review | Block vulnerable or incompatible new dependencies in PRs | Pull requests targeting `main` |
+| `imaginary-friend-release.yml` | Imaginary Friend Release | Build, attest, sign, and publish the independent Friend artifact | Friend `VERSION` changes, product tags, manual dispatch |
 | `integration.yml` | Integration | Best-effort installer dry-run and container checks outside the lint sandbox | Nightly schedule and manual dispatch |
 | `release.yml` | Release | Build, attest, sign, upload, and publish release artifacts | `VERSION` changes on `main`, version tags, manual dispatch |
 | `scorecard.yml` | OpenSSF Scorecard | Produce OpenSSF Scorecard SARIF and publish it to code scanning | Pushes to `main`, weekly schedule, branch protection changes |
@@ -102,6 +103,14 @@ failure, the action is configured to comment a summary on the pull request.
 The job uses `contents: read` and `pull-requests: write` only where the
 dependency review action needs them.
 
+## `imaginary-friend-release.yml` — Imaginary Friend Release
+
+This workflow validates and packages only `products/imaginary-friend/` plus
+the applicable family schemas and repository license. Product tags use
+`imaginary-friend-v<VERSION>`. The workflow publishes a checksum, SPDX SBOM,
+test evidence, provenance, and keyless cosign material independently of the
+root Ubuntu Zombie release.
+
 ## `integration.yml` — Integration
 
 The Integration workflow is a scheduled and manually dispatched safety net
@@ -110,7 +119,7 @@ same as local installation testing on a disposable Ubuntu Desktop VM.
 Instead, it provides best-effort coverage for install paths that are too
 heavy or too system-specific for the normal CI workflow.
 
-It contains two jobs:
+It contains three jobs:
 
 ### `dry-run`
 
@@ -136,6 +145,14 @@ interaction a real Ubuntu Desktop host exposes. The workflow comments call
 this out explicitly: failures are still a strong signal that installer
 validation or idempotency paths need attention, but the authoritative place
 for a real install remains a disposable Ubuntu Desktop LTS VM.
+
+### `imaginary-friend-lifecycle`
+
+This job exercises Friend install, verify, reinstall, backup, rollback,
+suspend, resume, retained-state recovery, and complete removal on disposable
+Ubuntu 22.04 and 24.04 runners against a hermetic loopback model fixture. The
+harness requires an explicit disposable-VM sentinel before it will mutate a
+host.
 
 ## `release.yml` — Release
 

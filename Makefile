@@ -4,13 +4,15 @@ SHELL := bash
 .SHELLFLAGS := -eu -o pipefail -c
 
 VERSION := $(shell cat VERSION)
+PYTHON ?= python3
+FRIEND_ROOT := products/imaginary-friend
 
 .PHONY: help lint test verify-bridge-pins install-local verify package deb clean
 
 help:
 	@echo "Targets:"
-	@echo "  lint           ShellCheck + bash -n + python compile"
-	@echo "  test           non-root smoke and repository checks"
+	@echo "  lint           root and product ShellCheck, syntax, and compile"
+	@echo "  test           root and product non-root test suites"
 	@echo "  verify-bridge-pins  checksum pinned Node bridge inputs"
 	@echo "  install-local  sudo ./scripts/install.sh install (RUN ON A VM)"
 	@echo "  verify         sudo ./scripts/install.sh verify"
@@ -29,9 +31,11 @@ lint:
 	done
 	bash tests/smoke.sh syntax
 	bash tests/smoke.sh python
+	$(MAKE) -C $(FRIEND_ROOT) lint PYTHON="$(PYTHON)"
 
 test:
 	bash tests/smoke.sh all
+	$(MAKE) -C $(FRIEND_ROOT) test PYTHON="$(PYTHON)"
 
 verify-bridge-pins:
 	bash scripts/verify-bridge-pins.sh
@@ -61,3 +65,4 @@ deb:
 clean:
 	rm -rf dist
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+	$(MAKE) -C $(FRIEND_ROOT) clean
