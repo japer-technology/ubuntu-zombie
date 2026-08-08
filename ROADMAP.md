@@ -97,6 +97,13 @@ preserve a second implementation of the same operation.
 
 ### 3. Extract Llama
 
+**Source status: implemented.** `products/llama/` now owns the complete
+lifecycle, compatibility delegation, release workflow, fixture-backed
+supported-VM harness, and product documentation. Root Llama payload and
+mutation implementations have been removed. Catalogue admission remains
+separate and waits for a published artifact plus recorded supported-VM and
+co-installation evidence under the release gates below.
+
 - Create `products/llama` with an independent descriptor, version, lifecycle,
   package, release, tests, and documentation.
 - Move all Llama-owned installation and removal behavior out of the Zombie

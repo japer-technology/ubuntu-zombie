@@ -213,21 +213,30 @@ Interactive installs can also toggle components from item
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#optional-components-ubuntu-zombie--options).
 More components are specified under [`options/`](options/README.md).
 
-### Standalone llama.cpp
+### Independent Llama product
 
-Install an independent CPU llama.cpp server and a small verified default
-model without installing Zombie:
+Llama now owns its descriptor, version, lifecycle, package, release, tests,
+audit log, and documentation under [`products/llama/`](products/llama/).
+Install its pinned CPU `llama.cpp` server and verified default model directly:
 
 ```bash
-sudo ./scripts/install.sh install llama
+products/llama/scripts/manage.sh install --dry-run
+sudo products/llama/scripts/manage.sh install --yes
+llama-manage status
 llama-manager status
 ```
 
+`sudo ./scripts/install.sh install llama` remains a compatibility command and
+delegates to that same product lifecycle; Ubuntu Zombie contains no second
+Llama installer.
+
 The OpenAI-compatible endpoint is
 `http://127.0.0.1:8080/v1`. It is available to local applications and
-local users only; it never listens on the LAN. Use `llama-manager` to
-start, stop, restart, enable, disable, test, or inspect it. Removing
-Zombie leaves this component untouched.
+local users only; it never listens on the LAN. Use `llama-manage` for the
+complete product lifecycle and `llama-manager` for runtime service and API
+operations. Selective `uninstall zombie` leaves Llama untouched. See the
+product [`README.md`](products/llama/README.md) for removal, update, rollback,
+and recovery guidance.
 
 ## Documentation
 

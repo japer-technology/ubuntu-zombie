@@ -23,7 +23,8 @@
       "enum": [
         "imaginary-friend",
         "curriculum-flame",
-        "eric"
+        "eric",
+        "llama"
       ]
     },
     "instance_id": {
@@ -44,11 +45,11 @@
     },
     "install_root": {
       "type": "string",
-      "pattern": "^/opt/(imaginary-friend|curriculum-flame|eric)$"
+      "pattern": "^/opt/(imaginary-friend|curriculum-flame|eric|llama\\.cpp)$"
     },
     "lifecycle_entrypoint": {
       "type": "string",
-      "pattern": "^/usr/local/sbin/(friend|flame|eric)-manage$"
+      "pattern": "^/usr/local/sbin/(friend|flame|eric|llama)-manage$"
     },
     "artifact_sha256": {
       "oneOf": [

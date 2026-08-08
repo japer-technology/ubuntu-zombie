@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manage the standalone, PC-wide llama.cpp service."""
+"""Operate the product-owned, PC-wide llama.cpp service."""
 
 from __future__ import annotations
 
@@ -16,28 +16,67 @@ from typing import Any
 
 
 CONFIG_PATH = Path("/etc/llama.cpp/config.json")
+INSTALL_ROOT = Path("/opt/llama.cpp")
+STATE_ROOT = Path("/var/lib/llama.cpp")
 UNIT = "llama-server.service"
+CONFIG_KEYS = {
+    "schema_version",
+    "port",
+    "model_id",
+    "model_path",
+    "context_size",
+    "threads",
+    "runtime_release",
+    "runtime_dir",
+}
+
+
+def _within(path: Path, root: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve(strict=False))
+    except ValueError:
+        return False
+    return True
 
 
 def load_config() -> dict[str, Any]:
-    """Load the installer-owned standalone llama configuration."""
+    """Load and validate the product-owned standalone configuration."""
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
+        value = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"cannot read {CONFIG_PATH}: {exc}") from exc
-    if not isinstance(data, dict) or data.get("schema_version") != 1:
+    if not isinstance(value, dict) or set(value) != CONFIG_KEYS:
         raise RuntimeError(f"{CONFIG_PATH} has an unsupported schema")
-    return data
+    if value["schema_version"] != 1 or value["port"] != 8080:
+        raise RuntimeError(f"{CONFIG_PATH} has an unsupported schema")
+    for name in ("context_size", "threads"):
+        if isinstance(value[name], bool) or not isinstance(value[name], int):
+            raise RuntimeError(f"{CONFIG_PATH} has an invalid {name}")
+    if not 512 <= value["context_size"] <= 1_048_576:
+        raise RuntimeError(f"{CONFIG_PATH} has an invalid context_size")
+    if not 1 <= value["threads"] <= 1024:
+        raise RuntimeError(f"{CONFIG_PATH} has an invalid threads")
+    for name in ("model_id", "runtime_release"):
+        if not isinstance(value[name], str) or not value[name]:
+            raise RuntimeError(f"{CONFIG_PATH} has an invalid {name}")
+    runtime = Path(value["runtime_dir"])
+    model = Path(value["model_path"])
+    if not runtime.is_absolute() or not _within(runtime, INSTALL_ROOT):
+        raise RuntimeError(f"{CONFIG_PATH} has an unsafe runtime_dir")
+    if not model.is_absolute() or not _within(model, STATE_ROOT / "models"):
+        raise RuntimeError(f"{CONFIG_PATH} has an unsafe model_path")
+    return value
 
 
 def systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    """Run systemctl for the fixed llama unit."""
+    """Run systemctl for the fixed Llama unit."""
     return subprocess.run(
         ["systemctl", *args, UNIT],
         check=check,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        timeout=30,
     )
 
 
@@ -48,9 +87,11 @@ def service_property(name: str) -> str:
 
 
 def api_request(path: str, method: str = "GET", body: bytes | None = None) -> Any:
-    """Call the fixed loopback API."""
+    """Call the fixed loopback API with a bounded request and response."""
+    if not path.startswith("/") or "\r" in path or "\n" in path:
+        raise RuntimeError("invalid API path")
     config = load_config()
-    url = f"http://127.0.0.1:{int(config['port'])}{path}"
+    url = f"http://127.0.0.1:{config['port']}{path}"
     request = urllib.request.Request(
         url,
         data=body,
@@ -58,7 +99,10 @@ def api_request(path: str, method: str = "GET", body: bytes | None = None) -> An
         headers={"Accept": "application/json", "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(request, timeout=10) as response:
-        return json.loads(response.read(1024 * 1024))
+        data = response.read(1024 * 1024 + 1)
+    if len(data) > 1024 * 1024:
+        raise RuntimeError("llama API response is too large")
+    return json.loads(data)
 
 
 def status_payload() -> dict[str, Any]:
@@ -71,17 +115,21 @@ def status_payload() -> dict[str, Any]:
         try:
             api_request("/health")
             healthy = True
-        except (OSError, ValueError, urllib.error.URLError):
+        except (OSError, RuntimeError, ValueError, urllib.error.URLError):
             healthy = False
-    state = "ready" if healthy else (
-        "installed-stopped" if active == "inactive" else active
+    state = (
+        "ready"
+        if healthy
+        else "installed-stopped"
+        if active == "inactive"
+        else active
     )
     return {
         "state": state,
         "active": active,
         "enabled": enabled,
         "healthy": healthy,
-        "url": f"http://127.0.0.1:{int(config['port'])}/v1",
+        "url": f"http://127.0.0.1:{config['port']}/v1",
         "model": config["model_id"],
         "runtime": config["runtime_release"],
     }
@@ -116,12 +164,13 @@ def print_models(as_json: bool) -> int:
     """List models advertised by the server."""
     try:
         payload = api_request("/v1/models")
-    except (OSError, ValueError, urllib.error.URLError) as exc:
+    except (OSError, RuntimeError, ValueError, urllib.error.URLError) as exc:
         print(f"llama API unavailable: {exc}", file=sys.stderr)
         return 1
     rows = payload.get("data", []) if isinstance(payload, dict) else []
     models = [
-        row["id"] for row in rows
+        row["id"]
+        for row in rows
         if isinstance(row, dict) and isinstance(row.get("id"), str)
     ]
     print(json.dumps(models) if as_json else "\n".join(models))
@@ -131,15 +180,17 @@ def print_models(as_json: bool) -> int:
 def test_api() -> int:
     """Run a bounded OpenAI-compatible inference probe."""
     config = load_config()
-    body = json.dumps({
-        "model": config["model_id"],
-        "messages": [{"role": "user", "content": "Reply with OK."}],
-        "max_tokens": 8,
-        "temperature": 0,
-    }).encode()
+    body = json.dumps(
+        {
+            "model": config["model_id"],
+            "messages": [{"role": "user", "content": "Reply with OK."}],
+            "max_tokens": 8,
+            "temperature": 0,
+        }
+    ).encode()
     try:
         payload = api_request("/v1/chat/completions", "POST", body)
-    except (OSError, ValueError, urllib.error.URLError) as exc:
+    except (OSError, RuntimeError, ValueError, urllib.error.URLError) as exc:
         print(f"llama API test failed: {exc}", file=sys.stderr)
         return 1
     choices = payload.get("choices") if isinstance(payload, dict) else None
@@ -179,24 +230,31 @@ def print_hardware(as_json: bool) -> int:
 def serve() -> None:
     """Replace this process with the pinned managed llama-server."""
     config = load_config()
-    executable = Path(str(config["runtime_dir"])) / "llama-server"
-    model = Path(str(config["model_path"]))
-    if not executable.is_file() or not model.is_file():
-        raise RuntimeError("managed runtime or model is missing")
+    runtime = Path(config["runtime_dir"])
+    executable = runtime / "llama-server"
+    model = Path(config["model_path"])
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise RuntimeError("managed runtime is missing or not executable")
+    if not model.is_file():
+        raise RuntimeError("managed model is missing")
     args = [
         str(executable),
-        "--host", "127.0.0.1",
-        "--port", str(int(config["port"])),
-        "--model", str(model),
-        "--ctx-size", str(int(config["context_size"])),
-        "--threads", str(int(config["threads"])),
-        "--alias", str(config["model_id"]),
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(config["port"]),
+        "--model",
+        str(model),
+        "--ctx-size",
+        str(config["context_size"]),
+        "--threads",
+        str(config["threads"]),
+        "--alias",
+        str(config["model_id"]),
     ]
-    runtime_dir = str(config["runtime_dir"])
     current_library_path = os.environ.get("LD_LIBRARY_PATH", "")
     os.environ["LD_LIBRARY_PATH"] = (
-        f"{runtime_dir}:{current_library_path}"
-        if current_library_path else runtime_dir
+        f"{runtime}:{current_library_path}" if current_library_path else str(runtime)
     )
     os.execv(executable, args)
 
@@ -206,8 +264,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="llama-manager")
     parser.add_argument("--json", action="store_true")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    for command in ("status", "start", "stop", "restart", "enable", "disable",
-                    "test", "models", "hardware"):
+    for command in (
+        "status",
+        "start",
+        "stop",
+        "restart",
+        "enable",
+        "disable",
+        "test",
+        "models",
+        "hardware",
+    ):
         subparsers.add_parser(command)
     subparsers.add_parser("serve", help=argparse.SUPPRESS)
     args = parser.parse_args()

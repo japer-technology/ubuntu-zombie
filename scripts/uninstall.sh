@@ -63,12 +63,37 @@ readonly COMPONENT_FORGEJO="forgejo"
 readonly COMPONENT_FORGEJO_RUNNER="forgejo-runner"
 readonly COMPONENT_LLAMA="llama"
 COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
+LLAMA_PRODUCT_ROOT="${LLAMA_PRODUCT_ROOT:-${REPO_ROOT}/products/llama}"
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
 UNINSTALL_EXIT=0
 # Count of cleanup failures: used for per-component manifest-retention checks
 # so that failures from one component cannot mask failures in a subsequent one.
 UNINSTALL_FAIL_COUNT=0
+
+llama_product_entrypoint() {
+  if [[ -x "${LLAMA_PRODUCT_ROOT}/scripts/manage.sh" ]]; then
+    printf '%s\n' "${LLAMA_PRODUCT_ROOT}/scripts/manage.sh"
+  elif [[ -x /usr/local/sbin/llama-manage ]]; then
+    printf '%s\n' /usr/local/sbin/llama-manage
+  else
+    return 66
+  fi
+}
+
+llama_product_manage() {
+  local entrypoint
+  entrypoint="$(llama_product_entrypoint)" || return $?
+  "${entrypoint}" "$@"
+}
+
+llama_product_lifecycle() {
+  local response
+  response="$(llama_product_manage status --json 2>/dev/null)" || return $?
+  python3 -c \
+    'import json,sys; print(json.load(sys.stdin)["details"]["llama"]["lifecycle"])' \
+    <<<"${response}"
+}
 
 # Shared colours/logging come from lib.sh. Keep the legacy C_YEL alias so the
 # inline printf calls below (e.g. the [dry] glyph) need no churn.
@@ -216,6 +241,8 @@ Environment:
 Notes:
   --archive and --keep-agent are only valid when the `zombie`
   component is being removed.
+  Llama removal delegates to its product lifecycle and retains models and
+  state. Complete purge requires llama-manage and its exact confirmation.
 
 This script intentionally does NOT remove Node, Python, or other base
 packages — those are normal Ubuntu software
@@ -540,47 +567,21 @@ remove_component_forgejo() {
 
 remove_component_llama() {
   local fail_count_before="${UNINSTALL_FAIL_COUNT}"
-  local marker="" candidate
-  for candidate in /etc/llama.cpp/managed-by-ubuntu-zombie \
-      /var/lib/llama.cpp/managed-by-ubuntu-zombie; do
-    if valid_component_ownership_marker "${candidate}" "${COMPONENT_LLAMA}"; then
-      marker="${candidate}"
-      break
-    fi
-  done
-  if [[ -z "${marker}" ]]; then
-    if [[ -e "${COMPONENT_MANIFEST_DIR}/${COMPONENT_LLAMA}" ]]; then
-      warn "Llama manifest exists but its ownership marker is missing or invalid."
-      warn "Refusing to remove any potentially unmanaged llama.cpp files."
-      UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
-      UNINSTALL_EXIT=1
-    fi
-    return 0
+  local lifecycle="" manifest
+  local -a arguments=(uninstall)
+  manifest="${COMPONENT_MANIFEST_DIR}/${COMPONENT_LLAMA}"
+  if (( ${#TARGET_ARGS[@]} == 0 )) && [[ ! -e "${manifest}" ]]; then
+    lifecycle="$(llama_product_lifecycle 2>/dev/null || true)"
+    [[ "${lifecycle}" == "legacy" ]] || return 0
   fi
+  (( DRY_RUN )) && arguments+=(--dry-run)
+  (( ASSUME_YES )) && arguments+=(--yes)
 
-  info "Removing standalone llama component"
-  run "systemctl disable --now llama-server.service 2>/dev/null || true"
-  run "rm -f /etc/systemd/system/llama-server.service"
-  run_or_warn "Reload systemd after llama removal" "systemctl daemon-reload"
-  run "rm -f /usr/local/bin/llama-manager"
-  remove_tree_checked "/etc/llama.cpp" "/etc/llama.cpp (managed configuration)"
-  remove_tree_checked "/opt/llama.cpp" "/opt/llama.cpp (managed runtime)"
-  if [[ -d /var/lib/llama.cpp ]]; then
-    if confirm "Remove /var/lib/llama.cpp (downloaded models and state)?"; then
-      remove_tree_checked "/var/lib/llama.cpp" "/var/lib/llama.cpp (models and state)"
-    else
-      warn "Keeping /var/lib/llama.cpp."
-    fi
-  fi
-  [[ ! -d /var/cache/llama.cpp ]] \
-    || remove_tree_checked "/var/cache/llama.cpp" "/var/cache/llama.cpp"
-  [[ ! -d /var/log/llama.cpp ]] \
-    || remove_tree_checked "/var/log/llama.cpp" "/var/log/llama.cpp"
-  if id llama-cpp >/dev/null 2>&1 && [[ ! -d /var/lib/llama.cpp ]]; then
-    if confirm "Remove the llama-cpp system account?"; then
-      run_or_warn "Remove llama-cpp account" \
-        "deluser llama-cpp >/dev/null 2>&1 || userdel llama-cpp"
-    fi
+  info "Delegating standalone Llama removal to its product lifecycle"
+  if ! llama_product_manage "${arguments[@]}"; then
+    warn "Independent Llama product removal failed."
+    UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
+    UNINSTALL_EXIT=1
   fi
   if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
     remove_component_manifest "${COMPONENT_LLAMA}"

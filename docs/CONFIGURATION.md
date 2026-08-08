@@ -526,8 +526,8 @@ not `--yes` and not `ZOMBIE_NONINTERACTIVE=1`), it opens an editable
 **parameter review** before touching the host. The review is scoped to
 the selected components. Zombie runs show agent, chat, TTL, provider, and
 local-LLM settings; Forgejo-only runs show Forgejo, PostgreSQL, runner,
-transcript, and receipt settings; llama-only runs show the runtime, model,
-context, CPU threads, and boot policy.
+transcript, and receipt settings. Llama-only runs display the
+product-generated plan; configure it with the `LLAMA_*` inputs below.
 Enter a number to edit a field (with validation and re-prompting on bad
 input), toggle the boolean options, and repeat until you are satisfied;
 then accept to begin the install. Cancelling at the review (`q`) exits
@@ -568,18 +568,18 @@ automatically selects its required `forgejo` dependency. It does not select
 the zombie component. The legacy `ZOMBIE_INSTALL_FORGEJO_RUNNER=1` selector
 remains additive and resolves to the same component pair.
 
-`install llama` installs a standalone application without selecting
-`zombie`. `ZOMBIE_INSTALL_LLAMA=1` remains an additive compatibility
+`install llama` delegates to an independently versioned product without
+selecting `zombie`. `ZOMBIE_INSTALL_LLAMA=1` remains an additive compatibility
 selector for automation.
 
-### Standalone llama.cpp (`install llama`)
+### Independent Llama product (`install llama` compatibility target)
 
-The standalone `llama` component installs the pinned CPU build of
-`llama.cpp` b10054 and a checksum-verified SmolLM2 360M Instruct Q4_K_M
-model. It runs as the dedicated `llama-cpp` system account and exposes an
-OpenAI-compatible API only at `http://127.0.0.1:8080/v1`. The endpoint is
-PC-wide: every local user can reach it, but it is not reachable from the
-LAN.
+Llama owns its lifecycle under `products/llama/`; the root target only maps
+compatibility inputs and delegates. The product installs pinned CPU build
+`llama.cpp` b10054 and a checksum-verified SmolLM2 360M Instruct Q4_K_M model.
+It runs as the dedicated `llama-cpp` system account and exposes an
+OpenAI-compatible API only at `http://127.0.0.1:8080/v1`. Every local user can
+reach the endpoint, but it is not reachable from the LAN.
 
 | Variable | Default | Effect |
 | -------- | ------- | ------ |
@@ -592,16 +592,23 @@ LAN.
 
 The runtime lives under `/opt/llama.cpp`, configuration under
 `/etc/llama.cpp`, models and state under `/var/lib/llama.cpp`, and logs
-under `/var/log/llama.cpp`. Downloads are pinned by immutable release or
-model revision and SHA-256. If any owned path, account, unit, or port
-already exists without the installer ownership marker, installation stops
-without adopting or changing it.
+under `/var/log/llama.cpp`. Downloads are pinned by immutable release or model
+revision and SHA-256. Existing legacy state is adopted only when both old
+markers, identity, configuration, exact unit, runtime tree, and model checksum
+validate. Any ambiguous resource stops the product before mutation.
 
 `llama-manager` supports `status`, `start`, `stop`, `restart`, `enable`,
 `disable`, `test`, `models`, and `hardware`; mutating commands require
-root. `verify llama`, `doctor llama`, `repair llama`, and
-`uninstall llama` are target-scoped. Uninstall asks separately before
-removing downloaded models and state.
+root. `llama-manage` owns `status`, `verify`, `doctor`, `repair`, `backup`,
+`update`, `rollback`, `suspend`, `resume`, and `uninstall`. Root compatibility
+targets for verify, doctor, repair, and uninstall delegate to it.
+
+The safe uninstall default removes runtime and configuration while retaining
+models and state. Complete deletion is available only through
+`llama-manage uninstall --purge --confirmation 'DELETE LLAMA STATE' --yes`;
+`--yes` by itself is not destructive confirmation. Full product configuration
+and request-file rules are in
+[`products/llama/docs/CONFIGURATION.md`](../products/llama/docs/CONFIGURATION.md).
 
 ### Forgejo server (`ZOMBIE_INSTALL_FORGEJO=1`)
 

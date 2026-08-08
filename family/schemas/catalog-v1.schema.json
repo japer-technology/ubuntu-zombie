@@ -72,12 +72,13 @@
           "enum": [
             "imaginary-friend",
             "curriculum-flame",
-            "eric"
+            "eric",
+            "llama"
           ]
         },
         "descriptor": {
           "type": "string",
-          "pattern": "^products/(imaginary-friend|curriculum-flame|eric)/PRODUCT\\.json$"
+          "pattern": "^products/(imaginary-friend|curriculum-flame|eric|llama)/PRODUCT\\.json$"
         },
         "version": {
           "type": "string",
@@ -85,7 +86,7 @@
         },
         "tag": {
           "type": "string",
-          "pattern": "^(imaginary-friend|curriculum-flame|eric)-v[0-9]{4}(\\.[0-9]{2}){5}$"
+          "pattern": "^(imaginary-friend|curriculum-flame|eric|llama)-v[0-9]{4}(\\.[0-9]{2}){5}$"
         },
         "artifact": {
           "$ref": "#/$defs/asset"
