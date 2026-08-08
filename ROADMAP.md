@@ -76,8 +76,8 @@ preserve a second implementation of the same operation.
 - Generalize the existing family lifecycle request, response, receipt,
   ownership-marker, audit-correlation, and inventory contracts for
   independently managed installables.
-- Preserve the stricter AI-agent family rules for Imaginary Friend and future
-  agents; infrastructure products must not be presented as agents.
+- Preserve each AI-agent product's reviewed authority and security rules;
+  infrastructure products must not be presented as agents.
 - Define dependency metadata, including the
   `forgejo-runner` → `forgejo` relationship.
 - Add schema and black-box conformance tests before moving implementation.
@@ -166,7 +166,9 @@ Throughout the work:
 6. Ubuntu Zombie's policy gate and audit behavior remain unchanged, and
    managed privileged operations produce correlated manager and target audit
    records.
-7. No subordinate product gains Ubuntu Zombie's general root authority.
+7. Every product's authority matches its reviewed purpose. A root-capable
+   product must preserve policy, approval, audit, revocation, and explicit
+   root-equivalent compromise guidance.
 8. Existing ports, paths, commands, and service names remain stable unless a
    product-specific migration explicitly documents and tests a change.
 
