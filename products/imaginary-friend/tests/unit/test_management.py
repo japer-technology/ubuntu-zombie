@@ -266,11 +266,12 @@ class ManagementUnitTests(unittest.TestCase):
 
     def test_unexpected_failure_keeps_correlation_and_is_audited(self) -> None:
         invocation = self.invocation("suspend")
+        failure = OSError("simulated failure")
         with mock.patch("friend.management.Manager") as manager_type:
             manager = manager_type.return_value
             manager.version = self.manager.version
             manager.invocation.return_value = invocation
-            manager.run.side_effect = OSError("simulated failure")
+            manager.run.side_effect = failure
             manager.instance_id.return_value = self.instance_id
             manager.steps_for.return_value = []
             with mock.patch("friend.management._print_result") as output:
@@ -281,7 +282,7 @@ class ManagementUnitTests(unittest.TestCase):
         result = output.call_args.args[0]
         self.assertEqual(result.correlation_id, invocation.correlation_id)
         self.assertEqual(result.instance_id, self.instance_id)
-        manager.audit_failure.assert_called_once_with(invocation)
+        manager.audit_failure.assert_called_once_with(invocation, failure)
 
     def test_read_failure_audit_uses_read_phase(self) -> None:
         self.paths.audit.parent.mkdir(parents=True)
@@ -290,8 +291,9 @@ class ManagementUnitTests(unittest.TestCase):
         with mock.patch.object(
             self.manager, "_append_lifecycle_audit"
         ) as append_audit:
-            self.manager.audit_failure(invocation)
+            self.manager.audit_failure(invocation, OSError("simulated failure"))
         self.assertEqual(append_audit.call_args.kwargs["phase"], "read")
+        self.assertEqual(append_audit.call_args.kwargs["failure_type"], "OSError")
 
     def test_resume_prepares_installed_model_configuration(self) -> None:
         self.paths.state_root.mkdir(parents=True)

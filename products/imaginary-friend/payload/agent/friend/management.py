@@ -3110,6 +3110,7 @@ class Manager:
             outcome: str,
             changed: bool,
             receipt_digest: str | None,
+            failure_type: str | None = None,
     ) -> None:
             if not self.paths.log_root.exists():
                 return
@@ -3127,6 +3128,8 @@ class Manager:
                 "changed": changed,
                 "receipt_digest": receipt_digest,
             }
+            if failure_type is not None:
+                entry["failure_type"] = failure_type
             line = canonical_json(entry) + b"\n"
             flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
             fd = os.open(self.paths.audit, flags, 0o640)
@@ -3180,7 +3183,7 @@ class Manager:
             except Exception:
                 return
 
-    def audit_failure(self, invocation: Invocation) -> None:
+    def audit_failure(self, invocation: Invocation, error: Exception) -> None:
             if not self.paths.audit.exists():
                 return
             try:
@@ -3198,6 +3201,7 @@ class Manager:
                     outcome="failed",
                     changed=False,
                     receipt_digest=None,
+                    failure_type=type(error).__name__,
                 )
             except Exception:
                 return
@@ -3345,7 +3349,7 @@ def main(argv: list[str] | None = None) -> int:
                 ],
             )
             if manager is not None and invocation is not None:
-                manager.audit_failure(invocation)
+                manager.audit_failure(invocation, exc)
             exit_code = 1
     _print_result(result, as_json=args.json)
     return exit_code
