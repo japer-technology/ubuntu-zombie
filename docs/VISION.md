@@ -26,18 +26,24 @@ or default installation of Ubuntu Zombie.
 Ubuntu Zombie is also the first of an independent
 [AI-agent family](ai-agent/). Imaginary Friend, Curriculum Flame, ERIC,
 and future products copy its proven installation, policy, audit, lifecycle,
-update, and release lessons while removing the authority they do not need.
+update, and release lessons while declaring the authority their own purpose
+requires. A systems-administrator variant may retain full root authority when
+that authority is explicit, justified, policy-gated, approved, audited, and
+tested; the existing named products retain their narrower definitions.
 They remain separate products with separate credentials, data, installers,
 updaters, policies, audits, and releases. Their source is co-located below
 dedicated `products/<product-id>/` roots so one repository can test every
 namespace and co-installation boundary without creating a shared runtime.
 
-As the only generally root-capable member, Ubuntu Zombie is the
-machine-level family manager — the **God role**. With explicit operator
-approval it is intended to discover, install, verify, diagnose, repair,
-update, suspend, and remove subordinate agents by invoking each product's
-own verified lifecycle interface. It does not share their runtime or turn
-them into installer components.
+Ubuntu Zombie is the currently implemented generally root-capable member and
+the designated machine-level family manager — the **God role**. That
+designation does not reserve root authority to Ubuntu Zombie: another product
+may define an equally root-capable role, and co-installed root-capable products
+must be treated as mutually trusted at the operating-system boundary. With
+explicit operator approval Ubuntu Zombie is intended to discover, install,
+verify, diagnose, repair, update, suspend, and remove managed agents by invoking
+each product's own verified lifecycle interface. It does not share their
+runtime or turn them into installer components.
 
 The existing root-capable tools can operate product-owned commands, but the
 dedicated catalogue, secret-free inventory, and family management experience
@@ -83,7 +89,7 @@ the machine the whole time.
   principal. The agent is a tool with hands, not a tenant.
 - **Multi-tenant or fleet management.** One machine, one operator,
   one trust boundary. Multi-machine fleet orchestration is out of scope;
-  same-host subordinate-agent management is a post-MVP family direction.
+  same-host managed-agent support is a post-MVP family direction.
 - **Replacement of the human users on the desktop.** Existing logins,
   files, and workflows are left alone. Ubuntu Zombie installs
   *beside* the user, not *over* them.
@@ -107,7 +113,7 @@ Zombie exposes only a loopback chat service by default.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — components, action classes,
   and the approval pipeline.
 - [`ai-agent/`](ai-agent/) — Ubuntu Zombie's family-manager role, the
-  subordinate product definitions, and the new-agent template.
+  managed product definitions, and the new-agent template.
 - [`ROADMAP.md`](ROADMAP.md) — what is intentionally post-MVP and
   what we have committed *not* to ship until the MVP is solid.
 

@@ -92,13 +92,13 @@ already enforced.]
 access. Explain why each permission is necessary. A prompt, persona,
 password, or approval must not raise this ceiling.]
 
-### Authority removed from Ubuntu Zombie
+### Authority inherited, retained, and removed
 
-- [General passwordless `sudo` removed.]
-- [General shell or command runner removed.]
-- [Host-wide file reads removed.]
-- [Package, service, device, or network control removed.]
-- [Other inherited privileged mechanism removed.]
+- [General passwordless `sudo` retained or removed, with the reason.]
+- [General shell or command runner retained or removed, with the reason.]
+- [Host-wide file reads retained or removed, with the reason.]
+- [Package, service, device, or network control retained or removed.]
+- [Other inherited privileged mechanism and its disposition.]
 
 ## Features
 
@@ -199,9 +199,12 @@ Requirements:
 - [A path, destination, or data class that remains unreachable.]
 
 Sensitive actions must pass through product-owned policy and audit code.
-Prompt instructions are guidance, not enforcement. If a narrowly privileged
-operation is unavoidable, define a closed root-owned helper with enumerated
-operations; do not give the service general `sudo`.
+Prompt instructions are guidance, not enforcement. A product without a
+host-administration purpose must use a closed root-owned helper with enumerated
+operations for any narrowly privileged work. A product that requires general
+root authority must justify it, use a dedicated identity and closed tool
+surface, preserve explicit approval and audit, provide revocation, and disclose
+that compromise is root-equivalent.
 
 ## Data, privacy, and retention
 
@@ -262,8 +265,10 @@ Specify:
 - why managing software does not grant Zombie a target-specific human,
   guardian, consent, evidence, or legal role.
 
-A subordinate agent cannot call this interface through its normal service
-identity, request management of a sibling, or increase its authority.
+Family membership and this interface do not themselves grant management
+authority or increase installed authority. If this product is also a family
+manager, define and test that role explicitly; otherwise its normal service
+interface cannot request management of a sibling.
 
 ## Installation
 
@@ -360,8 +365,8 @@ Prove:
 - honest treatment of Ubuntu Zombie's root authority;
 - successful Zombie-managed lifecycle operations against only this target;
   and
-- denial of every attempt by this service identity to invoke Zombie's
-  management plane.
+- denial of every unauthorised attempt by this service identity to invoke
+  Zombie's management plane.
 
 ## Observability and operator control
 
@@ -427,7 +432,7 @@ claiming impossible isolation.
 | ----------------------- | ------------------------ | ------ | -------- |
 | Idempotent installer | [Decision] | [Reason] | [Test/link] |
 | Policy and audit gate | [Decision] | [Reason] | [Test/link] |
-| Root-capable account | Remove unless this is Ubuntu Zombie | [Reason] | [Negative test] |
+| Root-capable account | [Keep or remove for the declared purpose] | [Reason] | [Boundary test] |
 | Chat authentication | [Decision] | [Reason] | [Test/link] |
 | Lifecycle/kill switch | [Decision] | [Reason] | [Test/link] |
 | Update and recovery | [Decision] | [Reason] | [Test/link] |

@@ -15,7 +15,9 @@ installation with its own authority, security boundary, lifecycle,
 documentation, and release, while Ubuntu Zombie can install and manage it
 on the operator's behalf. Their source and release automation live in this
 repository under separate product roots; source co-location does not combine
-their installed trust boundaries.
+their installed trust boundaries. The manager role does not reserve root
+authority: a separately defined systems-administrator product may also be
+fully root-capable.
 
 ## Catalogue
 
@@ -43,8 +45,8 @@ be created or consulted.
    source layout, lifecycle protocol, release model, and work order.
 2. Read [Ubuntu Zombie](ubuntu-zombie.md) for the working reference:
    installation, policy, audit, lifecycle, updates, and removal.
-3. Read the later product documents to see which lessons are retained and
-   which privileged mechanisms are removed.
+3. Read the later product documents to see which lessons and privileged
+   mechanisms are retained, changed, or removed.
 4. Use the [AI agent definition template](template.md) for a new proposal.
 5. Use the original
    [family plan](../options/ghosts-in-the-machine-plan.md) for rationale and
@@ -62,9 +64,12 @@ Every new family member follows the same progression:
 2. **Separate the product.** Rename every account, group, path, unit,
    command, environment variable, cookie, port, log, manifest, receipt, and
    package before the first install.
-3. **Remove authority.** Delete root access, general shell execution,
-   host-wide reads, package and service control, and every capability the
-   new purpose does not require.
+3. **Set authority deliberately.** Retain only capabilities the purpose
+   requires. A systems-administrator variant may retain general root access
+   when its definition justifies that boundary and preserves explicit policy,
+   approval, audit, revocation, and root-equivalent compromise disclosure.
+   Products without that purpose delete root access, general shell execution,
+   host-wide reads, package and service control, and other unneeded power.
 4. **Write a new boundary.** Define a product-specific threat model, policy,
    approval model, data model, and refusal behaviour. It is not a lower
    Ubuntu Zombie capability setting.
@@ -133,13 +138,15 @@ Products may independently select the same language or upstream dependency.
 They do not share a live installed copy merely because they have a common
 ancestor or Git repository.
 
-## Ubuntu Zombie is the family manager (“God” role)
+## Ubuntu Zombie is the designated family manager (“God” role)
 
-Ubuntu Zombie remains the only generally root-capable member and sits above
-the other agents as their machine-level administrator. “God” describes this
-technical root authority: it can discover, install, verify, start, stop,
-diagnose, repair, update, suspend, back up, and uninstall another local
-agent when the human operator approves the action.
+Ubuntu Zombie is generally root-capable and is the family's designated
+machine-level administrator. “God” describes that implemented management role:
+it can discover, install, verify, start, stop, diagnose, repair, update,
+suspend, back up, and uninstall another local agent when the human operator
+approves the action. It is not an exclusivity rule. A separately defined
+product may retain equivalent root authority, in which case the products are
+operating-system peers and cannot claim same-host isolation from one another.
 
 The current Ubuntu Zombie runtime already has the underlying root tools to
 operate product-owned commands. A dedicated family inventory and management
@@ -158,23 +165,25 @@ Management does not turn the products into components or one runtime:
 - both Ubuntu Zombie and the target product audit the request and outcome;
 - raw target passwords, provider keys, guardian keys, and vault keys are
   not copied into Zombie state or reused as Zombie credentials;
-- a target agent cannot call the management plane or gain Zombie authority;
-  and
+- manager integration does not grant a target access to the management plane
+  or any authority absent from its own product definition; and
 - managing a service does not grant Zombie the human, guardian, legal, or
   consent authority represented inside that service.
 
-A later agent does not receive passwordless general `sudo`, a login shell,
-membership in a privilege-bearing group, or a general command runner. A
-narrowly privileged operation, if essential, must use a closed root-owned
-helper for enumerated operations and pass through that product's policy and
-audit trail.
+Each product defines its own authority ceiling. A product that does not need
+general host administration uses a non-login identity and, if essential, a
+closed root-owned helper for enumerated operations. A product whose purpose
+does require full host administration may instead use a dedicated root-capable
+identity and general command runner, but those capabilities must pass through
+product-owned policy, approval, and audit controls and be covered by explicit
+revocation and root-equivalent compromise guidance.
 
 Less-privileged agents must not read or write Ubuntu Zombie's or one
-another's secrets, code, policy, state, logs, or ports. Ubuntu Zombie can
-inspect and administer the entire host because it is root-capable;
-same-machine isolation cannot hide another agent from it. A dedicated
-machine remains the stronger deployment for child data, ERIC evidence, or
-any boundary that must exclude the Systems Administrator.
+another's secrets, code, policy, state, logs, or ports. Any root-capable
+product can inspect and administer the entire host; same-machine isolation
+cannot hide one root-capable product from another. A dedicated machine remains
+the stronger deployment for child data, ERIC evidence, or any boundary that
+must exclude every Systems Administrator.
 
 No prompt, persona, password, approval, or template can increase installed
 authority.
@@ -284,8 +293,10 @@ When products share a host:
 - every target implements the root-only, machine-readable request, response,
   ownership-marker, receipt, health, and audit contracts in
   [`implementation.md`](implementation.md);
-- a target cannot invoke Ubuntu Zombie or issue management requests for a
-  sibling; and
+- family membership does not imply management authority; a product may manage
+  siblings only when its reviewed definition explicitly assigns that role and
+  its implementation satisfies the same target-selection and audit contract;
+  and
 - peer-to-peer messaging, shared memory, shared credentials, shared
   approval queues, and shared audit logs remain absent.
 
@@ -297,14 +308,14 @@ root, copy [`template.md`](template.md), and answer at least:
 
 1. What single human need does it serve?
 2. Who uses it and who operates it?
-3. What maximum authority does it require, and why is that less than Ubuntu
-   Zombie?
+3. What maximum authority does it require, why is each privileged capability
+   necessary, and does that authority differ from Ubuntu Zombie?
 4. Which tools, paths, destinations, and data does it need?
 5. Which unique host and credential namespaces does it own?
 6. What can never be shared with a sibling?
 7. How does every lifecycle operation work?
-8. Which Ubuntu Zombie lessons remain and which privileged mechanisms are
-   removed?
+8. Which Ubuntu Zombie lessons and privileged mechanisms are retained,
+   changed, or removed?
 9. What does this product measurably improve?
 10. How will standalone and co-installation security be proved?
 11. Which product-owned lifecycle interface may Ubuntu Zombie invoke, and

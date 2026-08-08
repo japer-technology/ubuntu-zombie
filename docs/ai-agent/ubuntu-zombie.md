@@ -8,9 +8,10 @@
 Ubuntu Zombie is the first and currently implemented member of the
 [AI-agent family](README.md). It also has the **God role**: the root-level
 manager that can install and manage the other agents for the human
-operator. Those products copy its proven disciplines and deliberately
-remove its general authority while retaining independent runtimes,
-credentials, policies, data, and releases.
+operator. Those products copy its proven disciplines, select the authority
+their own purposes require, and retain independent runtimes, credentials,
+policies, data, and releases. Another systems-administrator variant may be
+equally root-capable.
 
 ## Definition card
 
@@ -60,8 +61,9 @@ Ubuntu Zombie demonstrates that a local AI product can combine:
 - independently verifiable release artifacts.
 
 Later products inherit these outcomes, not this live runtime. Ubuntu Zombie
-remains the only generally root-capable family member and their top-level
-machine administrator.
+remains the root-capable reference product and designated machine
+administrator; that designation does not prevent another product from defining
+and testing equivalent root authority.
 
 ## Implemented features
 
@@ -208,8 +210,10 @@ component targets.
 
 ### Family management (“God” role)
 
-Ubuntu Zombie's root authority makes it the administrator above every other
-agent installed on the same machine. It must be able to:
+Ubuntu Zombie's root authority lets it serve as the designated administrator
+for managed agents installed on the same machine. A separately defined
+root-capable product is an operating-system peer, not an isolated subordinate.
+Ubuntu Zombie must be able to:
 
 - discover independently installed agents from verified ownership markers;
 - show product, version, authority, health, lifecycle, and update status;
@@ -277,8 +281,8 @@ The management contract is deliberately narrow:
 6. Zombie inventory stores identifiers, versions, health, receipt
    references, and outcomes, never raw target credentials or private
    content; and
-7. no subordinate agent can invoke the manager, operate a sibling, or
-   inherit Zombie's root authority.
+7. family membership and manager integration grant no target access to the
+   management plane or authority beyond the target's own product definition.
 
 The request, response, marker, receipt, health, lock, exit-status, and audit
 formats are not product-specific design work. They are fixed by
@@ -301,7 +305,7 @@ The operator owns:
 - the TTL and reactivation controls;
 - policy configuration and approvals; and
 - service suspension, credential revocation, uninstall, and approved
-  management of subordinate agents.
+  management of managed agents.
 
 ### Agent identity
 
@@ -469,7 +473,7 @@ packages are not treated as exclusively owned. See
 The known default chat password exists for compatibility and should be
 changed. Later family members improve on this baseline with generated
 credentials, root-owned executable code, hardened units, and smaller
-unprivileged tool registries from their first release.
+purpose-specific tool registries from their first release.
 
 ## Validation and release evidence
 
@@ -497,7 +501,7 @@ Disposable-VM validation must continue to prove:
 Hermetic manager tests must additionally reject unknown catalogue fields,
 duplicate JSON keys, unpinned versions and URLs, path traversal, symlinked or
 mis-owned markers/request files, mismatched product or operation responses,
-stale plan digests, secret-bearing inventory fields, subordinate callers,
+stale plan digests, secret-bearing inventory fields, unauthorised callers,
 timeouts, and non-target receipt updates.
 
 Run the repository's existing `make lint` and `make test` checks for every

@@ -123,8 +123,9 @@ Grouped by the operator need they serve. Every flag defaults to `0`.
 - [`docs/ai-agent/`](../ai-agent/) — the readable catalogue and canonical
   family definitions for Ubuntu Zombie, Imaginary Friend, Curriculum Flame,
   and ERIC, the in-repository implementation contract, and the template for
-  future agents. Ubuntu Zombie has the God-level host-management role; the
-  other products remain unprivileged and independently packaged.
+  future agents. Ubuntu Zombie has the designated God-level host-management
+  role; the existing named products remain unprivileged and independently
+  packaged, while a future product may declare and justify full root authority.
 - [`ghosts-in-the-machine-plan.md`](ghosts-in-the-machine-plan.md) —
   records the rationale and implementation plan for a family of separate
   products:

@@ -211,7 +211,7 @@ conversation, learner, evidence, consent, or key field.
 
 ## Ownership marker and receipt
 
-Every subordinate product uses
+Every managed product uses
 `/var/lib/<product-id>/installation.json` as its ownership marker. It is
 written atomically only after install and health checks succeed, is a regular
 non-symlink file owned by `root:root` with mode `0644`, and contains:
@@ -440,7 +440,8 @@ data contracts for these slices.
 
 The model endpoint is operator-provided infrastructure. It may be the
 standalone Ubuntu Zombie `llama` component or another OpenAI-compatible
-server, but no subordinate product installs, owns, updates, or removes it.
+server, but none of the three initial managed products installs, owns, updates,
+or removes it.
 Install health gates require the configured endpoint to answer a bounded
 model-list and completion probe. Hermetic tests start a product-owned
 loopback fixture implementing those two calls; tests never need a real model
