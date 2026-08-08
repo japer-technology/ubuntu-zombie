@@ -234,7 +234,7 @@ Zombie leaves this component untouched.
 | Document                                                       | When to read it                                   |
 | -------------------------------------------------------------- | ------------------------------------------------- |
 | [`docs/VISION.md`](docs/VISION.md)                             | What this project promises (and does not)         |
-| [`docs/ai-agent/`](docs/ai-agent/)                             | AI-agent family, manager contract, definitions, template |
+| [`docs/ai-agent/`](docs/ai-agent/)                             | AI-agent family, in-repo implementation contract, definitions |
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md)                     | First successful install in ten steps             |
 | [`docs/PLATFORMS.md`](docs/PLATFORMS.md)                       | Supported Ubuntu versions and architectures       |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md)               | Provider keys, chat, policy, helper settings      |

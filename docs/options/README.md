@@ -12,10 +12,12 @@ idempotent, non-interactive-capable, audited, and reversible by
 deliberate exception. It records the direction for an independent family
 of AI-agent products, not optional components. Those products have their
 own releases, installers, updates, security credentials, and lifecycles;
-they do not use Ubuntu Zombie's component registry. Their extracted
-definitions and hand-authored template live in
-[`docs/ai-agent/`](../ai-agent/). Ubuntu Zombie is the root-level family
-manager and invokes each product's independently owned lifecycle interface.
+they do not use Ubuntu Zombie's component registry. Their source is
+co-located under independent `products/<product-id>/` roots in this
+repository. Their normative definitions, implementation contract, and
+hand-authored template live in [`docs/ai-agent/`](../ai-agent/). Ubuntu
+Zombie is the root-level family manager and invokes each product's
+independently owned lifecycle interface.
 
 Runnable components follow the registry contract in
 [`scripts/component-registry.sh`](../scripts/component-registry.sh):
@@ -120,9 +122,9 @@ Grouped by the operator need they serve. Every flag defaults to `0`.
 
 - [`docs/ai-agent/`](../ai-agent/) — the readable catalogue and canonical
   family definitions for Ubuntu Zombie, Imaginary Friend, Curriculum Flame,
-  and ERIC, plus the template for future agents. Ubuntu Zombie has the
-  God-level host-management role; the other products remain unprivileged
-  and independent.
+  and ERIC, the in-repository implementation contract, and the template for
+  future agents. Ubuntu Zombie has the God-level host-management role; the
+  other products remain unprivileged and independently packaged.
 - [`ghosts-in-the-machine-plan.md`](ghosts-in-the-machine-plan.md) —
   records the rationale and implementation plan for a family of separate
   products:
@@ -137,10 +139,10 @@ Grouped by the operator need they serve. Every flag defaults to `0`.
   registry, capability tier, payload, or lifecycle implementation; Ubuntu
   Zombie manages them by verifying and invoking their product-owned
   interfaces under operator approval and dual audit.
-  The Curriculum Flame product follows
-  [`curriculum-gates-local-ai-for-children.md`](curriculum-gates-local-ai-for-children.md),
-  the local specification behind
-  [`japer-technology/curriculum-flame`](https://github.com/japer-technology/curriculum-flame).
+  The authoritative Curriculum Flame product definition is
+  [`docs/ai-agent/curriculum-flame.md`](../ai-agent/curriculum-flame.md);
+  [`curriculum-gates-local-ai-for-children.md`](curriculum-gates-local-ai-for-children.md)
+  remains its earlier requirements study.
 
 Candidates still at the brainstorm stage — secrets manager
 (`ZOMBIE_INSTALL_VAULT`), local SSO (`ZOMBIE_INSTALL_SSO`), wiki

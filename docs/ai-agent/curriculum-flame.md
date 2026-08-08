@@ -12,24 +12,25 @@ while replacing root administration with curriculum and safety gates,
 role-separated authentication, local inference, minimal retention, and
 fail-closed output validation.
 
-The detailed source specification is
+The earlier requirements study is
 [`../options/curriculum-gates-local-ai-for-children.md`](../options/curriculum-gates-local-ai-for-children.md).
-Implementation belongs to the independent
-[`japer-technology/curriculum-flame`](https://github.com/japer-technology/curriculum-flame)
-project. This document defines the family member; it does not certify that
-the sibling product has passed its release gates.
+This document and the common
+[`implementation contract`](implementation.md) are authoritative when that
+study differs. Implementation belongs at `products/curriculum-flame/` in
+this repository; this definition does not certify that the product has
+passed its release gates.
 
 ## Definition card
 
 | Field | Definition |
 | ----- | ---------- |
-| Status | Product definition with detailed local specification; implementation and release evidence are product-owned |
+| Status | Implementation-ready first-release specification; source not yet implemented |
 | Human need | Let a child use capable local AI without replacing instruction for the outcomes they are currently learning |
 | Intended users | Children, parents or guardians, and optionally authorised teachers |
 | Operator | Parent/guardian or system owner; Ubuntu Zombie may perform approved host-level lifecycle management |
-| Maximum authority | Flame-owned state and explicitly nominated learner workspaces |
-| Default Linux identity | Non-privileged `flame` identity, plus a separately trusted guardian plane |
-| Default access | Product-specific child and guardian sessions on loopback port `5656` |
+| Maximum authority | Flame-owned state in the first release; nominated learner workspaces require a later tool-enabled release |
+| Default Linux identities | Non-login `flame-child`, `flame-policy`, `flame-guardian`, `flame-model`, and `flame-validator` |
+| Default access | Child UI on `127.0.0.1:5656`; separate guardian UI on `127.0.0.1:5657` |
 | Install root | `/opt/curriculum-flame` |
 | Configuration root | `/etc/curriculum-flame` |
 | State root | `/var/lib/curriculum-flame` |
@@ -38,7 +39,54 @@ the sibling product has passed its release gates.
 | Command prefix | `flame-*` |
 | Environment prefix | `FLAME_*` |
 | Model boundary | Local provider only for child prompts and responses |
-| Authoritative repository | [`japer-technology/curriculum-flame`](https://github.com/japer-technology/curriculum-flame) |
+| Management entry point | Source `scripts/manage.sh`; installed `/usr/local/sbin/flame-manage` |
+| Source root | `products/curriculum-flame/` |
+| Authoritative repository | [`japer-technology/ubuntu-zombie`](https://github.com/japer-technology/ubuntu-zombie) |
+
+## Fixed first implementation
+
+The first release is a deliberately narrow evaluation product:
+
+| Concern | First-release decision |
+| ------- | ---------------------- |
+| Users | One guardian and one learner |
+| Curriculum | Bundled synthetic Years 5–8 mathematics outcomes for tests and evaluation |
+| Interaction | Text only |
+| Model | OpenAI-compatible loopback endpoint; default `http://127.0.0.1:8080/v1` |
+| Policy | Deterministic decision engine over versioned outcome matches |
+| Validation | Fully buffered response; no candidate token reaches the child before validation |
+| Alerts | Local guardian dashboard only; no outbound notification |
+| Retention | Structured events 90 days; full transcripts disabled |
+| Tools | None |
+| Network | Child and guardian loopback UIs plus loopback model route; no internet |
+| Platforms | Ubuntu Desktop 22.04 and 24.04 LTS on `amd64` |
+| Source lesson set | Ubuntu Zombie `v2026.08.07.05.56.42` |
+
+The synthetic curriculum is test data, not an official jurisdiction
+curriculum. Real curriculum distribution, schools, teachers, multiple
+learners, images, voice, external alerts, and tools are later work and do not
+block this slice.
+
+### Configuration contract
+
+| Input | Variable or request key | Rule |
+| ----- | ----------------------- | ---- |
+| Non-interactive mode | `FLAME_NONINTERACTIVE=1` | Never prompts |
+| Guardian password | `FLAME_GUARDIAN_PASSWORD_FILE` / `guardian_password_file` | Root-owned mode `0600`; required unattended |
+| Learner password | `FLAME_LEARNER_PASSWORD_FILE` / `learner_password_file` | Root-owned mode `0600`; required unattended |
+| Model endpoint | `FLAME_MODEL_BASE_URL` / `model_base_url` | HTTP loopback URL only; default above |
+| Model ID | `FLAME_MODEL` / `model` | Non-empty and required unattended |
+| Validator endpoint | `FLAME_VALIDATOR_BASE_URL` / `validator_base_url` | HTTP loopback URL; defaults to model endpoint |
+| Validator model | `FLAME_VALIDATOR_MODEL` / `validator_model` | Defaults to model ID; independently configurable |
+| Curriculum package | `FLAME_CURRICULUM_FILE` / `curriculum_file` | Optional signed package; defaults to bundled synthetic fixture |
+| Event retention | `FLAME_EVENT_RETENTION_DAYS` / `event_retention_days` | Integer `30..3650`, default `90` |
+| Classifier fixture | `FLAME_CLASSIFIER_FIXTURE` | Tests only; rejected by installed release |
+| Backup destination | request `backup_destination` | Absolute operator-controlled path |
+| Retain state | request `retain_state` | Required boolean for `uninstall` |
+
+Unknown `FLAME_*` installer inputs and management request keys fail closed.
+Raw credentials are not accepted in arguments or environment values.
+Missing required unattended input exits `64` before mutation.
 
 ## Product promise
 
@@ -213,6 +261,32 @@ secondary validation, restriction, or an unclassified response according
 to policy. A high-confidence match to a current protected outcome blocks
 generation or forces a safe redirect.
 
+The first implementation uses one versioned classifier contract:
+
+1. normalise Unicode with NFKC, case-fold, collapse whitespace, and preserve
+   both original and normalised hashes;
+2. match exact protected-document hashes and phrases;
+3. match outcome keywords, token sets, examples, prerequisites, and
+   successors from the active package;
+4. ask the configured local classifier for candidate outcome IDs, request
+   type, safety categories, confidence, and evidence spans;
+5. reject IDs not present in the active package and clamp confidence to
+   `0..1`;
+6. merge deterministic and classifier candidates by highest confidence; and
+7. pass only the structured candidates to the deterministic policy engine.
+
+Classifier output has schema version, classifier version, outcome candidates
+(`outcome_id`, `confidence`, `evidence_spans`), request types, safety
+categories, and an `uncertain` boolean. Unknown fields, prose outside the
+JSON object, invalid ranges, missing versions, timeout, or model failure make
+the result unavailable. An unavailable prompt classifier produces an
+unclassified restricted response; an unavailable safety or output validator
+blocks delivery.
+
+Tests inject classifier results only through the explicit
+`FLAME_CLASSIFIER_FIXTURE` test hook. The installed service rejects that
+variable so fixture decisions cannot enter a release.
+
 ### Deterministic decisions and response modes
 
 The policy engine, separate from the language model, produces decisions
@@ -229,6 +303,22 @@ It can select:
 | Safe rewrite | Remove protected or unsafe material, then revalidate |
 | Adult approval required | Ask an authorised adult for a narrow exception |
 | Session locked | Stop prompts until adult review |
+
+The first-release thresholds are fixed:
+
+| Match | Decision |
+| ----- | -------- |
+| Safety block at any configured confidence | `BLOCK` |
+| Current or temporarily protected outcome at `>= 0.90` | `BLOCK` |
+| Protected outcome at `0.75..0.89` | Secondary validation, then `BLOCK` on failure or confirmation |
+| Any candidate at `0.50..0.74` | `RESTRICT` as unclassified |
+| No valid candidate or confidence below `0.50` | `RESTRICT` as unclassified |
+| Previous/future/exempted only | `ALLOW_WITH_VALIDATION` |
+
+When several rules apply, safety, session lock, assessment protection,
+current outcome, temporary protection, unclassified, previous/future is the
+fixed most-restrictive order. An exemption can affect only its named outcome
+and time window; it cannot override safety or assessment protection.
 
 ## Protected content and circumvention
 
@@ -297,7 +387,7 @@ authorised and passes through both curriculum and safety policy.
 | Calculator | Allowed when it does not expose protected method or answers |
 | Local document search | Restricted to nominated learner material |
 | Code execution | Sandboxed or absent; never a route around curriculum policy |
-| File writing | Restricted to nominated learner workspaces |
+| File writing | Absent in the first release; later restricted to nominated learner workspaces |
 | Internet, email, messaging, purchases | Blocked |
 | Shell and device control | Blocked |
 | Image generation | Age- and policy-filtered |
@@ -308,27 +398,84 @@ prompt, policy, result, and output validation.
 
 ## Architecture and trust boundaries
 
-The design separates:
+The first implementation uses five separately confined services:
 
-- child UI and identity;
-- guardian dashboard and identity;
-- API gateway;
-- deterministic policy engine;
-- curriculum service and signed data;
-- prompt, safety, assessment, and circumvention classifiers;
-- local model router;
-- complete output validator;
-- structured event, alert, and audit services; and
-- root-only lifecycle management.
+| Service | Identity | Interface | Access |
+| ------- | -------- | --------- | ------ |
+| `curriculum-flame-child.service` | `flame-child` | Child UI on `127.0.0.1:5656`; decision socket only | No guardian database, policy writes, model/validator socket, shell, IP network, or sibling paths |
+| `curriculum-flame-guardian.service` | `flame-guardian` | Guardian UI on `127.0.0.1:5657`; policy administration Unix socket | No child credential, model call, executable-policy write, or sibling paths |
+| `curriculum-flame-policy.service` | `flame-policy` | Separate read-decision and guardian-control Unix sockets | Curriculum, profiles, approvals, event store, orchestration, deterministic decisions |
+| `curriculum-flame-model.service` | `flame-model` | Fixed generation Unix socket; configured loopback model endpoint | Candidate generation only; no policy decision or child response path |
+| `curriculum-flame-validator.service` | `flame-validator` | Separate pre/post-validation Unix socket; configured loopback classifier endpoint | Prompt, safety, assessment, circumvention, and complete candidate validation |
+
+The product also has root-only lifecycle management. There is no generic API
+gateway, container stack, message bus, or separately deployable microservice
+requirement in the first release.
 
 The child UI never connects directly to the model endpoint. The primary
 model receives no administrative credential or unrestricted filesystem
 access. Curriculum policy, validators, and executable code remain
 root-owned outside every child-writable root.
 
-The child service and guardian plane should use separate service identities
-where practical. Their routes, credentials, cookies, sessions, and data
-authorisation are tested as independent boundaries.
+The five services use the identities above. Unix sockets live below
+`/run/curriculum-flame/`; group and mode permit only the named caller.
+Services use `NoNewPrivileges=true`, an empty capability set,
+`ProtectSystem=strict`, private temporary/device namespaces, and explicit
+read/write paths. Root-owned `curriculum-flame-child.socket` and
+`curriculum-flame-guardian.socket` units bind the two UI ports and pass
+accepted descriptors to services restricted to `AF_UNIX`; those services
+cannot create outbound IP sockets. `flame-policy` is Unix-socket only. Only
+`flame-model` and `flame-validator` may create IP sockets. Their clients
+allowlist the exact configured URLs and systemd denies non-loopback IP;
+systemd does not claim to isolate one loopback port from another.
+
+The child and guardian cookies are respectively `flame_child_session` and
+`flame_guardian_session`. Both are host-only, `HttpOnly`, and
+`SameSite=Strict`; state-changing requests require a session-bound CSRF
+token. A learner ID comes from the authenticated child session, never a
+request body. A guardian ID and authorised learner set likewise come from
+the guardian session, preventing identifier substitution.
+
+### API and storage contract
+
+The child interface implements login/logout, `POST /v1/child/chat`, session
+status, and health. The guardian interface implements login/logout, learner
+profile create/read/update, outcome state update, protection create, approval
+create/revoke, event list/review, session suspend/resume, retention, export,
+and health. The request shapes in the earlier requirements study may be used
+only after removing caller-supplied identity fields as described above.
+
+`/var/lib/curriculum-flame/policy.db` is SQLite owned by
+`flame-policy:flame-policy` mode `0600`. Its first schema contains:
+
+| Record | Required fields |
+| ------ | --------------- |
+| `learners` | ID, display label, jurisdiction, curriculum version, reading level, active |
+| `outcomes` | Stable ID, framework, subject, strand, description, year range, prerequisites, successors, keywords/examples, package version |
+| `learner_outcomes` | Learner ID, outcome ID, state, valid from/until, guardian event ID |
+| `protected_material` | ID, hashes/fingerprints, outcome IDs, valid from/until |
+| `approvals` | ID, learner/outcomes, mode, reason, approver, created/expiry/revoked timestamps |
+| `policy_decisions` | ID, learner, normalised prompt hash, candidates, decision, mode, warning level, policy/classifier versions, timestamp |
+| `validation_results` | ID, decision ID, stage, validator versions, categories, result |
+| `alerts` | ID, decision ID, level, category, review state, timestamps |
+| `sessions` | Role, token digest, learner/guardian binding, created/expiry/revoked timestamps |
+
+Raw child prompts, candidate output, and delivered output are held only for
+the active request unless the guardian explicitly enables transcript
+retention in a later release. The first release stores hashes, evidence
+spans, outcome IDs, categories, decisions, and validator versions. Passwords
+are scrypt hashes with independent salts. No reversible credential or
+free-text transcript is stored in the database.
+
+The policy service obtains pre-generation validation from
+`flame-validator`, requests a complete candidate from `flame-model`, and
+sends that opaque candidate to `flame-validator` for an independent post
+check. The validator repeats safety, outcome, assessment, circumvention, and
+indirect leakage checks against the candidate and recent structured decision
+context. Only the policy service can turn a validator result into an `ALLOW`
+decision and return content to the child. The result must carry matching
+policy, classifier, model, and validator versions. Rewrite runs at most once
+and the rewritten candidate is fully revalidated.
 
 ## Authentication and secrets
 
@@ -347,6 +494,11 @@ fallback. Reinstall and update preserve valid Flame credentials unless an
 authorised rotation is requested. Child credentials cannot authenticate to
 guardian or management routes.
 
+Password records use product-owned `hashlib.scrypt` with a random 16-byte
+salt, `n=16384`, `r=8`, and `p=1`. Guardian and learner session-signing keys
+are independent. Credential rotation invalidates every session for the
+affected role.
+
 ## Data, privacy, and retention
 
 The default product:
@@ -356,7 +508,7 @@ The default product:
 - disables cloud telemetry, advertising, behavioural profiling, and data
   sale or sharing;
 - stores structured events rather than full transcripts by default;
-- encrypts sensitive fields at rest;
+- stores no reversible credentials or free-text transcripts by default;
 - keeps administrator credentials outside the child application;
 - provides configurable retention, export, and authorised deletion; and
 - records administrative access.
@@ -369,6 +521,12 @@ boundary.
 Administrative audit events are append-only and tamper-evident. Startup
 verifies policy signatures, curriculum packages, validator versions,
 guardian controls, credentials, and audit availability.
+
+The first release relies on mode-restricted local storage and an encrypted
+host volume; it does not claim application-level database encryption.
+Backups require an operator-nominated encrypted destination and are refused
+when that prerequisite is not acknowledged. Later storage encryption must
+define key custody and recovery before it can replace this honest boundary.
 
 ## Fail-closed behaviour
 
@@ -388,7 +546,9 @@ means a validation failure cannot leak already streamed content.
 ## Ubuntu Zombie management contract
 
 Ubuntu Zombie is the God-level host manager, not a child, guardian, teacher,
-or curriculum authority. Flame exposes a product-owned root interface for:
+or curriculum authority. Flame implements the common product-owned root
+interface in [`implementation.md`](implementation.md#lifecycle-entry-point)
+for:
 
 - discovery, version, ownership, integrity, health, and lifecycle status;
 - installation and complete dry-run;
@@ -409,27 +569,27 @@ Zombie from using a child or guardian session, changing curriculum through
 an application route, treating root as guardian approval, or hiding a
 policy change. A dedicated Flame machine is the stronger deployment.
 
-The `flame` service identity cannot invoke Zombie management or request an
+The `flame-child`, `flame-policy`, `flame-guardian`, `flame-model`, and
+`flame-validator` identities cannot invoke Zombie management or request an
 operation against Friend or ERIC.
 
 ## Installation
 
-The product-owned installer:
+`products/curriculum-flame/scripts/manage.sh install`:
 
 1. verifies the platform and Flame release;
 2. refuses unmarked identity, path, unit, command, port, cookie, or
    ownership collisions;
-3. reviews separate guardian, learner, curriculum, model, retention, alert,
-   and workspace settings;
+3. reviews separate guardian, learner, curriculum, model, and retention
+   settings;
 4. supports an accurate no-mutation dry-run;
-5. creates the non-privileged child service and separately trusted guardian
-   plane;
+5. creates the five non-login service identities and separately trusted
+   child, policy, guardian, model, and validator planes;
 6. generates unique credentials and stores them in product-owned protected
    files;
 7. installs root-owned code, curriculum rules, validators, policies, and
    hardened units;
-8. creates only Flame state, logs, receipts, ownership markers, and
-   nominated learner workspaces;
+8. creates only Flame state, logs, receipts, and ownership markers;
 9. validates curriculum/profile schemas and every required safeguard;
 10. starts the child service only after policy, audit, local model, and
     output-validator health checks pass; and
@@ -444,6 +604,18 @@ Ubuntu Zombie may fetch, verify, display, and invoke this exact installer.
 Flame does not become an Ubuntu Zombie component target.
 
 ## Update and lifecycle management
+
+The common operations have these product-specific outcomes:
+
+| Operation | Flame outcome |
+| --------- | ------------- |
+| Describe/status | Report role services, active package/validator versions, lifecycle, and health without learner data |
+| Verify/doctor | Read-only identity, permissions, sockets, role separation, package integrity, model, policy, audit, and validator checks |
+| Repair | Restore only known-safe product files, permissions, sockets, and units; never rewrite learner policy |
+| Backup/rollback | Protect and restore compatible guardian-owned state and integrity records |
+| Suspend | End child sessions and stop generation while keeping guardian review available |
+| Resume | Require policy, curriculum, model, validator, audit, and credential health before child access |
+| Uninstall | Remove only Flame resources after an explicit retained-state choice |
 
 An update:
 
@@ -481,8 +653,9 @@ The initial MVP is intentionally narrow:
 - structured local logging;
 - no internet access and no external tools.
 
-Mathematics for Years 5–8 is the recommended first evaluation domain
-because its outcome boundaries and answers are more measurable.
+Mathematics for Years 5–8 is the fixed first evaluation domain because its
+outcome boundaries and answers are more measurable. Bundled data is
+synthetic and carries no claim of jurisdictional completeness.
 
 Later stages may add multiple learners and guardians, signed curriculum
 imports, protected document and image input, additional subjects, teacher
@@ -497,8 +670,8 @@ The first release is not acceptable until tests prove:
 
 - guardian creation and learner profile management;
 - correct previous/current/future policy decisions;
-- direct, paraphrased, translated, encoded, roleplayed, image-derived, and
-  multi-turn protected requests are handled;
+- direct, paraphrased, translated, encoded, roleplayed, and multi-turn text
+  requests are handled;
 - permitted higher- and lower-level answers do not leak current outcomes;
 - candidate protected content is blocked before delivery;
 - warnings, alerts, session locks, and expiring approvals behave exactly as
@@ -515,8 +688,9 @@ Unit suites cover state transitions, decisions, alerts, approval expiry,
 permissions, and retention. Integration suites cover the complete pipeline,
 service failures, curriculum import, assessment matching, and alerts.
 Red-team suites cover prompt injection, roleplay, translation, encoding,
-decomposition, images, analogy, code, tools, and administrator
-impersonation.
+decomposition, analogy, generated code as text, tool requests, and
+administrator impersonation. Image bypass tests become mandatory only when
+image input is implemented.
 
 Disposable VMs test Flame alone and in every supported family combination.
 They prove child/guardian separation, sibling credential rejection,
@@ -545,12 +719,14 @@ data.
 
 ## Product-owned documentation
 
-The Curriculum Flame repository must own its README, vision, architecture,
-threat model, security and privacy policies, curriculum and policy schemas,
-configuration, guardian and child guides, installation, updates,
-migrations, backup/recovery, troubleshooting, disclosure, release
-artifacts, and test evidence.
+`products/curriculum-flame/` owns its README, vision, architecture, threat
+model, security and privacy policies, curriculum and policy schemas,
+configuration, guardian and child guides, installation, updates, migrations,
+backup/recovery, troubleshooting, disclosure, release artifacts, and test
+evidence in this repository.
 
-The full current requirement set remains in
-[`../options/curriculum-gates-local-ai-for-children.md`](../options/curriculum-gates-local-ai-for-children.md);
-this file is the family catalogue definition and management contract.
+The earlier
+[`curriculum-gates-local-ai-for-children.md`](../options/curriculum-gates-local-ai-for-children.md)
+study remains useful background. This file and
+[`implementation.md`](implementation.md) control source layout, first-release
+scope, identities, interfaces, data retention, and acceptance.

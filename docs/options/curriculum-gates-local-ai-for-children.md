@@ -1,5 +1,12 @@
 # Curriculum-Gated Local AI for Children
 
+> This is the original broad requirements study. The authoritative
+> [Curriculum Flame definition](../ai-agent/curriculum-flame.md) and common
+> [implementation contract](../ai-agent/implementation.md) fix the
+> first-release scope, Ubuntu monorepo source root, identities, interfaces,
+> data contracts, and validation order. They control wherever this study
+> proposes a broader platform, service layout, repository, or feature.
+
 ## 1. Product Summary
 
 The system is a locally hosted, general-purpose AI assistant designed for children.
@@ -754,14 +761,14 @@ Tool requests must pass through the same curriculum and safety policy engine as 
 
 ## 9. Local Deployment Requirements
 
-The system should support:
+The first implementation supports:
 
-* Windows
-* macOS
-* Linux
-* local server appliance
-* school network deployment
-* optional mobile client connected to a local server
+* Ubuntu Desktop 22.04 and 24.04 LTS on `amd64`
+* loopback-only child, guardian, model, and validator interfaces
+* the fixed service identities in the authoritative product definition
+
+Windows, macOS, local appliances, school networks, and mobile clients are
+later portability work, not first-release requirements.
 
 The deployment must include:
 
@@ -805,6 +812,11 @@ The primary language model must not receive administrative credentials or unrest
 ---
 
 ## 11. Recommended Service Architecture
+
+This tree is a conceptual decomposition, not the repository layout or a
+requirement for containers, JavaScript packages, or separately deployed
+microservices. The fixed Python/systemd mapping lives in the authoritative
+product definition.
 
 ```text
 /apps
@@ -1278,25 +1290,25 @@ Phase three may add:
 
 ---
 
-## 26. Repository Deliverables
+## 26. Product-Root Deliverables
 
-The GitHub repository should include:
+Implementation lives at `products/curriculum-flame/` in the
+`japer-technology/ubuntu-zombie` repository. That product root includes:
 
 ```text
 README.md
-ARCHITECTURE.md
-SECURITY.md
-PRIVACY.md
-POLICY_MODEL.md
-CURRICULUM_SCHEMA.md
-THREAT_MODEL.md
-CONTRIBUTING.md
-LICENSE
-docker-compose.yml
-.env.example
+CHANGELOG.md
+Makefile
+PRODUCT.json
+UPSTREAM.md
+VERSION
+docs/
+payload/
+scripts/manage.sh
+tests/
 ```
 
-It should also include:
+Its documentation and tests include:
 
 * sample curriculum data
 * sample child policy
@@ -1306,25 +1318,15 @@ It should also include:
 * API schemas
 * database migrations
 * local deployment instructions
-* validator plugin documentation
+* validator contract documentation
 
 ---
 
-## 27. Suggested Repository Name
+## 27. Fixed Source Identity
 
-```text
-curriculum-gated-ai
-```
-
-Alternative names:
-
-```text
-learning-boundary
-curriculum-firewall
-guardian-tutor
-local-child-ai
-curriculum-guard
-```
+The product ID is `curriculum-flame`, its source root is
+`products/curriculum-flame/`, and its release artifacts are produced from
+this repository. No separate repository name remains to be selected.
 
 ---
 
