@@ -230,7 +230,20 @@ class FriendApplication:
         destructive: bool = False,
         confirmation: str | None = None,
     ) -> None:
-        parts = normalize_relative_path(path, allow_root=not destructive)
+        try:
+            parts = normalize_relative_path(path, allow_root=not destructive)
+        except ValidationError as exc:
+            attempted_path = path[:512] if isinstance(path, str) else "<non-text>"
+            self.audit.event(
+                "policy_decision",
+                capability=capability,
+                workspace_id=workspace_id,
+                relative_path=attempted_path,
+                decision="denied",
+                reason=exc.code,
+                requires_confirmation=destructive,
+            )
+            raise
         canonical = canonical_relative(parts)
         decision = decide(
             capability,
@@ -533,9 +546,17 @@ class FriendApplication:
         if not verify_password(current_password, self.database.password_record()):
             self.audit.event("password_rotation", decision="denied")
             raise AuthenticationError("Current owner password was not accepted.")
-        if len(new_password) < 12:
+        if not isinstance(new_password, str) or len(new_password) < 12:
             raise ValidationError("New owner password must be at least 12 characters.")
-        self.database.rotate_password(hash_password(new_password))
+        if "\r" in new_password or "\n" in new_password:
+            raise ValidationError("New owner password must be one line.")
+        try:
+            password_hash = hash_password(new_password)
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(
+                "New owner password must be valid UTF-8 and at most 1024 bytes."
+            ) from exc
+        self.database.rotate_password(password_hash)
         self.audit.event(
             "password_rotation",
             decision="allowed",

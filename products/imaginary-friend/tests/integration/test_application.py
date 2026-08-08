@@ -133,11 +133,30 @@ class ApplicationTests(unittest.TestCase):
             self.workspace_id, "note.txt", confirmation="note.txt"
         )
 
+    def test_invalid_workspace_path_is_denied_and_audited(self) -> None:
+        with self.assertRaises(ValidationError):
+            self.application.read_file(self.workspace_id, "../outside")
+
+        event = json.loads(
+            self.audit_path.read_text(encoding="utf-8").splitlines()[-1]
+        )
+        self.assertEqual(event["event_type"], "policy_decision")
+        self.assertEqual(event["decision"], "denied")
+        self.assertEqual(event["relative_path"], "../outside")
+
     def test_settings_reject_non_loopback_provider(self) -> None:
         with self.assertRaises(ValidationError):
             self.application.update_settings(
                 {"model_base_url": "http://example.com/v1"}
             )
+
+    def test_password_rotation_rejects_unsupported_password_text(self) -> None:
+        for password in ("x" * 1025, "long enough\nbut multiline"):
+            with self.assertRaises(ValidationError):
+                self.application.rotate_password(
+                    "initial owner password", password
+                )
+        self.application.login("initial owner password")
 
     def test_suspension_revokes_sessions_and_capabilities(self) -> None:
         login = self.application.login("initial owner password")

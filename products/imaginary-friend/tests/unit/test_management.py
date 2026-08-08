@@ -11,7 +11,13 @@ from unittest import mock
 
 from friend.auth import hash_password
 from friend.database import Database
-from friend.management import Invocation, ManagementError, Manager, Paths
+from friend.management import (
+    Invocation,
+    ManagementError,
+    Manager,
+    Paths,
+    read_secret_file,
+)
 
 SOURCE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -403,6 +409,19 @@ class ManagementUnitTests(unittest.TestCase):
         with self.assertRaises(ManagementError) as raised:
             self.manager._validate_backup_destination(missing, dry_run=True)
         self.assertEqual(raised.exception.exit_code, 66)
+
+    def test_password_file_must_be_one_bounded_utf8_line(self) -> None:
+        password_file = Path(self.temporary.name) / "password"
+        for value in ("long enough\nsecond line", "x" * 1025):
+            password_file.write_text(value, encoding="utf-8")
+            details = password_file.stat()
+            with mock.patch(
+                "friend.management.check_secure_file",
+                return_value=details,
+            ):
+                with self.assertRaises(ManagementError) as raised:
+                    read_secret_file(password_file)
+            self.assertEqual(raised.exception.code, "INVALID_SECRET")
 
 
 if __name__ == "__main__":

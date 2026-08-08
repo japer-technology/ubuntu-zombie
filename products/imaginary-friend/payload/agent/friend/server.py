@@ -24,7 +24,7 @@ STATIC_PATH = Path(__file__).with_name("static") / "index.html"
 
 class FriendHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = False
+    allow_reuse_address = True
 
     def __init__(
         self, address: tuple[str, int], application: FriendApplication

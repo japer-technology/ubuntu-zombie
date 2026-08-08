@@ -18,7 +18,10 @@ MAX_PASSWORD_BYTES = 1_024
 def _password_bytes(password: str) -> bytes:
     if not isinstance(password, str):
         raise TypeError("password must be text")
-    encoded = password.encode("utf-8")
+    try:
+        encoded = password.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("password must be valid UTF-8") from exc
     if not encoded:
         raise ValueError("password must not be empty")
     if len(encoded) > MAX_PASSWORD_BYTES:
@@ -102,4 +105,3 @@ def token_digest(token: str, signing_key: bytes) -> str:
 def new_signing_key() -> bytes:
     """Return independent signing material for this Friend installation."""
     return secrets.token_bytes(32)
-

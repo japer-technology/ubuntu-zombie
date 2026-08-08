@@ -172,6 +172,9 @@ class HTTPTests(unittest.TestCase):
         response.read()
         connection.close()
 
+    def test_server_socket_supports_prompt_service_restarts(self) -> None:
+        self.assertTrue(FriendHTTPServer.allow_reuse_address)
+
 
 if __name__ == "__main__":
     unittest.main()
