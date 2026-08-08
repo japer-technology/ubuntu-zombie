@@ -7,6 +7,14 @@ Imaginary Friend uses independent UTC date-time versions in
 
 ### Fixed
 
+- Export every retained conversation from one consistent database snapshot,
+  keep conversations beyond the UI's former 100-record ceiling accessible,
+  and disclose an explicitly selected workspace file for one turn only.
+- Reject oversized model replies before they can make retained conversations
+  unusable, validate owner passwords against the runtime's exact format and
+  size limits, and allow the loopback service to restart promptly.
+- Audit invalid workspace-path denials and require setgid inheritance on
+  existing shared roots so Friend-created files retain `friend-share` access.
 - Preserve suspension across reinstall and update, recompute existing history
   expiry when its retention window changes, reject lifecycle inputs that the
   selected operation cannot apply, and retain correlation in unexpected
