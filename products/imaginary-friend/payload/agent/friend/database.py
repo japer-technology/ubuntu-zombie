@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import stat
 import time
 import uuid
 from pathlib import Path
@@ -103,13 +104,33 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
 
+    def _secure_journal(self) -> None:
+        journal = self.path.with_name(f"{self.path.name}-journal")
+        if not (journal.exists() or journal.is_symlink()):
+            return
+        details = journal.lstat()
+        if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+            raise ValidationError("Friend SQLite journal must be one regular file.")
+        os.chmod(journal, 0o600)
+
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.exists() or self.path.is_symlink():
+            details = self.path.lstat()
+            if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+                raise ValidationError("Friend state database must be one regular file.")
         connection = sqlite3.connect(self.path, timeout=5)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 5000")
+        connection.execute("PRAGMA journal_mode = PERSIST")
+        connection.execute("PRAGMA synchronous = FULL")
         connection.execute("PRAGMA secure_delete = ON")
+        try:
+            self._secure_journal()
+        except ValidationError:
+            connection.close()
+            raise
         return connection
 
     def initialize(
@@ -160,6 +181,7 @@ class Database:
             elif not valid_password_record(str(row["password_hash"])):
                 raise ValidationError("Stored owner authentication state is invalid.")
         os.chmod(self.path, 0o600)
+        self._secure_journal()
 
     def require_ready(self) -> None:
         """Fail closed when schema or authentication material is incomplete."""

@@ -552,7 +552,7 @@ class Manager:
 
     def _prepare_inputs(self, invocation: Invocation) -> None:
         operation = invocation.operation
-        if operation in {"install", "repair", "update"}:
+        if operation in {"install", "repair", "update", "resume"}:
             self._prepare_configuration_inputs(invocation)
         if operation == "backup":
             destination = invocation.inputs.get("backup_destination")
@@ -591,7 +591,7 @@ class Manager:
 
     def _prepare_configuration_inputs(self, invocation: Invocation) -> None:
         existing = self._existing_settings()
-        needs_install_inputs = invocation.operation == "install"
+        needs_install_inputs = invocation.operation == "install" and existing is None
         owner = invocation.inputs.get("owner_user") or self._owner_from_config()
         if needs_install_inputs and invocation.non_interactive and not invocation.inputs.get(
             "owner_user"
@@ -755,8 +755,6 @@ class Manager:
                 "UNSAFE_DESTINATION",
                 "Backup destination cannot be inside a nominated workspace.",
             )
-        if dry_run and not path.exists():
-            return
         try:
             details = path.lstat()
         except FileNotFoundError as exc:
@@ -800,6 +798,7 @@ class Manager:
             not stat.S_ISREG(details.st_mode)
             or details.st_nlink != 1
             or details.st_uid != 0
+            or details.st_gid != 0
             or stat.S_IMODE(details.st_mode) != 0o644
         ):
             raise ManagementError(
@@ -829,6 +828,20 @@ class Manager:
             raise ManagementError(78, "INVALID_MARKER", "Ownership marker identity is invalid.")
         validate_uuid(marker.get("instance_id"), label="marker instance_id")
         validate_version(str(marker.get("version")))
+        if (
+            not isinstance(marker.get("source_revision"), str)
+            or not marker["source_revision"]
+            or len(marker["source_revision"]) > 256
+        ):
+            raise ManagementError(
+                78, "INVALID_MARKER", "Marker source revision is invalid."
+            )
+        try:
+            datetime.fromisoformat(str(marker.get("installed_at")).replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ManagementError(
+                78, "INVALID_MARKER", "Marker installation time is invalid."
+            ) from exc
         digest = marker.get("artifact_sha256")
         if digest is not None and (
             not isinstance(digest, str)
@@ -1148,6 +1161,50 @@ class Manager:
         self, invocation: Invocation, *, network: bool
     ) -> list[dict[str, str]]:
         checks: list[dict[str, str]] = []
+        if invocation.operation != "install":
+            try:
+                marker = self.load_marker(required=True)
+            except ManagementError as exc:
+                checks.append(
+                    self.check(
+                        "ownership_marker",
+                        False,
+                        exc.message,
+                        "Install Friend or restore its valid ownership marker first.",
+                    )
+                )
+            else:
+                checks.append(
+                    self.check(
+                        "ownership_marker",
+                        True,
+                        "The Friend ownership marker is valid.",
+                    )
+                )
+                if (
+                    invocation.operation == "repair"
+                    and marker["version"] != self.version
+                ):
+                    checks.append(
+                        self.check(
+                            "source_version",
+                            False,
+                            "Repair source does not match the installed version.",
+                            "Use update for a newer source or the matching release for repair.",
+                        )
+                    )
+                if (
+                    invocation.operation == "rollback"
+                    and not self.paths.rollback_root.is_dir()
+                ):
+                    checks.append(
+                        self.check(
+                            "rollback_runtime",
+                            False,
+                            "No previous Friend runtime is available.",
+                            "Restore a verified backup or install a reviewed release.",
+                        )
+                    )
         if invocation.operation in {"install", "update", "resume"}:
             try:
                 self._platform_preflight()
@@ -1368,20 +1425,36 @@ class Manager:
         except FriendError as exc:
             raise ManagementError(69, "MODEL_UNAVAILABLE", exc.message, retryable=True) from exc
 
-    def verify_checks(self, *, probe_runtime: bool) -> list[dict[str, str]]:
+    def verify_checks(
+        self, *, probe_runtime: bool, allow_transaction: bool = False
+    ) -> list[dict[str, str]]:
         checks: list[dict[str, str]] = []
         try:
             marker = self.load_marker(required=True)
         except ManagementError as exc:
-            return [
+            transaction = (
+                self._transaction_instance()
+                if allow_transaction and exc.code == "INSTALLATION_MISSING"
+                else None
+            )
+            if transaction is None:
+                return [
+                    self.check(
+                        "ownership_marker",
+                        False,
+                        exc.message,
+                        "Use a reviewed source checkout to repair or reinstall Friend.",
+                    )
+                ]
+            checks.append(
                 self.check(
-                    "ownership_marker",
-                    False,
-                    exc.message,
-                    "Use a reviewed source checkout to repair or reinstall Friend.",
+                    "installation_transaction",
+                    True,
+                    "The clean install transaction is valid.",
                 )
-            ]
-        checks.append(self.check("ownership_marker", True, "Ownership marker is valid."))
+            )
+        else:
+            checks.append(self.check("ownership_marker", True, "Ownership marker is valid."))
         retained = not self.paths.install_root.exists()
         if retained:
             checks.append(
@@ -1425,7 +1498,7 @@ class Manager:
             ("install_root", self.paths.install_root, 0o755, 0),
             ("configuration_root", self.paths.configuration_root, 0o750, 0),
             ("state_root", self.paths.state_root, 0o750, 0),
-            ("log_root", self.paths.log_root, 0o750, None),
+            ("log_root", self.paths.log_root, 0o750, 0),
         ):
             try:
                 details = path.lstat()
@@ -1474,8 +1547,26 @@ class Manager:
         try:
             database = Database(self.paths.database)
             database.require_ready()
-            db_ok = database.integrity_check() == "ok"
-        except (FriendError, OSError):
+            friend = pwd.getpwnam("friend")
+            database_details = self.paths.database.lstat()
+            journal_path = self.paths.database.with_name(
+                f"{self.paths.database.name}-journal"
+            )
+            journal_details = journal_path.lstat()
+            db_ok = (
+                database.integrity_check() == "ok"
+                and stat.S_ISREG(database_details.st_mode)
+                and database_details.st_nlink == 1
+                and database_details.st_uid == friend.pw_uid
+                and database_details.st_gid == friend.pw_gid
+                and stat.S_IMODE(database_details.st_mode) == 0o600
+                and stat.S_ISREG(journal_details.st_mode)
+                and journal_details.st_nlink == 1
+                and journal_details.st_uid == friend.pw_uid
+                and journal_details.st_gid == friend.pw_gid
+                and stat.S_IMODE(journal_details.st_mode) == 0o600
+            )
+        except (FriendError, OSError, KeyError):
             database = None
             db_ok = False
         checks.append(
@@ -1525,6 +1616,19 @@ class Manager:
                 if sandbox_ok
                 else "Friend systemd confinement is missing a required control.",
                 "Run friend-manage repair and review the unit before resume.",
+            )
+        )
+        runtime_ok = self._runtime_is_root_controlled(
+            allow_transaction=allow_transaction
+        )
+        checks.append(
+            self.check(
+                "runtime_integrity",
+                runtime_ok,
+                "Friend runtime, descriptor, policy, and lifecycle files are root-controlled."
+                if runtime_ok
+                else "Friend executable or policy state is writable or inconsistent.",
+                "Stop Friend and run friend-manage repair from the matching release.",
             )
         )
         suspended = bool(database.settings()["suspended"]) if database else False
@@ -1672,6 +1776,66 @@ class Manager:
             )
             return all(item in text for item in required) and "__FRIEND_" not in text
 
+    def _runtime_is_root_controlled(self, *, allow_transaction: bool = False) -> bool:
+            try:
+                installed_descriptor = read_json(
+                    self.paths.configuration_root / "PRODUCT.json"
+                )
+                installed_version = (
+                    self.paths.install_root / "VERSION"
+                ).read_text(encoding="utf-8").strip()
+                marker = self.load_marker()
+                if marker is None:
+                    if not allow_transaction or self._transaction_instance() is None:
+                        return False
+                    installed_marker_version = self.version
+                else:
+                    installed_marker_version = str(marker["version"])
+                if (
+                    installed_descriptor != self.descriptor
+                    or installed_version != installed_marker_version
+                ):
+                    return False
+                protected_files = (
+                    self.paths.configuration_root / "PRODUCT.json",
+                    self.paths.configuration_root / "config.json",
+                    self.paths.configuration_root / "policy.json",
+                    self.paths.unit,
+                    self.paths.logrotate,
+                    self.paths.entrypoint,
+                    self.paths.diagnostics,
+                )
+                for path in protected_files:
+                    details = path.lstat()
+                    if (
+                        not stat.S_ISREG(details.st_mode)
+                        or details.st_nlink != 1
+                        or details.st_uid != 0
+                        or stat.S_IMODE(details.st_mode) & 0o022
+                    ):
+                        return False
+                for directory, names, files in os.walk(
+                    self.paths.install_root, followlinks=False
+                ):
+                    for name in [*names, *files]:
+                        path = Path(directory) / name
+                        details = path.lstat()
+                        if details.st_uid != 0:
+                            return False
+                        if stat.S_ISLNK(details.st_mode):
+                            target = path.resolve(strict=True)
+                            target_details = target.stat()
+                            if (
+                                target_details.st_uid != 0
+                                or stat.S_IMODE(target_details.st_mode) & 0o022
+                            ):
+                                return False
+                        elif stat.S_IMODE(details.st_mode) & 0o022:
+                            return False
+            except (ManagementError, OSError, UnicodeError):
+                return False
+            return True
+
     def _ensure_transaction(self) -> str:
             marker = self.load_marker()
             if marker is not None:
@@ -1773,7 +1937,7 @@ class Manager:
     ) -> None:
             self._ensure_directory(self.paths.state_root, 0o750, 0, friend_gid)
             self._ensure_directory(self.paths.configuration_root, 0o750, 0, friend_gid)
-            self._ensure_directory(self.paths.log_root, 0o750, friend_uid, friend_gid)
+            self._ensure_directory(self.paths.log_root, 0o750, 0, friend_gid)
             self._ensure_directory(self.paths.receipts, 0o750, 0, 0)
             self._ensure_directory(self.paths.recovery, 0o700, 0, 0)
             self._ensure_directory(self.paths.state_root / "exports", 0o700, friend_uid, friend_gid)
@@ -1829,12 +1993,14 @@ class Manager:
     def _root_own_tree(root: Path) -> None:
             for directory, names, files in os.walk(root, followlinks=False):
                 os.chown(directory, 0, 0)
+                os.chmod(directory, 0o755)
                 for name in [*names, *files]:
                     path = Path(directory) / name
                     if path.is_symlink():
                         os.lchown(path, 0, 0)
                     else:
                         os.chown(path, 0, 0)
+                        os.chmod(path, 0o755 if path.is_dir() else 0o644)
 
     def _stage_runtime(self) -> str | None:
             parent = self.paths.install_root.parent
@@ -1962,6 +2128,7 @@ class Manager:
             friend_gid: int,
             workspaces: list[Path],
     ) -> Database:
+            database_preexisting = self.paths.database.is_file()
             database = Database(self.paths.database)
             password = invocation.password or secrets.token_urlsafe(24)
             database.initialize(
@@ -1984,6 +2151,29 @@ class Manager:
             if self.paths.database.exists():
                 os.chown(self.paths.database, friend_uid, friend_gid)
                 os.chmod(self.paths.database, 0o600)
+            journal = self.paths.database.with_name(
+                f"{self.paths.database.name}-journal"
+            )
+            if not journal.exists():
+                atomic_write(
+                    journal,
+                    b"",
+                    mode=0o600,
+                    uid=friend_uid,
+                    gid=friend_gid,
+                )
+            else:
+                details = journal.lstat()
+                if not stat.S_ISREG(details.st_mode) or details.st_nlink != 1:
+                    raise ManagementError(
+                        73,
+                        "UNSAFE_COLLISION",
+                        "Friend SQLite journal is not a regular file.",
+                    )
+                os.chown(journal, friend_uid, friend_gid)
+                os.chmod(journal, 0o600)
+            if database_preexisting and "workspaces_file" not in invocation.inputs:
+                return database
             selected = {str(path) for path in workspaces}
             for record in database.list_workspaces():
                 if record["canonical_root"] not in selected:
@@ -2067,31 +2257,34 @@ class Manager:
             marker = self.load_marker()
             if marker is not None:
                 self._snapshot_recovery()
-            instance_id = self._ensure_transaction()
-            friend_uid, share_gid = self._ensure_accounts(owner)
-            friend_gid = grp.getgrnam("friend").gr_gid
-            self._ensure_paths(
-                friend_uid=friend_uid,
-                friend_gid=friend_gid,
-                share_gid=share_gid,
-                workspaces=invocation.workspaces,
-            )
-            previous_version = self._stage_runtime()
-            self._deploy_configuration(
-                invocation,
-                owner_user=owner,
-                friend_gid=friend_gid,
-                workspaces=invocation.workspaces,
-            )
-            database = self._initialize_database(
-                invocation,
-                friend_uid=friend_uid,
-                friend_gid=friend_gid,
-                workspaces=invocation.workspaces,
-            )
-            database.set_suspended(False)
-            self._deploy_unit(invocation.workspaces)
+            runtime_switched = False
+            previous_version: str | None = None
             try:
+                instance_id = self._ensure_transaction()
+                friend_uid, share_gid = self._ensure_accounts(owner)
+                friend_gid = grp.getgrnam("friend").gr_gid
+                self._ensure_paths(
+                    friend_uid=friend_uid,
+                    friend_gid=friend_gid,
+                    share_gid=share_gid,
+                    workspaces=invocation.workspaces,
+                )
+                previous_version = self._stage_runtime()
+                runtime_switched = True
+                self._deploy_configuration(
+                    invocation,
+                    owner_user=owner,
+                    friend_gid=friend_gid,
+                    workspaces=invocation.workspaces,
+                )
+                database = self._initialize_database(
+                    invocation,
+                    friend_uid=friend_uid,
+                    friend_gid=friend_gid,
+                    workspaces=invocation.workspaces,
+                )
+                database.set_suspended(False)
+                self._deploy_unit(invocation.workspaces)
                 self._validate_runtime_as_friend()
                 self._start_service()
                 if not self._service_health():
@@ -2101,7 +2294,10 @@ class Manager:
                         "Friend service did not pass its loopback health gate.",
                         recovery=["Run friend-manage doctor and inspect redacted diagnostics."],
                     )
-                checks = self.verify_checks(probe_runtime=True)
+                checks = self.verify_checks(
+                    probe_runtime=True,
+                    allow_transaction=marker is None,
+                )
                 failed = [item for item in checks if item["status"] == "fail"]
                 if failed:
                     raise ManagementError(
@@ -2109,11 +2305,14 @@ class Manager:
                         "BOUNDARY_CHECK_FAILED",
                         f"Post-install boundary check failed: {failed[0]['id']}",
                     )
+                self._write_marker(instance_id, previous=marker)
+                self.load_marker(required=True)
+                self.paths.transaction.unlink(missing_ok=True)
             except Exception:
-                self._restore_failed_switch()
+                self._restore_failed_switch(runtime_switched=runtime_switched)
+                if marker is None and self.paths.marker.exists():
+                    self.paths.marker.unlink(missing_ok=True)
                 raise
-            self._write_marker(instance_id, previous=marker)
-            self.paths.transaction.unlink(missing_ok=True)
             return (
                 [
                     "friend",
@@ -2145,33 +2344,38 @@ class Manager:
             self._validate_owner(owner)
             self._workspace_preflight(invocation.workspaces)
             self._snapshot_recovery()
-            friend_uid, share_gid = self._ensure_accounts(owner)
-            friend_gid = grp.getgrnam("friend").gr_gid
-            self._ensure_paths(
-                friend_uid=friend_uid,
-                friend_gid=friend_gid,
-                share_gid=share_gid,
-                workspaces=invocation.workspaces,
-            )
-            previous_version = self._stage_runtime()
-            self._deploy_configuration(
-                invocation,
-                owner_user=owner,
-                friend_gid=friend_gid,
-                workspaces=invocation.workspaces,
-            )
-            database = self._initialize_database(
-                invocation,
-                friend_uid=friend_uid,
-                friend_gid=friend_gid,
-                workspaces=invocation.workspaces,
-            )
-            if invocation.inputs.get("owner_password_file"):
-                if invocation.password is None:
-                    raise ManagementError(65, "INVALID_SECRET", "Password input is missing.")
-                database.rotate_password(hash_password(invocation.password))
-            self._deploy_unit(invocation.workspaces)
+            runtime_switched = False
+            previous_version: str | None = None
             try:
+                friend_uid, share_gid = self._ensure_accounts(owner)
+                friend_gid = grp.getgrnam("friend").gr_gid
+                self._ensure_paths(
+                    friend_uid=friend_uid,
+                    friend_gid=friend_gid,
+                    share_gid=share_gid,
+                    workspaces=invocation.workspaces,
+                )
+                previous_version = self._stage_runtime()
+                runtime_switched = True
+                self._deploy_configuration(
+                    invocation,
+                    owner_user=owner,
+                    friend_gid=friend_gid,
+                    workspaces=invocation.workspaces,
+                )
+                database = self._initialize_database(
+                    invocation,
+                    friend_uid=friend_uid,
+                    friend_gid=friend_gid,
+                    workspaces=invocation.workspaces,
+                )
+                if invocation.inputs.get("owner_password_file"):
+                    if invocation.password is None:
+                        raise ManagementError(
+                            65, "INVALID_SECRET", "Password input is missing."
+                        )
+                    database.rotate_password(hash_password(invocation.password))
+                self._deploy_unit(invocation.workspaces)
                 self._validate_runtime_as_friend()
                 if not database.settings()["suspended"]:
                     self._start_service()
@@ -2188,7 +2392,7 @@ class Manager:
                         1, "REPAIR_FAILED", f"Repair check failed: {failed[0]['id']}"
                     )
             except Exception:
-                self._restore_failed_switch()
+                self._restore_failed_switch(runtime_switched=runtime_switched)
                 raise
             return (
                 [
@@ -2237,31 +2441,66 @@ class Manager:
                 raise ManagementError(
                     78, "ROLLBACK_INVALID", "Previous Friend runtime is incomplete."
                 ) from exc
-            self._stop_service(disable=False)
-            failed = self.paths.install_root.parent / f".imaginary-friend-failed-{uuid.uuid4().hex}"
-            os.rename(self.paths.install_root, failed)
+            current_snapshot = self.paths.state_root / (
+                f".rollback-current-{uuid.uuid4().hex}"
+            )
+            self._snapshot_state(current_snapshot)
+            swapped = False
             try:
-                os.rename(self.paths.rollback_root, self.paths.install_root)
-                os.rename(failed, self.paths.rollback_root)
+                self._stop_service(disable=False)
+                self._swap_runtime_trees()
+                swapped = True
                 self._restore_recovery_state()
                 database = Database(self.paths.database)
                 database.require_ready()
-                database.set_suspended(False)
                 workspaces = [
                     Path(record["canonical_root"]) for record in database.list_workspaces()
                 ]
                 self._deploy_unit(workspaces)
                 self._validate_runtime_as_friend()
-                self._start_service()
-                if not self._service_health():
-                    raise ManagementError(
-                        1, "ROLLBACK_HEALTH_FAILED", "Restored Friend release is unhealthy."
-                    )
+                if not database.settings()["suspended"]:
+                    self._start_service()
+                    if not self._service_health():
+                        raise ManagementError(
+                            1,
+                            "ROLLBACK_HEALTH_FAILED",
+                            "Restored Friend release is unhealthy.",
+                        )
                 self.version = rollback_version
-                self._write_marker(str(marker["instance_id"]), previous=marker)
+                restored_marker = self.load_marker(required=True)
+                if (
+                    restored_marker["instance_id"] != marker["instance_id"]
+                    or restored_marker["version"] != rollback_version
+                ):
+                    raise ManagementError(
+                        78,
+                        "ROLLBACK_INVALID",
+                        "Recovery state does not match the previous Friend runtime.",
+                    )
+                self._rotate_recovery_snapshot(current_snapshot)
             except Exception:
-                if failed.exists() and not self.paths.install_root.exists():
-                    os.rename(failed, self.paths.install_root)
+                self._stop_service(disable=False)
+                recovered_current = False
+                try:
+                    if swapped:
+                        self._swap_runtime_trees()
+                    if current_snapshot.is_dir():
+                        self._restore_state(current_snapshot)
+                    self.version = current_version
+                    database = Database(self.paths.database)
+                    database.require_ready()
+                    workspaces = [
+                        Path(record["canonical_root"])
+                        for record in database.list_workspaces()
+                    ]
+                    self._deploy_unit(workspaces)
+                    if not database.settings()["suspended"]:
+                        self._start_service()
+                    recovered_current = True
+                except Exception:
+                    pass
+                if recovered_current and current_snapshot.is_dir():
+                    shutil.rmtree(current_snapshot)
                 raise
             return (
                 [str(self.paths.install_root), str(self.paths.database), str(self.paths.unit)],
@@ -2472,30 +2711,46 @@ class Manager:
             return f"source-tree-sha256:{digest.hexdigest()}"
 
     def _snapshot_recovery(self) -> None:
-            self.paths.recovery.mkdir(parents=True, exist_ok=True, mode=0o700)
-            os.chown(self.paths.recovery, 0, 0)
-            os.chmod(self.paths.recovery, 0o700)
-            for child in self.paths.recovery.iterdir():
+            self._snapshot_state(self.paths.recovery)
+
+    def _snapshot_state(self, destination: Path) -> None:
+            if destination.exists() or destination.is_symlink():
+                details = destination.lstat()
+                if (
+                    not stat.S_ISDIR(details.st_mode)
+                    or stat.S_ISLNK(details.st_mode)
+                    or details.st_uid != 0
+                ):
+                    raise ManagementError(
+                        73,
+                        "UNSAFE_COLLISION",
+                        "Recovery snapshot path is not a root-owned directory.",
+                    )
+            else:
+                destination.mkdir(parents=True, mode=0o700)
+            os.chown(destination, 0, 0)
+            os.chmod(destination, 0o700)
+            for child in destination.iterdir():
                 if child.is_dir() and not child.is_symlink():
                     shutil.rmtree(child)
                 else:
                     child.unlink()
             if self.paths.database.is_file():
-                snapshot = self.paths.recovery / "friend.db"
+                snapshot = destination / "friend.db"
                 Database(self.paths.database).backup_to(snapshot)
                 os.chown(snapshot, 0, 0)
                 os.chmod(snapshot, 0o600)
             if self.paths.configuration_root.is_dir():
                 self._copy_tree(
                     self.paths.configuration_root,
-                    self.paths.recovery / "configuration",
+                    destination / "configuration",
                 )
-                self._root_own_tree(self.paths.recovery / "configuration")
+                self._root_own_tree(destination / "configuration")
             if self.paths.marker.is_file():
-                shutil.copy2(self.paths.marker, self.paths.recovery / "installation.json")
-                os.chown(self.paths.recovery / "installation.json", 0, 0)
+                shutil.copy2(self.paths.marker, destination / "installation.json")
+                os.chown(destination / "installation.json", 0, 0)
             atomic_write(
-                self.paths.recovery / "snapshot.json",
+                destination / "snapshot.json",
                 canonical_json(
                     {
                         "schema_version": 1,
@@ -2508,51 +2763,160 @@ class Manager:
             )
 
     def _restore_recovery_state(self) -> None:
-            snapshot = self.paths.recovery / "friend.db"
+            self._restore_state(self.paths.recovery)
+
+    def _restore_state(self, source: Path) -> None:
+            metadata_path = source / "snapshot.json"
+            check_secure_file(metadata_path, missing_code=78)
+            metadata = read_json(metadata_path)
+            if set(metadata) != {"schema_version", "product_id", "created_at"} or (
+                metadata["schema_version"] != 1
+                or metadata["product_id"] != PRODUCT_ID
+                or not isinstance(metadata["created_at"], str)
+            ):
+                raise ManagementError(
+                    78, "RECOVERY_INVALID", "Recovery snapshot metadata is invalid."
+                )
+            friend_uid = pwd.getpwnam("friend").pw_uid
+            friend_gid = grp.getgrnam("friend").gr_gid
+            snapshot = source / "friend.db"
             if snapshot.is_file():
+                check_secure_file(snapshot, missing_code=78)
                 atomic_write(
                     self.paths.database,
                     snapshot.read_bytes(),
                     mode=0o600,
-                    uid=pwd.getpwnam("friend").pw_uid,
-                    gid=grp.getgrnam("friend").gr_gid,
+                    uid=friend_uid,
+                    gid=friend_gid,
                 )
-            configuration = self.paths.recovery / "configuration"
+                journal = self.paths.database.with_name(
+                    f"{self.paths.database.name}-journal"
+                )
+                if journal.exists() or journal.is_symlink():
+                    details = journal.lstat()
+                    if (
+                        not stat.S_ISREG(details.st_mode)
+                        or details.st_nlink != 1
+                        or details.st_uid not in {0, friend_uid}
+                    ):
+                        raise ManagementError(
+                            73,
+                            "RECOVERY_BLOCKED",
+                            "Friend SQLite journal cannot be replaced safely.",
+                        )
+                    journal.unlink()
+                atomic_write(
+                    journal,
+                    b"",
+                    mode=0o600,
+                    uid=friend_uid,
+                    gid=friend_gid,
+                )
+            configuration = source / "configuration"
             if configuration.is_dir():
                 if self.paths.configuration_root.exists():
                     self._remove_owned_tree(self.paths.configuration_root)
                 self._copy_tree(configuration, self.paths.configuration_root)
                 self._root_own_tree(self.paths.configuration_root)
                 os.chmod(self.paths.configuration_root, 0o750)
-                friend_gid = grp.getgrnam("friend").gr_gid
                 key = self.paths.configuration_root / "session.key"
                 if key.exists():
                     os.chown(key, 0, friend_gid)
                     os.chmod(key, 0o640)
+            marker = source / "installation.json"
+            if marker.is_file():
+                details = marker.lstat()
+                if (
+                    not stat.S_ISREG(details.st_mode)
+                    or details.st_nlink != 1
+                    or details.st_uid != 0
+                ):
+                    raise ManagementError(
+                        78, "RECOVERY_INVALID", "Recovery marker is invalid."
+                    )
+                atomic_write(
+                    self.paths.marker,
+                    marker.read_bytes(),
+                    mode=0o644,
+                )
+                self.load_marker(required=True)
 
-    def _restore_failed_switch(self) -> None:
-            if not self.paths.rollback_root.is_dir():
-                return
+    def _restore_failed_switch(self, *, runtime_switched: bool) -> None:
             self._stop_service(disable=False)
             failed = self.paths.install_root.parent / f".imaginary-friend-failed-{uuid.uuid4().hex}"
             try:
-                if self.paths.install_root.exists():
-                    os.rename(self.paths.install_root, failed)
-                os.rename(self.paths.rollback_root, self.paths.install_root)
-                if failed.exists():
-                    shutil.rmtree(failed)
-                self._restore_recovery_state()
-                database = Database(self.paths.database)
-                database.require_ready()
-                workspaces = [
-                    Path(record["canonical_root"]) for record in database.list_workspaces()
-                ]
-                self._deploy_unit(workspaces)
-                if not database.settings()["suspended"]:
-                    self._start_service()
+                if runtime_switched and self.paths.rollback_root.is_dir():
+                    if self.paths.install_root.exists():
+                        os.rename(self.paths.install_root, failed)
+                    os.rename(self.paths.rollback_root, self.paths.install_root)
+                    if failed.exists():
+                        shutil.rmtree(failed)
+                if (self.paths.recovery / "snapshot.json").is_file():
+                    self._restore_recovery_state()
+                if (
+                    self.paths.install_root.is_dir()
+                    and self.paths.database.is_file()
+                    and self.paths.configuration_root.is_dir()
+                ):
+                    database = Database(self.paths.database)
+                    database.require_ready()
+                    workspaces = [
+                        Path(record["canonical_root"])
+                        for record in database.list_workspaces()
+                    ]
+                    self._deploy_unit(workspaces)
+                    if not database.settings()["suspended"]:
+                        self._start_service()
             except Exception:
                 # Preserve both trees and recovery data for an explicit doctor run.
                 return
+
+    def _swap_runtime_trees(self) -> None:
+            for path in (self.paths.install_root, self.paths.rollback_root):
+                details = path.lstat()
+                if (
+                    not stat.S_ISDIR(details.st_mode)
+                    or stat.S_ISLNK(details.st_mode)
+                    or details.st_uid != 0
+                ):
+                    raise ManagementError(
+                        73,
+                        "OWNERSHIP_MISMATCH",
+                        f"Runtime tree is not product-controlled: {path}",
+                    )
+            temporary = self.paths.install_root.parent / (
+                f".imaginary-friend-swap-{uuid.uuid4().hex}"
+            )
+            os.rename(self.paths.install_root, temporary)
+            try:
+                os.rename(self.paths.rollback_root, self.paths.install_root)
+                try:
+                    os.rename(temporary, self.paths.rollback_root)
+                except Exception:
+                    os.rename(self.paths.install_root, self.paths.rollback_root)
+                    os.rename(temporary, self.paths.install_root)
+                    raise
+            except Exception:
+                if temporary.exists() and not self.paths.install_root.exists():
+                    os.rename(temporary, self.paths.install_root)
+                raise
+
+    def _rotate_recovery_snapshot(self, replacement: Path) -> None:
+            consumed = self.paths.state_root / (
+                f".recovery-consumed-{uuid.uuid4().hex}"
+            )
+            os.rename(self.paths.recovery, consumed)
+            try:
+                os.rename(replacement, self.paths.recovery)
+            except Exception:
+                os.rename(consumed, self.paths.recovery)
+                raise
+            try:
+                shutil.rmtree(consumed)
+            except OSError:
+                # The active rollback is already committed. Doctor can remove
+                # this root-only stale snapshot without weakening recovery.
+                pass
 
     def _create_backup(self, destination: Path) -> Path:
             timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

@@ -25,6 +25,9 @@ class DatabaseTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def test_required_schema_and_export_exclusions(self) -> None:
+        journal = self.root / "friend.db-journal"
+        self.assertTrue(journal.is_file())
+        self.assertEqual(oct(journal.stat().st_mode & 0o777), "0o600")
         required = {
             "conversations",
             "messages",
