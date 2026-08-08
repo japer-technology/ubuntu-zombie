@@ -22,7 +22,7 @@ OPERATIONS = (
     "resume",
     "uninstall",
 )
-PRODUCTS = ("imaginary-friend", "curriculum-flame", "eric")
+PRODUCTS = ("imaginary-friend", "curriculum-flame", "eric", "llama")
 VERSION_PATTERN = re.compile(r"^\d{4}(?:\.\d{2}){5}$")
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
