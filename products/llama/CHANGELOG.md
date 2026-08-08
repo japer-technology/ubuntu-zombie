@@ -20,6 +20,12 @@ format.
 
 ### Fixed
 
+- Create the lifecycle log boundary with protected root ownership so clean
+  installs and idempotent repairs pass their ownership gate.
+- Resolve model, rollback, and backup paths before enforcing product boundaries,
+  preventing traversal through parent components or symlinked ancestors.
+- Verify systemd stop and disable post-conditions before repair, rollback,
+  suspension, or removal continues.
 - Restart an active service after live configuration, runtime, model, manager,
   or unit changes, and keep repeated `resume` operations idempotent.
 - Record blocked lifecycle operations as denied audit decisions.
