@@ -365,6 +365,17 @@ class ManagementUnitTests(unittest.TestCase):
         self.assertEqual(invocation.inputs["owner_user"], "owner")
         self.assertEqual(invocation.inputs["model"], "fixture-friend")
 
+    def test_interactive_install_rejects_short_owner_password(self) -> None:
+        invocation = self.invocation()
+        invocation.non_interactive = False
+        with mock.patch(
+            "friend.management.getpass.getpass",
+            side_effect=["short", "short"],
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager._prepare_configuration_inputs(invocation)
+        self.assertEqual(raised.exception.code, "INVALID_SECRET")
+
     def test_repair_preserves_restricted_workspace_without_new_file(self) -> None:
         self.paths.state_root.mkdir(parents=True)
         workspace = Path(self.temporary.name) / "workspace"

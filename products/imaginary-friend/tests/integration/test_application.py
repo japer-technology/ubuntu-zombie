@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "fixtures"))
 
@@ -43,16 +44,18 @@ class ApplicationTests(unittest.TestCase):
             root_device=details.st_dev,
             root_inode=details.st_ino,
         )
-        self.application = FriendApplication(
-            Config(
-                owner_user="owner",
-                port=6767,
-                database_path=self.database_path,
-                audit_path=self.audit_path,
-                signing_key_path=self.key_path,
-                allowed_workspaces=(self.workspace,),
+        with mock.patch("friend.application.grp.getgrnam") as share_group:
+            share_group.return_value.gr_gid = self.workspace.stat().st_gid
+            self.application = FriendApplication(
+                Config(
+                    owner_user="owner",
+                    port=6767,
+                    database_path=self.database_path,
+                    audit_path=self.audit_path,
+                    signing_key_path=self.key_path,
+                    allowed_workspaces=(self.workspace,),
+                )
             )
-        )
 
     def tearDown(self) -> None:
         self.fixture.__exit__(None, None, None)
@@ -170,6 +173,15 @@ class ApplicationTests(unittest.TestCase):
             self.application.update_settings(
                 {"model_base_url": "http://example.com/v1"}
             )
+
+    def test_workspace_reenable_requires_complete_sharing_boundary(self) -> None:
+        self.application.set_workspace_enabled(self.workspace_id, False)
+        self.workspace.chmod(0o0770)
+        with self.assertRaises(ValidationError):
+            self.application.set_workspace_enabled(self.workspace_id, True)
+
+        self.workspace.chmod(0o2770)
+        self.application.set_workspace_enabled(self.workspace_id, True)
 
     def test_password_rotation_rejects_unsupported_password_text(self) -> None:
         for password in ("x" * 1025, "long enough\nbut multiline"):

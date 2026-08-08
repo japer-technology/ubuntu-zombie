@@ -361,9 +361,13 @@ def read_secret_file(path: Path) -> str:
         raise ManagementError(65, "INVALID_SECRET", "Owner password file is unreadable.") from exc
     if value.endswith("\n"):
         value = value[:-1]
+    return validate_owner_password(value)
+
+
+def validate_owner_password(value: str) -> str:
     if "\r" in value or "\n" in value:
         raise ManagementError(
-            65, "INVALID_SECRET", "Owner password file must contain exactly one line."
+            65, "INVALID_SECRET", "Owner password must contain exactly one line."
         )
     try:
         encoded = value.encode("utf-8")
@@ -671,7 +675,7 @@ class Manager:
                 second = getpass.getpass("Repeat owner password: ")
                 if not secrets.compare_digest(first, second):
                     raise ManagementError(64, "PASSWORD_MISMATCH", "Passwords did not match.")
-                invocation.password = first
+                invocation.password = validate_owner_password(first)
             else:
                 invocation.generated_password = secrets.token_urlsafe(24)
                 invocation.password = invocation.generated_password

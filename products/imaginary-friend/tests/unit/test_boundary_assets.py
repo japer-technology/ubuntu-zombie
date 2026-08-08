@@ -82,6 +82,7 @@ class BoundaryAssetTests(unittest.TestCase):
             interface,
         )
         self.assertIn("if (turnPending) return;", interface)
+        self.assertGreaterEqual(interface.count("if (turnPending) return;"), 3)
         self.assertGreaterEqual(interface.count("clearSelectedFile();"), 3)
 
 

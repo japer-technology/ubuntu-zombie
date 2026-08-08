@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import grp
 import hmac
 import json
 import os
@@ -137,6 +138,10 @@ class FriendApplication:
         self.database = Database(config.database_path)
         self.database.require_ready()
         try:
+            self.share_gid = grp.getgrnam("friend-share").gr_gid
+        except KeyError as exc:
+            raise ValidationError("Friend workspace sharing group is unavailable.") from exc
+        try:
             self.signing_key = config.signing_key_path.read_bytes()
         except OSError as exc:
             raise ValidationError("Friend session-signing key is unavailable.") from exc
@@ -152,6 +157,8 @@ class FriendApplication:
                 raise ValidationError(
                     "An enabled workspace is absent from root-controlled configuration."
                 )
+            if record["enabled"]:
+                self._validated_workspace_root(record)
         self.database.prune()
 
     def _session(self, token: str) -> dict[str, Any]:
@@ -213,13 +220,29 @@ class FriendApplication:
         self.database.revoke_session(token_digest(token, self.signing_key))
         self.audit.event("logout", decision="allowed", result="session_revoked")
 
+    def _validated_workspace_root(self, record: dict[str, Any]) -> WorkspaceRoot:
+        path = Path(record["canonical_root"])
+        details = validate_nominated_root(
+            path,
+            allow_default=record["canonical_root"]
+            == "/srv/imaginary-friend/workspace",
+        )
+        if (
+            details.st_dev != int(record["root_device"])
+            or details.st_ino != int(record["root_inode"])
+            or details.st_gid != self.share_gid
+            or stat.S_IMODE(details.st_mode) & 0o070 != 0o070
+            or not details.st_mode & stat.S_ISGID
+        ):
+            raise ValidationError("Workspace changed or lost its sharing boundary.")
+        return WorkspaceRoot.from_record(record, group=self.share_gid)
+
     def _workspace(self, workspace_id: str) -> tuple[dict[str, Any], Workspace]:
         record = self.database.workspace(workspace_id)
         allowed = {str(path) for path in self.config.allowed_workspaces}
         if record["canonical_root"] not in allowed:
             raise AuthorizationError("Workspace is not root-authorized.")
-        root = WorkspaceRoot.from_record(record)
-        return record, Workspace(root)
+        return record, Workspace(self._validated_workspace_root(record))
 
     def _workspace_decision(
         self,
@@ -273,16 +296,7 @@ class FriendApplication:
         if enabled:
             if Path(record["canonical_root"]) not in self.config.allowed_workspaces:
                 raise AuthorizationError("Workspace is not root-authorized.")
-            details = validate_nominated_root(
-                Path(record["canonical_root"]),
-                allow_default=record["canonical_root"]
-                == "/srv/imaginary-friend/workspace",
-            )
-            if (
-                details.st_dev != int(record["root_device"])
-                or details.st_ino != int(record["root_inode"])
-            ):
-                raise ValidationError("Workspace changed after nomination.")
+            self._validated_workspace_root(record)
         self.database.set_workspace_enabled(workspace_id, enabled)
         self.audit.event(
             "workspace_administration",

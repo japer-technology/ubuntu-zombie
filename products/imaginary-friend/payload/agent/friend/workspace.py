@@ -52,14 +52,18 @@ class WorkspaceRoot:
     path: Path
     device: int
     inode: int
+    group: int | None = None
 
     @classmethod
-    def from_record(cls, record: dict[str, Any]) -> "WorkspaceRoot":
+    def from_record(
+        cls, record: dict[str, Any], *, group: int | None = None
+    ) -> "WorkspaceRoot":
         return cls(
             workspace_id=str(record["id"]),
             path=Path(str(record["canonical_root"])),
             device=int(record["root_device"]),
             inode=int(record["root_inode"]),
+            group=group,
         )
 
 
@@ -186,6 +190,12 @@ class Workspace:
                 not stat.S_ISDIR(details.st_mode)
                 or details.st_dev != self.root.device
                 or details.st_ino != self.root.inode
+                or (
+                    self.root.group is not None
+                    and details.st_gid != self.root.group
+                )
+                or stat.S_IMODE(details.st_mode) & 0o070 != 0o070
+                or not details.st_mode & stat.S_ISGID
             ):
                 raise ValidationError(
                     "Workspace root changed after it was nominated."

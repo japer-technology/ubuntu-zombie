@@ -214,6 +214,7 @@
     }
 
     async function loadConversation(id) {
+      if (turnPending) return;
       const value = await api(`/api/conversations/${encodeURIComponent(id)}`);
       conversationId = id;
       byId("messages").replaceChildren();
@@ -270,6 +271,7 @@
     });
 
     byId("new-conversation").addEventListener("click", () => {
+      if (turnPending) return;
       conversationId = null;
       clearSelectedFile();
       byId("messages").replaceChildren();
