@@ -23,6 +23,11 @@ Product releases have an independent version, artifact, checksum manifest,
 SBOM, provenance, and signature material. Source-checkout installation is
 recorded separately from a verified artifact installation.
 
+Complete state removal retains audit evidence under `/var/log/llama.cpp`.
+A root-owned, non-writable `product-ownership` marker proves that this residual
+log directory may be reused by a later installation; an unmarked log collision
+still fails closed.
+
 ## Network and local-user boundary
 
 `llama-manager serve` supplies the host and port itself; configuration cannot
@@ -33,8 +38,10 @@ untrusted local tenants, and never forward it to an untrusted network.
 
 Systemd applies `NoNewPrivileges`, private devices and temporary storage,
 kernel and control-group protection, a strict filesystem view, and explicit
-writable paths. `MemoryDenyWriteExecute` remains disabled because the upstream
-inference runtime may require executable mappings.
+writable paths. Ubuntu Zombie's install, configuration, and component-state
+roots are explicitly inaccessible to the service. `MemoryDenyWriteExecute`
+remains disabled because the upstream inference runtime may require executable
+mappings.
 
 ## Residual risks
 

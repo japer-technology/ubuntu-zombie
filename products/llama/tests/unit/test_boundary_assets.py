@@ -17,6 +17,7 @@ class BoundaryAssetTests(unittest.TestCase):
         self.assertIn("Group=llama-cpp", unit)
         self.assertIn("NoNewPrivileges=true", unit)
         self.assertIn("ProtectSystem=strict", unit)
+        self.assertIn("InaccessiblePaths=-/opt/ai-zombie", unit)
         self.assertNotIn("0.0.0.0", unit)
 
     def test_catalogues_pin_digests_and_exact_revisions(self) -> None:

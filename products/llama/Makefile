@@ -27,6 +27,7 @@ lint:
 	  echo "$(PYTHON) -m py_compile $$file"; \
 	  "$(PYTHON)" -m py_compile "$$file"; \
 	done < <(find payload tests -name '*.py' -type f -print | sort)
+	"$(PYTHON)" -m py_compile payload/bin/llama-manager
 
 test:
 	PYTHONPATH=payload/agent "$(PYTHON)" -m unittest discover -s tests/unit -p 'test_*.py'

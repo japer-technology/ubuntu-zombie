@@ -15,9 +15,10 @@ A root Ubuntu Zombie release does not change the Llama version.
 | Test evidence | Product/version/commit JSON after validation and packaging |
 
 The source artifact contains only `products/llama/`, applicable
-`family/schemas/`, and `LICENSE`. The pinned product release workflow runs
-lint, unit, integration, family, and package checks before producing the SBOM,
-checksums, provenance, signatures, and test evidence.
+`family/schemas/`, and `LICENSE`. The pinned
+`.github/workflows/llama-release.yml` workflow runs lint, unit, integration,
+family, and package checks before producing the SBOM, checksums, provenance,
+signatures, and test evidence.
 
 Before a release install, verify the tag against `VERSION`, asset checksums,
 attestation subject, and expected workflow signing identity. A source checkout

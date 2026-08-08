@@ -23,8 +23,9 @@ contract conformance.
 `LLAMA_DISPOSABLE_VM_TEST=1` are present. It builds tiny checksum-pinned local
 fixture assets in a temporary copy of the product, then exercises clean
 install, health, idempotent reinstall, backup, suspend, resume, update,
-rollback, retained-state recovery, and complete removal. Run it only on a
-disposable Ubuntu Desktop 22.04 or 24.04 LTS VM.
+rollback, retained-state recovery, complete removal, post-purge reinstall, and
+a protected Ubuntu Zombie sibling canary. Run it only on a disposable Ubuntu
+Desktop 22.04 or 24.04 LTS VM.
 
 Real release evidence must additionally use the published runtime and model,
 verify the OpenAI-compatible API, and record resource isolation from Ubuntu

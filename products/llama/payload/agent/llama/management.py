@@ -100,6 +100,7 @@ DEFAULT_CONTEXT_SIZE = 2048
 DEFAULT_BOOT = "enabled"
 FIXED_PORT = 8080
 DELETE_CONFIRMATION = "DELETE LLAMA STATE"
+LEGACY_UNIT_SHA256 = "58d8fdb8f635e7c4aafd84a838d902a1b1595f353074ebbe20d46f1eafa870e7"
 VERSION_PARTS = 6
 MAX_DOWNLOAD_BYTES = 8 * 1024 * 1024 * 1024
 
@@ -199,6 +200,10 @@ class Paths:
     @property
     def audit(self) -> Path:
         return self.log_root / "audit.log"
+
+    @property
+    def log_ownership(self) -> Path:
+        return self.log_root / "product-ownership"
 
     @property
     def receipt(self) -> Path:
@@ -1196,6 +1201,8 @@ class Manager:
             lifecycle = "retained" if self.paths.retained.exists() else (
                 "suspended" if self.paths.suspended.exists() else "active"
             )
+        elif self._legacy_installation_valid():
+            lifecycle = "legacy"
         config: dict[str, Any] = {}
         try:
             existing = self._existing_config()
@@ -1231,6 +1238,14 @@ class Manager:
             return checks
 
         checks.append(self.check("ownership_marker", True, "Ownership marker is valid."))
+        checks.append(
+            self.check(
+                "log_ownership",
+                self._log_ownership_valid(),
+                "Retained audit evidence has a protected ownership marker.",
+                "Restore the product-owned log marker.",
+            )
+        )
         retained = self.paths.retained.exists()
         suspended = self.paths.suspended.exists()
         if retained:
@@ -1391,6 +1406,12 @@ class Manager:
                 "Restore the product descriptor.",
             ),
             self.check(
+                "log_ownership",
+                self._log_ownership_valid(),
+                "Retained audit evidence has a protected ownership marker.",
+                "Restore the product-owned log marker.",
+            ),
+            self.check(
                 "configuration",
                 self._root_file(self.paths.config, 0o644)
                 and existing is not None
@@ -1493,6 +1514,41 @@ class Manager:
             item.gr_name for item in grp.getgrall() if "llama-cpp" in item.gr_mem
         }
         return not supplementary
+
+    @staticmethod
+    def _directory_matches(path: Path, mode: int, uid: int, gid: int) -> bool:
+        try:
+            metadata = path.lstat()
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(metadata.st_mode)
+            and not stat.S_ISLNK(metadata.st_mode)
+            and metadata.st_uid == uid
+            and metadata.st_gid == gid
+            and stat.S_IMODE(metadata.st_mode) == mode
+        )
+
+    def _legacy_directories_valid(self) -> bool:
+        try:
+            account = pwd.getpwnam("llama-cpp")
+            group = grp.getgrnam("llama-cpp")
+        except KeyError:
+            return False
+        expected = (
+            (self.paths.install_root, 0o755, 0, 0),
+            (self.paths.versions, 0o755, 0, 0),
+            (self.paths.configuration_root, 0o755, 0, 0),
+            (self.paths.state_root, 0o755, 0, 0),
+            (self.paths.models, 0o750, account.pw_uid, group.gr_gid),
+            (self.paths.runtime_state, 0o750, account.pw_uid, group.gr_gid),
+            (self.paths.log_root, 0o750, account.pw_uid, group.gr_gid),
+            (self.paths.cache_root, 0o755, 0, 0),
+        )
+        return all(
+            self._directory_matches(path, mode, uid, gid)
+            for path, mode, uid, gid in expected
+        )
 
     def _configuration_paths_valid(self, value: dict[str, Any]) -> bool:
         if set(value) != CONFIG_KEYS or value["schema_version"] != 1:
@@ -1676,16 +1732,68 @@ class Manager:
             return False
         try:
             config = self._existing_config()
+            unit_digest = sha256_file(self.paths.unit)
+            build_content = (
+                self.source_root / "payload/etc/llama-builds.json"
+            ).read_bytes()
+            model_content = (
+                self.source_root / "payload/etc/llama-models.json"
+            ).read_bytes()
         except ManagementError:
             return False
+        except OSError:
+            return False
+        if config is None or not self._configuration_paths_valid(config):
+            return False
+        model = self._model(str(config["model_id"]))
+        model_path = Path(str(config["model_path"]))
+        try:
+            model_valid = (
+                model_path.is_file()
+                and model_path.stat().st_size == model["size_bytes"]
+                and sha256_file(model_path) == model["sha256"]
+            )
+        except (OSError, ManagementError):
+            return False
         return (
-            config is not None
-            and self._configuration_paths_valid(config)
+            model_valid
             and self._account_valid()
+            and self._legacy_directories_valid()
             and self._root_file(self.paths.manager, 0o755)
             and self._root_file(self.paths.unit, 0o644)
+            and unit_digest == LEGACY_UNIT_SHA256
+            and self._file_matches(
+                self.paths.configuration_root / "builds.json",
+                build_content,
+                0o644,
+                0,
+                0,
+            )
+            and self._file_matches(
+                self.paths.configuration_root / "models.json",
+                model_content,
+                0o644,
+                0,
+                0,
+            )
+            and self.paths.current.is_symlink()
             and self._runtime_valid(self.paths.current.resolve())
-            and Path(config["model_path"]).is_file()
+            and not self.paths.entrypoint.exists()
+            and not self.paths.logrotate.exists()
+        )
+
+    def _log_ownership_valid(self) -> bool:
+        try:
+            metadata = self.paths.log_root.lstat()
+        except OSError:
+            return False
+        content = b"product_id=llama\nformat=1\n"
+        return (
+            stat.S_ISDIR(metadata.st_mode)
+            and not stat.S_ISLNK(metadata.st_mode)
+            and metadata.st_uid == 0
+            and stat.S_IMODE(metadata.st_mode) == 0o750
+            and self._file_matches(self.paths.log_ownership, content, 0o600, 0, 0)
         )
 
     def _transaction_instance(self) -> str | None:
@@ -1731,7 +1839,12 @@ class Manager:
             self.paths.entrypoint,
             self.paths.manager,
         )
-        occupied = [str(path) for path in resources if path.exists() or path.is_symlink()]
+        occupied_paths = [
+            path for path in resources if path.exists() or path.is_symlink()
+        ]
+        if self.paths.log_root in occupied_paths and self._log_ownership_valid():
+            occupied_paths.remove(self.paths.log_root)
+        occupied = [str(path) for path in occupied_paths]
         try:
             pwd.getpwnam("llama-cpp")
         except KeyError:
@@ -1777,6 +1890,12 @@ class Manager:
         if not self._file_matches(self.paths.transaction, content, 0o600, 0, 0):
             atomic_write(self.paths.transaction, content, mode=0o600)
             changed.append(str(self.paths.transaction))
+
+    def _ensure_log_ownership(self, changed: list[str]) -> None:
+        content = b"product_id=llama\nformat=1\n"
+        if not self._file_matches(self.paths.log_ownership, content, 0o600, 0, 0):
+            atomic_write(self.paths.log_ownership, content, mode=0o600)
+            changed.append(str(self.paths.log_ownership))
 
     @staticmethod
     def _file_matches(
@@ -2197,7 +2316,12 @@ class Manager:
             changed.append(str(self.paths.config))
 
     def _apply_service_state(
-        self, configuration: Configuration, changed: list[str], *, verify_health: bool
+        self,
+        configuration: Configuration,
+        changed: list[str],
+        *,
+        verify_health: bool,
+        restart_required: bool,
     ) -> None:
         self._run(["systemctl", "daemon-reload"])
         if self.paths.suspended.exists():
@@ -2208,9 +2332,15 @@ class Manager:
         if configuration.boot == "enabled":
             enabled = self._service_enabled() == "enabled"
             active = self._service_active()
-            if not enabled or not active:
-                self._run(["systemctl", "enable", "--now", "llama-server.service"])
-                changed.append("llama-server.service:enabled-active")
+            if not enabled:
+                self._run(["systemctl", "enable", "llama-server.service"])
+                changed.append("llama-server.service:enabled")
+            if not active:
+                self._run(["systemctl", "start", "llama-server.service"])
+                changed.append("llama-server.service:active")
+            elif restart_required:
+                self._run(["systemctl", "restart", "llama-server.service"])
+                changed.append("llama-server.service:restarted")
             if verify_health:
                 for _ in range(60):
                     if self._health():
@@ -2343,7 +2473,6 @@ class Manager:
         self._ensure_directory(self.paths.versions, 0o755, 0, 0, changed)
         self._ensure_directory(self.paths.configuration_root, 0o755, 0, 0, changed)
         self._ensure_directory(self.paths.state_root, 0o755, 0, 0, changed)
-        self._ensure_directory(self.paths.log_root, 0o750, 0, 0, changed)
         self._ensure_directory(self.paths.cache_root, 0o755, 0, 0, changed)
         if marker is None:
             self._ensure_transaction(instance_id, changed)
@@ -2358,15 +2487,25 @@ class Manager:
             self.paths.log_root, 0o750, service_uid, service_gid, changed
         )
         self._ensure_directory(self.paths.receipts, 0o750, 0, service_gid, changed)
+        self._ensure_log_ownership(changed)
         self._deploy_product(changed)
         self._install_runtime(configuration, changed)
         self._install_model(configuration, service_uid, service_gid, changed)
         before_service_files = len(changed)
         self._deploy_configuration(configuration, changed)
+        live_resources = {
+            str(configuration.runtime_dir),
+            str(configuration.model_path),
+            str(self.paths.current),
+            str(self.paths.config),
+            str(self.paths.manager),
+            str(self.paths.unit),
+        }
         self._apply_service_state(
             configuration,
             changed,
             verify_health=configuration.boot == "enabled",
+            restart_required=any(item in live_resources for item in changed),
         )
         if len(changed) == before_service_files and configuration.boot == "enabled":
             if not self._health():
@@ -2633,6 +2772,7 @@ class Manager:
             changed,
             verify_health=not bool(metadata["suspended"])
             and restored.boot == "enabled",
+            restart_required=True,
         )
         self.load_marker(required=True)
         shutil.rmtree(self.paths.rollback_root)
@@ -2680,8 +2820,9 @@ class Manager:
             raise ManagementError(66, "CONFIGURATION_MISSING", "Llama config is missing.")
         if config["runtime_release"] != self.build_catalog["release"]:
             raise ManagementError(78, "VERSION_MISMATCH", "Installed catalogues do not match.")
-        self._run(["systemctl", "start", "llama-server.service"])
-        changed.append("llama-server.service:active")
+        if not self._service_active():
+            self._run(["systemctl", "start", "llama-server.service"])
+            changed.append("llama-server.service:active")
         for _ in range(60):
             if self._health():
                 break
@@ -2716,9 +2857,26 @@ class Manager:
     def _execute_uninstall(
         self, invocation: Invocation
     ) -> tuple[list[str], str | None]:
-        marker = self.load_marker(required=True)
-        version = str(marker["version"])
+        marker = self.load_marker()
+        legacy = marker is None and self._legacy_installation_valid()
+        if marker is None and not legacy:
+            raise ManagementError(
+                73,
+                "OWNERSHIP_REQUIRED",
+                "Llama is not installed with a valid product or legacy ownership marker.",
+            )
         changed: list[str] = []
+        if marker is None:
+            instance_id = str(uuid.uuid4())
+            self._write_marker(instance_id, installed_at=utc_now(), changed=changed)
+            marker = self.load_marker(required=True)
+        version = str(marker["version"])
+        try:
+            service_gid = grp.getgrnam("llama-cpp").gr_gid
+        except KeyError:
+            service_gid = 0
+        self._ensure_directory(self.paths.log_root, 0o750, 0, service_gid, changed)
+        self._ensure_log_ownership(changed)
         retained_config_content = (
             self.paths.config.read_bytes()
             if invocation.retain_state and self.paths.config.is_file()
@@ -2743,6 +2901,10 @@ class Manager:
             if path.exists():
                 self._remove_owned_tree(path)
                 changed.append(str(path))
+        legacy_state_marker = self.paths.state_root / "managed-by-ubuntu-zombie"
+        if legacy_state_marker.exists():
+            self._remove_owned_file(legacy_state_marker)
+            changed.append(str(legacy_state_marker))
         if invocation.retain_state:
             if retained_config_content is not None:
                 atomic_write(
@@ -2768,14 +2930,22 @@ class Manager:
             except KeyError:
                 pass
             else:
-                self._run(["userdel", "llama-cpp"], check=False)
+                result = self._run(["userdel", "llama-cpp"], check=False)
+                if result.returncode != 0:
+                    raise ManagementError(
+                        73, "ACCOUNT_REMOVAL_FAILED", "Could not remove llama-cpp."
+                    )
                 changed.append("account:llama-cpp")
             try:
                 grp.getgrnam("llama-cpp")
             except KeyError:
                 pass
             else:
-                self._run(["groupdel", "llama-cpp"], check=False)
+                result = self._run(["groupdel", "llama-cpp"], check=False)
+                if result.returncode != 0:
+                    raise ManagementError(
+                        73, "ACCOUNT_REMOVAL_FAILED", "Could not remove the llama-cpp group."
+                    )
         return changed, version
 
     def _write_receipt(
@@ -2792,12 +2962,11 @@ class Manager:
             service_gid = 0
         self._ensure_directory(self.paths.log_root, 0o750, 0, service_gid, [])
         self._ensure_directory(self.paths.receipts, 0o750, 0, service_gid, [])
+        marker = self.load_marker()
         receipt_value = {
             "schema_version": 1,
             "response": result.object(),
-            "installed_version": (
-                self.load_marker()["version"] if self.load_marker() is not None else None
-            ),
+            "installed_version": marker["version"] if marker is not None else None,
             "previous_version": previous_version,
             "changed_resources": sorted(set(changed_resources)),
             "audit_event_id": event_id,
@@ -2831,7 +3000,7 @@ class Manager:
             "operation": invocation.operation,
             "phase": _operation_phase(invocation.operation, dry_run=invocation.dry_run),
             "actor": invocation.actor,
-            "decision": "allowed",
+            "decision": "denied" if result_status == "blocked" else "allowed",
             "result": result_status,
             "changed": changed,
             "receipt_digest": receipt_digest,

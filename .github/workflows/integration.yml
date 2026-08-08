@@ -100,3 +100,22 @@ jobs:
           IMAGINARY_FRIEND_DISPOSABLE_VM_TEST: "1"
           IMAGINARY_FRIEND_TEST_OWNER: runner
         run: sudo -E products/imaginary-friend/tests/vm/lifecycle.sh
+
+  llama-lifecycle:
+    name: Llama lifecycle (Ubuntu ${{ matrix.label }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-22.04
+            label: "22.04"
+          - runs-on: ubuntu-24.04
+            label: "24.04"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Exercise standalone Llama lifecycle
+        env:
+          LLAMA_DISPOSABLE_VM_TEST: "1"
+        run: sudo -E products/llama/tests/vm/lifecycle.sh

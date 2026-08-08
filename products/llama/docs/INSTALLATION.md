@@ -20,6 +20,10 @@ product lifecycle:
 sudo ./scripts/install.sh install llama
 ```
 
+The matching `verify`, `doctor`, `repair`, and `uninstall llama` compatibility
+targets also delegate; no Llama mutation implementation remains in the root
+installer or uninstaller.
+
 Re-running `install` converges the same declared state. A supported legacy
 component is adopted only after its exact markers and resources validate.
 Unmanaged paths, account collisions, unexpected unit overrides, or a listener
@@ -59,3 +63,5 @@ sudo llama-manage uninstall --purge \
 
 Lifecycle receipts and audit evidence remain under `/var/log/llama.cpp`.
 Removal does not inspect or modify Ubuntu Zombie or another product.
+The retained root-owned log marker lets a later clean install distinguish that
+evidence from an unmanaged path.

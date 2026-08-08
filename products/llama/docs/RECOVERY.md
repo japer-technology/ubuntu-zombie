@@ -23,7 +23,8 @@ the unexpected resource before retrying.
 Retained-state uninstall keeps the model and a protected configuration
 snapshot. Running `install` restores the runtime around that state. A complete
 purge has no automatic state recovery; restore only from an operator-controlled
-backup.
+backup. Audit evidence and its protected ownership marker remain under
+`/var/log/llama.cpp`, so that evidence does not block a later clean install.
 
 If an update health gate fails, correct the immediate service problem or use
 the saved `rollback` operation. Never repoint `/opt/llama.cpp/current` manually

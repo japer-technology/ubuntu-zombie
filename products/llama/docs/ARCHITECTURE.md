@@ -17,7 +17,7 @@ operators and `llama-server.service`. The service runs as the non-login
 | Runtime and product code | `/opt/llama.cpp` |
 | Configuration | `/etc/llama.cpp` |
 | Models and lifecycle state | `/var/lib/llama.cpp` |
-| Audit and receipts | `/var/log/llama.cpp` |
+| Audit and receipts | `/var/log/llama.cpp` (protected by `product-ownership`) |
 | Download cache | `/var/cache/llama.cpp` |
 | Service | `llama-server.service` |
 | Listener | `127.0.0.1:8080/tcp` |
@@ -40,7 +40,9 @@ Update creates a configuration backup and one previous-version rollback
 snapshot before switching. Rollback restores product code, catalogues,
 configuration, unit files, and the previous runtime link. Model binaries and
 runtime versions are content-addressed by their pinned metadata and are not
-silently deleted during updates.
+silently deleted during updates. Install, repair, and update restart an active
+service whenever its live runtime, model, manager, unit, or configuration
+changes, then apply the loopback health gate before reporting success.
 
 Every completed mutation writes a secret-free receipt and a correlated JSON
 Lines audit event. Llama has no credential store and does not use Ubuntu
@@ -50,7 +52,9 @@ Zombie's policy or audit implementation.
 
 The first product release can adopt the previously supported component only
 when both exact `managed-by-ubuntu-zombie` markers, the `llama-cpp` identity,
-configuration boundary, runtime checksum manifest, manager, unit, model path,
-and declared resources validate. Partial or ambiguous state fails before
-mutation. A successful install replaces the legacy markers with the common
-product ownership marker without moving model state or changing paths.
+configuration boundary, runtime checksum manifest, manager, exact unit asset,
+model size and checksum, and declared resources validate. Partial or ambiguous
+state fails before mutation. A successful install replaces the legacy markers
+with the common product ownership marker without moving model state or changing
+paths. Product-owned removal can adopt that exact legacy state solely to remove
+or retain it safely.
