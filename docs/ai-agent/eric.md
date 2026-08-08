@@ -1,13 +1,17 @@
-# ERIC
+# ERIC — Evolving Record of Identity and Cognition
 
-**ERIC** means **Evolving Representation of Individual Continuity**:
+- **Evolving:** continuously develops as the individual learns, experiences,
+  decides, and changes over time.
+- **Record:** preserves an attributable and verifiable history rather than
+  merely generating a simulation of the individual.
+- **Identity:** captures the characteristics, relationships, experiences,
+  preferences, values, and history that distinguish one individual from
+  another.
+- **Cognition:** captures how the individual understands, reasons, evaluates,
+  remembers, decides, and responds.
 
-- **Evolving:** it learns and changes during its subject's lifetime.
-- **Representation:** it models a person without claiming to be that
-  person or to possess their consciousness.
-- **Individual:** it belongs to one specific, consenting subject.
-- **Continuity:** it preserves evidence, memories, values, reasoning, and
-  decisions over time and, when explicitly authorised, after death.
+**ERIC is an evolving record of who a person is, what they know, and how they
+think.**
 
 > A lifelong personal AI apprentice that learns one consenting person's
 > memories, beliefs, reasoning patterns, relationships, preferences, and
@@ -15,9 +19,10 @@
 > verification, and may later provide an authorised, explicitly labelled
 > simulation of that person.
 
-The strongest technical description is **Longitudinal Personal Continuity
-Agent**. “Life Apprentice”, “Continuant”, “Second Self”, “Aftermind”, and
-“The Long Twin” can name a mode or interface; ERIC is the product identity.
+The product is a **longitudinal identity and cognition record** with a
+conversational agent interface. “Life Apprentice”, “Continuant”, “Second
+Self”, “Aftermind”, and “The Long Twin” can name a mode or interface; ERIC is
+the product identity.
 
 This is an implementation-ready living-apprenticeship definition, not an
 implemented system or a claim that identity, consciousness, or legal
@@ -101,16 +106,16 @@ decide. It still cannot establish that it:
 - can replace a will, power, trustee, attorney, guardian, court, or human
   decision-maker.
 
-It is a historically grounded simulation that produces new inferences from
-preserved evidence. Its value comes from years of correction by the living
-subject, creating a traceable chain of consent, source material,
-interpretation, and verification.
+It is an attributable, verifiable record that can ground clearly labelled
+simulations producing new inferences from preserved evidence. Its value comes
+from years of correction by the living subject, creating a traceable chain of
+consent, source material, interpretation, and verification.
 
-ERIC identifies itself as a simulation at the start of every session. It
-does not sign as the subject, impersonate them to an unaware person, or
-present generated output as a recording. Synthetic voice, image, or video
-is disabled by default and requires separate living consent, prominent
-labelling, and purpose controls.
+Any simulated ERIC interface identifies itself as a simulation at the start
+of every session. It does not sign as the subject, impersonate them to an
+unaware person, or present generated output as a recording. Synthetic voice,
+image, or video is disabled by default and requires separate living consent,
+prominent labelling, and purpose controls.
 
 ## Relationship to Ubuntu Zombie
 
@@ -161,7 +166,8 @@ ERIC starts with:
 
 ### Living subject
 
-The subject is the one person ERIC represents. During apprenticeship they:
+The subject is the one person whose identity and cognition ERIC records.
+During apprenticeship they:
 
 - choose every evidence source;
 - correct and verify facts and predictions;
