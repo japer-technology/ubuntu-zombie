@@ -26,6 +26,14 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Documentation
 
+- **Complementary AI-agent product definitions:** added ten template-complete,
+  documentation-only proposals for code review, household finance, asset
+  maintenance, meeting records, adult language practice, photo cataloguing,
+  imported-mail drafting, project planning, cognitive accessibility, and
+  read-only host telemetry. Each definition fixes an independent namespace,
+  least-authority boundary, data and network contract, Ubuntu Zombie lifecycle
+  interface, validation plan, threat model, and honest release gate. The
+  proposal index does not claim implementation or family admission.
 - **Beep product definition:** added a template-complete specification for an
   independently installed, root-capable duplication of Ubuntu Zombie with
   Beep-owned identities, credentials, resources, lifecycle, audit, release,

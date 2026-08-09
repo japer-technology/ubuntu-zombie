@@ -39,6 +39,29 @@ open. Curriculum Flame and ERIC are to be implemented at the roots reserved
 by [`implementation.md`](implementation.md). No external repository needs to
 be created or consulted.
 
+### Product-definition proposals
+
+The following template-complete documents explore complementary products.
+They are discoverable design inputs, not entries in the implementation-ready
+catalogue above. A link here does not admit a product to the family contract,
+reserve an implemented manager target, or claim that source, tests, security
+evidence, or a release exists.
+
+| Proposal | Purpose | Maximum authority | Default identity | Default port |
+| -------- | ------- | ----------------- | ---------------- | ------------ |
+| [Archive Lantern](archive-lantern.md) | Cited answers from a private text library | Read one fixed library; write derived state | `lantern` | `3434` |
+| [Beep](beep.md) | Independent Ubuntu Zombie functional duplicate | Root through Beep policy and approval | `beep` | `58989` |
+| [Code Orchard](code-orchard.md) | Evidence-bound local code review and patch proposals | Read one source root; write unapplied reports and patches | `orchard` | `3567` |
+| [Household Ledger](household-ledger.md) | Offline household transaction analysis | Read one CSV import root; write Ledger state | `ledger` | `3890` |
+| [Maintenance Atlas](maintenance-atlas.md) | Cited household asset maintenance planning | Read one manual library; write Atlas records | `atlas` | `2828` |
+| [Meeting Loom](meeting-loom.md) | Cited summaries and action proposals from imported transcripts | Read one transcript inbox; write Loom records | `loom` | `2525` |
+| [Language Harbor](language-harbor.md) | Private adult language practice | Read signed lessons; write Harbor learner state | `harbor` | `2424` |
+| [Photo Grove](photo-grove.md) | Local search over a read-only photo library | Read one image library; write derived metadata | `grove` | `2727` |
+| [Mail Pilot](mail-pilot.md) | Triage imported messages and prepare unsent drafts | Read one `.eml` inbox; write Pilot drafts | `pilot` | `2626` |
+| [Project Compass](project-compass.md) | Structured personal project planning | Compass-owned state only | `compass` | `2323` |
+| [Access Bridge](access-bridge.md) | Reviewable cognitive-accessibility text alternatives | Bridge-owned state only | `bridge` | `2121` |
+| [Quiet Watch](quiet-watch.md) | Sanitised host-health telemetry and local alerts | Fixed read-only collector; Watch-owned state | `watch` | `2222` |
+
 ## Reading order
 
 1. Read the [implementation contract](implementation.md) for the authoritative
