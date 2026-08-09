@@ -62,7 +62,7 @@ import pi_mono  # noqa: E402
 import skill_loader  # noqa: E402
 import tools as tools_mod  # noqa: E402
 
-SECRETS_FILE = Path(os.environ.get("BEEP_SECRETS", "/opt/beep/secrets/env"))
+SECRETS_FILE = Path(os.environ.get("BEEP_SECRETS", "/etc/beep/secrets/env"))
 DEFAULT_PORT = int(os.environ.get("BEEP_CHAT_PORT", "58989"))
 DEFAULT_HOST = "127.0.0.1"
 # Streaming is per active operator turn. A thousand queued frames is
@@ -801,7 +801,7 @@ class App:
         if not token:
             return False
         with self._lock:
-            return token in self.sessions
+            return token in self.sessions and auth.verify_session_token(token)
 
     def session_info(self, token: str | None) -> dict[str, Any]:
         life = lifecycle.status()
@@ -858,18 +858,16 @@ class App:
         return result
 
     def set_password(self, password: str) -> dict[str, Any]:
-        """Set or remove the chat password without logging the secret."""
+        """Rotate the required chat password without logging the secret."""
         password = password or ""
-        stored = _write_password_hash(password if password else None)
+        if not 12 <= len(password.encode("utf-8")) <= 1024:
+            return {"error": "Password must be between 12 and 1,024 UTF-8 bytes."}
+        stored = _write_password_hash(password)
         with self._lock:
             self.sessions.clear()
-        if stored:
-            os.environ[auth.HASH_ENV] = stored
-            log_event("password_set")
-            return {"ok": True, "required": True, "logoff_required": True}
-        os.environ.pop(auth.HASH_ENV, None)
-        log_event("password_removed")
-        return {"ok": True, "required": False, "logoff_required": False}
+        os.environ[auth.HASH_ENV] = stored
+        log_event("password_set")
+        return {"ok": True, "required": True, "logoff_required": True}
 
     # ---- conversation flow ----
     def _emit_turn(self, state: TurnStream, event: str,
@@ -2843,7 +2841,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             cookie = (
                 f"beep_session={result['token']}; HttpOnly; "
-                "SameSite=Strict; Path=/"
+                f"SameSite=Strict; Path=/; Max-Age={auth.SESSION_MAX_AGE_SECONDS}"
             )
             self._send_json({"ok": True}, extra_headers=[("Set-Cookie", cookie)])
             return

@@ -160,7 +160,7 @@ def run_turn(
         timeout = _env_float("BEEP_PI_MONO_TIMEOUT", DEFAULT_TURN_TIMEOUT)
 
     # Single source of truth for model + auth. Resolve the active
-    # provider from /opt/beep/secrets/env via the shared registry
+    # provider from /etc/beep/secrets/env via the shared registry
     # in ``providers`` and pass the result to the bridge so the ``pi``
     # CLI selects the same model the chat banner advertises — rather
     # than falling back to pi's own default (``google``) or its native

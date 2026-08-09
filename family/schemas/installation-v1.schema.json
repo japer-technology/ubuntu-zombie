@@ -24,7 +24,8 @@
         "imaginary-friend",
         "curriculum-flame",
         "eric",
-        "llama"
+        "llama",
+        "beep"
       ]
     },
     "instance_id": {
@@ -45,11 +46,11 @@
     },
     "install_root": {
       "type": "string",
-      "pattern": "^/opt/(imaginary-friend|curriculum-flame|eric|llama\\.cpp)$"
+      "pattern": "^/opt/(imaginary-friend|curriculum-flame|eric|llama\\.cpp|beep)$"
     },
     "lifecycle_entrypoint": {
       "type": "string",
-      "pattern": "^/usr/local/sbin/(friend|flame|eric|llama)-manage$"
+      "pattern": "^/usr/local/sbin/(friend|flame|eric|llama|beep)-manage$"
     },
     "artifact_sha256": {
       "oneOf": [

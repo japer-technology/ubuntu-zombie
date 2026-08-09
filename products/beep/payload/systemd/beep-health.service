@@ -7,4 +7,4 @@ User=__AGENT_USER__
 Group=__AGENT_USER__
 Environment=BEEP_DIR=__BEEP_DIR__
 Environment=BEEP_HEALTH_WARN_ONLY=1
-ExecStart=__BEEP_DIR__/bin/health-check
+ExecStart=__BEEP_DIR__/bin/beep-health

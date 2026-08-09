@@ -8,9 +8,10 @@ Type=simple
 User=__AGENT_USER__
 Group=__AGENT_USER__
 WorkingDirectory=__BEEP_DIR__
-EnvironmentFile=-__BEEP_DIR__/secrets/env
+EnvironmentFile=-/etc/beep/secrets/env
 Environment=PYTHONUNBUFFERED=1
 Environment=BEEP_USER=__AGENT_USER__
+Environment=BEEP_SESSION_KEY_FILE=/etc/beep/secrets/session.key
 # FIX-3-02: provide a default for BEEP_CHAT_PORT so the unit still
 # starts when the operator has not added the variable to
 # __BEEP_DIR__/secrets/env (EnvironmentFile= is optional). Without

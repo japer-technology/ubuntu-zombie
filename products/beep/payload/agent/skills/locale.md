@@ -42,7 +42,7 @@ Operating rules:
   still maps `127.0.1.1` to the new name; a mismatch makes `sudo` slow
   and breaks local name resolution. Warn that certificates, monitoring
   and remote access configured against the old name will need
-  updating. If the optional Forgejo component is installed, the rename
+  updating. If an independently owned Forgejo service is installed, the rename
   also changes its advertised `<hostname>.local` URL and the Caddy
   route that serves it — see the `forgejo` skill.
 - After any change, prove it with the same read-only command you

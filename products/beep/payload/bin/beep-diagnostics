@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# collect-diagnostics — bundle logs and state for a bug report.
+# beep-diagnostics — bundle logs and state for a bug report.
 # Secrets are redacted before write.
 set -euo pipefail
 
 usage() {
   cat <<EOF
-collect-diagnostics — bundle redacted logs and state for a bug report.
+beep-diagnostics — bundle redacted logs and state for a bug report.
 
 Usage:
-  collect-diagnostics [-h|--help]
+  beep-diagnostics [-h|--help]
 
 Writes a tarball to \${TMPDIR:-/tmp}/beep-diagnostics-<stamp>.tar.gz
 containing system info, service status, journal excerpts, the installer
@@ -26,13 +26,14 @@ EOF
 case "${1:-}" in
   -h|--help) usage; exit 0 ;;
   "") ;;
-  *) echo "collect-diagnostics: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  *) echo "beep-diagnostics: unknown argument: $1" >&2; usage >&2; exit 2 ;;
 esac
 
 OUT_DIR="${TMPDIR:-/tmp}"
 STAMP="$(date -u +%Y%m%d-%H%M%S)"
 BUNDLE_DIR="$(mktemp -d "${OUT_DIR}/beep-diagnostics-${STAMP}.XXXX")"
-TARBALL="${OUT_DIR}/beep-diagnostics-${STAMP}.tar.gz"
+TARBALL="$(mktemp "${OUT_DIR}/beep-diagnostics-${STAMP}.XXXXXX.tar.gz")"
+chmod 600 "${TARBALL}"
 
 # FIX-3-23: clean up the staging directory on every exit path (tar
 # failure, signal, success), not just when the explicit `rm -rf` at
@@ -72,8 +73,8 @@ capture free.txt                free -h
 capture systemctl-failed.txt    systemctl --failed --no-pager
 capture systemctl-beep.txt    systemctl status beep-chat.service beep-health.timer --no-pager
 capture journal-beep.txt      journalctl -u beep-chat.service -n 400 --no-pager
-capture verify.txt              /opt/beep/bin/verify
-capture health.txt              /opt/beep/bin/health-check
+capture verify.txt              /usr/local/sbin/beep-manage verify --json
+capture health.txt              /opt/beep/bin/beep-health
 
 # Installer log
 if [[ -r /var/log/beep-install.log ]]; then
@@ -81,8 +82,8 @@ if [[ -r /var/log/beep-install.log ]]; then
 fi
 
 # Audit log (already redacted at write, but redact again defensively)
-if [[ -r /var/log/beep/audit.log ]]; then
-  redact < /var/log/beep/audit.log > "${BUNDLE_DIR}/audit.log"
+if [[ -r /var/log/beep/audit.jsonl ]]; then
+  redact < /var/log/beep/audit.jsonl > "${BUNDLE_DIR}/audit.jsonl"
 fi
 
 # Policy (no secrets in policy file by design)

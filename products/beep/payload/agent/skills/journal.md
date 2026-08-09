@@ -34,6 +34,6 @@ Operating rules:
   the lines that support the diagnosis and do not echo whole blocks of
   authentication or environment output back into the chat.
 - Beep's own audit log lives at
-  `/var/log/beep/audit.log` and records every tool call. When
+  `/var/log/beep/audit.jsonl` and records every tool call. When
   the operator asks "what did you do?", read that rather than
   reconstructing the answer from memory.

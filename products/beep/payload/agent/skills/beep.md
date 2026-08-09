@@ -1,4 +1,4 @@
-<!-- triggers: beep, beep, ai-beep, doctor, repair, audit, policy, ttl, installer -->
+<!-- triggers: beep, beep-manage, doctor, repair, audit, policy, ttl, installer -->
 # Skill: Beep's own layout and controls
 
 This skill is loaded when the operator asks about Beep
@@ -7,21 +7,22 @@ itself — its files, its policy, its audit trail or its lifecycle.
 Operating rules:
 
 - Layout worth knowing: `/opt/beep/` holds the agent package,
-  helper binaries under `bin/`, built-in skills under `skills/` and
-  runtime state under `state/`. Operator-editable configuration lives
+  helper binaries under `bin/` and built-in skills under `skills/`.
+  Runtime state lives under `/var/lib/beep/runtime/`. Operator-editable configuration lives
   in `/etc/beep/` (`policy.yaml` and `skills.d/`). The audit
-  log is `/var/log/beep/audit.log`.
-- The installer is the management interface. Its verbs are `install`,
-  `verify`, `doctor`, `repair` and `uninstall`, run as root against a
-  component target. `verify` and `doctor` are the right answer to "is
+  log is `/var/log/beep/audit.jsonl`.
+- `beep-manage` is the product-owned management interface. Its verbs are
+  `describe`, `status`, `install`, `verify`, `doctor`, `repair`, `backup`,
+  `update`, `rollback`, `suspend`, `resume`, and `uninstall`. `verify` and
+  `doctor` are the right answer to "is
   it healthy?"; `repair` re-asserts permissions, re-renders runtime
   configuration, redeploys skills and restarts the chat service.
 - Do not run installer verbs on the operator's behalf without asking.
   `install`, `repair` and especially `uninstall` mutate users, sudoers
   and systemd units; `uninstall` is not a reversible step.
-- Never stop, disable or mask `beep-chat.service`. It is the
-  product's only access surface — disabling it ends the conversation in
-  which the operator would have approved re-enabling it.
+- Use `beep-manage suspend` rather than directly disabling or masking
+  `beep-chat.service`; suspension records the operator's intent and revokes
+  active sessions.
 - Never edit `/etc/beep/policy.yaml` to widen what the agent
   may do. Rewriting the gate that governs your own actions is not a
   fix; describe the rule that blocked you and let the operator decide.
@@ -32,12 +33,12 @@ Operating rules:
   `timer.reactivation` are all of it; skills are guidance and cannot
   add tools. If a task genuinely needs a capability that does not
   exist, say so instead of improvising around it.
-- Answer "what did you do?" from the audit log, via the `audit-recent`
+- Answer "what did you do?" from the audit log, via the `beep-audit-recent`
   helper or `fs.read` on the log, rather than from conversational
   memory. The log is the record the operator can verify.
 - The TTL kill switch expires the agent's session. If the operator asks
   why the agent stopped responding, check lifecycle state and TTL
   before looking for a fault.
-- For a bug report, point at `collect-diagnostics`; it gathers the
+- For a bug report, point at `beep-diagnostics`; it gathers the
   supporting material. Never paste the contents of
-  `/opt/beep/secrets/env` into the chat or into a report.
+  `/etc/beep/secrets/env` into the chat or into a report.

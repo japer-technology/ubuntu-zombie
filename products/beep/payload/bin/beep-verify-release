@@ -2,13 +2,13 @@
 # Verify a downloaded Beep release directory.
 set -Eeuo pipefail
 
-REPO="${BEEP_RELEASE_REPO:-japer-technology/beep}"
+REPO="${BEEP_RELEASE_REPO:-japer-technology/ubuntu-zombie}"
 CERT_IDENTITY_REGEXP="${BEEP_RELEASE_CERT_IDENTITY_REGEXP:-https://github.com/${REPO}/.+}"
 CERT_OIDC_ISSUER="${BEEP_RELEASE_CERT_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 
 usage() {
   cat <<EOF
-Usage: verify-release [release-directory]
+Usage: beep-verify-release [release-directory]
 
 Verifies a downloaded Beep release directory by checking SHA256SUMS,
 cosign signatures, and the local SLSA provenance attestation bundle.

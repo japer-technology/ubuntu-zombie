@@ -39,13 +39,13 @@ Service control:
 Health and diagnostics:
   beep-health                       # one-shot health summary
   beep-diagnostics                  # bundle redacted logs + state for bug reports
-  sudo ${BEEP_DIR:-/opt/beep}/bin/secrets-edit    # safely edit provider keys
+  sudo beep-secrets-edit                # safely edit provider keys
 
 Audit log:
-  audit-recent                        # last 25 entries (pretty)
-  audit-recent -f                     # stream new entries (tail -F)
-  audit-recent -t tool_call -t provider_error
-  audit-recent --all                  # full log
+  beep-audit-recent                   # last 25 entries (pretty)
+  beep-audit-recent -f                # stream new entries (tail -F)
+  beep-audit-recent -t tool_call -t provider_error
+  beep-audit-recent --all             # full log
 
 Verbose audit (for testing only — opt in on the chat service):
   sudo systemctl edit beep-chat.service

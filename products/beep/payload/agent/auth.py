@@ -2,15 +2,12 @@
 
 The chat service binds to ``127.0.0.1`` only, but on a shared desktop
 *every* local user can reach ``http://127.0.0.1:58989``. A password gate
-keeps the root-capable administrator behind a shared secret. The
-installer asks for the password (default ``braaaains``) and
-stores only a salted PBKDF2 hash in ``secrets/env`` as
-``BEEP_ADMIN_PASSWORD_HASH`` — the plaintext is never written to disk.
+keeps the root-capable administrator behind a product-specific shared
+secret. The installer requires a protected password input and stores only
+a salted PBKDF2 hash as ``BEEP_ADMIN_PASSWORD_HASH``.
 
-The gate is *opt-in by configuration*: when ``BEEP_ADMIN_PASSWORD_HASH``
-is unset (e.g. in tests, or a deliberately open install), ``auth_required``
-returns ``False`` and every request is allowed. When it is set, the
-server requires a valid login before serving any privileged endpoint.
+An installed Beep always configures the gate. An unset hash is supported
+only by isolated source tests; it is never an installed operating mode.
 
 Hash format (single line, ``$``-separated)::
 
@@ -22,9 +19,13 @@ import hashlib
 import hmac
 import os
 import secrets
+import time
+from pathlib import Path
 
 HASH_ENV = "BEEP_ADMIN_PASSWORD_HASH"
-DEFAULT_PASSWORD = "braaaains"
+SESSION_KEY_ENV = "BEEP_SESSION_KEY_FILE"
+DEFAULT_SESSION_KEY = "/etc/beep/secrets/session.key"
+SESSION_MAX_AGE_SECONDS = 12 * 60 * 60
 
 _ALGO = "pbkdf2_sha256"
 _ITERATIONS = 200_000
@@ -80,8 +81,45 @@ def check_password(password: str) -> bool:
 
 
 def new_session_token() -> str:
-    """Return an unguessable opaque session token."""
-    return secrets.token_urlsafe(32)
+    """Return an authenticated, expiring Beep-only session token."""
+    issued = str(int(time.time()))
+    nonce = secrets.token_urlsafe(24)
+    payload = f"{issued}.{nonce}"
+    signature = hmac.new(_session_key(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
+
+
+def verify_session_token(token: str) -> bool:
+    """Validate a token signature and its fixed 12-hour lifetime."""
+    try:
+        issued_text, nonce, signature = token.split(".", 2)
+        issued = int(issued_text)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    if not nonce or issued > int(time.time()) + 60:
+        return False
+    if int(time.time()) - issued > SESSION_MAX_AGE_SECONDS:
+        return False
+    payload = f"{issued_text}.{nonce}"
+    expected = hmac.new(_session_key(), payload.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature)
+
+
+def _session_key() -> bytes:
+    path = Path(os.environ.get(SESSION_KEY_ENV, DEFAULT_SESSION_KEY))
+    try:
+        value = path.read_bytes().strip()
+    except OSError:
+        value = b""
+    if len(value) < 32:
+        # Source tests do not have installed secrets. A process-local key keeps
+        # those tokens authenticated without creating files or weakening an
+        # installed Beep, whose lifecycle always writes a protected key.
+        value = _TEST_SESSION_KEY
+    return value
+
+
+_TEST_SESSION_KEY = secrets.token_bytes(48)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -102,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     if password is None:
         password = sys.stdin.readline().rstrip("\n")
     if not password:
-        password = DEFAULT_PASSWORD
+        parser.error("a non-empty Beep password is required")
     sys.stdout.write(hash_password(password) + "\n")
     return 0
 

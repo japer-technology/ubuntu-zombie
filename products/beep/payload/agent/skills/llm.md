@@ -2,8 +2,8 @@
 # Skill: language models, providers and local inference
 
 This skill is loaded when the operator asks which model the agent is
-using, how to point it at a different provider, or how the local
-llama.cpp component works.
+using, how to point it at a different provider, or how a separately
+installed local model service works.
 
 Operating rules:
 
@@ -15,8 +15,8 @@ Operating rules:
   `mistral`, `groq`, `openrouter` and `lmstudio` (any local,
   OpenAI-compatible server).
 - API keys live in the root-owned secrets file
-  (`/opt/beep/secrets/env`, mode `0600`) and are edited with the
-  `secrets-edit` helper by the operator. Never read that file into the
+  (`/etc/beep/secrets/env`, mode `0600`) and are edited with the
+  `beep-secrets-edit` helper by the operator. Never read that file into the
   chat, never echo a key, and never write one into a unit file, a
   script or a shell history. See the `secrets` skill.
 - Changing provider or model is an operator decision that takes effect
@@ -25,14 +25,12 @@ Operating rules:
   service to apply a preference the operator did not ask for.
 - Local models are the private option. `/locals` in the chat probes the
   usual OpenAI-compatible ports (`1234`, `8080`, `11434`, `51234`) on
-  the local network and loopback; the managed llama.cpp port `58080`
-  is loopback-only. `web.fetch` deliberately refuses loopback and
+  the local network and loopback. `web.fetch` deliberately refuses loopback and
   private addresses, so it is not the way to inspect a local server —
   use `net.status` and `shell.run` with a bounded `curl`.
-- The optional `llama` component installs a CPU llama.cpp server plus a
-  pinned, checksum-verified model. It is managed with `llama-manager`
-  (`status`, `start`, `stop`, `restart`, `enable`, `disable`, `test`,
-  `models`, `hardware`); mutating verbs need root. Runtime lives under
+- Beep does not install a model server. The independent Llama product, when
+  selected by the operator, is managed through `llama-manage`; its lifecycle
+  and ownership remain outside Beep. Runtime lives under
   `/opt/llama.cpp`, configuration under `/etc/llama.cpp`, models and
   state under `/var/lib/llama.cpp`, logs under `/var/log/llama.cpp`.
 - The local endpoint (`http://127.0.0.1:8080/v1`) is deliberately
@@ -44,8 +42,8 @@ Operating rules:
   revision with a published SHA-256 over "the latest" — an unverified
   GGUF from an unknown repository is an unverified binary blob.
 - Match the model to the machine, not to ambition. Report RAM, core
-  count and whether a usable GPU exists (`nproc`, `free -h`,
-  `llama-manager hardware`) and say plainly when a requested model will
+  count and whether a usable GPU exists (`nproc`, `free -h`) and say plainly
+  when a requested model will
   swap the machine to a standstill. Context size costs memory too.
 - Anything the operator types goes to the configured provider. When
   they are about to paste logs, configuration or personal data, say

@@ -38,7 +38,7 @@ Operating rules:
   for good reason; publishing one to the LAN is a `network_change` that
   changes the machine's exposure, and an unauthenticated Redis or
   MongoDB on `0.0.0.0` is a well-known compromise path.
-- The Forgejo component has its own PostgreSQL database and role. Do
+- A separately installed Forgejo service has its own PostgreSQL database and role. Do
   not drop, rename or re-permission them while answering a general
   database question — see the `forgejo` skill for the confirmations
   that path requires.

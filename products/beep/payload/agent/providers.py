@@ -20,7 +20,7 @@ this file). The bridge is a small Node script that loads
 
 Supported providers (set ``BEEP_PROVIDER`` to one of the names on
 the left and supply the matching API key in
-``/opt/beep/secrets/env``)::
+``/etc/beep/secrets/env``)::
 
     openai      OPENAI_API_KEY
     anthropic   ANTHROPIC_API_KEY
@@ -339,7 +339,7 @@ class BaseProvider:
         if not chosen:
             raise NoProviderConfigured(
                 f"{spec.name} requires a model id. Set BEEP_MODEL in "
-                "/opt/beep/secrets/env (e.g. "
+                "/etc/beep/secrets/env (e.g. "
                 "BEEP_MODEL=anthropic/claude-3.5-sonnet for openrouter)."
             )
         self.model = chosen
@@ -444,7 +444,7 @@ def _resolve_spec(name: str | None = None) -> _ProviderSpec:
     keys = ", ".join(spec.key_env for spec in _PI_AI_PROVIDERS)
     raise NoProviderConfigured(
         "No provider API key found. Set one of "
-        f"{keys} in /opt/beep/secrets/env and restart "
+        f"{keys} in /etc/beep/secrets/env and restart "
         "beep-chat.service."
     )
 

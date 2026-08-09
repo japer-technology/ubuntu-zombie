@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# audit-recent — pretty-print recent JSON-lines audit entries.
+# beep-audit-recent — pretty-print recent JSON-lines audit entries.
 set -euo pipefail
 
-AUDIT_LOG="${BEEP_AUDIT_LOG:-/var/log/beep/audit.log}"
+AUDIT_LOG="${BEEP_AUDIT_LOG:-/var/log/beep/audit.jsonl}"
 
 usage() {
   cat <<EOF
-audit-recent — show recent Beep audit entries.
+beep-audit-recent — show recent Beep audit entries.
 
 Usage:
-  audit-recent [-n N] [--all] [-t TYPE] [-f|--follow]
+  beep-audit-recent [-n N] [--all] [-t TYPE] [-f|--follow]
 
 Options:
   -n N            Show the last N entries (default 25).
@@ -34,8 +34,12 @@ while [[ $# -gt 0 ]]; do
     -f|--follow) FOLLOW=1; shift ;;
     -t|--type)
       if [[ -z "${2:-}" ]]; then
-        echo "audit-recent: ${1} requires an event type" >&2
+        echo "beep-audit-recent: ${1} requires an event type" >&2
         usage >&2
+        exit 2
+      fi
+      if [[ ! "$2" =~ ^[a-z][a-z0-9_.-]*$ ]]; then
+        echo "beep-audit-recent: invalid event type: $2" >&2
         exit 2
       fi
       TYPES+=("$2"); shift 2 ;;
@@ -43,12 +47,12 @@ while [[ $# -gt 0 ]]; do
       # FIX-3-21: validate the argument up-front so we surface a
       # friendly error instead of `tail`'s `invalid number of lines`.
       if [[ -z "${2:-}" ]]; then
-        echo "audit-recent: -n requires a positive integer" >&2
+        echo "beep-audit-recent: -n requires a positive integer" >&2
         usage >&2
         exit 2
       fi
       if [[ ! "$2" =~ ^[0-9]+$ ]] || [[ "$2" -lt 1 ]]; then
-        echo "audit-recent: -n requires a positive integer, got '$2'" >&2
+        echo "beep-audit-recent: -n requires a positive integer, got '$2'" >&2
         usage >&2
         exit 2
       fi

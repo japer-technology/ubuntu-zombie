@@ -2,7 +2,7 @@
 
 Every prompt, proposed action, approval decision, command, exit code,
 and verification result is appended as one JSON object per line to
-``/var/log/beep/audit.log``. Secrets are redacted before
+``/var/log/beep/audit.jsonl``. Secrets are redacted before
 write: the redactor matches token-shaped substrings and also scrubs
 the values of a fixed set of sensitive environment variables and the
 secrets-file path. Tool dispatches are recorded as structured
@@ -41,7 +41,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Mapping
 
-AUDIT_PATH = Path(os.environ.get("BEEP_AUDIT_LOG", "/var/log/beep/audit.log"))
+AUDIT_PATH = Path(os.environ.get("BEEP_AUDIT_LOG", "/var/log/beep/audit.jsonl"))
 
 # Hard ceiling on preview length even when ``BEEP_AUDIT_PREVIEW_BYTES``
 # is set higher — keeps the log bounded and matches the per-stream cap
@@ -94,7 +94,7 @@ _SENSITIVE_ENV_NAMES = (
 
 
 def _secrets_path_redactors() -> tuple[tuple[re.Pattern[str], str], ...]:
-    paths = {os.environ.get("BEEP_SECRETS") or "/opt/beep/secrets/env"}
+    paths = {os.environ.get("BEEP_SECRETS") or "/etc/beep/secrets/env"}
     out: list[tuple[re.Pattern[str], str]] = []
     for p in paths:
         if not p:
