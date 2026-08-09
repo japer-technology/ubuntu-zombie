@@ -3,15 +3,18 @@
 set -Eeuo pipefail
 
 REPO="${BEEP_RELEASE_REPO:-japer-technology/ubuntu-zombie}"
-CERT_IDENTITY_REGEXP="${BEEP_RELEASE_CERT_IDENTITY_REGEXP:-https://github.com/${REPO}/.+}"
+DEFAULT_CERT_IDENTITY_REGEXP="https://github[.]com/${REPO}/[.]github"
+DEFAULT_CERT_IDENTITY_REGEXP+="/workflows/beep-release[.]yml"
+DEFAULT_CERT_IDENTITY_REGEXP+="@refs/(heads/main|tags/beep-v.*)"
+CERT_IDENTITY_REGEXP="${BEEP_RELEASE_CERT_IDENTITY_REGEXP:-${DEFAULT_CERT_IDENTITY_REGEXP}}"
 CERT_OIDC_ISSUER="${BEEP_RELEASE_CERT_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 
 usage() {
   cat <<EOF
 Usage: beep-verify-release [release-directory]
 
-Verifies a downloaded Beep release directory by checking SHA256SUMS,
-cosign signatures, and the local SLSA provenance attestation bundle.
+Verifies a downloaded Beep release directory by checking the versioned
+SHA-256 manifest, cosign signatures, and the local provenance bundle.
 
 Environment:
   BEEP_RELEASE_REPO                    GitHub repository (${REPO})
@@ -42,16 +45,31 @@ need gh
 
 cd "${release_dir}"
 
-[[ -s SHA256SUMS ]] || { echo "[x] SHA256SUMS missing or empty" >&2; exit 1; }
-
-mapfile -t artifacts < <(awk '{print $2}' SHA256SUMS | sed 's/^\*//' | grep -v '^$')
-if [[ "${#artifacts[@]}" -eq 0 ]]; then
-  echo "[x] SHA256SUMS does not list any artifacts" >&2
+mapfile -t checksum_files < <(
+  find . -maxdepth 1 -type f -name 'beep-*.sha256' -printf '%f\n' | sort
+)
+if [[ "${#checksum_files[@]}" -ne 1 || ! -s "${checksum_files[0]:-}" ]]; then
+  echo "[x] expected exactly one non-empty beep-*.sha256 manifest" >&2
   exit 1
 fi
+checksum_file="${checksum_files[0]}"
 
-status i "checking SHA256SUMS"
-sha256sum -c SHA256SUMS
+mapfile -t artifacts < <(
+  awk '{print $2}' "${checksum_file}" | sed 's/^\*//' | grep -v '^$'
+)
+if [[ "${#artifacts[@]}" -eq 0 ]]; then
+  echo "[x] checksum manifest does not list any artifacts" >&2
+  exit 1
+fi
+for artifact in "${artifacts[@]}"; do
+  if [[ "${artifact}" == -* || "${artifact}" == */* || "${artifact}" == *\\* ]]; then
+    echo "[x] unsafe artifact name in checksum manifest" >&2
+    exit 1
+  fi
+done
+
+status i "checking ${checksum_file}"
+sha256sum -c "${checksum_file}"
 status ok "checksums match"
 
 verify_cosign() {
@@ -75,7 +93,7 @@ verify_cosign() {
 }
 
 status i "checking cosign signatures"
-for artifact in "${artifacts[@]}" SHA256SUMS; do
+for artifact in "${artifacts[@]}" "${checksum_file}"; do
   [[ -s "${artifact}" ]] || { echo "[x] missing artifact: ${artifact}" >&2; exit 1; }
   verify_cosign "${artifact}"
 done

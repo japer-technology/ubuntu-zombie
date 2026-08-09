@@ -1532,6 +1532,45 @@ class Manager:
         if marker is not None:
             self._stop_services()
             self._create_recovery_snapshot(invocation.correlation_id)
+        try:
+            return self._converge_resources(
+                invocation,
+                configuration,
+                marker=marker,
+                instance_id=instance_id,
+                previous_version=previous_version,
+                suspended=suspended,
+            )
+        except Exception as original:
+            if marker is None:
+                raise
+            try:
+                self._execute_rollback()
+            except Exception as rollback_error:
+                raise ManagementError(
+                    1,
+                    "AUTOMATIC_ROLLBACK_FAILED",
+                    "Beep convergence failed and automatic rollback also failed.",
+                    recovery=[
+                        "Keep Beep stopped and restore the verified backup or recovery snapshot."
+                    ],
+                ) from rollback_error
+            if isinstance(original, ManagementError):
+                original.recovery.append(
+                    "The pre-operation Beep recovery snapshot was restored automatically."
+                )
+            raise
+
+    def _converge_resources(
+        self,
+        invocation: Invocation,
+        configuration: Configuration,
+        *,
+        marker: dict[str, Any] | None,
+        instance_id: str,
+        previous_version: str | None,
+        suspended: bool,
+    ) -> tuple[list[str], str | None]:
         changed: list[str] = []
         uid, gid = self._ensure_identity(configuration.agent_user, changed)
         self._ensure_directories(uid, gid, changed)
@@ -2352,6 +2391,15 @@ class Manager:
         else:
             os.chmod(self.paths.policy, 0o644)
             os.chown(self.paths.policy, 0, 0)
+            if not runtime_policy.validate_policy(self.paths.policy):
+                if atomic_write(
+                    self.paths.policy,
+                    (
+                        self.source_root / "payload" / "etc" / "policy.yaml"
+                    ).read_bytes(),
+                    mode=0o644,
+                ):
+                    changed.append(str(self.paths.policy))
         catalog_source = self.source_root / "payload" / "etc" / "agents" / "catalog.json"
         runtime_family.validate_catalog(
             runtime_family.load_json(catalog_source, label="catalog")

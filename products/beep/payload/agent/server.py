@@ -784,6 +784,7 @@ class App:
         self._lmstudio_lock = threading.Lock()
         self._status_probe_lock = threading.Lock()
         self._reactivation_control_lock = threading.Lock()
+        self._conversation_mutation_lock = threading.Lock()
         self._reactivation_wakeup = threading.Event()
         for orphaned in self.history.fail_orphaned_reactivations():
             log_event(
@@ -1000,6 +1001,8 @@ class App:
             and user_meta.get("reason") else None,
         )
         with self._lock:
+            if not self.history.conversation_exists(conv_id):
+                return {"error": f"No conversation #{conv_id}."}
             self._sweep_turns()
             self.turns[turn_id] = state
 
@@ -1099,6 +1102,23 @@ class App:
         return {"ok": True, "turn_id": turn_id}
 
     def post_message(
+        self,
+        conv_id: int | None,
+        prompt: str,
+        emit: Callable[[str, dict[str, Any]], None] | None = None,
+        user_meta: dict[str, Any] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
+        with self._conversation_mutation_lock:
+            return self._post_message(
+                conv_id,
+                prompt,
+                emit=emit,
+                user_meta=user_meta,
+                cancel_event=cancel_event,
+            )
+
+    def _post_message(
         self,
         conv_id: int | None,
         prompt: str,
@@ -2129,6 +2149,37 @@ class App:
             "events": self.history.get_events(conversation_id),
         }
 
+    def export_conversation(self, conversation_id: int) -> dict[str, Any]:
+        return {
+            "schema_version": 1,
+            "product_id": "beep",
+            "exported_at": time.time(),
+            **self.conversation_payload(conversation_id),
+        }
+
+    def delete_conversation(
+        self,
+        conversation_id: int,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        expected = f"DELETE CONVERSATION {conversation_id}"
+        if confirmation != expected:
+            return {"error": f"confirmation must be exactly {expected!r}"}
+        with self._conversation_mutation_lock, self._reactivation_control_lock:
+            with self._lock:
+                self._sweep_turns()
+                if any(
+                    turn.conversation_id == conversation_id
+                    and turn.done_at is None
+                    for turn in self.turns.values()
+                ):
+                    return {"error": "conversation has an active turn"}
+                if not self.history.delete_conversation(conversation_id):
+                    return {"error": f"No conversation #{conversation_id}."}
+        self._reactivation_wakeup.set()
+        log_event("conversation_deleted", conversation_id=conversation_id)
+        return {"ok": True, "conversation_id": conversation_id}
+
     def set_conversation_title(self, conversation_id: int,
                                title: str) -> dict[str, Any]:
         cleaned = " ".join(title.strip().split())[:120]
@@ -2923,6 +2974,27 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send_json(self.app.conversation_payload(cid))
             return
+        if (
+            len(parts) == 4
+            and parts[:2] == ["api", "conversation"]
+            and parts[3] == "export"
+        ):
+            try:
+                cid = int(parts[2])
+                data = self.app.export_conversation(cid)
+            except (ValueError, KeyError):
+                self._send_json({"error": "conversation not found"}, 404)
+                return
+            self._send_json(
+                data,
+                extra_headers=[
+                    (
+                        "Content-Disposition",
+                        f'attachment; filename="beep-conversation-{cid}.json"',
+                    )
+                ],
+            )
+            return
         if self.path == "/api/audit":
             self._send_json({"entries": audit_tail(50)})
             return
@@ -3235,6 +3307,24 @@ class Handler(BaseHTTPRequestHandler):
                 self._only_fields(data, set())
                 result = self.app.compress_conversation(cid)
                 self._send_json(result, 404 if result.get("error") else 200)
+                return
+            if action == "delete":
+                self._only_fields(data, {"confirmation"})
+                confirmation = data.get("confirmation")
+                if not isinstance(confirmation, str):
+                    raise RequestError(400, "confirmation must be a string")
+                result = self.app.delete_conversation(cid, confirmation)
+                if result.get("error"):
+                    status = (
+                        409
+                        if result["error"] == "conversation has an active turn"
+                        else 404
+                        if result["error"].startswith("No conversation")
+                        else 400
+                    )
+                else:
+                    status = 200
+                self._send_json(result, status)
                 return
         self.send_error(HTTPStatus.NOT_FOUND)
 

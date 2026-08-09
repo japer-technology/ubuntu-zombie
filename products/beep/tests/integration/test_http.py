@@ -37,6 +37,27 @@ class StubApp:
         self.messages.append(prompt)
         return {"ok": True, "conversation_id": conversation_id or 1}
 
+    def export_conversation(self, conversation_id: int) -> dict[str, Any]:
+        if conversation_id != 1:
+            raise KeyError
+        return {
+            "schema_version": 1,
+            "product_id": "beep",
+            "conversation": {"id": conversation_id},
+            "messages": [],
+            "events": [],
+        }
+
+    def delete_conversation(
+        self,
+        conversation_id: int,
+        confirmation: str,
+    ) -> dict[str, Any]:
+        expected = f"DELETE CONVERSATION {conversation_id}"
+        if confirmation != expected:
+            return {"error": f"confirmation must be exactly {expected!r}"}
+        return {"ok": True, "conversation_id": conversation_id}
+
 
 class HTTPBoundaryTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -194,6 +215,27 @@ class HTTPBoundaryTests(unittest.TestCase):
         self.assertEqual(status, 410)
         self.assertTrue(payload["dead"])
         self.assertEqual(payload["dead_reason"], "state_missing")
+
+    def test_conversation_export_and_explicit_deletion(self) -> None:
+        status, payload, headers = self.request(
+            "GET",
+            "/api/conversation/1/export",
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["product_id"], "beep")
+        self.assertIn("attachment", headers["Content-Disposition"])
+
+        status, _, _ = self.json_post(
+            "/api/conversation/1/delete",
+            b'{"confirmation":"wrong"}',
+        )
+        self.assertEqual(status, 400)
+        status, payload, _ = self.json_post(
+            "/api/conversation/1/delete",
+            b'{"confirmation":"DELETE CONVERSATION 1"}',
+        )
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
 
 
 if __name__ == "__main__":

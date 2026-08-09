@@ -252,6 +252,7 @@ product-named command to `/usr/local/sbin`:
 | Imaginary Friend | `/usr/local/sbin/friend-manage` |
 | Curriculum Flame | `/usr/local/sbin/flame-manage` |
 | ERIC | `/usr/local/sbin/eric-manage` |
+| Beep | `/usr/local/sbin/beep-manage` |
 
 The source and installed commands implement the same interface:
 
@@ -277,6 +278,12 @@ The required operations are:
 | `suspend` | Stop useful operation while preserving declared state |
 | `resume` | Resume only after integrity and policy checks pass |
 | `uninstall` | Remove only owned resources with explicit retention choice |
+
+Products may add a schema-declared operation that does not weaken or overload
+the common meanings. Beep adds `kill`: an approved, audited terminal
+tombstone and useful-service shutdown. The v1 request, response, and product
+schemas conditionally admit `kill` only when `product_id` is `beep`; other
+descriptors retain the common operation list.
 
 Mutating operations support `--dry-run`. A plan lists the exact resources
 and checks in execution order and does not create lock files, directories,

@@ -915,21 +915,32 @@ class FamilyManager:
                     environment_prefix=descriptor["environment_prefix"],
                     artifact_sha256=artifact_digest,
                 )
-            marker: dict[str, Any] | None = None
-            if operation != "uninstall" and response["status"] == "ok":
-                installed = self._installed_descriptor(product_id, required=True)
-                if installed != descriptor:
-                    raise FamilyError(
-                        78,
-                        "DESCRIPTOR_MISMATCH",
-                        "Installed target descriptor differs from verified release.",
-                    )
-                marker, _ = self._installed_marker(installed)
-                self._verify_receipt(response, installed)
-                self._record_outcome(entry, installed, marker, response)
-            elif operation == "uninstall" and response["status"] == "ok":
-                self._record_uninstall(entry, descriptor, response, retain_state)
-            self._audit(response, actor="beep")
+            try:
+                marker: dict[str, Any] | None = None
+                if operation != "uninstall" and response["status"] == "ok":
+                    installed = self._installed_descriptor(product_id, required=True)
+                    if installed != descriptor:
+                        raise FamilyError(
+                            78,
+                            "DESCRIPTOR_MISMATCH",
+                            "Installed target descriptor differs from verified release.",
+                        )
+                    marker, _ = self._installed_marker(installed)
+                    self._verify_receipt(response, installed)
+                    self._record_outcome(entry, installed, marker, response)
+                elif operation == "uninstall" and response["status"] == "ok":
+                    self._record_uninstall(entry, descriptor, response, retain_state)
+                self._audit(response, actor="beep")
+            except FamilyError:
+                self._audit_manager_failure(response)
+                raise
+            except Exception as exc:
+                self._audit_manager_failure(response)
+                raise FamilyError(
+                    1,
+                    "MANAGER_RECORD_FAILED",
+                    "The target returned, but Beep could not verify or record the outcome.",
+                ) from exc
         return response
 
     def read_inputs(self, path: Path | None) -> dict[str, Any]:
@@ -1608,6 +1619,14 @@ class FamilyManager:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
+
+    def _audit_manager_failure(self, response: dict[str, Any]) -> None:
+        failure = dict(response)
+        failure["status"] = "failed"
+        try:
+            self._audit(failure, actor="beep")
+        except OSError:
+            pass
 
     @contextmanager
     def _manager_lock(self) -> Iterator[None]:

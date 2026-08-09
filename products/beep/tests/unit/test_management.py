@@ -110,6 +110,57 @@ class ManagementTests(unittest.TestCase):
             0o644,
         )
 
+    def test_failed_existing_convergence_restores_recovery_snapshot(self) -> None:
+        marker = {
+            "instance_id": "12d515dc-92f6-44d8-adf1-2ca812197307",
+            "version": self.manager.version,
+        }
+        invocation = management.Invocation(
+            operation="update",
+            correlation_id="047fd8bd-ed5f-49f9-8da5-07bfe4ebad14",
+            actor="operator",
+            inputs={},
+            confirmation=None,
+            retain_state=None,
+            dry_run=False,
+            json_output=True,
+            non_interactive=True,
+            assume_yes=True,
+            supplied_plan_digest=None,
+        )
+        configuration = management.Configuration(
+            agent_user="beep",
+            chat_port=58989,
+            provider=None,
+            model=None,
+            model_base_url=None,
+            ttl_days=7,
+        )
+        failure = management.ManagementError(
+            1,
+            "DEPLOYMENT_FAILED",
+            "deployment failed",
+        )
+        with (
+            mock.patch.object(self.manager, "load_marker", return_value=marker),
+            mock.patch.object(self.manager, "_platform_preflight"),
+            mock.patch.object(self.manager, "_collision_preflight"),
+            mock.patch.object(self.manager, "_port_preflight"),
+            mock.patch.object(self.manager, "_stop_services"),
+            mock.patch.object(self.manager, "_create_recovery_snapshot"),
+            mock.patch.object(
+                self.manager,
+                "_converge_resources",
+                side_effect=failure,
+            ),
+            mock.patch.object(self.manager, "_execute_rollback") as rollback,
+        ):
+            with self.assertRaises(management.ManagementError) as raised:
+                self.manager._execute_converge(invocation, configuration)
+        self.assertIs(raised.exception, failure)
+        rollback.assert_called_once_with()
+        self.assertIn("restored automatically", failure.recovery[-1])
+
 
 if __name__ == "__main__":
     unittest.main()
