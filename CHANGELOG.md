@@ -26,6 +26,11 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ### Documentation
 
+- **Beep product definition:** added a template-complete specification for an
+  independently installed, root-capable duplication of Ubuntu Zombie with
+  Beep-owned identities, credentials, resources, lifecycle, audit, release,
+  family management, and co-installation boundaries. Documentation only; Beep
+  is not implemented or admitted to the production family catalogue.
 - **Product-defined family authority:** removed the family-wide rule that
   reserved general root authority to Ubuntu Zombie. Future
   systems-administrator products may retain full root capability when their
