@@ -1,0 +1,40 @@
+#!/bin/sh
+# postinst — make installer scripts executable and tell the operator
+# what to do next. Run after the .deb's files have been laid down.
+set -e
+
+INSTALL_ROOT="/usr/share/beep"
+
+# Re-assert executable bits (dpkg preserves them from the .deb, but be
+# defensive in case a future maintainer strips them).
+for f in \
+  "${INSTALL_ROOT}/scripts/install.sh" \
+  "${INSTALL_ROOT}/scripts/uninstall.sh" \
+  "${INSTALL_ROOT}/payload/bin"/* \
+  /usr/sbin/beep
+do
+  [ -e "$f" ] || continue
+  chmod 0755 "$f" 2>/dev/null || true
+done
+
+cat <<'EOF'
+
+Beep has been staged at /usr/share/beep/.
+
+Nothing has been changed on this host yet. To install:
+
+  sudo beep --dry-run install      # preview the plan
+  sudo beep install                # apply it
+
+To verify or recover an existing install:
+
+  sudo beep verify
+  sudo beep doctor
+  sudo beep repair
+
+Documentation: /usr/share/doc/beep/README.md and
+https://github.com/japer-technology/ubuntu-zombie
+
+EOF
+
+exit 0

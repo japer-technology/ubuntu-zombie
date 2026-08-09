@@ -1,0 +1,16 @@
+# Managed by install.sh for a runner co-located with Forgejo.
+runner:
+  file: /var/lib/forgejo-runner/.runner
+  capacity: 1
+
+cache:
+  # The built-in cache proxy listens on every interface by default.
+  enabled: false
+
+container:
+  # Job containers must share host networking to reach loopback-only Forgejo.
+  network: host
+  privileged: false
+  valid_volumes: []
+  # The runner can use Docker, but jobs do not receive the Docker socket.
+  docker_host: "-"

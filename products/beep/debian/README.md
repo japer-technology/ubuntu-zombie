@@ -1,0 +1,34 @@
+# Beep — Debian packaging
+
+This directory holds the metadata used by `make deb` to produce an
+installable `.deb` archive of the Beep source tree.
+
+The `.deb` is intentionally a **stage-1** package: it copies the
+installer, payload, and documentation to `/usr/share/beep/`
+and exposes a thin wrapper at `/usr/sbin/beep` that
+delegates to `scripts/install.sh`. It deliberately does **not** run
+the full installer at `apt install` time, because the installer
+modifies sshd, the firewall, the display manager, and (optionally)
+enrols Tailscale — all of which need an attended operator decision.
+
+After installing the package:
+
+```bash
+sudo apt install ./beep_<version>_all.deb
+sudo beep install
+```
+
+`sudo beep {install|verify|doctor|repair|uninstall|--dry-run}`
+behaves identically to invoking `scripts/install.sh` directly from a
+git clone.
+
+## Files in this directory
+
+| File         | Purpose                                                          |
+| ------------ | ---------------------------------------------------------------- |
+| `control.in` | dpkg control file template (`__VERSION__` is substituted).       |
+| `postinst`   | Sets executable bits and prints the next-steps message.          |
+| `prerm`      | Refuses to uninstall the package if the system is still set up.  |
+| `copyright`  | MIT copyright notice in machine-readable format.                 |
+| `changelog`  | Stub Debian changelog (real history lives in /CHANGELOG.md).     |
+| `README.md`  | This file.                                                       |
