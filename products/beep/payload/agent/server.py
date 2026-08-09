@@ -76,6 +76,8 @@ VERSION_CHECK_TIMEOUT_SECONDS = 4.0
 VERSION_CACHE_SECONDS = 900.0
 STATUS_PROBE_CACHE_SECONDS = 30.0
 MAX_VERSION_RESPONSE_BYTES = 1024 * 1024
+MAX_REQUEST_BYTES = 1024 * 1024
+MAX_ACTIVE_SESSIONS = 256
 REACTIVATION_HARD_MIN_SECONDS = 5
 REACTIVATION_HARD_MAX_SECONDS = 3600
 REACTIVATION_PROMPT_MAX_CHARS = 2000
@@ -85,8 +87,8 @@ AGENT_REACTIVATION_CLOSE = "</beep-reactivation>"
 _VERSION_SOURCES = {
     "beep": (
         "https://api.github.com/repos/japer-technology/"
-        "beep/releases/latest",
-        "tag_name",
+        "ubuntu-zombie/releases?per_page=100",
+        "beep_tag",
     ),
     "pi-mono": (
         "https://registry.npmjs.org/"
@@ -678,7 +680,19 @@ def _latest_component_versions() -> dict[str, str]:
             if len(raw) > MAX_VERSION_RESPONSE_BYTES:
                 continue
             payload = json.loads(raw)
-            value = payload.get(field) if isinstance(payload, dict) else None
+            if field == "beep_tag" and isinstance(payload, list):
+                value = next(
+                    (
+                        row["tag_name"].removeprefix("beep-v")
+                        for row in payload
+                        if isinstance(row, dict)
+                        and isinstance(row.get("tag_name"), str)
+                        and row["tag_name"].startswith("beep-v")
+                    ),
+                    None,
+                )
+            else:
+                value = payload.get(field) if isinstance(payload, dict) else None
             if isinstance(value, str) and value.strip():
                 latest[name] = value.strip().removeprefix("v")
         except (
@@ -792,6 +806,13 @@ class App:
             return None
         token = auth.new_session_token()
         with self._lock:
+            self.sessions = {
+                candidate
+                for candidate in self.sessions
+                if auth.verify_session_token(candidate)
+            }
+            while len(self.sessions) >= MAX_ACTIVE_SESSIONS:
+                self.sessions.pop()
             self.sessions.add(token)
         log_event("login_ok")
         return {"ok": True, "token": token}
@@ -807,7 +828,12 @@ class App:
         if not token:
             return False
         with self._lock:
-            return token in self.sessions and auth.verify_session_token(token)
+            if token not in self.sessions:
+                return False
+            if auth.verify_session_token(token):
+                return True
+            self.sessions.discard(token)
+            return False
 
     def session_info(self, token: str | None) -> dict[str, Any]:
         life = lifecycle.status()
@@ -860,8 +886,23 @@ class App:
     def ttl_die(self) -> dict[str, Any]:
         """Trip the kill switch immediately and permanently."""
         result = lifecycle.kill()
-        log_event("ttl_killed")
-        return result
+        disabled = self._disable_for_death("beep killed")
+        log_event("ttl_killed", **disabled)
+        return {**result, **disabled}
+
+    def _disable_for_death(self, reason: str) -> dict[str, Any]:
+        with self._lock:
+            turns = [
+                turn for turn in self.turns.values() if turn.final_payload is None
+            ]
+            self.sessions.clear()
+        for turn in turns:
+            turn.cancel_event.set()
+        cancelled = self.history.cancel_pending_reactivation(reason)
+        return {
+            "active_turns_cancelled": len(turns),
+            "reactivation_cancelled": cancelled is not None,
+        }
 
     def set_password(self, password: str) -> dict[str, Any]:
         """Rotate the required chat password without logging the secret."""
@@ -2524,6 +2565,8 @@ def _ttl_seconds_from_payload(
             default_seconds=(lifecycle.DEFAULT_TTL_SECONDS if reset else None),
         )
     if "seconds" in data:
+        if isinstance(data.get("seconds"), bool):
+            raise ValueError("seconds must be a number")
         try:
             seconds = float(data.get("seconds"))
         except (TypeError, ValueError) as exc:
@@ -2532,6 +2575,8 @@ def _ttl_seconds_from_payload(
             raise ValueError("duration must be greater than zero")
         return seconds
     if "days" in data:
+        if isinstance(data.get("days"), bool):
+            raise ValueError("days must be a number")
         try:
             days = float(data.get("days"))
         except (TypeError, ValueError) as exc:
@@ -2605,6 +2650,21 @@ def _truncate_obs(result: Any, limit: int = 4000) -> Any:
 INDEX_HTML_PATH = HERE / "templates" / "index.html"
 
 
+class RequestError(ValueError):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def _strict_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON key: {key}")
+        result[key] = value
+    return result
+
+
 def _provider_banner(name: str, status: str) -> str:
     """Return the compact model label shown in the chat header."""
     if name != "none" and status.startswith("model ") and "not set" not in status:
@@ -2641,6 +2701,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
         for name, value in extra_headers or ():
             self.send_header(name, value)
         self.end_headers()
@@ -2663,16 +2727,72 @@ class Handler(BaseHTTPRequestHandler):
     def _authenticated(self) -> bool:
         return self.app.session_valid(self._session_token())
 
+    def _host(self) -> str:
+        host = self.headers.get("Host", "")
+        port = self.server.server_port
+        allowed = {
+            f"127.0.0.1:{port}",
+            f"localhost:{port}",
+            f"[::1]:{port}",
+        }
+        if host not in allowed:
+            raise RequestError(400, "Host header must name the Beep loopback origin.")
+        return host
+
+    def _same_origin(self) -> None:
+        host = self._host()
+        origin = self.headers.get("Origin")
+        if origin is None:
+            if self.headers.get("Sec-Fetch-Site", "").lower() == "cross-site":
+                raise RequestError(
+                    403, "State-changing requests require the Beep same origin."
+                )
+            return
+        if origin != f"http://{host}":
+            raise RequestError(
+                403, "State-changing requests require the Beep same origin."
+            )
+
     def _read_json(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length") or 0)
+        content_type = (
+            self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        )
+        if content_type != "application/json":
+            raise RequestError(415, "Request Content-Type must be application/json.")
+        if self.headers.get("Transfer-Encoding"):
+            raise RequestError(400, "Chunked request bodies are not accepted.")
+        raw_length = self.headers.get("Content-Length", "")
+        if not re.fullmatch(r"[0-9]+", raw_length):
+            raise RequestError(400, "Request Content-Length is invalid.")
+        length = int(raw_length)
         if length <= 0:
-            return {}
-        raw = self.rfile.read(length).decode("utf-8", "replace")
+            raise RequestError(400, "Request body must not be empty.")
+        if length > MAX_REQUEST_BYTES:
+            raise RequestError(413, "Request body is too large.")
+        encoded = self.rfile.read(length)
+        if len(encoded) != length:
+            raise RequestError(400, "Request body was incomplete.")
         try:
-            data = json.loads(raw)
-        except json.JSONDecodeError:
-            return {}
-        return data if isinstance(data, dict) else {}
+            data = json.loads(
+                encoded.decode("utf-8"),
+                object_pairs_hook=_strict_json_object,
+                parse_constant=lambda value: (_ for _ in ()).throw(
+                    ValueError(f"invalid JSON number: {value}")
+                ),
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise RequestError(
+                400, "Request body must be one valid UTF-8 JSON object."
+            ) from exc
+        if not isinstance(data, dict):
+            raise RequestError(400, "Request body must be one JSON object.")
+        return data
+
+    @staticmethod
+    def _only_fields(data: dict[str, Any], allowed: set[str]) -> None:
+        unknown = sorted(set(data) - allowed)
+        if unknown:
+            raise RequestError(400, f"Unknown request field: {unknown[0]}")
 
     def _path_parts(self) -> list[str]:
         path = self.path.split("?", 1)[0]
@@ -2737,6 +2857,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _guard(self) -> bool:
         """Return True if the request may proceed; otherwise send 401."""
+        try:
+            self._host()
+        except RequestError as exc:
+            self._send_json({"error": str(exc)}, exc.status)
+            return False
         path = self.path.split("?", 1)[0]
         if path in self._PUBLIC_PATHS:
             return True
@@ -2755,6 +2880,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
             self.end_headers()
             self.wfile.write(body)
             return
@@ -2838,10 +2967,21 @@ class Handler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
+        try:
+            self._same_origin()
+            self._do_POST()
+        except RequestError as exc:
+            self._send_json({"error": str(exc)}, exc.status)
+
+    def _do_POST(self) -> None:
         parts = self._path_parts()
         if self.path == "/api/login":
             data = self._read_json()
-            result = self.app.login(str(data.get("password") or ""))
+            self._only_fields(data, {"password"})
+            password = data.get("password")
+            if not isinstance(password, str):
+                raise RequestError(400, "password must be a string")
+            result = self.app.login(password)
             if not result:
                 self._send_json({"error": "Incorrect password."}, 401)
                 return
@@ -2859,10 +2999,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         if not self._guard():
             return
+        life = lifecycle.status()
+        if life["dead"]:
+            self._send_json(
+                {
+                    "error": "The Beep is permanently disabled.",
+                    **life,
+                },
+                410,
+            )
+            return
         if self.path == "/api/ttl":
             data = self._read_json()
+            self._only_fields(data, {"die", "duration", "seconds", "days", "reset"})
+            for name in ("die", "reset"):
+                if name in data and not isinstance(data[name], bool):
+                    raise RequestError(400, f"{name} must be true or false")
             if data.get("die") is True:
                 self._send_json(self.app.ttl_die())
+                shutdown = getattr(self.server, "shutdown", None)
+                if callable(shutdown):
+                    threading.Thread(target=shutdown, daemon=True).start()
                 return
             try:
                 seconds = _ttl_seconds_from_payload(
@@ -2880,6 +3037,21 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/reactivation":
             data = self._read_json()
+            self._only_fields(
+                data,
+                {
+                    "reset",
+                    "cancel",
+                    "enabled",
+                    "minimum_seconds",
+                    "maximum_seconds",
+                    "minimum",
+                    "maximum",
+                },
+            )
+            for name in ("reset", "cancel"):
+                if name in data and not isinstance(data[name], bool):
+                    raise RequestError(400, f"{name} must be true or false")
             if data.get("reset") is True:
                 self._send_json(self.app.reset_reactivation())
                 return
@@ -2925,20 +3097,40 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/password":
             data = self._read_json()
-            password = str(data.get("password") or "")
+            self._only_fields(data, {"password"})
+            password = data.get("password")
+            if not isinstance(password, str):
+                raise RequestError(400, "password must be a string")
             self._send_json(self.app.set_password(password))
             return
         if self.path == "/api/message":
             data = self._read_json()
-            prompt = (data.get("prompt") or "").strip()
+            self._only_fields(data, {"prompt", "conversation_id", "stream"})
+            raw_prompt = data.get("prompt")
+            if not isinstance(raw_prompt, str):
+                raise RequestError(400, "prompt must be a string")
+            prompt = raw_prompt.strip()
             conv_id = data.get("conversation_id")
+            if "stream" in data and not isinstance(data["stream"], bool):
+                raise RequestError(400, "stream must be true or false")
             if not prompt:
                 self._send_json({"error": "empty prompt"}, 400)
                 return
-            try:
-                cid = int(conv_id) if conv_id else None
-            except (TypeError, ValueError):
+            if conv_id is None:
                 cid = None
+            elif isinstance(conv_id, bool):
+                raise RequestError(400, "conversation_id must be a positive integer")
+            else:
+                try:
+                    cid = int(conv_id)
+                except (TypeError, ValueError) as exc:
+                    raise RequestError(
+                        400, "conversation_id must be a positive integer"
+                    ) from exc
+                if cid <= 0 or str(cid) != str(conv_id):
+                    raise RequestError(
+                        400, "conversation_id must be a positive integer"
+                    )
             if data.get("stream") is True:
                 result = self.app.start_streaming_message(cid, prompt)
                 self._send_json(result, 410 if result.get("dead") else 200)
@@ -2948,20 +3140,29 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/approve":
             data = self._read_json()
+            self._only_fields(data, {"tool_call_id", "decision", "phrase"})
             # Accept the new ``tool_call_id`` field; reject the legacy
             # ``proposal_id`` so callers cannot accidentally drive the
             # removed code path.
             tcid = data.get("tool_call_id")
             decision = data.get("decision", "deny")
             phrase = data.get("phrase")
-            if not tcid:
+            if not isinstance(tcid, str) or not tcid:
                 self._send_json({"error": "missing tool_call_id"}, 400)
                 return
+            if decision not in {"approve", "deny"}:
+                raise RequestError(400, "decision must be approve or deny")
+            if phrase is not None and not isinstance(phrase, str):
+                raise RequestError(400, "phrase must be a string or null")
             self._send_json(self.app.approve(tcid, decision, phrase))
             return
         if self.path == "/api/model":
             data = self._read_json()
-            model = (data.get("model") or "").strip()
+            self._only_fields(data, {"model"})
+            raw_model = data.get("model")
+            if not isinstance(raw_model, str):
+                raise RequestError(400, "model must be a string")
+            model = raw_model.strip()
             if not model:
                 self._send_json({"error": "missing model"}, 400)
                 return
@@ -2969,7 +3170,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == "/api/local":
             data = self._read_json()
-            base_url = (data.get("url") or "").strip()
+            self._only_fields(data, {"url"})
+            raw_url = data.get("url")
+            if not isinstance(raw_url, str):
+                raise RequestError(400, "url must be a string")
+            base_url = raw_url.strip()
             if not base_url:
                 self._send_json({"error": "Local API URL is required."}, 400)
                 return
@@ -2984,7 +3189,11 @@ class Handler(BaseHTTPRequestHandler):
             data = self._read_json()
             action = parts[3]
             if action == "title":
-                title = str(data.get("title") or "")
+                self._only_fields(data, {"title"})
+                raw_title = data.get("title", "")
+                if not isinstance(raw_title, str):
+                    raise RequestError(400, "title must be a string")
+                title = raw_title
                 result = self.app.set_conversation_title(cid, title)
                 if result.get("error"):
                     status = (
@@ -2995,16 +3204,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(result, status)
                 return
             if action == "branch":
-                title = str(data.get("title") or "")
+                self._only_fields(data, {"title"})
+                raw_title = data.get("title", "")
+                if not isinstance(raw_title, str):
+                    raise RequestError(400, "title must be a string")
+                title = raw_title
                 result = self.app.branch_conversation(cid, title)
                 self._send_json(result, 404 if result.get("error") else 200)
                 return
             if action == "retry":
+                self._only_fields(data, set())
                 result = self.app.retry_conversation(cid)
                 self._send_json(result, 404 if result.get("error") else 200)
                 return
             if action == "undo":
+                self._only_fields(data, {"turns"})
                 raw_turns = data.get("turns", 1)
+                if isinstance(raw_turns, bool):
+                    self._send_json({"error": "turns must be an integer"}, 400)
+                    return
                 try:
                     turns = int(raw_turns)
                 except (TypeError, ValueError):
@@ -3014,6 +3232,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(result, 404 if result.get("error") else 200)
                 return
             if action == "compress":
+                self._only_fields(data, set())
                 result = self.app.compress_conversation(cid)
                 self._send_json(result, 404 if result.get("error") else 200)
                 return
@@ -3061,8 +3280,43 @@ def main(argv: list[str] | None = None) -> int:
         auth.validate_configuration()
     except RuntimeError as exc:
         raise SystemExit(f"Refusing to start: {exc}.") from exc
+    initial_lifecycle = lifecycle.status()
+    if initial_lifecycle["dead"]:
+        log_event(
+            "service_start_refused",
+            reason=initial_lifecycle["dead_reason"],
+        )
+        print("refusing to start: the Beep is permanently disabled", file=sys.stderr)
+        return 0
     app = App()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
+    lifecycle_stop = threading.Event()
+
+    def lifecycle_supervisor() -> None:
+        while not lifecycle_stop.is_set():
+            current = lifecycle.status()
+            if current["dead"]:
+                disabled = app._disable_for_death(
+                    str(current["dead_reason"] or "beep disabled")
+                )
+                log_event(
+                    "lifecycle_shutdown",
+                    reason=current["dead_reason"],
+                    **disabled,
+                )
+                server.shutdown()
+                return
+            wait_seconds = max(
+                0.1,
+                min(30.0, float(current["remaining_seconds"])),
+            )
+            lifecycle_stop.wait(wait_seconds)
+
+    threading.Thread(
+        target=lifecycle_supervisor,
+        name="lifecycle-supervisor",
+        daemon=True,
+    ).start()
     log_event("service_start", host=args.host, port=args.port,
               pid=os.getpid())
     print(f"beep chat listening on http://{args.host}:{args.port}/",
@@ -3072,6 +3326,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         pass
     finally:
+        lifecycle_stop.set()
         log_event("service_stop", pid=os.getpid())
         server.server_close()
         app.history.close()

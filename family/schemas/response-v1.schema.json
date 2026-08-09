@@ -201,6 +201,27 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "product_id": {
+            "const": "beep"
+          }
+        },
+        "required": [
+          "product_id"
+        ]
+      },
+      "else": {
+        "properties": {
+          "operation": {
+            "$ref": "#/$defs/shared_operation"
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "absolute_path": {
       "type": "string",
@@ -240,6 +261,23 @@
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
     "operation": {
+      "enum": [
+        "describe",
+        "status",
+        "install",
+        "verify",
+        "doctor",
+        "repair",
+        "backup",
+        "update",
+        "rollback",
+        "suspend",
+        "resume",
+        "kill",
+        "uninstall"
+      ]
+    },
+    "shared_operation": {
       "enum": [
         "describe",
         "status",

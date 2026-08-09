@@ -840,11 +840,7 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
                 "operation": {
                     "type": "string",
                     "enum": [
-                        "describe",
-                        "status",
                         "install",
-                        "verify",
-                        "doctor",
                         "repair",
                         "backup",
                         "update",

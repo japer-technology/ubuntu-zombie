@@ -164,6 +164,8 @@ def _save_raw(data: dict[str, Any]) -> None:
         # non-privileged local user cannot edit the expiry to keep the
         # beep alive past its TTL.
         os.chmod(tmp_name, 0o600)
+        if metadata is not None and os.geteuid() == 0:
+            os.chown(tmp_name, metadata.st_uid, metadata.st_gid)
         os.replace(tmp_name, path)
     finally:
         if tmp_name:
