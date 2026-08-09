@@ -153,7 +153,7 @@ manual search, and local reminders remain available.
 | Loopback UI and session service | `atlas` | Credentials, asset records, confirmations | Authenticated views and controls | No device or host authority |
 | Manual cataloguer | `atlas` | Supported manual files | Metadata, passages, digests | Read-only fixed root |
 | Retrieval and citation verifier | `atlas` | Asset query, index, current files | Verified source passages | Deterministic |
-| Model bridge | `atlas` | Minimized asset fields and selected passages | Untrusted proposed guidance | Exact loopback endpoint only |
+| Model bridge | `atlas` | Minimised asset fields and selected passages | Untrusted proposed guidance | Exact loopback endpoint only |
 | Schedule engine | `atlas` | Confirmed interval and event dates | Due dates and reminders | Deterministic; model cannot write |
 | Lifecycle manager | Root, direct or through Ubuntu Zombie | Verified request and release | Plan, result, marker, receipt | Atlas-owned resources only |
 
@@ -255,7 +255,7 @@ the manual library.
 | Direction | Endpoint | Data | Default | Control |
 | --------- | -------- | ---- | ------- | ------- |
 | Inbound | `127.0.0.1:2828` | Authenticated UI traffic | Open after healthy install | Password, scoped session, CSRF |
-| Outbound | Configured loopback OpenAI-compatible endpoint | Minimized asset fields and selected passages | Allowed | Exact URL and bounded payload |
+| Outbound | Configured loopback OpenAI-compatible endpoint | Minimised asset fields and selected passages | Allowed | Exact URL and bounded payload |
 | Outbound | Vendors, devices, internet, LAN, email, or messaging | None | Blocked | Network policy and absent clients |
 
 Dry-run makes no network request. The first release neither discovers devices

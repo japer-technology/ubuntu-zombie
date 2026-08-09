@@ -289,7 +289,7 @@ service cannot invoke either management plane.
 - Support Ubuntu Desktop 22.04 and 24.04 LTS on `amd64`.
 - Reject identity, path, port, command, unit, cookie, package, and ownership
   collisions before mutation.
-- Verify artifact, checksum, signature, provenance, SBOM, descriptor, and
+- Verify artefact, checksum, signature, provenance, SBOM, descriptor, and
   pinned source lesson set.
 - Validate owner, storage, sharing-root ownership, model configuration, and
   rollback readiness.

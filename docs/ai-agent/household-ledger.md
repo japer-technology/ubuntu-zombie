@@ -121,7 +121,7 @@ prompts, or owner confirmation cannot add a financial capability.
 | ------- | ---------- | ----------------------- | ------------- |
 | CSV import | Creates an attributable local transaction record | Read fixed import root | MVP |
 | Deterministic totals | Shows accurate sums by period and category | Decimal transaction fields | MVP |
-| Suggested categories | Reduces manual classification work | Minimized descriptions and local model | MVP |
+| Suggested categories | Reduces manual classification work | Minimised descriptions and local model | MVP |
 | Budget comparison | Compares owner-set plans with recorded spending | Ledger state only | MVP |
 | Portable report | Supports owner review outside the product | Ledger-owned export root | MVP |
 | Bank synchronisation | Automatic record collection | External credentials and network | Out of scope |
@@ -152,7 +152,7 @@ totals, corrections, and export available without AI suggestions.
 | Loopback UI and session service | `ledger` | Credentials, budgets, corrections | Authenticated views and controls | No financial execution authority |
 | Import validator | `ledger` | Supported CSV files | Canonical rows and provenance | Read-only fixed root |
 | Calculation engine | `ledger` | Decimal canonical rows | Reproducible totals | Deterministic; model-independent |
-| Model bridge | `ledger` | Minimized descriptions and summaries | Untrusted category suggestions | Exact loopback endpoint only |
+| Model bridge | `ledger` | Minimised descriptions and summaries | Untrusted category suggestions | Exact loopback endpoint only |
 | Report exporter | `ledger` | Confirmed ledger state | JSON and CSV reports | Ledger export root only |
 | Lifecycle manager | Root, direct or through Ubuntu Zombie | Verified request and release | Plan, result, marker, receipt | Ledger-owned resources only |
 
@@ -216,7 +216,7 @@ credentials and reset flows are rejected.
 | --------------- | ---------------- | -------- | ----------- | ------ |
 | Import CSV | Restricted | Authenticated owner | `import.accepted` | Fixed root, schema, size, and digest |
 | Compute totals | Allowed | None after valid import | `calculation.completed` | Deterministic decimal operations |
-| Suggest category | Restricted | Owner confirms use | `category.suggested` | Minimized row fields, loopback model |
+| Suggest category | Restricted | Owner confirms use | `category.suggested` | Minimised row fields, loopback model |
 | Edit budget/category | Restricted | Owner | `ledger.changed` | Ledger state only |
 | Export report | Restricted | Owner | `report.exported` | Protected export root |
 | Delete state | Restricted | Owner confirmation | `state.deleted` | Ledger-owned data only |
@@ -254,7 +254,7 @@ Complete uninstall never deletes the import root contents.
 | Direction | Endpoint | Data | Default | Control |
 | --------- | -------- | ---- | ------- | ------- |
 | Inbound | `127.0.0.1:3890` | Authenticated UI traffic | Open after healthy install | Password, scoped session, CSRF |
-| Outbound | Configured loopback OpenAI-compatible endpoint | Minimized descriptions and aggregate context | Allowed | Exact loopback URL and payload bounds |
+| Outbound | Configured loopback OpenAI-compatible endpoint | Minimised descriptions and aggregate context | Allowed | Exact loopback URL and payload bounds |
 | Outbound | Banks, payment services, internet, or LAN | None | Blocked | Service network policy and absent clients |
 
 The first release requires a credential-free loopback model. It performs no
