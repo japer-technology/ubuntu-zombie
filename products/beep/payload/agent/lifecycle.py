@@ -31,7 +31,10 @@ the current expiry (or from now, whichever is later), so issuing
 from __future__ import annotations
 
 import json
+import math
 import os
+import stat
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -76,26 +79,98 @@ def _state_path() -> Path:
 
 
 def _load_raw() -> dict[str, Any]:
+    path = _state_path()
     try:
-        data = json.loads(_state_path().read_text(encoding="utf-8"))
+        metadata = path.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            return {}
+        data = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"invalid JSON number: {value}")
+            ),
+        )
     except (OSError, ValueError):
         return {}
     return data if isinstance(data, dict) else {}
 
 
+def _state_present() -> bool:
+    try:
+        _state_path().lstat()
+    except OSError:
+        return False
+    return True
+
+
+def _timestamp(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def _valid_state(data: dict[str, Any]) -> bool:
+    if set(data) != {
+        "created_at",
+        "expires_at",
+        "dead",
+        "dead_reason",
+        "dead_at",
+    }:
+        return False
+    if not _timestamp(data["created_at"]) or not _timestamp(data["expires_at"]):
+        return False
+    if float(data["expires_at"]) < float(data["created_at"]):
+        return False
+    if not isinstance(data["dead"], bool):
+        return False
+    if data["dead"]:
+        return (
+            isinstance(data["dead_reason"], str)
+            and bool(data["dead_reason"])
+            and _timestamp(data["dead_at"])
+            and float(data["dead_at"]) >= float(data["created_at"])
+        )
+    return data["dead_reason"] is None and data["dead_at"] is None
+
+
 def _save_raw(data: dict[str, Any]) -> None:
     path = _state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
-    # The lifecycle file is not a secret, but keep it owner-only so a
-    # non-privileged local user cannot edit the expiry to keep the
-    # beep alive past its TTL.
     try:
-        os.chmod(path, 0o600)
-    except OSError:  # pragma: no cover - best effort on odd filesystems
-        pass
+        metadata = path.lstat()
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None and not stat.S_ISREG(metadata.st_mode):
+        raise RuntimeError(f"unsafe lifecycle state path: {path}")
+
+    tmp_name = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as handle:
+            tmp_name = handle.name
+            json.dump(data, handle, indent=2, allow_nan=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        # The lifecycle file is not a secret, but keep it owner-only so a
+        # non-privileged local user cannot edit the expiry to keep the
+        # beep alive past its TTL.
+        os.chmod(tmp_name, 0o600)
+        os.replace(tmp_name, path)
+    finally:
+        if tmp_name:
+            try:
+                os.unlink(tmp_name)
+            except FileNotFoundError:
+                pass
 
 
 def format_remaining(seconds: float) -> str:
@@ -105,6 +180,8 @@ def format_remaining(seconds: float) -> str:
     zero) so the countdown reads consistently, and each unit is
     singularised when its value is exactly one.
     """
+    if not math.isfinite(seconds):
+        raise ValueError("duration must be finite")
     total = int(max(0, seconds))
     days, rem = divmod(total, DAY_SECONDS)
     hours, rem = divmod(rem, 3_600)
@@ -139,7 +216,7 @@ def parse_duration(text: str, *, default_seconds: float | None = None) -> float:
             days = float(tokens[0])
         except ValueError as exc:
             raise ValueError("duration must be '<number> <unit>' pairs") from exc
-        if days <= 0:
+        if not math.isfinite(days) or days <= 0:
             raise ValueError("duration must be greater than zero")
         return days * DAY_SECONDS
     if len(tokens) % 2:
@@ -160,8 +237,10 @@ def parse_duration(text: str, *, default_seconds: float | None = None) -> float:
             seconds = _DURATION_UNITS.get(raw_unit)
         if seconds is None:
             raise ValueError(f"bad duration unit: {raw_unit}")
+        if not math.isfinite(amount):
+            raise ValueError("duration amount must be finite")
         total += amount * seconds
-    if total <= 0:
+    if not math.isfinite(total) or total <= 0:
         raise ValueError("duration must be greater than zero")
     return total
 
@@ -169,6 +248,19 @@ def parse_duration(text: str, *, default_seconds: float | None = None) -> float:
 def _mark_dead(reason: str, data: dict[str, Any] | None = None) -> dict[str, Any]:
     if data is None:
         data = _load_raw()
+    if not isinstance(reason, str) or not reason:
+        raise ValueError("death reason is required")
+    if not _valid_state(data):
+        now = _now()
+        data = {
+            "created_at": now,
+            "expires_at": now,
+            "dead": True,
+            "dead_reason": reason,
+            "dead_at": now,
+        }
+        _save_raw(data)
+        return data
     if not data.get("dead"):
         data["dead"] = True
         data["dead_reason"] = reason
@@ -185,11 +277,23 @@ def status() -> dict[str, Any]:
     *before* returning so the ``dead`` decision is durable.
     """
     data = _load_raw()
+    if not _valid_state(data):
+        return {
+            "alive": False,
+            "dead": True,
+            "dead_reason": "invalid_state" if _state_present() else "state_missing",
+            "dead_at": None,
+            "configured": False,
+            "created_at": None,
+            "expires_at": None,
+            "remaining_seconds": 0,
+            "remaining_human": "0 seconds",
+        }
     dead = bool(data.get("dead"))
     expires_at = data.get("expires_at")
     created_at = data.get("created_at")
     reason = data.get("dead_reason")
-    configured = dead or isinstance(expires_at, (int, float))
+    configured = True
     now = _now()
 
     if not dead and isinstance(expires_at, (int, float)) and now >= expires_at:
@@ -227,7 +331,7 @@ def set_ttl(days: float) -> dict[str, Any]:
 
 def set_ttl_seconds(seconds: float) -> dict[str, Any]:
     """Extend the Time to Live by ``seconds`` and return the new status."""
-    if seconds <= 0:
+    if not math.isfinite(seconds) or seconds <= 0:
         raise ValueError("duration must be greater than zero")
     current = status()
     if current["dead"]:
@@ -246,7 +350,7 @@ def set_ttl_seconds(seconds: float) -> dict[str, Any]:
 
 def reset_ttl_seconds(seconds: float = DEFAULT_TTL_SECONDS) -> dict[str, Any]:
     """Reset the Time to Live to ``seconds`` from now."""
-    if seconds <= 0:
+    if not math.isfinite(seconds) or seconds <= 0:
         raise ValueError("duration must be greater than zero")
     current = status()
     if current["dead"]:
@@ -272,7 +376,7 @@ def initialize(days: float) -> dict[str, Any]:
     Called by the installer only when no valid lifecycle state exists.
     This is the only path that clears a tombstone.
     """
-    if days <= 0:
+    if not math.isfinite(days) or days <= 0:
         raise ValueError("days must be greater than zero")
     now = _now()
     _save_raw(
