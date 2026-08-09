@@ -174,15 +174,64 @@
           "rollback",
           "suspend",
           "resume",
+          "kill",
           "uninstall"
         ]
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "product_id": {
+            "const": "beep"
+          }
+        },
+        "required": [
+          "product_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "operations": {
+            "contains": {
+              "const": "kill"
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "operations": {
+            "items": {
+              "$ref": "#/$defs/shared_operation"
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "absolute_path": {
       "type": "string",
       "pattern": "^/(?!.*(?:^|/)\\.\\.(?:/|$))[^\\u0000\\r\\n]*$"
+    },
+    "shared_operation": {
+      "enum": [
+        "describe",
+        "status",
+        "install",
+        "verify",
+        "doctor",
+        "repair",
+        "backup",
+        "update",
+        "rollback",
+        "suspend",
+        "resume",
+        "uninstall"
+      ]
     }
   }
 }

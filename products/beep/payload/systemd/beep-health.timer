@@ -1,5 +1,7 @@
 [Unit]
 Description=Run Beep health check every 15 minutes
+BindsTo=beep-chat.service
+After=beep-chat.service
 
 [Timer]
 OnBootSec=5min

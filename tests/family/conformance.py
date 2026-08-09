@@ -22,6 +22,7 @@ OPERATIONS = (
     "resume",
     "uninstall",
 )
+BEEP_OPERATIONS = (*OPERATIONS[:-1], "kill", OPERATIONS[-1])
 PRODUCTS = ("imaginary-friend", "curriculum-flame", "eric", "llama", "beep")
 VERSION_PATTERN = re.compile(r"^\d{4}(?:\.\d{2}){5}$")
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -140,7 +141,8 @@ def validate_product(value: dict[str, Any]) -> None:
         or not value["authority_summary"].strip()
     ):
         raise ContractError("authority_summary must be non-empty")
-    if value["operations"] != list(OPERATIONS):
+    expected_operations = BEEP_OPERATIONS if product_id == "beep" else OPERATIONS
+    if value["operations"] != list(expected_operations):
         raise ContractError("operations must use the complete stable order")
     if not isinstance(value["accounts"], list) or not value["accounts"]:
         raise ContractError("accounts must be a non-empty array")
@@ -196,7 +198,8 @@ def validate_request(
         )
     if value["schema_version"] != 1 or value["product_id"] != product_id:
         raise ContractError("request identity mismatch")
-    if value["operation"] != operation or operation not in OPERATIONS:
+    expected_operations = BEEP_OPERATIONS if product_id == "beep" else OPERATIONS
+    if value["operation"] != operation or operation not in expected_operations:
         raise ContractError("request operation mismatch")
     _uuid(value["correlation_id"], label="correlation_id")
     if value["requested_by"] not in {"operator", "ubuntu-zombie", "beep"}:
@@ -248,7 +251,10 @@ def validate_response(value: dict[str, Any]) -> None:
         raise ContractError("invalid product_version")
     _uuid(value["instance_id"], label="instance_id", nullable=True)
     _uuid(value["correlation_id"], label="correlation_id")
-    if value["operation"] not in OPERATIONS:
+    expected_operations = (
+        BEEP_OPERATIONS if value["product_id"] == "beep" else OPERATIONS
+    )
+    if value["operation"] not in expected_operations:
         raise ContractError("invalid response operation")
     if value["phase"] not in {"read", "plan", "execute"}:
         raise ContractError("invalid response phase")

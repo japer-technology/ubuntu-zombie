@@ -227,10 +227,10 @@ def _max_class(names: Iterable[str]) -> str:
     best = -1
     best_name = "read_only"
     for name in names:
-        rank = _CLASS_RANK.get(name, -1)
+        rank = _CLASS_RANK.get(name, _CLASS_RANK["destructive"])
         if rank > best:
             best = rank
-            best_name = name
+            best_name = name if name in _CLASS_RANK else "destructive"
     return best_name
 
 
@@ -379,6 +379,10 @@ def _parse_value(raw: str) -> Any:
         return False
     if low in {"null", "~", ""}:
         return None
+    if raw == "{}":
+        return {}
+    if raw == "[]":
+        return []
     try:
         return int(raw)
     except ValueError:
@@ -590,6 +594,112 @@ def _extract_sudo_allow_list_from_text(text: str) -> tuple[str, ...]:
 _cache: tuple[tuple[str, int, int], Policy] | None = None
 
 
+def _policy_source_valid(text: str, data: dict[str, Any]) -> bool:
+    if set(data) - {
+        "settings",
+        "sudo_allow_list",
+        "classes",
+        "rules",
+        "tool_classes",
+        "agent",
+    }:
+        return False
+    settings = data.get("settings", {})
+    if not isinstance(settings, dict) or set(settings) - {
+        "destructive_confirmation",
+        "default_class",
+    }:
+        return False
+    confirmation = settings.get(
+        "destructive_confirmation", "yes, I understand this is destructive"
+    )
+    default_class = settings.get("default_class", "destructive")
+    if (
+        not isinstance(confirmation, str)
+        or not confirmation.strip()
+        or len(confirmation) > 256
+        or default_class not in CLASS_ORDER
+    ):
+        return False
+
+    classes = data.get("classes", {})
+    if not isinstance(classes, dict) or set(classes) - set(CLASS_ORDER):
+        return False
+    for spec in classes.values():
+        if (
+            not isinstance(spec, dict)
+            or set(spec) - {"approval", "confirm_phrase", "description"}
+            or spec.get("approval", "required") not in {"auto", "required"}
+            or not isinstance(spec.get("confirm_phrase", False), bool)
+            or not isinstance(spec.get("description", ""), str)
+        ):
+            return False
+
+    rules = _extract_rules_from_text(text)
+    in_rules = False
+    pattern_count = 0
+    class_count = 0
+    for raw_line in text.splitlines():
+        stripped = raw_line.split("#", 1)[0].rstrip()
+        if not stripped.strip():
+            continue
+        if stripped.lstrip() == "rules:":
+            in_rules = True
+            continue
+        if (
+            in_rules
+            and not stripped.startswith(" ")
+            and stripped.endswith(":")
+        ):
+            break
+        if in_rules:
+            line = stripped.strip()
+            pattern_count += int(line.startswith("- pattern:"))
+            class_count += int(line.startswith("class:"))
+    if (
+        pattern_count != class_count
+        or len(rules) != pattern_count
+        or any(rule.class_name not in CLASS_ORDER for rule in rules)
+    ):
+        return False
+
+    tool_classes = data.get("tool_classes", {})
+    if not isinstance(tool_classes, dict) or any(
+        not isinstance(name, str)
+        or not isinstance(class_name, str)
+        or class_name not in CLASS_ORDER
+        for name, class_name in tool_classes.items()
+    ):
+        return False
+    agent = data.get("agent", {})
+    if not isinstance(agent, dict) or set(agent) - {
+        "max_tool_calls_per_turn",
+        "max_elevated_calls_per_turn",
+        "max_turn_seconds",
+    }:
+        return False
+    for name, value in agent.items():
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < (0 if name == "max_turn_seconds" else 1)
+        ):
+            return False
+    return True
+
+
+def validate_policy(path: Path = POLICY_PATH) -> bool:
+    """Return whether an existing policy is syntactically and semantically valid."""
+    try:
+        if not path.is_file() or path.is_symlink():
+            return False
+        text = path.read_text(encoding="utf-8")
+        data = _load_yaml(text)
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return _policy_source_valid(text, data)
+
+
 def load_policy(path: Path = POLICY_PATH) -> Policy:
     global _cache
     try:
@@ -605,11 +715,17 @@ def load_policy(path: Path = POLICY_PATH) -> Policy:
     key = (str(path), st.st_mtime_ns, st.st_size)
     if _cache is not None and _cache[0] == key:
         return _cache[1]
-    text = path.read_text(encoding="utf-8")
     try:
+        text = path.read_text(encoding="utf-8")
         data = _load_yaml(text)
-    except Exception:
-        data = {}
+    except (OSError, UnicodeError, ValueError):
+        policy = _default_policy()
+        _cache = (key, policy)
+        return policy
+    if not _policy_source_valid(text, data):
+        policy = _default_policy()
+        _cache = (key, policy)
+        return policy
 
     settings = data.get("settings", {}) if isinstance(data, dict) else {}
     classes_raw = data.get("classes", {}) if isinstance(data, dict) else {}

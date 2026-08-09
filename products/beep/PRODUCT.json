@@ -50,6 +50,7 @@
     "rollback",
     "suspend",
     "resume",
+    "kill",
     "uninstall"
   ]
 }

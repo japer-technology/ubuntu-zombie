@@ -25,19 +25,21 @@ fully root-capable.
 | ------- | ------------------------- | ------- | ----------------- | ---------------- | ------------ |
 | [Ubuntu Zombie](ubuntu-zombie.md) | Core implemented; family manager implementation-ready | AI Systems Administrator and family manager | Root through its policy and approval boundary | `zombie` | `7878` |
 | [Imaginary Friend](imaginary-friend.md) | Standalone source and release implemented; production family admission gated | Private conversational companion and workspace | Its own files and nominated workspace only | `friend` | `6767` |
+| [Beep](beep.md) | Standalone source, tests, package, and release workflow implemented; production family admission gated | Independent Ubuntu Zombie functional duplicate | Root through Beep policy and approval | `beep` | `58989` |
 | [Curriculum Flame](curriculum-flame.md) | Implementation-ready first-release specification | Curriculum-gated local AI for children | Its own state; learner workspaces are later | `flame-*` services | `5656`, `5657` |
 | [ERIC](eric.md) | Living-apprenticeship implementation-ready; later stages gated | Evolving record of identity and cognition | Its own evidence and model; Executor absent in first release | `eric-*` services | `4545`, `4546` |
 
 “Implemented” means this repository currently ships and tests the named
 scope. “Implementation-ready” means the source root, first scope, interfaces,
 defaults, and acceptance gates are fixed; it does not claim that software
-exists or is safe to deploy. Imaginary Friend now has standalone source,
-tests, lifecycle, documentation, and an independent release, but remains
-absent from the production family catalogue while manager, recorded
-disposable-VM, co-installation, and final release-verification gates remain
-open. Curriculum Flame and ERIC are to be implemented at the roots reserved
-by [`implementation.md`](implementation.md). No external repository needs to
-be created or consulted.
+exists or is safe to deploy. Imaginary Friend and Beep now have standalone
+source, tests, lifecycle, documentation, packaging, and independent release
+machinery, but remain absent from the production family catalogue while their
+recorded disposable-VM, co-installation, security-review, and final
+release-verification gates remain open. Curriculum Flame and ERIC are to be
+implemented at the roots reserved by
+[`implementation.md`](implementation.md). No external repository needs to be
+created or consulted.
 
 ### Product-definition proposals
 
@@ -50,7 +52,6 @@ evidence, or a release exists.
 | Proposal | Purpose | Maximum authority | Default identity | Default port |
 | -------- | ------- | ----------------- | ---------------- | ------------ |
 | [Archive Lantern](archive-lantern.md) | Cited answers from a private text library | Read one fixed library; write derived state | `lantern` | `3434` |
-| [Beep](beep.md) | Independent Ubuntu Zombie functional duplicate | Root through Beep policy and approval | `beep` | `58989` |
 | [Code Orchard](code-orchard.md) | Evidence-bound local code review and patch proposals | Read one source root; write unapplied reports and patches | `orchard` | `3567` |
 | [Household Ledger](household-ledger.md) | Offline household transaction analysis | Read one CSV import root; write Ledger state | `ledger` | `3890` |
 | [Maintenance Atlas](maintenance-atlas.md) | Cited household asset maintenance planning | Read one manual library; write Atlas records | `atlas` | `2828` |

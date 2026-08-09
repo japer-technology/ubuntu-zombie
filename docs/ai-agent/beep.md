@@ -21,7 +21,7 @@ imports or operates from Ubuntu Zombie's live runtime or data.
 
 | Field | Definition |
 | ----- | ---------- |
-| Status | Product definition; implementation, security evidence, and release remain open |
+| Status | Standalone implementation, tests, package, and release workflow present; external security, VM, co-installation, published-release, and family-admission evidence remain open |
 | Product ID | `beep` |
 | Human need | Operate and repair a complex personal Ubuntu machine without requiring the owner to translate every problem into administration commands |
 | Intended users | The owner/operator and authorised local users of one machine |
@@ -73,10 +73,12 @@ of Beep is equivalent to compromise of the host.
 
 ## Status and evidence
 
-This document fixes Beep's intended parity and independent boundary. No Beep
-source, installer, artifact, catalogue entry, disposable-VM result, or release
-currently exists. Every safeguard below is a requirement until linked
-implementation and test evidence exists.
+This document fixes Beep's intended parity and independent boundary.
+Standalone source, lifecycle, runtime, package, product documentation, source
+tests, guarded VM harness, and independent release workflow now live below
+[`products/beep/`](../../products/beep/). The production catalogue remains
+empty, and no supported-VM, co-installation, external security review, or
+published-release verification result is claimed here.
 
 | Gate | State | Evidence or owner |
 | ---- | ----- | ----------------- |
@@ -84,9 +86,9 @@ implementation and test evidence exists.
 | First implementation slice fixed | Passed | Full-parity scope and contracts in this document |
 | Configuration and data contracts fixed | Passed | Namespace, input, data, and lifecycle sections below |
 | Threat model reviewed | Open | Repository security reviewers |
-| Installer lifecycle complete | Open | Future `products/beep/` implementation |
-| Security boundary tested | Open | Future policy, negative, and disposable-VM suites |
-| Update and rollback tested | Open | Future lifecycle evidence |
+| Installer lifecycle complete | Implemented; host evidence open | `products/beep/payload/agent/beep/management.py`, source suites, guarded VM harness |
+| Security boundary tested | Source suite passed; review and host evidence open | `products/beep/tests/`, product threat model |
+| Update and rollback tested | Source failure coverage passed; VM matrix open | Automatic recovery tests and guarded lifecycle harness |
 | Standalone VM validation | Open | Ubuntu 22.04 and 24.04 LTS evidence |
 | Co-installation validation | Open | Root-peer and full-family matrix evidence |
 | Release verification complete | Open | Independent Beep release evidence |
@@ -713,8 +715,8 @@ idempotent reinstall.
 
 | Decision/risk | Why it matters | Owner | Required before |
 | ------------- | -------------- | ----- | --------------- |
-| Family contract admission | Current schemas and catalogue do not admit `beep` | Repository maintainers | First implementation change |
-| Full-parity fixture | A fixed machine-readable feature set is needed to prevent an incomplete copy from claiming parity | Beep maintainers | First runtime change |
+| Family contract admission | Shared schemas admit Beep's terminal `kill` extension, but the production catalogue and Ubuntu Zombie manager admission remain open | Repository maintainers | Production admission |
+| Full-parity fixture | The product-owned fixture must evolve with every promised feature | Beep maintainers | Every release |
 | Root-peer security review | Two root-capable model-driven products increase host exposure and cannot isolate each other | Security reviewers | Implementation approval |
 | Optional-software ownership | Singleton services and ports cannot be claimed by both Ubuntu Zombie and Beep | Product architects | First optional-software change |
 | Independent release and migration policy | A duplicate must not silently track or execute unverified Ubuntu Zombie changes | Release owner | Release candidate |
@@ -726,22 +728,23 @@ evidence risks must not weaken them.
 
 ## Product-owned documentation
 
-These documents will live below `products/beep/`; no external repository is
-required.
+These documents live below `products/beep/`; no external repository is
+required. Open external evidence is labelled in the testing and release
+documents.
 
-- [ ] README and product vision with an exact parity statement.
-- [ ] Architecture, data-flow, and root-peer diagrams.
-- [ ] Threat model, security policy, incident response, and disclosure process.
-- [ ] Privacy, provider disclosure, retention, export, and deletion model.
-- [ ] Policy classes, tools, approval, audit, TTL, and reactivation reference.
-- [ ] Family catalogue, target lifecycle, inventory, and correlation contracts.
-- [ ] Configuration and credential rotation.
-- [ ] Installation, verification, diagnostics, repair, suspension, and removal.
-- [ ] Updating, migration, rollback, backup, and recovery.
-- [ ] Parity, negative, red-team, and co-installation test strategy and evidence.
-- [ ] Release process, changelog, version, checksums, signatures, provenance,
+- [x] README and product vision with an exact parity statement.
+- [x] Architecture, data-flow, and root-peer diagrams.
+- [x] Threat model, security policy, incident response, and disclosure process.
+- [x] Privacy, provider disclosure, retention, export, and deletion model.
+- [x] Policy classes, tools, approval, audit, TTL, and reactivation reference.
+- [x] Family catalogue, target lifecycle, inventory, and correlation contracts.
+- [x] Configuration and credential rotation.
+- [x] Installation, verification, diagnostics, repair, suspension, and removal.
+- [x] Updating, migration, rollback, backup, and recovery.
+- [x] Parity, negative, red-team, and co-installation test strategy and evidence.
+- [x] Release process, changelog, version, checksums, signatures, provenance,
       SBOM, and pinned-source record.
-- [ ] Platform support and troubleshooting.
+- [x] Platform support and troubleshooting.
 
 ## Release gate
 

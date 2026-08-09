@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from conformance import (
+    BEEP_OPERATIONS,
     ContractError,
     OPERATIONS,
     load_json_strict,
@@ -79,7 +80,7 @@ class FamilyContractTests(unittest.TestCase):
         descriptor = load_json_strict(BEEP_PRODUCT / "PRODUCT.json")
         validate_product(descriptor)
         self.assertEqual(descriptor["product_id"], "beep")
-        self.assertEqual(descriptor["operations"], list(OPERATIONS))
+        self.assertEqual(descriptor["operations"], list(BEEP_OPERATIONS))
         self.assertEqual(descriptor["cookie_names"], ["beep_session"])
         self.assertEqual(descriptor["ports"][0]["port"], 58989)
 

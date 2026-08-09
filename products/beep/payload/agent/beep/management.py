@@ -17,6 +17,7 @@ import secrets
 import shlex
 import shutil
 import socket
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -34,7 +35,9 @@ from typing import Any, Iterator
 
 import auth as runtime_auth
 import family as runtime_family
+import history as runtime_history
 import lifecycle as runtime_lifecycle
+import policy as runtime_policy
 
 
 PRODUCT_ID = "beep"
@@ -50,6 +53,7 @@ OPERATIONS = (
     "rollback",
     "suspend",
     "resume",
+    "kill",
     "uninstall",
 )
 MUTATING = {
@@ -60,6 +64,7 @@ MUTATING = {
     "rollback",
     "suspend",
     "resume",
+    "kill",
     "uninstall",
 }
 READ_ONLY = {"describe", "status", "verify", "doctor"}
@@ -86,6 +91,7 @@ OPERATION_INPUTS = {
     "rollback": set(),
     "suspend": set(),
     "resume": set(),
+    "kill": set(),
     "uninstall": set(),
 }
 KNOWN_ENV = {
@@ -410,9 +416,13 @@ def atomic_write(
     gid: int = 0,
 ) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
-    if path.is_symlink():
-        raise ManagementError(73, "UNSAFE_PATH", f"Refusing symlink: {path}")
-    previous = path.read_bytes() if path.is_file() else None
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None and not stat.S_ISREG(metadata.st_mode):
+        raise ManagementError(73, "UNSAFE_PATH", f"Refusing unsafe path: {path}")
+    previous = path.read_bytes() if metadata is not None else None
     if previous == content:
         os.chmod(path, mode)
         if os.geteuid() == 0:
@@ -506,17 +516,16 @@ class Manager:
             raise ManagementError(
                 66, "SOURCE_INCOMPLETE", "The Beep source payload is incomplete."
             )
+        unsafe = next(
+            (path for path in self.source_root.rglob("*") if path.is_symlink()),
+            None,
+        )
+        if unsafe is not None:
+            raise ManagementError(
+                78, "UNSAFE_SOURCE", f"The Beep source contains a symlink: {unsafe}"
+            )
 
     def _validate_environment(self) -> None:
-        unknown = sorted(
-            key for key in os.environ if key.startswith("BEEP_") and key not in KNOWN_ENV
-        )
-        if unknown:
-            raise ManagementError(
-                65,
-                "UNKNOWN_ENVIRONMENT",
-                f"Unknown Beep environment variable(s): {', '.join(unknown)}",
-            )
         prohibited = {
             "BEEP_ADMIN_PASSWORD",
             "BEEP_PROVIDER_CREDENTIAL",
@@ -527,6 +536,15 @@ class Manager:
                 65,
                 "RAW_SECRET_REJECTED",
                 "Raw secret environment variables are prohibited; use a protected file.",
+            )
+        unknown = sorted(
+            key for key in os.environ if key.startswith("BEEP_") and key not in KNOWN_ENV
+        )
+        if unknown:
+            raise ManagementError(
+                65,
+                "UNKNOWN_ENVIRONMENT",
+                f"Unknown Beep environment variable(s): {', '.join(unknown)}",
             )
 
     def _existing_config(self) -> dict[str, Any]:
@@ -893,6 +911,7 @@ class Manager:
             "rollback": "Restore the most recent verified Beep recovery snapshot.",
             "suspend": "Stop Beep services, cancel useful operation, and revoke sessions.",
             "resume": "Revalidate Beep and resume only its services.",
+            "kill": "Write the permanent death tombstone and stop all Beep services.",
             "uninstall": "Remove only resources proven to be owned by Beep.",
         }
         return [
@@ -1047,6 +1066,7 @@ class Manager:
             marker = None
             marker_error = True
         installed = marker is not None
+        lifecycle_status = self._lifecycle_status()
         checks = [
             self.check(
                 "marker",
@@ -1066,16 +1086,14 @@ class Manager:
             ),
             self.check(
                 "runtime",
-                installed
-                and (self.paths.install_root / "agent" / "server.py").is_file()
-                and (self.paths.runtime / "lifecycle.json").is_file(),
-                "Beep runtime and lifecycle state are present.",
+                installed and self._runtime_valid(lifecycle_status),
+                "Beep runtime, dependencies, and lifecycle state are valid.",
                 "Run beep-manage repair.",
             ),
             self.check(
                 "policy",
-                installed and self.paths.policy.is_file() and not self.paths.policy.is_symlink(),
-                "Beep policy is present.",
+                installed and self._policy_valid(),
+                "Beep policy is valid and independently protected.",
                 "Restore or repair /etc/beep/policy.yaml.",
             ),
             self.check(
@@ -1106,12 +1124,22 @@ class Manager:
             ),
         ]
         if installed and shutil.which("systemctl"):
-            suspended = self.paths.suspended.exists()
-            active = self._service_active("beep-chat.service")
+            suspended = self.paths.suspended.exists() or lifecycle_status["dead"]
+            chat_active = self._service_active("beep-chat.service")
+            health_active = self._service_active("beep-health.timer")
             checks.append(
                 self.check(
                     "service_state",
-                    (suspended and not active) or (not suspended and active),
+                    (
+                        suspended
+                        and not chat_active
+                        and not health_active
+                    )
+                    or (
+                        not suspended
+                        and chat_active
+                        and health_active
+                    ),
                     "Beep service state matches lifecycle state.",
                     "Run beep-manage resume or beep-manage suspend as intended.",
                 )
@@ -1132,6 +1160,114 @@ class Manager:
             )
         )
         return checks
+
+    def _runtime_valid(self, lifecycle_status: dict[str, Any]) -> bool:
+        lifecycle_path = self.paths.runtime / "lifecycle.json"
+        try:
+            account = pwd.getpwnam(DEFAULT_USER)
+            metadata = lifecycle_path.lstat()
+            version_path = self.paths.install_root / "VERSION"
+            version_valid = (
+                version_path.is_file()
+                and not version_path.is_symlink()
+                and version_path.read_text(encoding="utf-8").strip() == self.version
+            )
+        except (KeyError, OSError, UnicodeError):
+            return False
+        return (
+            lifecycle_status["configured"]
+            and stat.S_ISREG(metadata.st_mode)
+            and metadata.st_uid == account.pw_uid
+            and metadata.st_gid == account.pw_gid
+            and stat.S_IMODE(metadata.st_mode) == 0o600
+            and self._tree_matches(
+                self.source_root / "payload" / "agent",
+                self.paths.install_root / "agent",
+            )
+            and self._tree_matches(
+                self.source_root / "payload" / "bin",
+                self.paths.install_root / "bin",
+                executable=True,
+            )
+            and version_valid
+            and self._node_runtime_supported()
+        )
+
+    @staticmethod
+    def _tree_matches(
+        source: Path,
+        destination: Path,
+        *,
+        executable: bool = False,
+    ) -> bool:
+        if (
+            not source.is_dir()
+            or source.is_symlink()
+            or not destination.is_dir()
+            or destination.is_symlink()
+        ):
+            return False
+        try:
+            root_metadata = destination.stat(follow_symlinks=False)
+            if (
+                root_metadata.st_uid != 0
+                or root_metadata.st_gid != 0
+                or stat.S_IMODE(root_metadata.st_mode) != 0o755
+            ):
+                return False
+            expected: set[Path] = set()
+            for item in source.rglob("*"):
+                if "__pycache__" in item.parts or item.suffix == ".pyc":
+                    continue
+                relative = item.relative_to(source)
+                expected.add(relative)
+                target = destination / relative
+                if item.is_symlink() or target.is_symlink():
+                    return False
+                metadata = target.stat(follow_symlinks=False)
+                if metadata.st_uid != 0 or metadata.st_gid != 0:
+                    return False
+                if item.is_dir():
+                    if (
+                        not target.is_dir()
+                        or stat.S_IMODE(metadata.st_mode) != 0o755
+                    ):
+                        return False
+                elif item.is_file():
+                    mode = (
+                        0o755
+                        if executable or os.access(item, os.X_OK)
+                        else 0o644
+                    )
+                    if (
+                        not target.is_file()
+                        or stat.S_IMODE(metadata.st_mode) != mode
+                        or target.read_bytes() != item.read_bytes()
+                    ):
+                        return False
+                else:
+                    return False
+            actual = {
+                item.relative_to(destination)
+                for item in destination.rglob("*")
+                if "__pycache__" not in item.parts and item.suffix != ".pyc"
+            }
+            return actual == expected
+        except (OSError, UnicodeError):
+            return False
+
+    def _policy_valid(self) -> bool:
+        try:
+            metadata = self.paths.policy.lstat()
+        except OSError:
+            return False
+        return (
+            stat.S_ISREG(metadata.st_mode)
+            and metadata.st_uid == 0
+            and metadata.st_gid == 0
+            and stat.S_IMODE(metadata.st_mode) == 0o644
+            and runtime_policy.validate_policy(self.paths.policy)
+        )
 
     def _credentials_valid(self) -> bool:
         try:
@@ -1201,11 +1337,23 @@ class Manager:
             return result, 0
         if invocation.operation == "status":
             marker = self.load_marker(required=False)
-            result.status = "ok" if marker is not None else "degraded"
+            lifecycle_status = self._lifecycle_status()
+            result.status = (
+                "ok"
+                if marker is not None and lifecycle_status["configured"]
+                else "degraded"
+            )
             result.details = {
-                "lifecycle": "installed" if marker else "missing",
+                "lifecycle": (
+                    "dead"
+                    if marker is not None and lifecycle_status["dead"]
+                    else "installed" if marker is not None else "missing"
+                ),
                 "version": marker["version"] if marker else None,
                 "suspended": self.paths.suspended.exists(),
+                "dead": lifecycle_status["dead"],
+                "dead_reason": lifecycle_status["dead_reason"],
+                "remaining_seconds": lifecycle_status["remaining_seconds"],
             }
             self._best_effort_audit(invocation, result)
             return result, 0
@@ -1223,7 +1371,7 @@ class Manager:
         result.required_inputs = self._required_inputs(invocation, configuration)
         if invocation.dry_run:
             result.status = "blocked" if result.required_inputs else "ok"
-            return result, 0
+            return result, 64 if result.required_inputs else 0
         if result.required_inputs:
             raise ManagementError(
                 64,
@@ -1272,6 +1420,8 @@ class Manager:
                 changed_resources, previous_version = self._execute_suspend()
             elif invocation.operation == "resume":
                 changed_resources, previous_version = self._execute_resume()
+            elif invocation.operation == "kill":
+                changed_resources, previous_version = self._execute_kill()
             elif invocation.operation == "uninstall":
                 changed_resources, previous_version = self._execute_uninstall(invocation)
             else:  # pragma: no cover - argparse and constants prevent this
@@ -1349,6 +1499,23 @@ class Manager:
             os.close(descriptor)
             self.paths.lock.unlink(missing_ok=True)
 
+    @contextmanager
+    def _lifecycle_environment(self) -> Iterator[None]:
+        name = "BEEP_LIFECYCLE_STATE"
+        previous = os.environ.get(name)
+        os.environ[name] = str(self.paths.runtime / "lifecycle.json")
+        try:
+            yield
+        finally:
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
+
+    def _lifecycle_status(self) -> dict[str, Any]:
+        with self._lifecycle_environment():
+            return runtime_lifecycle.status()
+
     def _execute_converge(
         self,
         invocation: Invocation,
@@ -1365,6 +1532,45 @@ class Manager:
         if marker is not None:
             self._stop_services()
             self._create_recovery_snapshot(invocation.correlation_id)
+        try:
+            return self._converge_resources(
+                invocation,
+                configuration,
+                marker=marker,
+                instance_id=instance_id,
+                previous_version=previous_version,
+                suspended=suspended,
+            )
+        except Exception as original:
+            if marker is None:
+                raise
+            try:
+                self._execute_rollback()
+            except Exception as rollback_error:
+                raise ManagementError(
+                    1,
+                    "AUTOMATIC_ROLLBACK_FAILED",
+                    "Beep convergence failed and automatic rollback also failed.",
+                    recovery=[
+                        "Keep Beep stopped and restore the verified backup or recovery snapshot."
+                    ],
+                ) from rollback_error
+            if isinstance(original, ManagementError):
+                original.recovery.append(
+                    "The pre-operation Beep recovery snapshot was restored automatically."
+                )
+            raise
+
+    def _converge_resources(
+        self,
+        invocation: Invocation,
+        configuration: Configuration,
+        *,
+        marker: dict[str, Any] | None,
+        instance_id: str,
+        previous_version: str | None,
+        suspended: bool,
+    ) -> tuple[list[str], str | None]:
         changed: list[str] = []
         uid, gid = self._ensure_identity(configuration.agent_user, changed)
         self._ensure_directories(uid, gid, changed)
@@ -1372,7 +1578,11 @@ class Manager:
         self._deploy_runtime(configuration, uid, gid, changed)
         self._deploy_configuration(invocation, configuration, uid, gid, changed)
         self._deploy_services(configuration, uid, gid, changed)
-        self._start_services(changed, suspended=suspended)
+        lifecycle_status = self._lifecycle_status()
+        self._start_services(
+            changed,
+            suspended=suspended or lifecycle_status["dead"],
+        )
         checks = self.checks_without_marker()
         failed = [check for check in checks if check["status"] == "fail"]
         if failed:
@@ -1422,8 +1632,8 @@ class Manager:
             }:
                 predicate = {
                     "runtime": (self.paths.install_root / "agent" / "server.py").is_file()
-                    and (self.paths.runtime / "lifecycle.json").is_file(),
-                    "policy": self.paths.policy.is_file(),
+                    and self._runtime_valid(self._lifecycle_status()),
+                    "policy": self._policy_valid(),
                     "credentials": self._credentials_valid(),
                     "service_assets": all(
                         path.is_file()
@@ -1488,7 +1698,11 @@ class Manager:
             self.paths.sudoers,
             self.paths.entrypoint,
         )
-        collisions = [str(path) for path in resources if path.exists() and path not in allowed]
+        collisions = [
+            str(path)
+            for path in resources
+            if self._path_present(path) and path not in allowed
+        ]
         try:
             pwd.getpwnam(DEFAULT_USER)
         except KeyError:
@@ -1496,12 +1710,27 @@ class Manager:
         else:
             if not retained:
                 collisions.append("user:beep")
+        try:
+            grp.getgrnam(DEFAULT_USER)
+        except KeyError:
+            pass
+        else:
+            if not retained:
+                collisions.append("group:beep")
         if collisions:
             raise ManagementError(
                 73,
                 "OWNERSHIP_COLLISION",
                 "Unowned Beep resource collision: " + ", ".join(sorted(collisions)),
             )
+
+    @staticmethod
+    def _path_present(path: Path) -> bool:
+        try:
+            path.lstat()
+        except OSError:
+            return False
+        return True
 
     @staticmethod
     def _port_preflight(port: int, installed: bool) -> None:
@@ -1606,6 +1835,10 @@ class Manager:
         for path, mode, owner, group in declarations:
             if path.is_symlink():
                 raise ManagementError(73, "UNSAFE_PATH", f"Refusing symlink: {path}")
+            if path.exists() and not path.is_dir():
+                raise ManagementError(
+                    73, "UNSAFE_PATH", f"Directory path is not a directory: {path}"
+                )
             if not path.exists():
                 path.mkdir(parents=True, mode=mode)
                 changed.append(str(path))
@@ -1741,7 +1974,16 @@ class Manager:
         node = self.paths.node_root / "bin" / "node"
         npm = self.paths.node_root / "bin" / "npm"
         marker = self.paths.node_root / ".beep-node.json"
-        if not node.is_file() or not npm.is_file() or not marker.is_file():
+        if (
+            not node.is_file()
+            or node.is_symlink()
+            or not os.access(node, os.X_OK)
+            or not npm.is_file()
+            or npm.is_symlink()
+            or not os.access(npm, os.X_OK)
+            or not marker.is_file()
+            or marker.is_symlink()
+        ):
             return False
         try:
             metadata = load_json(marker)
@@ -1974,10 +2216,9 @@ class Manager:
                 raise ManagementError(73, "UNSAFE_PATH", f"Runtime contains symlink: {path}")
             if path.is_dir():
                 os.chmod(path, 0o755)
-            elif path.parent == self.paths.install_root / "bin":
-                os.chmod(path, 0o755)
             else:
-                os.chmod(path, 0o644)
+                current_mode = stat.S_IMODE(path.stat(follow_symlinks=False).st_mode)
+                os.chmod(path, 0o755 if current_mode & 0o111 else 0o644)
             os.chown(path, 0, 0)
         os.chown(self.paths.install_root, 0, 0)
         os.chmod(self.paths.install_root, 0o755)
@@ -2054,7 +2295,18 @@ class Manager:
             symlinks=False,
             ignore=shutil.ignore_patterns("dist", "__pycache__", "*.pyc"),
         )
+        if self.paths.product_root.is_symlink() or (
+            self.paths.product_root.exists()
+            and not self.paths.product_root.is_dir()
+        ):
+            shutil.rmtree(staging)
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Refusing unsafe product path: {self.paths.product_root}",
+            )
         if self.paths.product_root.exists():
+            self._assert_tree_safe(self.paths.product_root)
             shutil.rmtree(self.paths.product_root)
         os.replace(staging, self.paths.product_root)
         changed.append(str(self.paths.product_root))
@@ -2067,8 +2319,14 @@ class Manager:
         *,
         executable: bool = False,
     ) -> None:
-        if not source.is_dir():
+        if not source.is_dir() or source.is_symlink():
             raise ManagementError(66, "SOURCE_INCOMPLETE", f"Missing source tree: {source}")
+        if destination.is_symlink() or (
+            destination.exists() and not destination.is_dir()
+        ):
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Refusing unsafe destination: {destination}"
+            )
         destination.mkdir(parents=True, exist_ok=True)
         expected: set[Path] = set()
         for item in sorted(source.rglob("*")):
@@ -2080,6 +2338,12 @@ class Manager:
             if item.is_symlink():
                 raise ManagementError(78, "UNSAFE_SOURCE", f"Source symlink rejected: {item}")
             if item.is_dir():
+                if target.is_symlink() or (
+                    target.exists() and not target.is_dir()
+                ):
+                    raise ManagementError(
+                        73, "UNSAFE_PATH", f"Refusing unsafe destination: {target}"
+                    )
                 target.mkdir(parents=True, exist_ok=True)
                 continue
             mode = 0o755 if executable or os.access(item, os.X_OK) else 0o644
@@ -2087,6 +2351,10 @@ class Manager:
                 changed.append(str(target))
         for target in sorted(destination.rglob("*"), reverse=True):
             if target not in expected:
+                if target.is_symlink():
+                    raise ManagementError(
+                        73, "UNSAFE_PATH", f"Refusing destination symlink: {target}"
+                    )
                 if target.is_dir():
                     target.rmdir()
                 else:
@@ -2123,6 +2391,15 @@ class Manager:
         else:
             os.chmod(self.paths.policy, 0o644)
             os.chown(self.paths.policy, 0, 0)
+            if not runtime_policy.validate_policy(self.paths.policy):
+                if atomic_write(
+                    self.paths.policy,
+                    (
+                        self.source_root / "payload" / "etc" / "policy.yaml"
+                    ).read_bytes(),
+                    mode=0o644,
+                ):
+                    changed.append(str(self.paths.policy))
         catalog_source = self.source_root / "payload" / "etc" / "agents" / "catalog.json"
         runtime_family.validate_catalog(
             runtime_family.load_json(catalog_source, label="catalog")
@@ -2236,11 +2513,27 @@ class Manager:
         ):
             changed.append(str(self.paths.config))
         lifecycle_path = self.paths.runtime / "lifecycle.json"
-        os.environ["BEEP_LIFECYCLE_STATE"] = str(lifecycle_path)
+        if lifecycle_path.is_symlink() or (
+            lifecycle_path.exists() and not lifecycle_path.is_file()
+        ):
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Refusing unsafe lifecycle path: {lifecycle_path}"
+            )
         if not lifecycle_path.exists():
-            runtime_lifecycle.initialize(configuration.ttl_days)
+            with self._lifecycle_environment():
+                runtime_lifecycle.initialize(configuration.ttl_days)
             os.chown(lifecycle_path, uid, gid)
             changed.append(str(lifecycle_path))
+        else:
+            metadata = lifecycle_path.stat(follow_symlinks=False)
+            if (
+                stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_uid != uid
+                or metadata.st_gid != gid
+            ):
+                os.chmod(lifecycle_path, 0o600)
+                os.chown(lifecycle_path, uid, gid)
+                changed.append(str(lifecycle_path))
 
     @staticmethod
     def _quote_env(value: str) -> str:
@@ -2352,7 +2645,7 @@ class Manager:
             raise ManagementError(69, "SYSTEMD_MISSING", "systemctl is required.")
         self._run(["systemctl", "daemon-reload"])
         if suspended:
-            self._run(["systemctl", "disable", "--now", "beep-chat.service"], check=False)
+            self._stop_services()
             return
         self._run(["systemctl", "enable", "--now", "beep-chat.service"])
         self._run(["systemctl", "enable", "--now", "beep-health.timer"])
@@ -2409,7 +2702,7 @@ class Manager:
             archive.unlink(missing_ok=True)
             raise
         finally:
-            if not suspended:
+            if not suspended and not self._lifecycle_status()["dead"]:
                 self._start_services([], suspended=False)
         return [str(archive)], str(marker["version"]), str(archive)
 
@@ -2644,7 +2937,10 @@ class Manager:
                 host_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, host_path)
         self._restore_snapshot_ownership(metadata["ownership"])
-        self._start_services([], suspended=self.paths.suspended.exists())
+        self._start_services(
+            [],
+            suspended=self.paths.suspended.exists() or self._lifecycle_status()["dead"],
+        )
         restored_manager = Manager(source_root=self.paths.product_root)
         failed = [
             check for check in restored_manager.checks() if check["status"] == "fail"
@@ -2777,6 +3073,12 @@ class Manager:
 
     def _execute_resume(self) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=True)
+        if self._lifecycle_status()["dead"]:
+            raise ManagementError(
+                78,
+                "RESUME_BLOCKED",
+                "A dead Beep cannot be resumed or revived.",
+            )
         failed = [check for check in self.checks() if check["status"] == "fail" and check["id"] != "service_state"]
         if failed:
             raise ManagementError(
@@ -2787,6 +3089,57 @@ class Manager:
             self.paths.suspended.unlink()
             changed.append(str(self.paths.suspended))
         self._start_services(changed, suspended=False)
+        return sorted(set(changed)), str(marker["version"])
+
+    def _execute_kill(self) -> tuple[list[str], str | None]:
+        marker = self.load_marker(required=True)
+        self._stop_services()
+        lifecycle_path = self.paths.runtime / "lifecycle.json"
+        if lifecycle_path.is_symlink() or (
+            lifecycle_path.exists() and not lifecycle_path.is_file()
+        ):
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Refusing unsafe lifecycle path: {lifecycle_path}"
+            )
+        before = lifecycle_path.read_bytes() if lifecycle_path.is_file() else None
+        with self._lifecycle_environment():
+            runtime_lifecycle.kill("operator_killed")
+        try:
+            account = pwd.getpwnam(DEFAULT_USER)
+        except KeyError as exc:
+            raise ManagementError(
+                1,
+                "IDENTITY_MISSING",
+                "The death tombstone was written, but the Beep account is missing.",
+            ) from exc
+        os.chmod(lifecycle_path, 0o600)
+        os.chown(lifecycle_path, account.pw_uid, account.pw_gid)
+        changed: list[str] = []
+        if before != lifecycle_path.read_bytes():
+            changed.append(str(lifecycle_path))
+
+        history_path = self.paths.runtime / "conversations.db"
+        if history_path.is_symlink() or (
+            history_path.exists() and not history_path.is_file()
+        ):
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Refusing unsafe history path: {history_path}"
+            )
+        if history_path.is_file():
+            try:
+                history = runtime_history.History(history_path)
+                try:
+                    cancelled = history.cancel_pending_reactivation("beep killed")
+                finally:
+                    history.close()
+            except (OSError, sqlite3.Error) as exc:
+                raise ManagementError(
+                    1,
+                    "REACTIVATION_CANCEL_FAILED",
+                    "The death tombstone was written, but pending reactivation cancellation failed.",
+                ) from exc
+            if cancelled is not None:
+                changed.append(str(history_path))
         return sorted(set(changed)), str(marker["version"])
 
     def _execute_uninstall(

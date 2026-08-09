@@ -237,6 +237,14 @@ class History:
             ).fetchone()
         return row is not None
 
+    def delete_conversation(self, conversation_id: int) -> bool:
+        """Delete one conversation and all of its cascaded local records."""
+        cursor = self._execute(
+            "DELETE FROM conversations WHERE id = ?",
+            (conversation_id,),
+        )
+        return cursor.rowcount > 0
+
     # ------------------------------------------------------------------
     # Timer reactivation
     # ------------------------------------------------------------------

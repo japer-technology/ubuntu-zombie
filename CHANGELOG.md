@@ -8,6 +8,27 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Independent Beep product
+
+- **Complete standalone implementation:** added `products/beep/` as an
+  independently installed, root-capable functional duplicate of Ubuntu Zombie
+  with Beep-owned identity, credentials, lifecycle, policy, approval, audit,
+  chat, history, provider, tool, and family-manager boundaries.
+- **Terminal and recoverable lifecycle:** added strict fail-closed TTL state,
+  approved terminal kill, collision and integrity checks, idempotent
+  convergence, automatic recovery-snapshot rollback, protected backup and
+  restore, and ownership-safe retention and purge.
+- **Hardened local runtime:** constrained loopback HTTP Host and mutation
+  origin, bounded and strictly validated JSON, isolated sessions,
+  confirmation-bound deletion, authenticated export, destructive handling for
+  malformed policy, and correlated manager/target failure evidence.
+- **Independent assurance and release:** added unit, integration, parity,
+  family, and guarded disposable-VM suites; complete product-owned
+  documentation; package and provenance records; and a pinned, signed Beep
+  release workflow. Production family admission, recorded supported-VM and
+  co-installation runs, external security review, and published-release
+  verification remain explicit open gates.
+
 ### Independent Llama product
 
 - **Complete product extraction:** added `products/llama/` with an independent
@@ -34,11 +55,6 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
   least-authority boundary, data and network contract, Ubuntu Zombie lifecycle
   interface, validation plan, threat model, and honest release gate. The
   proposal index does not claim implementation or family admission.
-- **Beep product definition:** added a template-complete specification for an
-  independently installed, root-capable duplication of Ubuntu Zombie with
-  Beep-owned identities, credentials, resources, lifecycle, audit, release,
-  family management, and co-installation boundaries. Documentation only; Beep
-  is not implemented or admitted to the production family catalogue.
 - **Product-defined family authority:** removed the family-wide rule that
   reserved general root authority to Ubuntu Zombie. Future
   systems-administrator products may retain full root capability when their
