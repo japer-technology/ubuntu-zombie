@@ -17,6 +17,7 @@ from conformance import (
 ROOT = Path(__file__).resolve().parents[2]
 FRIEND_PRODUCT = ROOT / "products" / "imaginary-friend"
 LLAMA_PRODUCT = ROOT / "products" / "llama"
+BEEP_PRODUCT = ROOT / "products" / "beep"
 
 
 class FamilyContractTests(unittest.TestCase):
@@ -74,8 +75,16 @@ class FamilyContractTests(unittest.TestCase):
         self.assertEqual(descriptor["cookie_names"], [])
         self.assertEqual(descriptor["ports"][0]["port"], 8080)
 
+    def test_beep_descriptor(self) -> None:
+        descriptor = load_json_strict(BEEP_PRODUCT / "PRODUCT.json")
+        validate_product(descriptor)
+        self.assertEqual(descriptor["product_id"], "beep")
+        self.assertEqual(descriptor["operations"], list(OPERATIONS))
+        self.assertEqual(descriptor["cookie_names"], ["beep_session"])
+        self.assertEqual(descriptor["ports"][0]["port"], 58989)
+
     def test_manage_describe_uses_common_response(self) -> None:
-        for product in (FRIEND_PRODUCT, LLAMA_PRODUCT):
+        for product in (FRIEND_PRODUCT, LLAMA_PRODUCT, BEEP_PRODUCT):
             with self.subTest(product=product.name):
                 completed = subprocess.run(
                     [str(product / "scripts" / "manage.sh"), "describe", "--json"],
@@ -95,6 +104,11 @@ class FamilyContractTests(unittest.TestCase):
         installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
         self.assertNotIn("imaginary-friend", installer)
         self.assertNotIn("friend-manage", installer)
+
+    def test_beep_is_not_a_zombie_component(self) -> None:
+        installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+        self.assertNotIn("beep-manage", installer)
+        self.assertNotIn("products/beep", installer)
 
     def test_llama_root_targets_are_delegating_shims_only(self) -> None:
         installer = (ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
