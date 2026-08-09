@@ -28,7 +28,7 @@ imports or operates from Ubuntu Zombie's live runtime or data.
 | Operator | The human who owns the machine, provider account, Beep credentials, policy, and lifecycle controls |
 | Maximum authority | Root through the dedicated Beep account, including approved management of other local agents |
 | Default Linux identity | Password-disabled dedicated `beep` account and group |
-| Default loopback port | `8989` |
+| Default loopback port | `58989` |
 | Install root | `/opt/beep` |
 | Configuration root | `/etc/beep` |
 | State root | `/var/lib/beep` |
@@ -160,7 +160,7 @@ an explicit Beep review, namespace analysis, implementation, and release.
 
 ### Primary workflow
 
-1. A local user authenticates to `127.0.0.1:8989` with Beep-only credentials.
+1. A local user authenticates to `127.0.0.1:58989` with Beep-only credentials.
 2. Beep validates lifecycle and turn state, reconstructs bounded conversation
    context, and sends the request to the configured provider.
 3. Proposed tool calls enter Beep's closed registry and are schema-validated,
@@ -239,7 +239,7 @@ in [`implementation.md`](implementation.md#ownership-marker-and-receipt).
 | Units | `beep-*.service` and `beep-*.timer` |
 | Commands | `beep-*` |
 | Environment | `BEEP_*` |
-| Loopback ports | `8989` |
+| Loopback ports | `58989` |
 | Cookie names | `beep_session` |
 | Package names | `beep` |
 | Ownership marker | `/var/lib/beep/installation.json` |
@@ -345,7 +345,7 @@ uninstall requires explicit confirmation before deleting retained Beep state.
 
 | Direction | Endpoint | Data | Default | Control |
 | --------- | -------- | ---- | ------- | ------- |
-| Inbound | `127.0.0.1:8989` | Authenticated chat, events, approvals, and controls | Open after healthy install | Beep password, signed session, CSRF protection |
+| Inbound | `127.0.0.1:58989` | Authenticated chat, events, approvals, and controls | Open after healthy install | Beep password, signed session, CSRF protection |
 | Outbound | Operator-configured supported cloud provider | Prompts, selected context, tool schemas, and results | Allowed only when configured | Exact provider adapter, TLS, policy, redaction |
 | Outbound | Operator-configured loopback or bounded LAN model | Same model-turn data | Allowed only when configured | Explicit discovery/selection and endpoint validation |
 | Outbound | Public HTTP/S for `web.fetch` | Requested URL and bounded response | Policy-restricted | Address checks on every redirect, no private targets or credentials |
@@ -445,7 +445,7 @@ Ubuntu Zombie's installed files.
 | Input | Interactive behaviour | Unattended variable/file | Validation |
 | ----- | --------------------- | ------------------------ | ---------- |
 | Account | Review default `beep` | `BEEP_USER` | Unique valid Linux name; consistent on reinstall |
-| Chat port | Review default `8989` | `BEEP_CHAT_PORT` | Unused loopback TCP port `1024..65535` |
+| Chat port | Review default `58989` | `BEEP_CHAT_PORT` | Unused loopback TCP port `1024..65535` |
 | Chat password | Generate or read protected file | `BEEP_ADMIN_PASSWORD_FILE` | Root-owned regular mode `0600` file; 12–1,024 UTF-8 bytes |
 | Provider | Select supported adapter | `BEEP_PROVIDER` | Registered Beep adapter |
 | Provider credential | Read protected file when required | `BEEP_PROVIDER_CREDENTIAL_FILE` | Root-owned regular mode `0600`; provider-specific validation |
