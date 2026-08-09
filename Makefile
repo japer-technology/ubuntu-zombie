@@ -7,6 +7,7 @@ VERSION := $(shell cat VERSION)
 PYTHON ?= python3
 FRIEND_ROOT := products/imaginary-friend
 LLAMA_ROOT := products/llama
+BEEP_ROOT := products/beep
 
 .PHONY: help lint test verify-bridge-pins install-local verify package deb clean
 
@@ -34,11 +35,13 @@ lint:
 	bash tests/smoke.sh python
 	$(MAKE) -C $(FRIEND_ROOT) lint PYTHON="$(PYTHON)"
 	$(MAKE) -C $(LLAMA_ROOT) lint PYTHON="$(PYTHON)"
+	$(MAKE) -C $(BEEP_ROOT) lint PYTHON="$(PYTHON)"
 
 test:
 	bash tests/smoke.sh all
 	$(MAKE) -C $(FRIEND_ROOT) test PYTHON="$(PYTHON)"
 	$(MAKE) -C $(LLAMA_ROOT) test PYTHON="$(PYTHON)"
+	$(MAKE) -C $(BEEP_ROOT) test PYTHON="$(PYTHON)"
 
 verify-bridge-pins:
 	bash scripts/verify-bridge-pins.sh
@@ -71,3 +74,4 @@ clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	$(MAKE) -C $(FRIEND_ROOT) clean
 	$(MAKE) -C $(LLAMA_ROOT) clean
+	$(MAKE) -C $(BEEP_ROOT) clean

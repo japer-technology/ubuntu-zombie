@@ -36,7 +36,8 @@
         "imaginary-friend",
         "curriculum-flame",
         "eric",
-        "llama"
+        "llama",
+        "beep"
       ]
     },
     "instance_id": {
@@ -60,6 +61,7 @@
       "enum": [
         "operator",
         "ubuntu-zombie",
+        "beep",
         "friend-owner",
         "friend-service"
       ]

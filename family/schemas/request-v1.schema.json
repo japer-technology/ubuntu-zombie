@@ -22,7 +22,8 @@
         "imaginary-friend",
         "curriculum-flame",
         "eric",
-        "llama"
+        "llama",
+        "beep"
       ]
     },
     "operation": {
@@ -34,7 +35,8 @@
     "requested_by": {
       "enum": [
         "operator",
-        "ubuntu-zombie"
+        "ubuntu-zombie",
+        "beep"
       ]
     },
     "inputs": {

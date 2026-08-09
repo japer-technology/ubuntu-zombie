@@ -22,7 +22,7 @@ OPERATIONS = (
     "resume",
     "uninstall",
 )
-PRODUCTS = ("imaginary-friend", "curriculum-flame", "eric", "llama")
+PRODUCTS = ("imaginary-friend", "curriculum-flame", "eric", "llama", "beep")
 VERSION_PATTERN = re.compile(r"^\d{4}(?:\.\d{2}){5}$")
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -199,7 +199,7 @@ def validate_request(
     if value["operation"] != operation or operation not in OPERATIONS:
         raise ContractError("request operation mismatch")
     _uuid(value["correlation_id"], label="correlation_id")
-    if value["requested_by"] not in {"operator", "ubuntu-zombie"}:
+    if value["requested_by"] not in {"operator", "ubuntu-zombie", "beep"}:
         raise ContractError("invalid requested_by")
     if not isinstance(value["inputs"], dict):
         raise ContractError("inputs must be an object")

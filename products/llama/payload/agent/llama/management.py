@@ -799,7 +799,7 @@ class Manager:
         ):
             raise ManagementError(65, "INVALID_REQUEST", "Request identity is invalid.")
         validate_uuid(value["correlation_id"], label="correlation_id")
-        if value["requested_by"] not in {"operator", "ubuntu-zombie"}:
+        if value["requested_by"] not in {"operator", "ubuntu-zombie", "beep"}:
             raise ManagementError(65, "INVALID_REQUEST", "requested_by is invalid.")
         if not isinstance(value["inputs"], dict):
             raise ManagementError(65, "INVALID_REQUEST", "inputs must be an object.")

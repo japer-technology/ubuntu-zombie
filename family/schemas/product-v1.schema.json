@@ -34,7 +34,8 @@
         "imaginary-friend",
         "curriculum-flame",
         "eric",
-        "llama"
+        "llama",
+        "beep"
       ]
     },
     "display_name": {
@@ -47,7 +48,7 @@
     },
     "source_root": {
       "type": "string",
-      "pattern": "^products/(imaginary-friend|curriculum-flame|eric|llama)$"
+      "pattern": "^products/(imaginary-friend|curriculum-flame|eric|llama|beep)$"
     },
     "version_file": {
       "const": "VERSION"
@@ -57,7 +58,7 @@
     },
     "installed_entrypoint": {
       "type": "string",
-      "pattern": "^/usr/local/sbin/(friend|flame|eric|llama)-manage$"
+      "pattern": "^/usr/local/sbin/(friend|flame|eric|llama|beep)-manage$"
     },
     "install_root": {
       "$ref": "#/$defs/absolute_path"
@@ -79,7 +80,8 @@
         "FRIEND",
         "FLAME",
         "ERIC",
-        "LLAMA"
+        "LLAMA",
+        "BEEP"
       ]
     },
     "accounts": {
