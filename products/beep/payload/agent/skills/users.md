@@ -27,7 +27,7 @@ Operating rules:
   directory or the `beep-*` groups. That is Beep's own
   privilege boundary; changing it edits the trust model from inside the
   agent. If the operator wants it changed, point them at
-  `scripts/install.sh` and its `repair` subcommand.
+  `beep-manage repair`.
 - Never echo password material, hashes from `/etc/shadow`, or SSH
   private keys into the chat. `/etc/shadow` is not readable through
   `fs.read` for the same reason, and the `secrets` skill covers

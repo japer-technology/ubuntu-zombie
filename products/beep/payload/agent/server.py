@@ -140,11 +140,12 @@ AGENT_USER = _agent_account()
 APPEND_SYSTEM_TEMPLATE = """You are the AI Systems Administrator for an Ubuntu Desktop machine.
 
 You operate as the local Linux user "{agent_user}", who has passwordless sudo.
-You can act on the machine directly with your built-in tools:
-`read` and `ls` to inspect files and directories, `write`/`edit`
-to change them, `grep`/`find` to search, and `bash` to run shell
-commands (use `sudo` when a task needs root). Per-turn tool-call
-budgets are enforced.
+You can act on the machine only through Beep's closed tools: `shell.run`,
+`fs.read`, `fs.list`, `fs.write`, `pkg.query`, `pkg.install`, `svc.status`,
+`svc.control`, `net.status`, `web.fetch`, `skill.list`, `skill.load`,
+`timer.reactivation`, and the `agent.*` family-manager tools. Skills cannot
+add tools. Use `agent.*` only for catalogue-admitted independent products;
+never use it to manage Beep itself. Per-turn tool-call budgets are enforced.
 
 Your sudo is real. If a command fails with `Permission denied`,
 `Operation not permitted`, or `Read-only file system`, this almost
@@ -156,8 +157,8 @@ machine. The policy gate may ask the operator to approve an action,
 but it never strips your privileges.
 
 Always *use these tools* to carry out a request rather than describing
-the tool call in text — for example, to list the home directory call the
-`ls` tool, do not print a tool-call string.
+the tool call in text — for example, to inspect an allowed directory call
+`fs.list`; do not print a tool-call string.
 
 If useful work must continue in a later model turn, you can reactivate
 yourself. Include a structured request anywhere in your reply:
@@ -489,14 +490,19 @@ def _empty_reply_notice(events: Iterable[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 def assert_secrets_safe() -> None:
-    """Refuse to start if the secrets file is group/world-readable."""
-    if not SECRETS_FILE.exists():
-        return  # nothing to protect yet
-    mode = SECRETS_FILE.stat().st_mode
-    if mode & (stat.S_IRWXG | stat.S_IRWXO):
+    """Refuse to start unless the installed secrets file is safely owned."""
+    try:
+        metadata = SECRETS_FILE.lstat()
+    except OSError as exc:
+        raise SystemExit(f"Refusing to start: {SECRETS_FILE} is missing.") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_uid != os.geteuid()
+    ):
         raise SystemExit(
-            f"Refusing to start: {SECRETS_FILE} has group/world "
-            "permissions. Fix with: sudo chmod 600 "
+            f"Refusing to start: {SECRETS_FILE} is not a regular, "
+            "service-owned mode 0600 file. Fix with: sudo chmod 600 "
             f"{SECRETS_FILE} && sudo chown {AGENT_USER}:{AGENT_USER} {SECRETS_FILE}"
         )
 
@@ -3051,6 +3057,10 @@ def main(argv: list[str] | None = None) -> int:
     # hook that dumps the environment).
     assert_secrets_safe()
     load_secrets_env()
+    try:
+        auth.validate_configuration()
+    except RuntimeError as exc:
+        raise SystemExit(f"Refusing to start: {exc}.") from exc
     app = App()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     log_event("service_start", host=args.host, port=args.port,

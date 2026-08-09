@@ -47,6 +47,9 @@ Audit log:
   beep-audit-recent -t tool_call -t provider_error
   beep-audit-recent --all             # full log
 
+Independent product manager:
+  sudo /opt/beep/bin/beep-agents --json list
+
 Verbose audit (for testing only — opt in on the chat service):
   sudo systemctl edit beep-chat.service
     # add: [Service]

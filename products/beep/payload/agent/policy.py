@@ -205,6 +205,11 @@ class Policy:
             # No argv and no command — refuse to auto-run.
             return self.default_class
 
+        if name == "agent.manage":
+            if args.get("operation") == "uninstall":
+                return "destructive"
+            return "system_change"
+
         spec = TOOL_REGISTRY.get(name)
         if spec is None:
             return self.default_class

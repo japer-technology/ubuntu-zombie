@@ -75,6 +75,7 @@ capture systemctl-beep.txt    systemctl status beep-chat.service beep-health.tim
 capture journal-beep.txt      journalctl -u beep-chat.service -n 400 --no-pager
 capture verify.txt              /usr/local/sbin/beep-manage verify --json
 capture health.txt              /opt/beep/bin/beep-health
+capture agents.txt              sudo -n /opt/beep/bin/beep-agents --json list
 
 # Installer log
 if [[ -r /var/log/beep-install.log ]]; then

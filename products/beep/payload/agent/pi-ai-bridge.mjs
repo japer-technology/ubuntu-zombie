@@ -90,7 +90,7 @@ function die(error, code = "bridge_error") {
 // Resolve the OpenAI-compatible base URL for a local/custom provider.
 //
 // Providers such as `lmstudio` have no static catalogue in pi-ai; their
-// models live on the server itself. scripts/install.sh records the
+// models live on the server itself. beep-manage records the
 // server URL in ~/.pi/agent/models.json (the same file pi-mono reads),
 // so we look the provider's `baseUrl` up there. The path is overridable
 // via BEEP_PI_MODELS_JSON for tests. An explicit OPENAI_BASE_URL /
@@ -99,7 +99,10 @@ function die(error, code = "bridge_error") {
 // Returns the trimmed base URL string, or "" when none is configured or
 // the configured value is not an absolute http(s) URL.
 function localBaseUrl(provider) {
-  let baseUrl = "";
+  let baseUrl =
+    provider === "openai" || provider === "lmstudio"
+      ? String(process.env.BEEP_MODEL_BASE_URL || "").trim()
+      : "";
   if (provider === "openai") {
     const envUrl = process.env.OPENAI_BASE_URL || process.env.OPENAI_API_BASE;
     if (envUrl) baseUrl = String(envUrl).trim();
@@ -115,7 +118,7 @@ function localBaseUrl(provider) {
 }
 
 // Read the provider's entry from ~/.pi/agent/models.json (the file
-// scripts/install.sh writes for local providers and pi-mono reads).
+// beep-manage writes for local providers and pi-mono reads).
 // Returns the raw object ({ baseUrl, api, compat, ... }) or null when
 // the file or entry is missing/unparseable.
 function customProviderEntry(provider) {
@@ -180,7 +183,7 @@ async function fetchLiveModels(baseUrl, keyEnv) {
 // Resolve and import @earendil-works/pi-ai/compat.
 //
 // The package is installed *globally* (npm install -g, see
-// scripts/install.sh) and this bridge is deployed to
+// beep-manage) and this bridge is deployed to
 // /opt/beep/agent/, which is outside any node_modules tree. Node's
 // ESM loader resolves bare specifiers by walking node_modules up from
 // the importing file and — unlike CommonJS require — ignores NODE_PATH,
@@ -231,9 +234,7 @@ function globalModuleDirs() {
   if (process.env.NODE_PATH) {
     for (const part of process.env.NODE_PATH.split(delimiter)) add(part);
   }
-  // Standard global prefix for the running node: <prefix>/lib/node_modules
-  // (e.g. /usr/bin/node -> /usr/lib/node_modules on the NodeSource build
-  // this project installs).
+  // Global modules in Beep's pinned local Node prefix.
   add(resolve(dirname(execPath), "..", "lib", "node_modules"));
   // Windows-style layout and common Unix fallbacks.
   add(resolve(dirname(execPath), "node_modules"));
@@ -268,7 +269,7 @@ async function loadPiAi() {
     : "";
   die(
     `failed to load @earendil-works/pi-ai: ${lastErr ? lastErr.message : "not found"}${where}. ` +
-      "Reinstall via scripts/install.sh.",
+      "Reinstall via beep-manage repair.",
     "pi_ai_missing",
   );
 }

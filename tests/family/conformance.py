@@ -199,7 +199,7 @@ def validate_request(
     if value["operation"] != operation or operation not in OPERATIONS:
         raise ContractError("request operation mismatch")
     _uuid(value["correlation_id"], label="correlation_id")
-    if value["requested_by"] not in {"operator", "ubuntu-zombie"}:
+    if value["requested_by"] not in {"operator", "ubuntu-zombie", "beep"}:
         raise ContractError("invalid requested_by")
     if not isinstance(value["inputs"], dict):
         raise ContractError("inputs must be an object")

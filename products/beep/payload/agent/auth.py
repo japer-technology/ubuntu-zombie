@@ -19,6 +19,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import stat
 import time
 from pathlib import Path
 
@@ -50,7 +51,15 @@ def verify_password(password: str, stored: str) -> bool:
         algo, iterations, salt, digest = stored.split("$", 3)
     except (ValueError, AttributeError):
         return False
-    if algo != _ALGO:
+    if (
+        algo != _ALGO
+        or not iterations.isascii()
+        or not iterations.isdigit()
+        or len(iterations) > 7
+        or not 100_000 <= int(iterations) <= 2_000_000
+        or len(salt) != _SALT_BYTES * 2
+        or len(digest) != hashlib.sha256().digest_size * 2
+    ):
         return False
     try:
         candidate = hashlib.pbkdf2_hmac(
@@ -68,16 +77,41 @@ def configured_hash() -> str | None:
 
 
 def auth_required() -> bool:
-    """True when a password hash is configured (the gate is active)."""
-    return configured_hash() is not None
+    """Installed Beep always requires authentication."""
+
+    return True
 
 
 def check_password(password: str) -> bool:
-    """Validate ``password``; allow everything when the gate is disabled."""
+    """Validate ``password`` and fail closed when configuration is absent."""
     stored = configured_hash()
     if stored is None:
-        return True
+        return False
     return verify_password(password, stored)
+
+
+def valid_password_hash(stored: str | None) -> bool:
+    """Return whether ``stored`` has Beep's bounded PBKDF2 format."""
+
+    return bool(stored) and _hash_fields_valid(stored)
+
+
+def _hash_fields_valid(stored: str) -> bool:
+    try:
+        algo, iterations, salt, digest = stored.split("$", 3)
+        bytes.fromhex(salt)
+        bytes.fromhex(digest)
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return (
+        algo == _ALGO
+        and iterations.isascii()
+        and iterations.isdigit()
+        and len(iterations) <= 7
+        and 100_000 <= int(iterations) <= 2_000_000
+        and len(salt) == _SALT_BYTES * 2
+        and len(digest) == hashlib.sha256().digest_size * 2
+    )
 
 
 def new_session_token() -> str:
@@ -96,7 +130,12 @@ def verify_session_token(token: str) -> bool:
         issued = int(issued_text)
     except (AttributeError, TypeError, ValueError):
         return False
-    if not nonce or issued > int(time.time()) + 60:
+    if (
+        not nonce
+        or len(token) > 512
+        or len(nonce) > 128
+        or issued > int(time.time()) + 60
+    ):
         return False
     if int(time.time()) - issued > SESSION_MAX_AGE_SECONDS:
         return False
@@ -111,12 +150,31 @@ def _session_key() -> bytes:
         value = path.read_bytes().strip()
     except OSError:
         value = b""
-    if len(value) < 32:
-        # Source tests do not have installed secrets. A process-local key keeps
-        # those tokens authenticated without creating files or weakening an
-        # installed Beep, whose lifecycle always writes a protected key.
-        value = _TEST_SESSION_KEY
+    if not 32 <= len(value) <= 4096:
+        if os.environ.get("BEEP_TEST_ALLOW_EPHEMERAL_SESSION_KEY") == "1":
+            return _TEST_SESSION_KEY
+        raise RuntimeError("Beep session key is missing or too short")
     return value
+
+
+def validate_configuration() -> None:
+    """Fail closed unless installed authentication material is protected."""
+
+    if not _hash_fields_valid(configured_hash() or ""):
+        raise RuntimeError("Beep admin password hash is missing or invalid")
+    path = Path(os.environ.get(SESSION_KEY_ENV, DEFAULT_SESSION_KEY))
+    try:
+        metadata = path.lstat()
+        value = path.read_bytes().strip()
+    except OSError as exc:
+        raise RuntimeError("Beep session key is missing") from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_uid != os.geteuid()
+        or not 32 <= len(value) <= 4096
+    ):
+        raise RuntimeError("Beep session key is not safely configured")
 
 
 _TEST_SESSION_KEY = secrets.token_bytes(48)
@@ -131,14 +189,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compute the Beep admin password hash."
     )
-    parser.add_argument(
-        "--password",
-        help="Password to hash. If omitted, read a single line from stdin.",
-    )
-    args = parser.parse_args(argv)
-    password = args.password
-    if password is None:
-        password = sys.stdin.readline().rstrip("\n")
+    parser.parse_args(argv)
+    password = sys.stdin.readline().rstrip("\n")
     if not password:
         parser.error("a non-empty Beep password is required")
     sys.stdout.write(hash_password(password) + "\n")

@@ -500,7 +500,7 @@ class Manager:
         if value["operation"] != operation:
             raise ManagementError(65, "REQUEST_MISMATCH", "Request operation does not match.")
         validate_uuid(value["correlation_id"], label="request correlation_id")
-        if value["requested_by"] not in {"operator", "ubuntu-zombie"}:
+        if value["requested_by"] not in {"operator", "ubuntu-zombie", "beep"}:
             raise ManagementError(65, "INVALID_REQUEST", "requested_by is invalid.")
         if not isinstance(value["inputs"], dict):
             raise ManagementError(65, "INVALID_REQUEST", "Request inputs must be an object.")

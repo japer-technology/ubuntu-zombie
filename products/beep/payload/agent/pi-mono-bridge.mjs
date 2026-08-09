@@ -260,7 +260,7 @@ async function run() {
     "-p", buildPrompt(start),
   ];
   // Model + provider come from payload/agent/providers.py (resolved
-  // from /opt/beep/secrets/env) so the agent loop selects the
+  // from /etc/beep/secrets/env) so the agent loop selects the
   // same model the chat banner advertises instead of pi's built-in
   // default ("google"). Both are optional: when unset the operator has
   // no provider configured and we let pi resolve credentials/model

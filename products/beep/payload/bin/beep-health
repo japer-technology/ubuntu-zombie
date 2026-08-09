@@ -93,6 +93,13 @@ else
   check_warn "audit log missing (will appear on first chat use)"
 fi
 
+# Independent family manager
+if sudo -n /opt/beep/bin/beep-agents --json list >/dev/null 2>&1; then
+  check_ok "family catalogue and inventory valid"
+else
+  check_fail "family catalogue or inventory invalid (run: sudo beep-manage doctor)"
+fi
+
 echo
 printf '%sResult:%s %d ok, %d warn, %d fail\n' "${C_BOLD}" "${C_RESET}" "${PASS}" "${WARN}" "${FAIL}"
 if [[ "${FAIL}" -gt 0 && "${BEEP_HEALTH_WARN_ONLY}" != "1" ]]; then exit 1; fi

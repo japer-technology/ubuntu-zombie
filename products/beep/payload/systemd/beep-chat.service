@@ -10,11 +10,12 @@ Group=__AGENT_USER__
 WorkingDirectory=__BEEP_DIR__
 EnvironmentFile=-/etc/beep/secrets/env
 Environment=PYTHONUNBUFFERED=1
+Environment=PATH=__BEEP_DIR__/node/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=BEEP_USER=__AGENT_USER__
 Environment=BEEP_SESSION_KEY_FILE=/etc/beep/secrets/session.key
 # FIX-3-02: provide a default for BEEP_CHAT_PORT so the unit still
 # starts when the operator has not added the variable to
-# __BEEP_DIR__/secrets/env (EnvironmentFile= is optional). Without
+# /etc/beep/secrets/env (EnvironmentFile= is optional). Without
 # this, ${BEEP_CHAT_PORT} would expand to '' and argparse would
 # reject ``--port ''``.
 Environment=BEEP_CHAT_PORT=58989

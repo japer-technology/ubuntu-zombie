@@ -14,6 +14,7 @@ import platform
 import pwd
 import re
 import secrets
+import shlex
 import shutil
 import socket
 import stat
@@ -28,10 +29,11 @@ import venv
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Iterator
 
 import auth as runtime_auth
+import family as runtime_family
 import lifecycle as runtime_lifecycle
 
 
@@ -118,6 +120,11 @@ DELETE_CONFIRMATION = "DELETE BEEP STATE"
 VERSION_PATTERN = re.compile(r"^\d{4}(?:\.\d{2}){5}$")
 USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
 MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
+NODE_VERSION = "22.23.2"
+NODE_ARCHIVE = f"node-v{NODE_VERSION}-linux-x64.tar.xz"
+NODE_URL = f"https://nodejs.org/dist/v{NODE_VERSION}/{NODE_ARCHIVE}"
+NODE_SHA256 = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
+MAX_NODE_ARCHIVE_BYTES = 128 * 1024 * 1024
 SYSTEM_PACKAGES = (
     "sudo",
     "curl",
@@ -150,6 +157,14 @@ SYSTEM_PACKAGES = (
     "cron",
     "pwgen",
     "psmisc",
+)
+HOST_COMMANDS = (
+    "beep-audit-recent",
+    "beep-chat",
+    "beep-diagnostics",
+    "beep-health",
+    "beep-secrets-edit",
+    "beep-verify-release",
 )
 
 
@@ -237,6 +252,30 @@ class Paths:
     @property
     def receipts(self) -> Path:
         return self.log_root / "receipts"
+
+    @property
+    def agents_configuration(self) -> Path:
+        return self.configuration_root / "agents"
+
+    @property
+    def catalog(self) -> Path:
+        return self.agents_configuration / "catalog.json"
+
+    @property
+    def agents_state(self) -> Path:
+        return self.state_root / "agents"
+
+    @property
+    def inventory(self) -> Path:
+        return self.agents_state / "inventory.json"
+
+    @property
+    def family_schemas(self) -> Path:
+        return self.install_root / "family" / "schemas"
+
+    @property
+    def node_root(self) -> Path:
+        return self.install_root / "node"
 
     @property
     def product_root(self) -> Path:
@@ -580,6 +619,12 @@ class Manager:
                     65, "INVALID_CONFIGURATION", "model_base_url must be a URL."
                 )
             self._validate_model_url(base_url)
+            if provider not in {"openai", "lmstudio"}:
+                raise ManagementError(
+                    65,
+                    "INVALID_CONFIGURATION",
+                    "model_base_url is supported only for openai and lmstudio.",
+                )
         raw_ttl = self._input(
             invocation, "ttl_days", "BEEP_TTL_DAYS", existing, DEFAULT_TTL_DAYS
         )
@@ -599,6 +644,12 @@ class Manager:
                 "REQUIRED_INPUT",
                 "The selected provider requires a model identifier.",
             )
+        if provider == "lmstudio" and base_url is None:
+            raise ManagementError(
+                64,
+                "REQUIRED_INPUT",
+                "The lmstudio provider requires model_base_url.",
+            )
         return Configuration(
             agent_user=agent_user,
             chat_port=chat_port,
@@ -616,6 +667,7 @@ class Manager:
             or not parsed.hostname
             or parsed.username
             or parsed.password
+            or parsed.query
             or parsed.fragment
         ):
             raise ManagementError(
@@ -697,11 +749,11 @@ class Manager:
             raise ManagementError(
                 73, "UNSAFE_REQUEST", "Request must be a non-symlink regular file."
             )
-        if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) & 0o077:
+        if metadata.st_uid != 0 or stat.S_IMODE(metadata.st_mode) != 0o600:
             raise ManagementError(
                 73,
                 "UNSAFE_REQUEST",
-                "Request must be root-owned and inaccessible to group and other.",
+                "Request must be root-owned with mode 0600.",
             )
         value = load_json(path)
         required = {
@@ -902,7 +954,14 @@ class Manager:
                 "UNSAFE_SECRET_FILE",
                 "Secret files must be root-owned regular files with mode 0600.",
             )
-        return sha256_bytes(path.read_bytes())
+        fingerprint = {
+            "device": metadata.st_dev,
+            "inode": metadata.st_ino,
+            "size": metadata.st_size,
+            "modified_ns": metadata.st_mtime_ns,
+            "changed_ns": metadata.st_ctime_ns,
+        }
+        return sha256_bytes(canonical_json(fingerprint))
 
     def _configuration_secret_path(
         self, invocation: Invocation, key: str, environment: str
@@ -928,7 +987,7 @@ class Manager:
             )
             if (
                 password is None
-                and not self.paths.secrets.is_file()
+                and not self._password_configured()
                 and (invocation.non_interactive or not sys.stdin.isatty())
             ):
                 required.append({"name": "chat_password_file", "secret": True})
@@ -954,14 +1013,20 @@ class Manager:
         return required
 
     def _provider_configured(self, provider: str) -> bool:
-        if not self.paths.secrets.is_file():
-            return False
-        key = PROVIDER_KEYS[provider]
         try:
-            lines = self.paths.secrets.read_text(encoding="utf-8").splitlines()
-        except OSError:
+            environment = self._read_secret_environment()
+        except ManagementError:
             return False
-        return any(line.startswith(f"{key}=") and line != f"{key}=" for line in lines)
+        return bool(environment.get(PROVIDER_KEYS[provider], "").strip())
+
+    def _password_configured(self) -> bool:
+        try:
+            environment = self._read_secret_environment()
+        except ManagementError:
+            return False
+        return runtime_auth.valid_password_hash(
+            environment.get("BEEP_ADMIN_PASSWORD_HASH")
+        )
 
     def check(
         self, identifier: str, passed: bool, summary: str, remediation: str
@@ -1015,10 +1080,7 @@ class Manager:
             ),
             self.check(
                 "credentials",
-                installed
-                and self.paths.secrets.is_file()
-                and not self.paths.secrets.is_symlink()
-                and stat.S_IMODE(self.paths.secrets.stat().st_mode) == 0o600,
+                installed and self._credentials_valid(),
                 "Beep credentials are independently protected.",
                 "Run beep-manage repair and rotate Beep credentials.",
             ),
@@ -1035,6 +1097,12 @@ class Manager:
                 ),
                 "Beep systemd assets are present.",
                 "Run beep-manage repair.",
+            ),
+            self.check(
+                "family_manager",
+                installed and self._family_manager_valid(),
+                "Beep's independent family manager assets are present.",
+                "Run beep-manage repair from a complete verified Beep release.",
             ),
         ]
         if installed and shutil.which("systemctl"):
@@ -1064,6 +1132,52 @@ class Manager:
             )
         )
         return checks
+
+    def _credentials_valid(self) -> bool:
+        try:
+            account = pwd.getpwnam(DEFAULT_USER)
+            for path in (self.paths.secrets, self.paths.session_key):
+                metadata = path.lstat()
+                if (
+                    not stat.S_ISREG(metadata.st_mode)
+                    or stat.S_IMODE(metadata.st_mode) != 0o600
+                    or metadata.st_uid != account.pw_uid
+                    or metadata.st_gid != account.pw_gid
+                ):
+                    return False
+            environment = self._read_secret_environment()
+            return (
+                runtime_auth.valid_password_hash(
+                    environment.get("BEEP_ADMIN_PASSWORD_HASH")
+                )
+                and 32
+                <= len(self.paths.session_key.read_bytes().strip())
+                <= 4096
+            )
+        except (KeyError, OSError, ManagementError):
+            return False
+
+    def _family_manager_valid(self) -> bool:
+        if not (
+            (self.paths.install_root / "bin" / "beep-agents").is_file()
+            and self.paths.catalog.is_file()
+            and not self.paths.catalog.is_symlink()
+            and self.paths.inventory.is_file()
+            and not self.paths.inventory.is_symlink()
+            and self.paths.family_schemas.is_dir()
+            and not self.paths.family_schemas.is_symlink()
+        ):
+            return False
+        try:
+            runtime_family.validate_catalog(
+                runtime_family.load_json(self.paths.catalog, label="catalog")
+            )
+            runtime_family.validate_inventory(
+                runtime_family.load_json(self.paths.inventory, label="inventory")
+            )
+        except runtime_family.FamilyError:
+            return False
+        return True
 
     def run(self, invocation: Invocation) -> tuple[Result, int]:
         configuration = (
@@ -1146,7 +1260,6 @@ class Manager:
                     configuration
                     if configuration is not None
                     else self.configuration(invocation),
-                    snapshot=invocation.operation in {"install", "update"},
                 )
             elif invocation.operation == "backup":
                 changed_resources, previous_version, backup = self._execute_backup(
@@ -1179,6 +1292,26 @@ class Manager:
                 event_id=event_id,
                 receipt_digest=receipt["digest"],
             )
+            if (
+                invocation.operation == "uninstall"
+                and invocation.retain_state is False
+            ):
+                self._journal_purge_evidence(
+                    invocation,
+                    result,
+                    event_id=event_id,
+                    receipt_digest=receipt["digest"],
+                )
+                self._finalize_purge()
+                result.receipt = None
+                result.details = {
+                    "purge_evidence": {
+                        "journal_identifier": "beep-manage",
+                        "audit_event_id": event_id,
+                        "receipt_digest": receipt["digest"],
+                        "removed_receipt_path": receipt["path"],
+                    }
+                }
         return result, 0
 
     @staticmethod
@@ -1198,7 +1331,11 @@ class Manager:
     @contextmanager
     def _lock(self) -> Iterator[None]:
         self.paths.lock.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(self.paths.lock, os.O_RDWR | os.O_CREAT, 0o600)
+        descriptor = os.open(
+            self.paths.lock,
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+            0o600,
+        )
         try:
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -1216,8 +1353,6 @@ class Manager:
         self,
         invocation: Invocation,
         configuration: Configuration,
-        *,
-        snapshot: bool,
     ) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=False)
         previous_version = str(marker["version"]) if marker else None
@@ -1226,7 +1361,9 @@ class Manager:
         self._platform_preflight()
         self._collision_preflight(marker)
         self._port_preflight(configuration.chat_port, marker is not None)
-        if snapshot and marker is not None:
+        suspended = self.paths.suspended.exists()
+        if marker is not None:
+            self._stop_services()
             self._create_recovery_snapshot(invocation.correlation_id)
         changed: list[str] = []
         uid, gid = self._ensure_identity(configuration.agent_user, changed)
@@ -1235,7 +1372,7 @@ class Manager:
         self._deploy_runtime(configuration, uid, gid, changed)
         self._deploy_configuration(invocation, configuration, uid, gid, changed)
         self._deploy_services(configuration, uid, gid, changed)
-        self._start_services(changed, suspended=self.paths.suspended.exists())
+        self._start_services(changed, suspended=suspended)
         checks = self.checks_without_marker()
         failed = [check for check in checks if check["status"] == "fail"]
         if failed:
@@ -1281,12 +1418,13 @@ class Manager:
                 "policy",
                 "credentials",
                 "service_assets",
+                "family_manager",
             }:
                 predicate = {
                     "runtime": (self.paths.install_root / "agent" / "server.py").is_file()
                     and (self.paths.runtime / "lifecycle.json").is_file(),
                     "policy": self.paths.policy.is_file(),
-                    "credentials": self.paths.secrets.is_file(),
+                    "credentials": self._credentials_valid(),
                     "service_assets": all(
                         path.is_file()
                         for path in (
@@ -1294,6 +1432,9 @@ class Manager:
                             self.paths.health_unit,
                             self.paths.health_timer,
                         )
+                    ),
+                    "family_manager": (
+                        self._family_manager_valid()
                     ),
                 }[check["id"]]
                 if predicate:
@@ -1452,10 +1593,12 @@ class Manager:
             (self.paths.configuration_root, 0o755, 0, 0),
             (self.paths.configuration_root / "secrets", 0o700, uid, gid),
             (self.paths.configuration_root / "skills.d", 0o755, 0, 0),
+            (self.paths.agents_configuration, 0o755, 0, 0),
             (self.paths.state_root, 0o750, uid, gid),
             (self.paths.runtime, 0o700, uid, gid),
             (self.paths.runtime / "logs", 0o750, uid, gid),
             (self.paths.runtime / "pi-mono-sessions", 0o700, uid, gid),
+            (self.paths.agents_state, 0o700, 0, 0),
             (self.paths.log_root, 0o750, uid, gid),
             (self.paths.receipts, 0o750, uid, gid),
             (self.paths.rollback_root, 0o700, 0, 0),
@@ -1470,19 +1613,38 @@ class Manager:
             os.chown(path, owner, group)
 
     def _ensure_dependencies(self, agent_user: str, changed: list[str]) -> None:
-        missing = [name for name in ("python3", "npm", "node", "sudo") if not shutil.which(name)]
+        if not shutil.which("apt-get") or not shutil.which("dpkg-query"):
+            raise ManagementError(
+                69, "DEPENDENCY_MISSING", "apt-get and dpkg-query are required."
+            )
+        environment = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+        missing = [
+            package
+            for package in SYSTEM_PACKAGES
+            if self._run(
+                [
+                    "dpkg-query",
+                    "-W",
+                    "-f=${db:Status-Status}",
+                    package,
+                ],
+                check=False,
+            ).stdout.strip()
+            != "installed"
+        ]
         if missing:
-            if not shutil.which("apt-get"):
-                raise ManagementError(
-                    69, "DEPENDENCY_MISSING", "apt-get is required to install dependencies."
-                )
-            environment = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
             self._run(["apt-get", "update", "-qq"], environment=environment)
             self._run(
-                ["apt-get", "install", "-y", *SYSTEM_PACKAGES, "nodejs", "npm"],
+                ["apt-get", "install", "-y", "--no-install-recommends", *missing],
                 environment=environment,
             )
             changed.append("system-packages")
+        self._ensure_node_runtime(changed)
+        for command in ("python3", "sudo"):
+            if not shutil.which(command):
+                raise ManagementError(
+                    69, "DEPENDENCY_MISSING", f"Required command is missing: {command}"
+                )
         home = Path(pwd.getpwnam(agent_user).pw_dir)
         virtualenv = home / "agent-env"
         if not (virtualenv / "bin" / "python").is_file():
@@ -1491,9 +1653,232 @@ class Manager:
             changed.append(str(virtualenv))
         self._install_bridges(changed)
 
+    def _ensure_node_runtime(self, changed: list[str]) -> None:
+        if self._node_runtime_supported():
+            return
+        if platform.machine() not in {"x86_64", "amd64"}:
+            raise ManagementError(
+                69,
+                "UNSUPPORTED_ARCHITECTURE",
+                "The pinned Beep Node runtime supports amd64 only.",
+            )
+        request = urllib.request.Request(
+            NODE_URL, headers={"User-Agent": "beep-manage/1"}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                final = urllib.parse.urlsplit(response.geturl())
+                if final.scheme != "https" or final.hostname != "nodejs.org":
+                    raise ManagementError(
+                        78,
+                        "DEPENDENCY_DOWNLOAD_FAILED",
+                        "The Node download redirected outside nodejs.org.",
+                    )
+                archive_bytes = response.read(MAX_NODE_ARCHIVE_BYTES + 1)
+        except OSError as exc:
+            raise ManagementError(
+                75,
+                "DEPENDENCY_DOWNLOAD_FAILED",
+                "Could not download the pinned Beep Node runtime.",
+                retryable=True,
+            ) from exc
+        if (
+            len(archive_bytes) > MAX_NODE_ARCHIVE_BYTES
+            or hashlib.sha256(archive_bytes).hexdigest() != NODE_SHA256
+        ):
+            raise ManagementError(
+                78,
+                "DEPENDENCY_INTEGRITY_FAILED",
+                "The pinned Beep Node runtime digest did not match.",
+            )
+        with tempfile.TemporaryDirectory(
+            prefix=".node-stage-", dir=self.paths.install_root
+        ) as directory:
+            work = Path(directory)
+            archive = work / NODE_ARCHIVE
+            archive.write_bytes(archive_bytes)
+            staged = work / "node"
+            self._extract_node_archive(archive, staged)
+            atomic_write(
+                staged / ".beep-node.json",
+                canonical_json(
+                    {
+                        "schema_version": 1,
+                        "version": NODE_VERSION,
+                        "archive": NODE_ARCHIVE,
+                        "sha256": NODE_SHA256,
+                    }
+                )
+                + b"\n",
+                mode=0o644,
+            )
+            previous = self.paths.install_root / f".node-old-{uuid.uuid4().hex}"
+            if self.paths.node_root.is_symlink():
+                raise ManagementError(
+                    73, "UNSAFE_PATH", f"Refusing symlink: {self.paths.node_root}"
+                )
+            if self.paths.node_root.exists():
+                if not self.paths.node_root.is_dir():
+                    raise ManagementError(
+                        73, "UNSAFE_PATH", f"Refusing unsafe path: {self.paths.node_root}"
+                    )
+                os.replace(self.paths.node_root, previous)
+            try:
+                os.replace(staged, self.paths.node_root)
+            except Exception:
+                if previous.exists() and not self.paths.node_root.exists():
+                    os.replace(previous, self.paths.node_root)
+                raise
+            if previous.exists():
+                shutil.rmtree(previous)
+        if not self._node_runtime_supported():
+            raise ManagementError(
+                69, "DEPENDENCY_MISSING", f"Node {NODE_VERSION} is required."
+            )
+        changed.append(str(self.paths.node_root))
+
+    def _node_runtime_supported(self) -> bool:
+        node = self.paths.node_root / "bin" / "node"
+        npm = self.paths.node_root / "bin" / "npm"
+        marker = self.paths.node_root / ".beep-node.json"
+        if not node.is_file() or not npm.is_file() or not marker.is_file():
+            return False
+        try:
+            metadata = load_json(marker)
+        except ManagementError:
+            return False
+        if metadata != {
+            "schema_version": 1,
+            "version": NODE_VERSION,
+            "archive": NODE_ARCHIVE,
+            "sha256": NODE_SHA256,
+        }:
+            return False
+        completed = self._run([node, "--version"], check=False)
+        return completed.returncode == 0 and completed.stdout.strip() == f"v{NODE_VERSION}"
+
+    @staticmethod
+    def _extract_node_archive(archive: Path, destination: Path) -> None:
+        prefix = PurePosixPath(f"node-v{NODE_VERSION}-linux-x64")
+        file_count = 0
+        total_size = 0
+        try:
+            with tarfile.open(archive, "r:xz") as source:
+                members = source.getmembers()
+                seen: set[PurePosixPath] = set()
+                safe_links: dict[PurePosixPath, tuple[str, ...]] = {}
+                for member in members:
+                    path = PurePosixPath(member.name)
+                    if (
+                        path.is_absolute()
+                        or ".." in path.parts
+                        or not path.parts
+                        or path.parts[0] != str(prefix)
+                        or path in seen
+                        or member.islnk()
+                        or member.isdev()
+                        or member.isfifo()
+                        or (
+                            not member.isfile()
+                            and not member.isdir()
+                            and not member.issym()
+                        )
+                    ):
+                        raise ManagementError(
+                            78,
+                            "DEPENDENCY_INTEGRITY_FAILED",
+                            "The Node archive contains an unsafe member.",
+                        )
+                    seen.add(path)
+                    if member.isfile():
+                        file_count += 1
+                        total_size += member.size
+                    if file_count > 25_000 or total_size > 512 * 1024 * 1024:
+                        raise ManagementError(
+                            78,
+                            "DEPENDENCY_INTEGRITY_FAILED",
+                            "The Node archive exceeds extraction limits.",
+                        )
+                    if member.issym():
+                        link = PurePosixPath(member.linkname)
+                        if link.is_absolute():
+                            raise ManagementError(
+                                78,
+                                "DEPENDENCY_INTEGRITY_FAILED",
+                                "The Node archive contains an unsafe link.",
+                            )
+                        stack: list[str] = []
+                        for part in path.parent.parts[1:] + link.parts:
+                            if part in {"", "."}:
+                                continue
+                            if part == "..":
+                                if not stack:
+                                    raise ManagementError(
+                                        78,
+                                        "DEPENDENCY_INTEGRITY_FAILED",
+                                        "The Node archive link escapes its root.",
+                                    )
+                                stack.pop()
+                            else:
+                                stack.append(part)
+                        safe_links[path] = tuple(stack)
+                destination.mkdir(mode=0o755)
+                for member in members:
+                    relative = PurePosixPath(member.name).relative_to(prefix)
+                    if not relative.parts:
+                        continue
+                    target = destination.joinpath(*relative.parts)
+                    if member.isdir():
+                        target.mkdir(parents=True, exist_ok=True, mode=0o755)
+                        os.chmod(target, 0o755)
+                    elif member.issym():
+                        continue
+                    else:
+                        target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+                        extracted = source.extractfile(member)
+                        if extracted is None:
+                            raise ManagementError(
+                                78,
+                                "DEPENDENCY_INTEGRITY_FAILED",
+                                "The Node archive is incomplete.",
+                            )
+                        with extracted, target.open("xb") as output:
+                            shutil.copyfileobj(extracted, output, length=1024 * 1024)
+                        os.chmod(target, 0o755 if member.mode & 0o111 else 0o644)
+                for member_path, link_parts in safe_links.items():
+                    relative = member_path.relative_to(prefix)
+                    target = destination.joinpath(*relative.parts)
+                    link_target = destination.joinpath(*link_parts)
+                    if not link_target.is_file() or link_target.is_symlink():
+                        raise ManagementError(
+                            78,
+                            "DEPENDENCY_INTEGRITY_FAILED",
+                            "The Node archive link target is invalid.",
+                        )
+                    target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+                    shutil.copyfile(link_target, target)
+                    os.chmod(target, stat.S_IMODE(link_target.stat().st_mode))
+        except ManagementError:
+            raise
+        except (OSError, tarfile.TarError) as exc:
+            raise ManagementError(
+                78, "DEPENDENCY_INTEGRITY_FAILED", "The Node archive is invalid."
+            ) from exc
+
     def _install_bridges(self, changed: list[str]) -> None:
-        if not shutil.which("npm") or not shutil.which("node"):
+        npm = self.paths.node_root / "bin" / "npm"
+        node = self.paths.node_root / "bin" / "node"
+        if not npm.is_file() or not node.is_file():
             raise ManagementError(69, "DEPENDENCY_MISSING", "Node and npm are required.")
+        environment = {
+            "PATH": (
+                f"{self.paths.node_root / 'bin'}:"
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ),
+            "HOME": "/root",
+            "LANG": "C.UTF-8",
+            "NPM_CONFIG_PREFIX": str(self.paths.node_root),
+        }
         lock = self.source_root / "payload" / "agent" / "bridge-dependencies.lock"
         pins: list[tuple[str, str, str, str]] = []
         for line in lock.read_text(encoding="utf-8").splitlines():
@@ -1505,8 +1890,9 @@ class Manager:
             _, package, version, url, digest, _, _ = fields
             pins.append((package, version, url, digest))
         installed = self._run(
-            ["npm", "ls", "-g", "--depth=0", "--json"],
+            [str(npm), "ls", "-g", "--depth=0", "--json"],
             check=False,
+            environment=environment,
         )
         try:
             npm_state = json.loads(installed.stdout or "{}").get("dependencies", {})
@@ -1541,7 +1927,10 @@ class Manager:
                     )
                 destination.write_bytes(data)
                 archives.append(str(destination))
-            self._run(["npm", "install", "-g", "--ignore-scripts", *archives])
+            self._run(
+                [str(npm), "install", "-g", "--ignore-scripts", *archives],
+                environment=environment,
+            )
         changed.append("pinned-node-bridges")
 
     def _deploy_runtime(
@@ -1559,6 +1948,7 @@ class Manager:
             self.paths.install_root / "skills",
             changed,
         )
+        self._deploy_family_schemas(changed)
         pi_root = self.paths.install_root / "pi"
         pi_root.mkdir(parents=True, exist_ok=True)
         settings = (payload / "agent" / "templates" / "settings.json.tmpl").read_bytes()
@@ -1578,6 +1968,7 @@ class Manager:
         if atomic_write(version_path, f"{self.version}\n".encode(), mode=0o644):
             changed.append(str(version_path))
         self._deploy_product_source(changed)
+        self._deploy_pi_models(configuration, uid, gid, changed)
         for path in self.paths.install_root.rglob("*"):
             if path.is_symlink():
                 raise ManagementError(73, "UNSAFE_PATH", f"Runtime contains symlink: {path}")
@@ -1591,6 +1982,67 @@ class Manager:
         os.chown(self.paths.install_root, 0, 0)
         os.chmod(self.paths.install_root, 0o755)
         os.chown(self.paths.runtime, uid, gid)
+
+    def _deploy_pi_models(
+        self,
+        configuration: Configuration,
+        uid: int,
+        gid: int,
+        changed: list[str],
+    ) -> None:
+        if (
+            configuration.provider != "lmstudio"
+            or configuration.model is None
+            or configuration.model_base_url is None
+        ):
+            return
+        home = Path(pwd.getpwnam(configuration.agent_user).pw_dir)
+        pi_root = home / ".pi"
+        agent_root = pi_root / "agent"
+        for path in (pi_root, agent_root):
+            if path.is_symlink() or (path.exists() and not path.is_dir()):
+                raise ManagementError(73, "UNSAFE_PATH", f"Refusing unsafe path: {path}")
+            path.mkdir(mode=0o700, exist_ok=True)
+            os.chmod(path, 0o700)
+            os.chown(path, uid, gid)
+        models = agent_root / "models.json"
+        content = {
+            "providers": {
+                "lmstudio": {
+                    "baseUrl": configuration.model_base_url,
+                    "api": "openai-completions",
+                    "apiKey": "LMSTUDIO_API_KEY",
+                    "compat": {
+                        "supportsDeveloperRole": False,
+                        "supportsReasoningEffort": False,
+                    },
+                    "models": [{"id": configuration.model}],
+                }
+            }
+        }
+        if atomic_write(
+            models,
+            json.dumps(content, indent=2, sort_keys=True).encode() + b"\n",
+            mode=0o600,
+            uid=uid,
+            gid=gid,
+        ):
+            changed.append(str(models))
+
+    def _deploy_family_schemas(self, changed: list[str]) -> None:
+        candidates = (
+            self.source_root.parents[1] / "family" / "schemas",
+            self.paths.family_schemas,
+        )
+        source = next((path for path in candidates if path.is_dir()), None)
+        if source is None:
+            raise ManagementError(
+                66,
+                "SOURCE_INCOMPLETE",
+                "The shared family schemas are missing from the Beep release.",
+            )
+        if source.resolve() != self.paths.family_schemas.resolve(strict=False):
+            self._sync_tree(source, self.paths.family_schemas, changed)
 
     def _deploy_product_source(self, changed: list[str]) -> None:
         if self.source_root == self.paths.product_root.resolve(strict=False):
@@ -1620,6 +2072,8 @@ class Manager:
         destination.mkdir(parents=True, exist_ok=True)
         expected: set[Path] = set()
         for item in sorted(source.rglob("*")):
+            if "__pycache__" in item.parts or item.suffix == ".pyc":
+                continue
             relative = item.relative_to(source)
             target = destination / relative
             expected.add(target)
@@ -1653,6 +2107,12 @@ class Manager:
             mode=0o644,
         ):
             changed.append(str(self.paths.descriptor))
+        if self.paths.policy.is_symlink() or (
+            self.paths.policy.exists() and not self.paths.policy.is_file()
+        ):
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Refusing unsafe policy path: {self.paths.policy}"
+            )
         if not self.paths.policy.exists():
             if atomic_write(
                 self.paths.policy,
@@ -1660,6 +2120,32 @@ class Manager:
                 mode=0o644,
             ):
                 changed.append(str(self.paths.policy))
+        else:
+            os.chmod(self.paths.policy, 0o644)
+            os.chown(self.paths.policy, 0, 0)
+        catalog_source = self.source_root / "payload" / "etc" / "agents" / "catalog.json"
+        runtime_family.validate_catalog(
+            runtime_family.load_json(catalog_source, label="catalog")
+        )
+        if atomic_write(self.paths.catalog, catalog_source.read_bytes(), mode=0o644):
+            changed.append(str(self.paths.catalog))
+        if self.paths.inventory.exists():
+            runtime_family.validate_inventory(
+                runtime_family.load_json(self.paths.inventory, label="inventory")
+            )
+        elif atomic_write(
+            self.paths.inventory,
+            canonical_json(
+                {
+                    "schema_version": 1,
+                    "generated_at": utc_now(),
+                    "products": {},
+                }
+            )
+            + b"\n",
+            mode=0o600,
+        ):
+            changed.append(str(self.paths.inventory))
         password_file = self._configuration_secret_path(
             invocation, "chat_password_file", "BEEP_ADMIN_PASSWORD_FILE"
         )
@@ -1683,10 +2169,23 @@ class Manager:
                 )
             elif configuration.provider == "lmstudio":
                 existing.setdefault("LMSTUDIO_API_KEY", "local")
+        else:
+            existing.pop("BEEP_PROVIDER", None)
         if configuration.model is not None:
             existing["BEEP_MODEL"] = configuration.model
+        else:
+            existing.pop("BEEP_MODEL", None)
         if configuration.model_base_url is not None:
             existing["BEEP_MODEL_BASE_URL"] = configuration.model_base_url
+        else:
+            existing.pop("BEEP_MODEL_BASE_URL", None)
+        if (
+            configuration.provider == "openai"
+            and configuration.model_base_url is not None
+        ):
+            existing["OPENAI_BASE_URL"] = configuration.model_base_url
+        else:
+            existing.pop("OPENAI_BASE_URL", None)
         existing.update(
             {
                 "BEEP_DIR": str(self.paths.install_root),
@@ -1708,12 +2207,27 @@ class Manager:
             gid=gid,
         ):
             changed.append(str(self.paths.secrets))
-        if not self.paths.session_key.exists():
+        if self.paths.session_key.is_symlink() or (
+            self.paths.session_key.exists() and not self.paths.session_key.is_file()
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Refusing unsafe session key path: {self.paths.session_key}",
+            )
+        current_session_key = (
+            self.paths.session_key.read_bytes()
+            if self.paths.session_key.is_file()
+            else b""
+        )
+        if not 32 <= len(current_session_key.strip()) <= 4096:
             key = secrets.token_urlsafe(48).encode() + b"\n"
-            if atomic_write(
-                self.paths.session_key, key, mode=0o600, uid=uid, gid=gid
-            ):
-                changed.append(str(self.paths.session_key))
+        else:
+            key = current_session_key
+        if atomic_write(
+            self.paths.session_key, key, mode=0o600, uid=uid, gid=gid
+        ):
+            changed.append(str(self.paths.session_key))
         if atomic_write(
             self.paths.config,
             canonical_json(configuration.object()) + b"\n",
@@ -1732,7 +2246,13 @@ class Manager:
     def _quote_env(value: str) -> str:
         if "\n" in value or "\r" in value or "\x00" in value:
             raise ManagementError(65, "INVALID_SECRET", "Environment value is invalid.")
-        return "'" + value.replace("'", "'\"'\"'") + "'"
+        escaped = (
+            value.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("$", "\\$")
+            .replace("`", "\\`")
+        )
+        return f'"{escaped}"'
 
     def _read_secret_environment(self) -> dict[str, str]:
         if not self.paths.secrets.is_file() or self.paths.secrets.is_symlink():
@@ -1744,9 +2264,20 @@ class Manager:
             key, separator, value = line.partition("=")
             if not separator or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
                 raise ManagementError(78, "INVALID_SECRET_ENV", "Secret environment is invalid.")
-            if value.startswith("'") and value.endswith("'"):
-                value = value[1:-1].replace("'\"'\"'", "'")
-            result[key] = value
+            lexer = shlex.shlex(value, posix=True)
+            lexer.whitespace_split = True
+            lexer.commenters = ""
+            try:
+                fields = list(lexer)
+            except ValueError as exc:
+                raise ManagementError(
+                    78, "INVALID_SECRET_ENV", "Secret environment is invalid."
+                ) from exc
+            if len(fields) != 1:
+                raise ManagementError(
+                    78, "INVALID_SECRET_ENV", "Secret environment is invalid."
+                )
+            result[key] = fields[0]
         return result
 
     @staticmethod
@@ -1809,15 +2340,7 @@ class Manager:
         wrapper = (self.source_root / "scripts" / "manage.sh").read_bytes()
         if atomic_write(self.paths.entrypoint, wrapper, mode=0o755):
             changed.append(str(self.paths.entrypoint))
-        commands = (
-            "beep-audit-recent",
-            "beep-chat",
-            "beep-diagnostics",
-            "beep-health",
-            "beep-secrets-edit",
-            "beep-verify-release",
-        )
-        for command in commands:
+        for command in HOST_COMMANDS:
             destination = Path("/usr/local/bin") / command
             source = self.paths.install_root / "bin" / command
             if atomic_write(destination, source.read_bytes(), mode=0o755):
@@ -1843,38 +2366,51 @@ class Manager:
         if destination is None:
             raise ManagementError(64, "REQUIRED_INPUT", "backup_destination is required.")
         destination.mkdir(parents=True, exist_ok=True)
+        if not destination.is_dir() or destination.is_symlink():
+            raise ManagementError(73, "UNSAFE_PATH", "Backup destination is unsafe.")
         archive = destination / f"beep-{self.version}-{invocation.correlation_id}.tar.gz"
         if archive.exists() or archive.is_symlink():
             raise ManagementError(73, "BACKUP_EXISTS", "Backup destination already exists.")
-        with tarfile.open(archive, "x:gz") as output:
-            for path, name in (
-                (self.paths.configuration_root, "etc"),
-                (self.paths.state_root, "state"),
-                (self.paths.log_root, "log"),
-            ):
-                self._assert_tree_safe(path)
-                output.add(path, arcname=name, recursive=True)
-            manifest = canonical_json(
-                {
-                    "schema_version": 1,
-                    "product_id": PRODUCT_ID,
-                    "instance_id": marker["instance_id"],
-                    "version": marker["version"],
-                    "created_at": utc_now(),
-                }
-            ) + b"\n"
-            info = tarfile.TarInfo("manifest.json")
-            info.size = len(manifest)
-            info.mode = 0o600
-            with tempfile.SpooledTemporaryFile() as handle:
-                handle.write(manifest)
-                handle.seek(0)
-                output.addfile(info, handle)
-        os.chmod(archive, 0o600)
-        with tarfile.open(archive, "r:gz") as check:
-            names = set(check.getnames())
-            if "manifest.json" not in names:
-                raise ManagementError(1, "BACKUP_INVALID", "Backup verification failed.")
+        suspended = self.paths.suspended.exists()
+        self._stop_services()
+        try:
+            with tarfile.open(archive, "x:gz") as output:
+                for path, name in (
+                    (self.paths.configuration_root, "etc"),
+                    (self.paths.state_root, "state"),
+                    (self.paths.log_root, "log"),
+                ):
+                    self._assert_tree_safe(path)
+                    output.add(path, arcname=name, recursive=True)
+                manifest = canonical_json(
+                    {
+                        "schema_version": 1,
+                        "product_id": PRODUCT_ID,
+                        "instance_id": marker["instance_id"],
+                        "version": marker["version"],
+                        "created_at": utc_now(),
+                    }
+                ) + b"\n"
+                info = tarfile.TarInfo("manifest.json")
+                info.size = len(manifest)
+                info.mode = 0o600
+                with tempfile.SpooledTemporaryFile() as handle:
+                    handle.write(manifest)
+                    handle.seek(0)
+                    output.addfile(info, handle)
+            os.chmod(archive, 0o600)
+            with tarfile.open(archive, "r:gz") as check:
+                names = set(check.getnames())
+                if "manifest.json" not in names:
+                    raise ManagementError(
+                        1, "BACKUP_INVALID", "Backup verification failed."
+                    )
+        except Exception:
+            archive.unlink(missing_ok=True)
+            raise
+        finally:
+            if not suspended:
+                self._start_services([], suspended=False)
         return [str(archive)], str(marker["version"]), str(archive)
 
     def _backup_destination(self, invocation: Invocation) -> Path | None:
@@ -1909,30 +2445,101 @@ class Manager:
         return destination
 
     def _create_recovery_snapshot(self, correlation_id: str) -> Path:
+        marker = self.load_marker(required=True)
         snapshot = self.paths.rollback_root / correlation_id
         if snapshot.exists():
+            self._assert_tree_safe(snapshot)
             shutil.rmtree(snapshot)
-        snapshot.mkdir(parents=True, mode=0o700)
-        for source, name in (
-            (self.paths.install_root, "opt"),
-            (self.paths.configuration_root, "etc"),
-            (self.paths.state_root, "state"),
-        ):
-            self._assert_tree_safe(source)
-            shutil.copytree(source, snapshot / name, symlinks=False)
-        atomic_write(
-            snapshot / "snapshot.json",
-            canonical_json(
-                {
-                    "schema_version": 1,
-                    "product_id": PRODUCT_ID,
-                    "created_at": utc_now(),
-                    "version": self.version,
-                }
+        self.paths.rollback_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        temporary = Path(
+            tempfile.mkdtemp(
+                prefix=f".beep-recovery-{correlation_id}-",
+                dir=self.paths.state_root.parent,
             )
-            + b"\n",
-            mode=0o600,
         )
+        try:
+            for source, name in (
+                (self.paths.install_root, "opt"),
+                (self.paths.configuration_root, "etc"),
+            ):
+                self._assert_tree_safe(source)
+                shutil.copytree(source, temporary / name, symlinks=False)
+            self._assert_tree_safe(self.paths.state_root)
+
+            def omit_recovery(directory: str, names: list[str]) -> set[str]:
+                if Path(directory) == self.paths.state_root:
+                    return {self.paths.rollback_root.name} & set(names)
+                return set()
+
+            shutil.copytree(
+                self.paths.state_root,
+                temporary / "state",
+                symlinks=False,
+                ignore=omit_recovery,
+            )
+            ownership: dict[str, list[int]] = {}
+            for source, name in (
+                (self.paths.install_root, "opt"),
+                (self.paths.configuration_root, "etc"),
+                (self.paths.state_root, "state"),
+            ):
+                ownership.update(
+                    self._ownership_map(
+                        source,
+                        name,
+                        excluded=(
+                            {self.paths.rollback_root}
+                            if source == self.paths.state_root
+                            else set()
+                        ),
+                    )
+                )
+            present_host_files: list[str] = []
+            for host_path in self._host_resources():
+                if host_path.is_symlink():
+                    raise ManagementError(
+                        73, "UNSAFE_PATH", f"Refusing symlink: {host_path}"
+                    )
+                if not host_path.exists():
+                    continue
+                if not host_path.is_file():
+                    raise ManagementError(
+                        73, "UNSAFE_PATH", f"Host resource is not a file: {host_path}"
+                    )
+                relative = host_path.relative_to("/")
+                target = temporary / "host" / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(host_path, target)
+                present_host_files.append(str(host_path))
+                metadata = host_path.stat(follow_symlinks=False)
+                ownership[f"host/{relative}"] = [metadata.st_uid, metadata.st_gid]
+            digests = {
+                name: self._tree_digest(temporary / name)
+                for name in ("opt", "etc", "state", "host")
+                if (temporary / name).exists()
+            }
+            atomic_write(
+                temporary / "snapshot.json",
+                canonical_json(
+                    {
+                        "schema_version": 1,
+                        "product_id": PRODUCT_ID,
+                        "correlation_id": correlation_id,
+                        "instance_id": marker["instance_id"],
+                        "created_at": utc_now(),
+                        "version": marker["version"],
+                        "tree_digests": digests,
+                        "host_files": sorted(present_host_files),
+                        "ownership": ownership,
+                    }
+                )
+                + b"\n",
+                mode=0o600,
+            )
+            os.replace(temporary, snapshot)
+        finally:
+            if temporary.exists():
+                shutil.rmtree(temporary)
         atomic_write(
             self.paths.rollback_root / "latest",
             f"{snapshot.name}\n".encode(),
@@ -1946,28 +2553,214 @@ class Manager:
         if not latest.is_file() or latest.is_symlink():
             raise ManagementError(66, "ROLLBACK_UNAVAILABLE", "No rollback snapshot exists.")
         name = latest.read_text(encoding="utf-8").strip()
-        if not re.fullmatch(r"[0-9a-f-]{36}", name):
-            raise ManagementError(65, "ROLLBACK_INVALID", "Rollback metadata is invalid.")
+        try:
+            if str(uuid.UUID(name)) != name:
+                raise ValueError
+        except ValueError as exc:
+            raise ManagementError(
+                65, "ROLLBACK_INVALID", "Rollback metadata is invalid."
+            ) from exc
         snapshot = self.paths.rollback_root / name
+        self._assert_tree_safe(snapshot)
         metadata = load_json(snapshot / "snapshot.json")
-        if metadata.get("product_id") != PRODUCT_ID:
-            raise ManagementError(65, "ROLLBACK_INVALID", "Rollback snapshot is invalid.")
+        expected_fields = {
+            "schema_version",
+            "product_id",
+            "correlation_id",
+            "instance_id",
+            "created_at",
+            "version",
+            "tree_digests",
+            "host_files",
+            "ownership",
+        }
+        if (
+            set(metadata) != expected_fields
+            or metadata["schema_version"] != 1
+            or metadata["product_id"] != PRODUCT_ID
+            or metadata["correlation_id"] != name
+            or metadata["instance_id"] != marker["instance_id"]
+            or not VERSION_PATTERN.fullmatch(str(metadata["version"]))
+            or not isinstance(metadata["tree_digests"], dict)
+            or not isinstance(metadata["host_files"], list)
+            or not isinstance(metadata["ownership"], dict)
+            or any(
+                path not in {str(item) for item in self._host_resources()}
+                for path in metadata["host_files"]
+            )
+        ):
+            raise ManagementError(65, "ROLLBACK_INVALID", "Rollback metadata is invalid.")
+        self._validate_snapshot_ownership(metadata["ownership"], snapshot)
+        for tree_name, expected_digest in metadata["tree_digests"].items():
+            if tree_name not in {"opt", "etc", "state", "host"} or (
+                self._tree_digest(snapshot / tree_name) != expected_digest
+            ):
+                raise ManagementError(
+                    78, "ROLLBACK_INTEGRITY_FAILED", "Rollback snapshot changed."
+                )
+        if not {"opt", "etc", "state"} <= set(metadata["tree_digests"]):
+            raise ManagementError(65, "ROLLBACK_INVALID", "Rollback snapshot is incomplete.")
         self._stop_services()
         for source, destination in (
             (snapshot / "opt", self.paths.install_root),
             (snapshot / "etc", self.paths.configuration_root),
-            (snapshot / "state", self.paths.state_root),
         ):
             self._assert_tree_safe(source)
             if destination.exists():
+                self._assert_tree_safe(destination)
                 shutil.rmtree(destination)
             shutil.copytree(source, destination, symlinks=False)
+        self._assert_tree_safe(self.paths.state_root)
+        for path in self.paths.state_root.iterdir():
+            if path == self.paths.rollback_root:
+                continue
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+        state_source = snapshot / "state"
+        for path in state_source.iterdir():
+            target = self.paths.state_root / path.name
+            if path.is_dir():
+                shutil.copytree(path, target, symlinks=False)
+            else:
+                shutil.copy2(path, target)
+        host_files = set(metadata["host_files"])
+        for host_path in self._host_resources():
+            if host_path.is_symlink():
+                raise ManagementError(73, "UNSAFE_PATH", f"Refusing symlink: {host_path}")
+            if host_path.exists():
+                if not host_path.is_file():
+                    raise ManagementError(
+                        73, "UNSAFE_PATH", f"Host resource is not a file: {host_path}"
+                    )
+                host_path.unlink()
+            if str(host_path) in host_files:
+                source = snapshot / "host" / host_path.relative_to("/")
+                if not source.is_file() or source.is_symlink():
+                    raise ManagementError(
+                        78, "ROLLBACK_INTEGRITY_FAILED", "Host snapshot is incomplete."
+                    )
+                host_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, host_path)
+        self._restore_snapshot_ownership(metadata["ownership"])
         self._start_services([], suspended=self.paths.suspended.exists())
+        restored_manager = Manager(source_root=self.paths.product_root)
+        failed = [
+            check for check in restored_manager.checks() if check["status"] == "fail"
+        ]
+        if failed:
+            raise ManagementError(
+                1, "ROLLBACK_HEALTH_FAILED", "Restored Beep failed integrity checks."
+            )
         return [
             str(self.paths.install_root),
             str(self.paths.configuration_root),
             str(self.paths.state_root),
         ], str(marker["version"])
+
+    def _host_resources(self) -> tuple[Path, ...]:
+        return (
+            self.paths.chat_unit,
+            self.paths.health_unit,
+            self.paths.health_timer,
+            self.paths.logrotate,
+            self.paths.sudoers,
+            self.paths.entrypoint,
+            *(Path("/usr/local/bin") / name for name in HOST_COMMANDS),
+        )
+
+    @staticmethod
+    def _ownership_map(
+        root: Path,
+        prefix: str,
+        *,
+        excluded: set[Path],
+    ) -> dict[str, list[int]]:
+        result: dict[str, list[int]] = {}
+        for path in (root, *sorted(root.rglob("*"))):
+            if any(path == item or item in path.parents for item in excluded):
+                continue
+            if path.is_symlink():
+                raise ManagementError(73, "UNSAFE_PATH", f"Symlink rejected: {path}")
+            relative = PurePosixPath(".") if path == root else PurePosixPath(
+                *path.relative_to(root).parts
+            )
+            key = str(PurePosixPath(prefix) / relative)
+            metadata = path.stat(follow_symlinks=False)
+            result[key] = [metadata.st_uid, metadata.st_gid]
+        return result
+
+    @staticmethod
+    def _validate_snapshot_ownership(value: dict[str, Any], snapshot: Path) -> None:
+        if not value:
+            raise ManagementError(65, "ROLLBACK_INVALID", "Ownership map is missing.")
+        for name, ownership in value.items():
+            path = PurePosixPath(name) if isinstance(name, str) else PurePosixPath("/")
+            if (
+                not isinstance(name, str)
+                or path.is_absolute()
+                or ".." in path.parts
+                or not path.parts
+                or path.parts[0] not in {"opt", "etc", "state", "host"}
+                or not isinstance(ownership, list)
+                or len(ownership) != 2
+                or any(
+                    isinstance(item, bool) or not isinstance(item, int) or item < 0
+                    for item in ownership
+                )
+            ):
+                raise ManagementError(
+                    65, "ROLLBACK_INVALID", "Ownership map is invalid."
+                )
+            source = snapshot.joinpath(*path.parts)
+            if not source.exists() or source.is_symlink():
+                raise ManagementError(
+                    65, "ROLLBACK_INVALID", "Ownership map references a missing path."
+                )
+
+    def _restore_snapshot_ownership(self, value: dict[str, list[int]]) -> None:
+        roots = {
+            "opt": self.paths.install_root,
+            "etc": self.paths.configuration_root,
+            "state": self.paths.state_root,
+        }
+        for name, ownership in value.items():
+            path = PurePosixPath(name)
+            if path.parts[0] == "host":
+                target = Path("/").joinpath(*path.parts[1:])
+            else:
+                target = roots[path.parts[0]].joinpath(*path.parts[1:])
+            if not target.exists() or target.is_symlink():
+                raise ManagementError(
+                    78, "ROLLBACK_INTEGRITY_FAILED", "Restored ownership target is missing."
+                )
+            os.chown(target, ownership[0], ownership[1])
+
+    @staticmethod
+    def _tree_digest(root: Path) -> str:
+        if not root.is_dir() or root.is_symlink():
+            raise ManagementError(65, "SNAPSHOT_INVALID", f"Missing snapshot tree: {root}")
+        digest = hashlib.sha256()
+        for path in (root, *sorted(root.rglob("*"))):
+            if path.is_symlink():
+                raise ManagementError(73, "UNSAFE_PATH", f"Symlink rejected: {path}")
+            relative = "." if path == root else str(path.relative_to(root))
+            metadata = path.stat(follow_symlinks=False)
+            digest.update(relative.encode())
+            digest.update(b"\0")
+            digest.update(f"{stat.S_IMODE(metadata.st_mode):04o}".encode())
+            digest.update(b"\0")
+            if path.is_file():
+                with path.open("rb") as handle:
+                    for block in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(block)
+            elif not path.is_dir():
+                raise ManagementError(
+                    73, "UNSAFE_PATH", f"Unsupported snapshot entry: {path}"
+                )
+            digest.update(b"\0")
+        return sha256_bytes(digest.digest())
 
     def _execute_suspend(self) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=True)
@@ -2015,14 +2808,7 @@ class Manager:
             self.paths.logrotate,
             self.paths.sudoers,
             self.paths.entrypoint,
-            *(Path("/usr/local/bin") / name for name in (
-                "beep-audit-recent",
-                "beep-chat",
-                "beep-diagnostics",
-                "beep-health",
-                "beep-secrets-edit",
-                "beep-verify-release",
-            )),
+            *(Path("/usr/local/bin") / name for name in HOST_COMMANDS),
         ):
             if path.exists() and not path.is_symlink():
                 path.unlink()
@@ -2047,18 +2833,68 @@ class Manager:
             for path in (
                 self.paths.configuration_root,
                 self.paths.state_root,
-                self.paths.log_root,
             ):
                 if path.exists():
                     self._assert_tree_safe(path)
                     shutil.rmtree(path)
                     changed.append(str(path))
-            self._run(["userdel", "--remove", DEFAULT_USER], check=False)
-            self._run(["groupdel", DEFAULT_USER], check=False)
-            changed.extend(["user:beep", "group:beep"])
+            changed.extend(
+                [str(self.paths.log_root), "user:beep", "group:beep"]
+            )
         if shutil.which("systemctl"):
             self._run(["systemctl", "daemon-reload"], check=False)
         return sorted(set(changed)), str(marker["version"])
+
+    @staticmethod
+    def _journal_purge_evidence(
+        invocation: Invocation,
+        result: Result,
+        *,
+        event_id: str,
+        receipt_digest: str,
+    ) -> None:
+        systemd_cat = Path("/usr/bin/systemd-cat")
+        if not systemd_cat.is_file() or systemd_cat.is_symlink():
+            raise ManagementError(
+                69,
+                "JOURNAL_UNAVAILABLE",
+                "Cannot purge Beep without recording final journal evidence.",
+            )
+        evidence = {
+            "timestamp": utc_now(),
+            "event_id": event_id,
+            "correlation_id": invocation.correlation_id,
+            "product_id": PRODUCT_ID,
+            "instance_id": result.instance_id,
+            "operation": "uninstall",
+            "phase": "execute",
+            "actor": invocation.actor,
+            "result": result.status,
+            "changed": result.changed,
+            "receipt_digest": receipt_digest,
+            "purge": True,
+        }
+        completed = subprocess.run(
+            [str(systemd_cat), "--identifier=beep-manage", "--priority=notice"],
+            check=False,
+            input=(canonical_json(evidence) + b"\n"),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=30,
+        )
+        if completed.returncode != 0:
+            raise ManagementError(
+                1,
+                "JOURNAL_WRITE_FAILED",
+                "Final Beep purge evidence could not be written to the journal.",
+            )
+
+    def _finalize_purge(self) -> None:
+        if self.paths.log_root.exists():
+            self._assert_tree_safe(self.paths.log_root)
+            shutil.rmtree(self.paths.log_root)
+        self._run(["userdel", "--remove", DEFAULT_USER], check=False)
+        self._run(["groupdel", DEFAULT_USER], check=False)
 
     def _stop_services(self) -> None:
         if not shutil.which("systemctl"):
@@ -2085,6 +2921,7 @@ class Manager:
                 or path.is_symlink()
                 or "dist" in path.parts
                 or "__pycache__" in path.parts
+                or path.suffix == ".pyc"
             ):
                 continue
             digest.update(str(path.relative_to(self.source_root)).encode())
@@ -2145,9 +2982,12 @@ class Manager:
         receipt = {
             "schema_version": 1,
             "response": result.object(),
-            "installed_version": self.version
-            if result.operation != "uninstall"
-            else None,
+            "installed_version": (
+                marker["version"]
+                if result.operation != "uninstall"
+                and (marker := self.load_marker(required=False)) is not None
+                else None
+            ),
             "previous_version": previous_version,
             "changed_resources": sorted(set(changed_resources)),
             "audit_event_id": event_id,
@@ -2187,6 +3027,14 @@ class Manager:
             0o640,
         )
         try:
+            try:
+                account = pwd.getpwnam(DEFAULT_USER)
+                group = grp.getgrnam(DEFAULT_USER)
+            except KeyError:
+                pass
+            else:
+                os.fchown(descriptor, account.pw_uid, group.gr_gid)
+            os.fchmod(descriptor, 0o640)
             os.write(descriptor, canonical_json(event) + b"\n")
             os.fsync(descriptor)
         finally:

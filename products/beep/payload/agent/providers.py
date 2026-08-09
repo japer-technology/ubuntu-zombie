@@ -35,7 +35,7 @@ the left and supply the matching API key in
 extension any ``/v1/chat/completions`` endpoint such as Ollama or
 llama.cpp). Unlike the hosted providers it has no fixed endpoint, so
 the agent loop reaches it through a custom ``pi`` provider defined in
-``~/.pi/agent/models.json`` (written by ``scripts/install.sh`` when a
+``~/.pi/agent/models.json`` (written by ``beep-manage`` when a
 local server is discovered on the LAN). The ``base URL`` therefore
 lives in that file rather than in an environment variable, and the API
 key is usually ignored by the server.
@@ -193,7 +193,7 @@ def _bridge_path() -> Path:
 
     Overridable via ``BEEP_PI_AI_BRIDGE`` so tests can point at a
     stub. The default sits next to this module both in the source tree
-    and after ``scripts/install.sh`` deploys ``payload/agent/`` to
+    and after ``beep-manage`` deploys ``payload/agent/`` to
     ``${BEEP_DIR}/agent/``.
     """
     override = os.environ.get("BEEP_PI_AI_BRIDGE")
@@ -206,7 +206,7 @@ def _node_binary() -> str:
     node = os.environ.get("BEEP_NODE") or shutil.which("node")
     if not node:
         raise ProviderError(
-            "node executable not found on PATH. Re-run scripts/install.sh "
+            "node executable not found on PATH. Re-run beep-manage repair "
             "to install the Node runtime that @earendil-works/pi-ai needs."
         )
     return node
@@ -236,6 +236,8 @@ def _bridge_env(spec: _ProviderSpec) -> dict[str, str]:
         for base_url_env in ("OPENAI_BASE_URL", "OPENAI_API_BASE"):
             if base_url_env in os.environ:
                 env[base_url_env] = os.environ[base_url_env]
+    if spec.name in {"openai", "lmstudio"} and "BEEP_MODEL_BASE_URL" in os.environ:
+        env["BEEP_MODEL_BASE_URL"] = os.environ["BEEP_MODEL_BASE_URL"]
     # pi-ai may need an HTTPS proxy in restricted networks; honour the
     # standard variables if the operator set them.
     for passthrough in ("HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
@@ -260,7 +262,7 @@ def _run_bridge(
     bridge = _bridge_path()
     if not bridge.exists():
         raise ProviderError(
-            f"pi-ai bridge missing at {bridge}. Re-run scripts/install.sh "
+            f"pi-ai bridge missing at {bridge}. Re-run beep-manage repair "
             "or set BEEP_PI_AI_BRIDGE."
         )
     node = _node_binary()
@@ -559,11 +561,13 @@ def _models_json_path() -> Path:
 
 def _lmstudio_endpoint() -> tuple[str, str] | None:
     """Return ``(base_url, host_port)`` for the configured API, if valid."""
-    try:
-        data = json.loads(_models_json_path().read_text(encoding="utf-8"))
-        base_url = data["providers"]["lmstudio"]["baseUrl"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
+    base_url = os.environ.get("BEEP_MODEL_BASE_URL")
+    if not base_url:
+        try:
+            data = json.loads(_models_json_path().read_text(encoding="utf-8"))
+            base_url = data["providers"]["lmstudio"]["baseUrl"]
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
     if not isinstance(base_url, str):
         return None
     from urllib.parse import urlparse

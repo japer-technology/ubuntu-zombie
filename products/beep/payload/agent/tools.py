@@ -27,6 +27,7 @@ import socket
 import subprocess
 import urllib.error
 import urllib.request
+import json
 from pathlib import Path
 from typing import Any, Callable
 
@@ -113,7 +114,7 @@ def validate_args(name: str, args: dict[str, Any] | None) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def _state_dir() -> Path:
-    return Path(os.environ.get("BEEP_DIR", "/opt/beep")) / "state"
+    return Path("/var/lib/beep/runtime")
 
 
 def _read_allowed_prefixes() -> tuple[Path, ...]:
@@ -512,6 +513,93 @@ def _shim_timer_reactivation(_args: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _agent_cli(arguments: list[str], *, timeout: int) -> dict[str, Any]:
+    """Invoke Beep's fixed family CLI and return its bounded JSON response."""
+
+    if isinstance(timeout, bool) or not 1 <= timeout <= 3600:
+        raise SchemaError("agent tool timeout must be between 1 and 3600 seconds")
+    command = [
+        "sudo",
+        "-n",
+        "/opt/beep/bin/beep-agents",
+        "--json",
+        *arguments,
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            env={
+                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "HOME": "/var/lib/beep",
+                "LANG": "C.UTF-8",
+            },
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SchemaError("agent manager timed out") from exc
+    if len(completed.stdout) > 2 * 1024 * 1024:
+        raise SchemaError("agent manager response exceeded its size limit")
+    try:
+        value = json.loads(completed.stdout.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise SchemaError("agent manager returned an invalid response") from exc
+    if not isinstance(value, dict):
+        raise SchemaError("agent manager response must be an object")
+    if completed.returncode != 0:
+        value["manager_exit_code"] = completed.returncode
+    return value
+
+
+def _agent_timeout(args: dict[str, Any], default: int) -> int:
+    value = args.get("timeout", default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SchemaError("agent tool timeout must be an integer")
+    return value
+
+
+def _shim_agent_list(args: dict[str, Any]) -> dict[str, Any]:
+    return _agent_cli(["list"], timeout=_agent_timeout(args, 60))
+
+
+def _shim_agent_status(args: dict[str, Any]) -> dict[str, Any]:
+    return _agent_cli(
+        ["status", str(args["product_id"])],
+        timeout=_agent_timeout(args, 60),
+    )
+
+
+def _shim_agent_plan(args: dict[str, Any]) -> dict[str, Any]:
+    command = [
+        "plan",
+        str(args["product_id"]),
+        str(args["operation"]),
+    ]
+    if "retain_state" in args:
+        command.extend(["--retain-state", "yes" if args["retain_state"] else "no"])
+    return _agent_cli(command, timeout=_agent_timeout(args, 1800))
+
+
+def _shim_agent_manage(args: dict[str, Any]) -> dict[str, Any]:
+    command = [
+        "manage",
+        str(args["product_id"]),
+        str(args["operation"]),
+        "--correlation-id",
+        str(args["correlation_id"]),
+        "--plan-digest",
+        str(args["plan_digest"]),
+    ]
+    if "retain_state" in args:
+        command.extend(["--retain-state", "yes" if args["retain_state"] else "no"])
+    if "confirmation" in args:
+        command.extend(["--confirmation", str(args["confirmation"])])
+    return _agent_cli(command, timeout=_agent_timeout(args, 1800))
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -700,6 +788,123 @@ TOOL_REGISTRY: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
         },
         shim=_shim_timer_reactivation,
+    ),
+    "agent.list": _t(
+        classification="read_only",
+        description="List releases admitted to Beep's validated family catalogue.",
+        schema={
+            "type": "object",
+            "properties": {"timeout": {"type": "integer"}},
+            "required": [],
+            "additionalProperties": False,
+        },
+        shim=_shim_agent_list,
+    ),
+    "agent.status": _t(
+        classification="read_only",
+        description="Read one admitted product's validated lifecycle status.",
+        schema={
+            "type": "object",
+            "properties": {
+                "product_id": {
+                    "type": "string",
+                    "enum": [
+                        "imaginary-friend",
+                        "curriculum-flame",
+                        "eric",
+                        "llama",
+                    ],
+                },
+                "timeout": {"type": "integer"},
+            },
+            "required": ["product_id"],
+            "additionalProperties": False,
+        },
+        shim=_shim_agent_status,
+    ),
+    "agent.plan": _t(
+        classification="read_only",
+        description="Render one admitted target's dry-run lifecycle plan.",
+        schema={
+            "type": "object",
+            "properties": {
+                "product_id": {
+                    "type": "string",
+                    "enum": [
+                        "imaginary-friend",
+                        "curriculum-flame",
+                        "eric",
+                        "llama",
+                    ],
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": [
+                        "describe",
+                        "status",
+                        "install",
+                        "verify",
+                        "doctor",
+                        "repair",
+                        "backup",
+                        "update",
+                        "rollback",
+                        "suspend",
+                        "resume",
+                        "uninstall",
+                    ],
+                },
+                "retain_state": {"type": "boolean"},
+                "timeout": {"type": "integer"},
+            },
+            "required": ["product_id", "operation"],
+            "additionalProperties": False,
+        },
+        shim=_shim_agent_plan,
+    ),
+    "agent.manage": _t(
+        classification="system_change",
+        description="Execute one exact approved target lifecycle plan.",
+        schema={
+            "type": "object",
+            "properties": {
+                "product_id": {
+                    "type": "string",
+                    "enum": [
+                        "imaginary-friend",
+                        "curriculum-flame",
+                        "eric",
+                        "llama",
+                    ],
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": [
+                        "install",
+                        "repair",
+                        "backup",
+                        "update",
+                        "rollback",
+                        "suspend",
+                        "resume",
+                        "uninstall",
+                    ],
+                },
+                "correlation_id": {"type": "string"},
+                "plan_digest": {"type": "string"},
+                "retain_state": {"type": "boolean"},
+                "confirmation": {"type": "string"},
+                "timeout": {"type": "integer"},
+            },
+            "required": [
+                "product_id",
+                "operation",
+                "correlation_id",
+                "plan_digest",
+            ],
+            "additionalProperties": False,
+        },
+        shim=_shim_agent_manage,
     ),
 }
 

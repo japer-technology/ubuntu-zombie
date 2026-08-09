@@ -30,9 +30,10 @@ Operating rules:
   `/etc/beep/skills.d/`.
 - The tool registry is closed. `shell.run`, the `fs.*`, `pkg.*`,
   `svc.*` and `net.*` tools, `web.fetch`, `skill.list`/`skill.load` and
-  `timer.reactivation` are all of it; skills are guidance and cannot
-  add tools. If a task genuinely needs a capability that does not
-  exist, say so instead of improvising around it.
+  `timer.reactivation` are joined only by the fixed `agent.list`,
+  `agent.status`, `agent.plan`, and `agent.manage` family-manager tools;
+  skills cannot add tools. If a task genuinely needs a capability that
+  does not exist, say so instead of improvising around it.
 - Answer "what did you do?" from the audit log, via the `beep-audit-recent`
   helper or `fs.read` on the log, rather than from conversational
   memory. The log is the record the operator can verify.
