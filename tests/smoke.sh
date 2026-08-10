@@ -3445,62 +3445,48 @@ run_standards() {
     || { echo "health systemd template must use __ZOMBIE_DIR__ placeholder" >&2; exit 1; }
   grep -q "ZOMBIE_HEALTH_WARN_ONLY=1" payload/systemd/ubuntu-zombie-health.service \
     || { echo "health timer must not leave a failed unit after reporting unhealthy state" >&2; exit 1; }
-  # Optional Forgejo component: hardened units must ship in the payload,
-  # and the policy must gate database drops as destructive.
-  [[ -s payload/systemd/forgejo.service ]] \
-    || { echo "missing payload/systemd/forgejo.service" >&2; exit 1; }
+  # The Forgejo server is product-owned while its phase-5 runner remains in
+  # the root suite.
+  [[ -s products/forgejo/payload/systemd/forgejo.service ]] \
+    || { echo "missing product-owned forgejo.service" >&2; exit 1; }
+  [[ ! -e payload/systemd/forgejo.service ]] \
+    || { echo "root payload must not retain forgejo.service" >&2; exit 1; }
   [[ -s payload/systemd/forgejo-runner.service ]] \
     || { echo "missing payload/systemd/forgejo-runner.service" >&2; exit 1; }
   [[ -s payload/etc/forgejo-runner-config.yaml ]] \
     || { echo "missing payload/etc/forgejo-runner-config.yaml" >&2; exit 1; }
-  grep -q "NoNewPrivileges=true" payload/systemd/forgejo.service \
+  grep -q "NoNewPrivileges=true" \
+      products/forgejo/payload/systemd/forgejo.service \
     || { echo "forgejo.service must stay hardened (NoNewPrivileges)" >&2; exit 1; }
   grep -Fq \
       "ExecStart=/usr/local/bin/forgejo-runner -c /var/lib/forgejo-runner/config.yaml daemon" \
       payload/systemd/forgejo-runner.service \
     || { echo "forgejo-runner.service must load the managed config" >&2; exit 1; }
-  grep -Eq '^Requires=.*docker\.service.*forgejo\.service' \
+  grep -Eq '^Requires=docker\.service$' \
       payload/systemd/forgejo-runner.service \
-    || { echo "forgejo-runner.service must require Docker and Forgejo" >&2; exit 1; }
+    && grep -Eq '^Wants=.*forgejo\.service' \
+      payload/systemd/forgejo-runner.service \
+    && ! grep -Eq '^Requires=.*forgejo\.service' \
+      payload/systemd/forgejo-runner.service \
+    || { echo "runner must require Docker but only want Forgejo" >&2; exit 1; }
   if ! grep -Eq '^  capacity: 1$' payload/etc/forgejo-runner-config.yaml \
       || ! grep -Eq '^  enabled: false$' payload/etc/forgejo-runner-config.yaml \
       || ! grep -Eq '^  network: host$' payload/etc/forgejo-runner-config.yaml \
       || ! grep -Eq '^  privileged: false$' payload/etc/forgejo-runner-config.yaml \
       || ! grep -Eq '^  valid_volumes: \[\]$' payload/etc/forgejo-runner-config.yaml \
-      || ! grep -Eq '^  docker_host: "-"$' payload/etc/forgejo-runner-config.yaml; then
+      || ! grep -Eq '^  docker_host: "-"$' payload/etc/forgejo-runner-config.yaml \
+      || ! grep -Fq '__FORGEJO_HOST__:127.0.0.1' \
+        payload/etc/forgejo-runner-config.yaml \
+      || ! grep -Fq '/etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro' \
+        payload/etc/forgejo-runner-config.yaml; then
     echo "managed runner config must enforce the conservative same-host contract" >&2
     exit 1
   fi
-  grep -q 'LFS_JWT_SECRET = ${_fj_lfs_jwt_secret}' scripts/install.sh \
-    || { echo "install.sh must preconfigure Forgejo's LFS JWT secret" >&2; exit 1; }
-  grep -q 'chmod 660 /etc/forgejo/app.ini' scripts/install.sh \
-    || { echo "Forgejo migration must temporarily permit config updates" >&2; exit 1; }
-  ! grep -q 'chmod 770 /etc/forgejo' scripts/install.sh \
-    || { echo "Forgejo migration must not make the config directory writable" >&2; exit 1; }
-  grep -q 'chmod 640 /etc/forgejo/app.ini' scripts/install.sh \
-    || { echo "Forgejo migration must restore app.ini permissions" >&2; exit 1; }
-  grep -q 'chmod 750 /etc/forgejo' scripts/install.sh \
-    || { echo "Forgejo config directory must be locked after migration" >&2; exit 1; }
-  grep -q '/api/healthz' scripts/install.sh \
-    || { echo "Forgejo install must verify application health" >&2; exit 1; }
-  local verify_forgejo_body
-  verify_forgejo_body="$(install_function verify_forgejo)"
-  grep -q -- '-o /dev/null' <<<"${verify_forgejo_body}" \
-    && ! grep -q "\"healthy\"" <<<"${verify_forgejo_body}" \
-    || { echo "Forgejo verify must trust the health endpoint HTTP status" >&2; exit 1; }
-  for caddy_check in caddy_binary caddy_unit caddy_enabled caddy_route \
-      caddy_config caddy_legacy_route local_ca_current; do
-    grep -q "${caddy_check}" <<<"${verify_forgejo_body}" \
-      || { echo "Forgejo verify must include deep Caddy check: ${caddy_check}" >&2; exit 1; }
-  done
-  grep -q 'config_recovery' <<<"${verify_forgejo_body}" \
-    || { echo "Forgejo verify must validate preserved recovery material" >&2; exit 1; }
-  for runner_check in runner_registration runner_config runner_config_perms \
-      runner_docker_service runner_docker_group runner_docker_access \
-      runner_binary runner_unit runner_enabled runner_exec runner_drop_ins \
-      runner_declared; do
-    grep -q "${runner_check}" <<<"${verify_forgejo_body}" \
-      || { echo "Forgejo verify must include runner check: ${runner_check}" >&2; exit 1; }
+  for ca_variable in SSL_CERT_FILE GIT_SSL_CAINFO NODE_EXTRA_CA_CERTS \
+      REQUESTS_CA_BUNDLE; do
+    grep -Fq "${ca_variable}: /etc/ssl/certs/ca-certificates.crt" \
+        payload/etc/forgejo-runner-config.yaml \
+      || { echo "runner jobs must inherit ${ca_variable}" >&2; exit 1; }
   done
   local forgejo_exec_checker
   forgejo_exec_checker="$(install_function forgejo_runner_uses_managed_config)"
@@ -3540,12 +3526,7 @@ EOF
   fi
   rm -f "${forgejo_drop_in_tmp}"
   local lifecycle_helper
-  for lifecycle_helper in caddyfile_has_forgejo_route \
-      caddy_configuration_is_valid caddy_exported_ca_is_current \
-      configure_forgejo_lan_https forgejo_runner_config_is_managed \
-      established_forgejo_state_present \
-      ini_get forgejo_config_file_has_recovery_material \
-      forgejo_config_has_recovery_material \
+  for lifecycle_helper in forgejo_runner_config_is_managed \
       forgejo_manifest_has_runner forgejo_runner_is_expected \
       restore_forgejo_runner_intent \
       forgejo_runner_drop_in_paths _forgejo_runner_drop_in_is_obsolete \
@@ -3558,78 +3539,26 @@ EOF
     ' scripts/install.sh \
       || { echo "lifecycle helper must be defined before dispatch: ${lifecycle_helper}" >&2; exit 1; }
   done
-  grep -q 'HTTP_ADDR = 127.0.0.1' scripts/install.sh \
-    || { echo "Forgejo backend must stay loopback-only" >&2; exit 1; }
-  grep -q 'tls internal' scripts/install.sh \
-    || { echo "Forgejo Caddy route must use the internal CA" >&2; exit 1; }
-  grep -q 'reverse_proxy 127.0.0.1:${FORGEJO_HTTP_PORT}' scripts/install.sh \
-    || { echo "Caddy must proxy to the Forgejo loopback backend" >&2; exit 1; }
-  ( grep -q '# BEGIN install.sh Forgejo' scripts/install.sh \
-    && grep -q '/etc/caddy/Caddyfile' scripts/install.sh ) \
-    || { echo "Forgejo route must be rendered in the active Caddyfile" >&2; exit 1; }
-  grep -q 'rm -f /etc/caddy/conf.d/forgejo.caddy' scripts/install.sh \
-    || { echo "Forgejo install must migrate the legacy Caddy route fragment" >&2; exit 1; }
-  local caddy_helper caddy_test_dir caddy_hook
-  caddy_helper="$(install_function _caddyfile_is_packaged_default)"
-  caddy_test_dir="$(mktemp -d)"
-  cat > "${caddy_test_dir}/stock" <<'EOF'
-# Packaged Caddy welcome site.
-:80 {
-	root * /usr/share/caddy
-	file_server
-}
-EOF
-  cat > "${caddy_test_dir}/custom" <<'EOF'
-example.test {
-	reverse_proxy 127.0.0.1:8080
-}
-EOF
-  bash -c "${caddy_helper}
-    _caddyfile_is_packaged_default \"\$1\"
-    ! _caddyfile_is_packaged_default \"\$2\"" \
-    _ "${caddy_test_dir}/stock" "${caddy_test_dir}/custom" \
-    || { rm -rf "${caddy_test_dir}"; echo "Forgejo must remove only Caddy's packaged welcome site" >&2; exit 1; }
-  rm -rf "${caddy_test_dir}"
-  local caddy_route_helper
-  caddy_route_helper="$(install_function caddyfile_has_forgejo_route)"
-  cat > "${caddy_test_dir}" <<'EOF'
-# BEGIN install.sh Forgejo
-https://forgejo.test.local {
-	tls internal
-	reverse_proxy 127.0.0.1:3000
-}
-# END install.sh Forgejo
-EOF
-  bash -c "${caddy_route_helper}
-    caddyfile_has_forgejo_route \"\$1\" forgejo.test.local 3000
-    ! caddyfile_has_forgejo_route \"\$1\" stale.test.local 3000
-    ! caddyfile_has_forgejo_route \"\$1\" forgejo.test.local 3001" \
-    _ "${caddy_test_dir}" \
-    || { rm -f "${caddy_test_dir}"; echo "Forgejo Caddy route diagnostics must detect stale hosts and ports" >&2; exit 1; }
-  rm -f "${caddy_test_dir}"
-  caddy_hook="$(sed -n \
-    '/^# lifecycle-helper: forgejo-caddy-configure begin$/,/^# lifecycle-helper: forgejo-caddy-configure end$/p' \
-    scripts/install.sh)"
-  awk '
-    /systemctl restart forgejo.service/ { restart = NR }
-    /http:\/\/127.0.0.1:\$\{FORGEJO_HTTP_PORT\}\/api\/healthz/ { backend = NR }
-    /systemctl enable --now caddy.service/ { caddy = NR }
-    END { exit !(restart && backend > restart && caddy > backend) }
-  ' <<<"${caddy_hook}" \
-    || { echo "Forgejo must recover before Caddy activates its proxy" >&2; exit 1; }
-  # These exact endpoints are part of the installer contract: Forgejo must use
-  # Caddy's signed stable Cloudsmith repository rather than an Ubuntu fallback.
-  awk '
-    /https:\/\/dl.cloudsmith.io\/public\/caddy\/stable\/gpg.key/ { key_url = 1 }
-    /caddy-stable-archive-keyring.gpg/ { keyring = 1 }
-    /https:\/\/dl.cloudsmith.io\/public\/caddy\/stable\/deb\/debian any-version main/ { repository = 1 }
-    END { exit !(key_url && keyring && repository) }
-  ' scripts/install.sh \
-    || { echo "Forgejo install must configure Caddy's signed stable repository" >&2; exit 1; }
-  grep -q '_https._tcp' scripts/install.sh \
-    || { echo "Forgejo must advertise HTTPS through Avahi" >&2; exit 1; }
-  grep -q '/etc/forgejo/caddy-local-ca.crt' scripts/install.sh \
-    || { echo "Forgejo must export Caddy's public local CA root" >&2; exit 1; }
+  for delegated_hook in component_install_forgejo component_verify_forgejo \
+      component_doctor_forgejo component_repair_forgejo; do
+    grep -q "^${delegated_hook}()" scripts/install.sh \
+      || { echo "missing Forgejo compatibility delegate: ${delegated_hook}" >&2; exit 1; }
+  done
+  grep -q 'forgejo_product_manage' scripts/install.sh \
+    && grep -q 'ADOPT FORGEJO' scripts/install.sh \
+    || { echo "Forgejo compatibility commands must delegate with adoption safety" >&2; exit 1; }
+  ! grep -Eq '^(install_forgejo|verify_forgejo)\(\)|^  (doctor_forgejo|repair_forgejo)\(\)' \
+      scripts/install.sh \
+    || { echo "root installer must not retain the Forgejo server lifecycle" >&2; exit 1; }
+  ! grep -Eq 'dropdb|dropuser|# BEGIN install\.sh Forgejo' scripts/uninstall.sh \
+    || { echo "root uninstaller must not retain Forgejo server removal logic" >&2; exit 1; }
+  grep -q 'Managed by forgejo-manage' \
+      products/forgejo/payload/agent/forgejo/management.py \
+    && grep -q '127.0.0.1' \
+      products/forgejo/payload/agent/forgejo/management.py \
+    && grep -q 'tls internal' \
+      products/forgejo/payload/agent/forgejo/management.py \
+    || { echo "Forgejo product must own its loopback HTTPS boundary" >&2; exit 1; }
   local provider_helper password_helper provider_test_file
   provider_helper="$(install_function provider_credential_configured)"
   provider_test_file="$(mktemp)"
@@ -3713,32 +3642,19 @@ EOF
 
   password_helper="$(install_function password_source_label)"
   bash -c "${password_helper}
-    [[ \"\$(password_source_label operator)\" == 'set by operator, not recorded' ]]
-    [[ \"\$(password_source_label '')\" == 'generated, recorded in receipt' ]]" \
+    [[ \"\$(password_source_label operator)\" == 'set by operator; passed through a private file' ]]
+    [[ \"\$(password_source_label '')\" == 'generated by the product; not recorded in this receipt' ]]" \
     || { echo "Forgejo password source labels must describe receipt handling accurately" >&2; exit 1; }
   grep -q 'password accepted (not recorded)' scripts/install.sh \
     || { echo "Prompted Forgejo passwords must not be described as recorded" >&2; exit 1; }
-  grep -q '/etc/caddy/conf.d/forgejo.caddy' scripts/uninstall.sh \
-    && grep -q '# BEGIN install.sh Forgejo' scripts/uninstall.sh \
-    || { echo "Forgejo uninstall must remove current and legacy Caddy routes" >&2; exit 1; }
-  grep -q '/etc/avahi/services/forgejo.service' scripts/uninstall.sh \
-    || { echo "Forgejo uninstall must remove its Avahi service" >&2; exit 1; }
-  local confirmation_helper confirmation_out forgejo_hook forgejo_runner_hook
+  grep -q 'forgejo_product_manage' scripts/uninstall.sh \
+    && grep -q 'DELETE FORGEJO STATE' scripts/uninstall.sh \
+    || { echo "Forgejo uninstall must delegate explicit purge safely" >&2; exit 1; }
+  local confirmation_helper confirmation_out forgejo_runner_hook
   local repair_forgejo_body repair_forgejo_runner_body
-  forgejo_hook="$(sed -n \
-    '/^# component-hook: forgejo begin$/,/^# component-hook: forgejo end$/p' \
-    scripts/install.sh)"
-  [[ -n "${forgejo_hook}" ]] \
-    || { echo "could not extract the Forgejo install hook" >&2; exit 1; }
   forgejo_runner_hook="$(install_function install_forgejo_runner)"
   [[ -n "${forgejo_runner_hook}" ]] \
     || { echo "could not extract the Forgejo runner install hook" >&2; exit 1; }
-  awk '
-    /configure_caddy_apt_repository$/ { repository = NR }
-    /caddy avahi-daemon libnss-mdns/ { packages = NR }
-    END { exit !(repository && packages && repository < packages) }
-  ' <<<"${forgejo_hook}" \
-    || { echo "Caddy repository must be configured before installing Caddy" >&2; exit 1; }
   confirmation_helper="$(install_function require_capitalized_yes)"
   bash -c "${confirmation_helper}
     info() { :; }
@@ -3762,13 +3678,8 @@ EOF
     || { echo "Forgejo update refusal must explain the exact YES override" >&2; exit 1; }
   grep -q 'require_capitalized_yes FORGEJO_CONFIRM_UPDATE' scripts/install.sh \
     || { echo "existing Forgejo installs must require explicit update approval" >&2; exit 1; }
-  grep -q 'require_capitalized_yes FORGEJO_CONFIRM_DATABASE_REUSE' <<<"${forgejo_hook}" \
-    || { echo "existing Forgejo databases must require explicit reuse approval" >&2; exit 1; }
-  grep -Fq 'Refusing to install or update Forgejo because existing component state was found' \
-      scripts/install.sh \
-    || { echo "Forgejo install must fail closed when app.ini is missing" >&2; exit 1; }
-  grep -Fq '&& established_forgejo_state_present \' scripts/install.sh \
-    || { echo "Forgejo recovery gate must allow resumable partial installs" >&2; exit 1; }
+  grep -q -- '--confirmation "ADOPT FORGEJO"' scripts/install.sh \
+    || { echo "legacy Forgejo adoption must use the product confirmation" >&2; exit 1; }
   local forgejo_runner_expected_body
   forgejo_runner_expected_body="$(install_function forgejo_runner_is_expected)"
   ! grep -Fq -- '-d /var/lib/forgejo-runner' \
@@ -3780,22 +3691,6 @@ EOF
     END { exit !(restore && validate && restore < validate) }
   ' scripts/install.sh \
     || { echo "Forgejo runner intent must be restored before validation" >&2; exit 1; }
-  awk '
-    /require_capitalized_yes FORGEJO_CONFIRM_DATABASE_REUSE/ { gate=NR }
-    /ALTER ROLE/ { alter=NR }
-    END { exit !(gate && alter && gate < alter) }
-  ' <<<"${forgejo_hook}" \
-    || { echo "database reuse approval must precede role mutation" >&2; exit 1; }
-  awk '
-    /Refusing to reuse the existing Forgejo database or role without/ { recovery=NR }
-    /openssl rand -hex 24/ { generate=NR }
-    /ALTER ROLE/ { alter=NR }
-    END {
-      exit !(recovery && generate && alter \
-        && recovery < generate && recovery < alter)
-    }
-  ' <<<"${forgejo_hook}" \
-    || { echo "missing app.ini must stop database credential rotation" >&2; exit 1; }
   grep -Fq '[[ -s /var/lib/forgejo-runner/.runner ]]' \
       <<<"${forgejo_runner_hook}" \
     || { echo "Forgejo install must reject empty runner registrations" >&2; exit 1; }
@@ -3804,23 +3699,23 @@ EOF
     || { echo "Forgejo install must wait for the current runner declaration" >&2; exit 1; }
   grep -Fq 'forgejo-runner-config.yaml' <<<"${forgejo_runner_hook}" \
     || { echo "Forgejo install must deploy the managed runner config" >&2; exit 1; }
-  grep -Fq 'Refusing to repair or restart Forgejo because /etc/forgejo/app.ini is missing, empty, or incomplete.' \
-      scripts/install.sh \
-    || { echo "Forgejo repair must fail closed without app.ini" >&2; exit 1; }
   grep -Fq 'install -m 640 -o root -g forgejo-runner' scripts/install.sh \
     || { echo "Forgejo repair must restore root ownership of runner config" >&2; exit 1; }
-  repair_forgejo_body="$(sed -n \
-    '/^  repair_forgejo() {$/,/^  repair_llama() {$/p' scripts/install.sh)"
-  grep -Fq 'if forgejo_runner_is_forgejo_suboption; then' \
-      <<<"${repair_forgejo_body}" \
+  repair_forgejo_body="$(install_function component_repair_forgejo)"
+  grep -Fq 'forgejo_product_manage repair' <<<"${repair_forgejo_body}" \
+    || { echo "Forgejo repair must delegate to the product" >&2; exit 1; }
+  grep -Fq 'ZOMBIE_INSTALL_FORGEJO_RUNNER' <<<"${repair_forgejo_body}" \
     || { echo "Forgejo repair must honor persisted runner intent" >&2; exit 1; }
   grep -Fq 'repair_forgejo_runner' <<<"${repair_forgejo_body}" \
     || { echo "Forgejo repair must dispatch persisted runner repair" >&2; exit 1; }
   repair_forgejo_runner_body="$(sed -n \
-    '/^  repair_forgejo_runner() {$/,/^  repair_forgejo() {$/p' scripts/install.sh)"
+    '/^  repair_forgejo_runner() {$/,/^  local component/p' scripts/install.sh)"
   grep -Fq 'systemctl enable forgejo-runner.service' \
       <<<"${repair_forgejo_runner_body}" \
     || { echo "Forgejo repair must restore runner boot enablement" >&2; exit 1; }
+  grep -Fq 's|__FORGEJO_HOST__|${runner_host}|g' \
+      <<<"${repair_forgejo_runner_body}" \
+    || { echo "Forgejo repair must render the same-host runner mapping" >&2; exit 1; }
   local docker_conflict_out forgejo_docker_helper docker_stub
   forgejo_docker_helper="$(install_function ensure_forgejo_runner_docker_package)"
   docker_stub="$(mktemp)"
@@ -3886,52 +3781,11 @@ EOF
     forgejo_fetch_release_asset forgejo/runner 12.7.3 \
       forgejo-runner-12.7.3-linux-amd64 /tmp/forgejo-runner-smoke" \
     || { echo "forgejo-runner downloads must prefer code.forgejo.org" >&2; exit 1; }
-  local forgejo_config_validator forgejo_config_tmp forgejo_jwt_validator
-  forgejo_jwt_validator="$(install_function is_valid_forgejo_jwt_secret)"
-  bash -c "${forgejo_jwt_validator}
-    is_valid_forgejo_jwt_secret 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-    ! is_valid_forgejo_jwt_secret ''
-    ! is_valid_forgejo_jwt_secret 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-    ! is_valid_forgejo_jwt_secret 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-    ! is_valid_forgejo_jwt_secret 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
-    ! is_valid_forgejo_jwt_secret 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA+'
-    ! is_valid_forgejo_jwt_secret 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'" \
-    || { echo "install.sh must reject malformed preserved Forgejo JWT secrets" >&2; exit 1; }
-  forgejo_config_validator="$(
-    install_function ini_get
-    install_function is_valid_forgejo_jwt_secret
-    install_function forgejo_config_file_has_recovery_material
-  )"
-  forgejo_config_tmp="$(mktemp)"
-  cat > "${forgejo_config_tmp}" <<'EOF'
-[database]
-PASSWD = preserved-database-password
-[server]
-LFS_JWT_SECRET = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-[security]
-SECRET_KEY = preserved-secret-key
-INTERNAL_TOKEN = preserved-internal-token
-[oauth2]
-JWT_SECRET = AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
-EOF
-  bash -c "${forgejo_config_validator}
-    forgejo_config_file_has_recovery_material \"\$1\"" _ "${forgejo_config_tmp}" \
-    || { rm -f "${forgejo_config_tmp}"; echo "complete app.ini recovery material must be accepted" >&2; exit 1; }
-  sed -i '/^SECRET_KEY = /d' "${forgejo_config_tmp}"
-  if bash -c "${forgejo_config_validator}
-      forgejo_config_file_has_recovery_material \"\$1\"" _ "${forgejo_config_tmp}"; then
-    rm -f "${forgejo_config_tmp}"
-    echo "incomplete app.ini must not permit automatic secret reconstruction" >&2
-    exit 1
-  fi
-  rm -f "${forgejo_config_tmp}"
-  grep -q 'dropdb' payload/etc/policy.yaml \
-    || { echo "policy.yaml must classify dropdb/dropuser as destructive" >&2; exit 1; }
-  grep -q "option-sections: forgejo begin" scripts/install.sh \
-    || { echo "install.sh must keep the forgejo option-sections markers" >&2; exit 1; }
-  grep -q "ZOMBIE_INSTALL_FORGEJO" scripts/uninstall.sh 2>/dev/null \
-    || grep -q "Removing optional Forgejo component" scripts/uninstall.sh \
-    || { echo "uninstall.sh must reverse the Forgejo component" >&2; exit 1; }
+  grep -q 'Forgejo secrets  : not recorded' scripts/install.sh \
+    && ! grep -q 'receipt_password_line' scripts/install.sh \
+    || { echo "root Forgejo receipts must remain secret-free" >&2; exit 1; }
+  grep -q 'forgejo_product_manage' scripts/uninstall.sh \
+    || { echo "uninstall.sh must delegate Forgejo removal" >&2; exit 1; }
   grep -q "Delegating standalone Llama removal" scripts/uninstall.sh \
     && grep -q "llama_product_manage" scripts/uninstall.sh \
     || { echo "uninstall.sh must delegate llama removal" >&2; exit 1; }
