@@ -174,7 +174,7 @@ create the zombie account, install Node or the
 Python agent runtime, deploy policy or chat services, or change desktop
 sleep settings. The runner target automatically selects its required
 `forgejo` dependency. `ZOMBIE_INSTALL_FORGEJO=1 install` remains supported
-and selects the legacy combined `zombie forgejo` path.
+and selects the compatible combined `zombie forgejo` path.
 
 To upgrade an existing host (or refresh after fixing a bug upstream),
 pull the latest source and re-run `install`:
@@ -211,6 +211,31 @@ Interactive installs can also toggle components from item
 `9) Options` of the parameter review. Settings and caveats:
 [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md#optional-components-ubuntu-zombie--options).
 More components are specified under [`options/`](options/README.md).
+
+### Independent Forgejo product
+
+Forgejo owns its descriptor, version, lifecycle, package, release, tests,
+audit log, and documentation under
+[`products/forgejo/`](products/forgejo/). Install the PostgreSQL-backed server
+directly:
+
+```bash
+products/forgejo/scripts/manage.sh install --dry-run
+sudo products/forgejo/scripts/manage.sh install --yes
+sudo forgejo-manage verify
+```
+
+`sudo ./scripts/install.sh install forgejo` remains a compatibility command
+and delegates to the same product lifecycle. The root repository still owns
+the `forgejo-runner` compatibility component until its separate roadmap phase.
+For same-host jobs it injects deterministic `.local` resolution and the host
+CA bundle while retaining host networking, `privileged: false`, no arbitrary
+workflow volumes, and no job Docker socket.
+
+Forgejo itself remains on `127.0.0.1:3000`; Caddy serves its `.local` HTTPS
+URL. Selective `uninstall zombie` leaves Forgejo untouched. See the product
+[`README.md`](products/forgejo/README.md) for retained-state removal, purge,
+update, rollback, and recovery.
 
 ### Independent Llama product
 

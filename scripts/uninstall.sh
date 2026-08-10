@@ -64,6 +64,7 @@ readonly COMPONENT_FORGEJO_RUNNER="forgejo-runner"
 readonly COMPONENT_LLAMA="llama"
 COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
 LLAMA_PRODUCT_ROOT="${LLAMA_PRODUCT_ROOT:-${REPO_ROOT}/products/llama}"
+FORGEJO_PRODUCT_ROOT="${FORGEJO_PRODUCT_ROOT:-${REPO_ROOT}/products/forgejo}"
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
 UNINSTALL_EXIT=0
@@ -92,6 +93,41 @@ llama_product_lifecycle() {
   response="$(llama_product_manage status --json 2>/dev/null)" || return $?
   python3 -c \
     'import json,sys; print(json.load(sys.stdin)["details"]["llama"]["lifecycle"])' \
+    <<<"${response}"
+}
+
+forgejo_product_entrypoint() {
+  if [[ -x "${FORGEJO_PRODUCT_ROOT}/scripts/manage.sh" ]]; then
+    printf '%s\n' "${FORGEJO_PRODUCT_ROOT}/scripts/manage.sh"
+  elif [[ -x /usr/local/sbin/forgejo-manage ]]; then
+    printf '%s\n' /usr/local/sbin/forgejo-manage
+  else
+    return 66
+  fi
+}
+
+forgejo_product_manage() {
+  local entrypoint
+  entrypoint="$(forgejo_product_entrypoint)" || return $?
+  (
+    local variable
+    for variable in "${!FORGEJO_@}"; do
+      case "${variable}" in
+        FORGEJO_ARTIFACT_SHA256|FORGEJO_DISPOSABLE_VM_TEST|FORGEJO_TEST_RELEASE_BASE)
+          ;;
+        *) unset "${variable}" ;;
+      esac
+    done
+    FORGEJO_NONINTERACTIVE="$((ASSUME_YES || DRY_RUN))" \
+      "${entrypoint}" "$@"
+  )
+}
+
+forgejo_product_lifecycle() {
+  local response
+  response="$(forgejo_product_manage status --json 2>/dev/null)" || return $?
+  python3 -c \
+    'import json,sys; print(json.load(sys.stdin)["details"]["forgejo"]["lifecycle"])' \
     <<<"${response}"
 }
 
@@ -452,110 +488,35 @@ remove_component_forgejo_runner() {
 }
 
 remove_component_forgejo() {
-  local fail_count_before="${UNINSTALL_FAIL_COUNT}"
-  local _fj_db _fj_role _fj_user _fj_has_db_state=0 _fj_postgres_ready=0
-
-  if [[ -f /etc/systemd/system/forgejo.service || -d /etc/forgejo \
-      || -x /usr/local/bin/forgejo \
-      || -f /etc/caddy/conf.d/forgejo.caddy \
-      || -f /etc/avahi/services/forgejo.service \
-      || -f /etc/systemd/system/forgejo-runner.service \
-      || -x /usr/local/bin/forgejo-runner \
-      || -d /var/lib/forgejo || -d /var/lib/forgejo-runner \
-      || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]; then
-    info "Removing optional Forgejo component"
-    # Capture the database/role names from app.ini before the config is
-    # removed (the operator may have customised FORGEJO_DB_NAME/USER).
-    FORGEJO_DB_NAME="forgejo"; FORGEJO_DB_USER="forgejo"
-    if [[ -f /etc/forgejo/app.ini || -d /var/lib/forgejo \
-        || -f "${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}" ]]; then
-      _fj_has_db_state=1
-    fi
-    if [[ -r /etc/forgejo/app.ini ]]; then
-      _fj_db="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="NAME"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-      _fj_role="$(awk -F' = ' '$0=="[database]"{s=1;next} /^\[/{s=0} s && $1=="USER"{print $2; exit}' /etc/forgejo/app.ini 2>/dev/null || true)"
-      [[ "${_fj_db}"   =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_NAME="${_fj_db}"
-      [[ "${_fj_role}" =~ ^[a-z][a-z0-9_-]{0,39}$ ]] && FORGEJO_DB_USER="${_fj_role}"
-    fi
-    run "systemctl disable --now forgejo-runner.service 2>/dev/null || true"
-    run "systemctl disable --now forgejo.service        2>/dev/null || true"
-    run "rm -f /etc/systemd/system/forgejo.service /etc/systemd/system/forgejo-runner.service"
-    run_or_warn "systemctl daemon-reload" "systemctl daemon-reload"
-    run "rm -f /usr/local/bin/forgejo /usr/local/bin/forgejo-runner"
-    if [[ -f /etc/caddy/Caddyfile ]] \
-        && grep -Fqx '# BEGIN install.sh Forgejo' /etc/caddy/Caddyfile; then
-      if ! grep -Fqx '# END install.sh Forgejo' /etc/caddy/Caddyfile; then
-        warn "Caddyfile contains an incomplete managed Forgejo block; leaving it unchanged."
-        UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
-        UNINSTALL_EXIT=1
-      elif [[ "${DRY_RUN}" == "1" ]]; then
-        run "remove the managed Forgejo block from /etc/caddy/Caddyfile"
-      else
-        _caddy_tmp="$(mktemp)"
-        awk '
-          BEGIN { managed = 0 }
-          $0 == "# BEGIN install.sh Forgejo" { managed = 1; next }
-          $0 == "# END install.sh Forgejo" { managed = 0; next }
-          !managed { print }
-        ' /etc/caddy/Caddyfile > "${_caddy_tmp}"
-        install -m 644 -o root -g root "${_caddy_tmp}" /etc/caddy/Caddyfile
-        rm -f "${_caddy_tmp}"
-      fi
-    fi
-    run "rm -f /etc/caddy/conf.d/forgejo.caddy /etc/avahi/services/forgejo.service"
-    if systemctl cat caddy.service >/dev/null 2>&1; then
-      run_or_warn "Reload Caddy after removing Forgejo route" \
-        "systemctl reload-or-restart caddy.service"
-    fi
-    if systemctl cat avahi-daemon.service >/dev/null 2>&1; then
-      run_or_warn "Reload Avahi after removing Forgejo advertisement" \
-        "systemctl reload-or-restart avahi-daemon.service"
-    fi
-    if [[ -d /etc/forgejo ]]; then
-      remove_tree_checked "/etc/forgejo" "/etc/forgejo (Forgejo config + secrets)"
-    fi
-    if [[ -d /var/lib/forgejo ]]; then
-      if confirm "Remove /var/lib/forgejo (ALL repositories and LFS data)?"; then
-        remove_tree_checked "/var/lib/forgejo" "/var/lib/forgejo (Forgejo data)"
-      else
-        warn "Keeping /var/lib/forgejo. Repository data remains on disk."
-      fi
-    fi
-    if [[ -d /var/lib/forgejo-runner ]]; then
-      remove_tree_checked "/var/lib/forgejo-runner" "/var/lib/forgejo-runner (runner state)"
-    fi
-    # Only prompt for the PostgreSQL database and role when PostgreSQL is
-    # present and Forgejo database state was discovered before file cleanup.
-    # This makes `uninstall forgejo --yes` reliably return the host to a clean
-    # testing slate while avoiding prompts on hosts with only runner artifacts.
-    # Dry-run only needs the client binary to render the planned drop commands;
-    # real uninstalls also require the postgres system account before runuser.
-    if command -v psql >/dev/null 2>&1; then
-      if (( DRY_RUN )) || id postgres >/dev/null 2>&1; then
-        _fj_postgres_ready=1
-      fi
-    fi
-    if (( _fj_has_db_state && _fj_postgres_ready )); then
-      if confirm "Drop the Forgejo PostgreSQL database and role (destructive)?"; then
-        run_or_warn "Drop Forgejo database" \
-          "runuser -u postgres -- dropdb --if-exists -- $(shell_quote "${FORGEJO_DB_NAME}")"
-        run_or_warn "Drop Forgejo role" \
-          "runuser -u postgres -- dropuser --if-exists -- $(shell_quote "${FORGEJO_DB_USER}")"
-      else
-        warn "Keeping the Forgejo PostgreSQL database and role."
-      fi
-    fi
-    for _fj_user in forgejo-runner git; do
-      if id "${_fj_user}" >/dev/null 2>&1; then
-        if confirm "Remove the ${_fj_user} system user (created for Forgejo)?"; then
-          run_or_warn "Remove user ${_fj_user}" \
-            "deluser ${_fj_user} >/dev/null 2>&1 || userdel ${_fj_user}"
-        fi
-      fi
-    done
-    ok "Forgejo component removal finished."
+  local fail_count_before="${UNINSTALL_FAIL_COUNT}" lifecycle="" manifest
+  local -a product_arguments=(uninstall)
+  manifest="${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}"
+  if (( ${#TARGET_ARGS[@]} == 0 )) && [[ ! -e "${manifest}" ]]; then
+    lifecycle="$(forgejo_product_lifecycle 2>/dev/null || true)"
+    [[ "${lifecycle}" == "legacy" || "${lifecycle}" == "active" \
+        || "${lifecycle}" == "suspended" || "${lifecycle}" == "retained" ]] \
+      || return 0
   fi
-
+  if [[ -f /etc/systemd/system/forgejo-runner.service \
+      || -x /usr/local/bin/forgejo-runner \
+      || -d /var/lib/forgejo-runner ]]; then
+    remove_component_forgejo_runner
+  fi
+  (( DRY_RUN )) && product_arguments+=(--dry-run)
+  if (( ASSUME_YES )); then
+    product_arguments+=(
+      --yes
+      --purge
+      --confirmation "DELETE FORGEJO STATE"
+      --non-interactive
+    )
+  fi
+  info "Delegating standalone Forgejo removal to its product lifecycle"
+  if ! forgejo_product_manage "${product_arguments[@]}"; then
+    warn "Independent Forgejo product removal failed."
+    UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
+    UNINSTALL_EXIT=1
+  fi
   if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
     remove_component_manifest "${COMPONENT_FORGEJO_RUNNER}"
     remove_component_manifest "${COMPONENT_FORGEJO}"

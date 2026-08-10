@@ -118,6 +118,14 @@ dependency on Zombie, and provides a smaller migration surface than Forgejo.
 
 ### 4. Extract Forgejo
 
+**Source status: implemented.** `products/forgejo/` now owns the complete
+server lifecycle, compatibility delegation, release workflow, guarded
+supported-VM harness, and product documentation. PostgreSQL, Caddy, Avahi,
+certificate trust, recovery secrets, service hardening, ownership, and the
+loopback boundary remain intact. Root runner management remains deliberately
+in place for phase 5, with health-gated server coordination and explicit
+same-host name-resolution and CA injection.
+
 - Create `products/forgejo` with an independent lifecycle and release.
 - Preserve its PostgreSQL, Caddy, Avahi, certificate, secrets, service
   hardening, ownership, and network-boundary behavior.

@@ -8,6 +8,25 @@ with its UTC release time as `yyyy.mm.dd.hh.nn.ss`.
 
 ## [Unreleased]
 
+### Independent Forgejo product
+
+- **Complete server extraction:** added `products/forgejo/` with an independent
+  descriptor, version, lifecycle, package, signed-release workflow, guarded
+  disposable-VM harness, audit/receipt boundary, tests, and operator
+  documentation.
+- **Preserved infrastructure boundary:** retained PostgreSQL, the `git`
+  identity, loopback port 3000, Caddy internal-CA HTTPS, Avahi discovery,
+  host certificate trust, protected recovery secrets, service hardening, and
+  ownership-safe adoption.
+- **Delegating compatibility targets:** root install, verify, doctor, repair,
+  and uninstall targets delegate Forgejo server work to the product. The
+  not-yet-extracted runner remains a dependent compatibility component.
+- **Correct same-host runner path:** job containers retain host networking and
+  restricted Docker settings while gaining deterministic `.local` resolution,
+  a read-only host CA bundle, and Git, OpenSSL, Python, and Node trust
+  variables. Server mutations stop and restore an active runner only across
+  health-gated operations, and server removal refuses an installed runner.
+
 ### Independent Beep product
 
 - **Complete standalone implementation:** added `products/beep/` as an

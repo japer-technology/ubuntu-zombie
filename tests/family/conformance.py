@@ -23,7 +23,14 @@ OPERATIONS = (
     "uninstall",
 )
 BEEP_OPERATIONS = (*OPERATIONS[:-1], "kill", OPERATIONS[-1])
-PRODUCTS = ("imaginary-friend", "curriculum-flame", "eric", "llama", "beep")
+PRODUCTS = (
+    "imaginary-friend",
+    "curriculum-flame",
+    "eric",
+    "forgejo",
+    "llama",
+    "beep",
+)
 VERSION_PATTERN = re.compile(r"^\d{4}(?:\.\d{2}){5}$")
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
