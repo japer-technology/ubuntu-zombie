@@ -87,10 +87,16 @@ jobs:
           make -C products/llama lint PYTHON=python3
           make -C products/llama test PYTHON=python3
 
+      - name: Forgejo lint and tests
+        run: |
+          make -C products/forgejo lint PYTHON=python3
+          make -C products/forgejo test PYTHON=python3
+
       - name: Package source bundle
         run: |
           make package
           make -C products/imaginary-friend package
+          make -C products/forgejo package
           make -C products/llama package
 
       - name: Secret pattern scan

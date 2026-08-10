@@ -150,45 +150,37 @@ The installer uses the component-aware grammar `scripts/install.sh <verb>
 starting the runner. The legacy `ZOMBIE_INSTALL_*` flags remain supported and
 are additive with explicit targets; all default to `0`.
 
-Zombie, Forgejo, and Forgejo Runner still use installer-owned component hooks.
-The Llama target is different: every Llama operation delegates to the
-independently versioned lifecycle under `products/llama/` (or the installed
-`/usr/local/sbin/llama-manage`). The root installer retains only target
-selection, compatibility inputs, summary/receipt integration, and its
-component-manifest reference; it contains no Llama mutation implementation.
+Forgejo and Llama server operations delegate to independently versioned
+lifecycles under `products/forgejo/` and `products/llama/` (or their installed
+management entry points). The root installer retains target selection,
+compatibility inputs, summary/receipt integration, and component-manifest
+references; it contains no server mutation implementation. Zombie and the
+not-yet-extracted Forgejo Runner retain installer-owned hooks.
 
-The first component is the **Forgejo server**
-(`ZOMBIE_INSTALL_FORGEJO`): a git forge backed by PostgreSQL, running
-as the dedicated `git` system user under a hardened `forgejo.service`
-unit, plus an optional co-located Actions runner
-(`ZOMBIE_INSTALL_FORGEJO_RUNNER`, restricted Docker executor,
-`forgejo-runner` system user). Its trust boundary differs from the chat
-service: the Forgejo process is loopback-only, while Caddy is the
-**network-listening service** on HTTPS port `443`. Avahi publishes the
-machine's `.local`
-name, Caddy terminates a certificate from its internal CA, and the
-installer exports only the public CA root for clients to trust. Runner job
-containers use host networking to reach Forgejo's loopback endpoint, so the
-runner is restricted to trusted repositories even though privileged
-containers, arbitrary volumes, job access to the Docker socket, and the
-runner's all-interface cache proxy are disabled. These services are sandboxed
-(`NoNewPrivileges`, `ProtectSystem=full`, scoped `ReadWritePaths`) —
-the opposite of the deliberately unsandboxed chat unit. Its secrets
-live only in `/etc/forgejo/app.ini` (`root:git`, `640`). The policy
-gate classifies forge administration (`forgejo`, `forgejo-runner`,
-`psql`, `createdb`) as `system_change` and database drops
-(`dropdb`/`dropuser`/`DROP DATABASE`) as `destructive`.
+The independent **Forgejo server** is a PostgreSQL-backed git forge running as
+the dedicated `git` account under a hardened `forgejo.service`. It owns its
+complete lifecycle, `/opt/forgejo`, `/etc/forgejo`, `/var/lib/forgejo`,
+`/var/log/forgejo`, one exact Caddyfile block, its Avahi advertisement, and
+the exported and host-trusted public CA copies. The Forgejo process is
+loopback-only; Caddy is the **network-listening service** on HTTPS port `443`.
+Secrets remain in `/etc/forgejo/app.ini` (`root:git`, `640`) and do not enter
+common lifecycle responses, receipts, or audit events.
 
-The installer core owns parsing, target ordering, selected configuration
-validation, host preflight, apt/download helpers, logging, receipts,
-progress, and manifest writes. Component hooks own their mutations.
-`install_zombie` converges the account, runtimes, policy, and chat stack;
-`install_forgejo` converges PostgreSQL and Forgejo, while
-`install_forgejo_runner` converges the optional runner.
-The Forgejo hook has an explicit package set (`git`, `git-lfs`,
-`postgresql`, `postgresql-contrib`, `openssl`, `xz-utils`, `caddy`,
-`avahi-daemon`, and `libnss-mdns`, plus `docker.io` for the runner) and
-does not depend on zombie-owned state.
+The optional co-located Actions runner remains a separate compatibility
+component (`ZOMBIE_INSTALL_FORGEJO_RUNNER`) with its own `forgejo-runner`
+account and restricted Docker executor. Job containers use host networking
+to reach the loopback Caddy edge, an explicit `.local` host mapping rather
+than image-specific mDNS, and a read-only host CA bundle with Git, OpenSSL,
+Python, and Node trust variables. Privileged containers, workflow-supplied
+host volumes, the job Docker socket, and the all-interface cache proxy remain
+disabled. The runner process itself has root-equivalent Docker daemon access,
+so it remains suitable only for trusted repositories. Forgejo lifecycle
+mutations coordinate a present runner and refuse server removal until the
+dependent runner is removed.
+
+The policy gate still classifies interactive forge administration
+(`forgejo`, `forgejo-runner`, `psql`, `createdb`) as `system_change` and
+database drops (`dropdb`/`dropuser`/`DROP DATABASE`) as `destructive`.
 
 The independent **Llama** infrastructure product has no dependency on
 `zombie`. It owns the pinned upstream CPU runtime under `/opt/llama.cpp`, the
@@ -226,8 +218,8 @@ create neither the zombie account nor `/opt/ai-zombie`, and they do not
 deploy Node, the Python agent runtime, policy, audit, chat, or
 desktop-availability settings. The runner target selects Forgejo as its
 required component dependency.
-`install llama` is a compatibility path to the independent product lifecycle
-and likewise does not select or modify Zombie.
+`install forgejo` and `install llama` are compatibility paths to their
+independent product lifecycles and likewise do not select or modify Zombie.
 Installer-owned transcript and receipt records remain under `/var/log/`.
 
 ## Component manifest

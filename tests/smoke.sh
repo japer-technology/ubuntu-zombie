@@ -2558,7 +2558,8 @@ run_subcommands() {
 
   combined_out="$(ZOMBIE_COLOR=never ZOMBIE_INSTALL_FORGEJO=1 \
     ./scripts/install.sh --dry-run install zombie)"
-  grep -q "Optional components enabled" <<<"${combined_out}" \
+  grep -q "Components:     zombie forgejo" <<<"${combined_out}" \
+    && grep -q "Forgejo product lifecycle plan" <<<"${combined_out}" \
     || { echo "FAIL: legacy Forgejo env flag was not additive" >&2; exit 1; }
 
   forgejo_zombie_order_out="$(ZOMBIE_COLOR=never ./scripts/install.sh --dry-run \
@@ -2573,35 +2574,29 @@ run_subcommands() {
   expect_exit_code 0 env ZOMBIE_USER=INVALID ZOMBIE_CHAT_PORT=not-a-port \
     ZOMBIE_TTL_DAYS=invalid ZOMBIE_NONINTERACTIVE=1 \
     ./scripts/install.sh install forgejo --dry-run
-  expect_exit_code 64 env ZOMBIE_RECEIPT=0 ZOMBIE_NONINTERACTIVE=1 \
-    ./scripts/install.sh install forgejo --yes
+  expect_exit_code 0 env ZOMBIE_RECEIPT=0 ZOMBIE_NONINTERACTIVE=1 \
+    ./scripts/install.sh install forgejo --yes --dry-run
 
-  # The extracted Forgejo hook must not depend on zombie runtime state.
+  # The extracted Forgejo hook is a compatibility delegate, not a second
+  # server lifecycle, and must not depend on zombie runtime state.
   local forgejo_hook
   forgejo_hook="$(sed -n \
-    '/^# component-hook: forgejo begin$/,/^# component-hook: forgejo end$/p' \
+    '/^component_install_forgejo() {/,/^}/p' \
     scripts/install.sh)"
   [[ -n "${forgejo_hook}" ]] \
-    || { echo "FAIL: could not locate the install_forgejo hook" >&2; exit 1; }
-  grep -q 'PostgreSQL' <<<"${forgejo_hook}" \
-    || { echo "FAIL: extracted install_forgejo hook is incomplete" >&2; exit 1; }
-  grep -q 'FORGEJO_HTTP_PORT' <<<"${forgejo_hook}" \
-    && grep -q 'FORGEJO_ADMIN_USER' <<<"${forgejo_hook}" \
-    && grep -q 'FORGEJO_DB_NAME' <<<"${forgejo_hook}" \
-    || { echo "FAIL: install_forgejo is missing required Forgejo state" >&2; exit 1; }
+    || { echo "FAIL: could not locate the Forgejo compatibility hook" >&2; exit 1; }
+  grep -q 'forgejo_product_manage' <<<"${forgejo_hook}" \
+    && grep -q 'ADOPT FORGEJO' <<<"${forgejo_hook}" \
+    || { echo "FAIL: Forgejo compatibility hook does not delegate safely" >&2; exit 1; }
   ! grep -Eq 'AGENT_USER|AGENT_HOME|CHAT_PORT|TTL_DAYS|LOCAL_LLM|ZOMBIE_ETC|/opt/ai-zombie' \
     <<<"${forgejo_hook}" \
-    || { echo "FAIL: install_forgejo references zombie-owned state" >&2; exit 1; }
-  grep -q 'api/healthz' <<<"${forgejo_hook}" \
-    || { echo "FAIL: install_forgejo must require the Forgejo health check" >&2; exit 1; }
-  local forgejo_host_helper
-  forgejo_host_helper="$(sed -n '/^forgejo_url_host() {/,/^}/p' scripts/install.sh)"
-  grep -Fq "tr '[:upper:]' '[:lower:]'" <<<"${forgejo_host_helper}" \
-    || { echo "FAIL: Forgejo URL host helper must normalize hostname case" >&2; exit 1; }
-  grep -q '_fj_domain="$(forgejo_url_host)"' <<<"${forgejo_hook}" \
-    || { echo "FAIL: Forgejo ROOT_URL generation must use the normalized URL host" >&2; exit 1; }
-  grep -q 'FORGEJO_URL_HOST="${FORGEJO_URL_HOST:-$(forgejo_url_host)}"' scripts/install.sh \
-    || { echo "FAIL: Forgejo summaries must use the normalized URL host" >&2; exit 1; }
+    || { echo "FAIL: Forgejo delegate references zombie-owned state" >&2; exit 1; }
+  [[ -f products/forgejo/payload/agent/forgejo/management.py \
+      && ! -e payload/systemd/forgejo.service ]] \
+    || { echo "FAIL: Forgejo server lifecycle was not moved to the product" >&2; exit 1; }
+  grep -q 'def _wait_healthy' \
+    products/forgejo/payload/agent/forgejo/management.py \
+    || { echo "FAIL: Forgejo product must own its health gate" >&2; exit 1; }
   grep -q 'install=component_install_forgejo' scripts/install.sh \
     && grep -q 'manifest=component_manifest_forgejo' scripts/install.sh \
     || { echo "FAIL: Forgejo install and manifest hooks must be registered" >&2; exit 1; }
@@ -2871,10 +2866,9 @@ EOF_FAKE_PSQL
     PATH="${fake_bin}:${PATH}" ./scripts/uninstall.sh forgejo --yes --dry-run 2>&1 || true)"
   ! grep -q "fake psql should not execute" <<<"${out}" \
     || { echo "FAIL: forgejo dry-run must not execute PostgreSQL commands" >&2; exit 1; }
-  grep -q "dropdb --if-exists -- forgejo" <<<"${out}" \
-    || { echo "FAIL: forgejo uninstall should include PostgreSQL database cleanup" >&2; exit 1; }
-  grep -q "dropuser --if-exists -- forgejo" <<<"${out}" \
-    || { echo "FAIL: forgejo uninstall should include PostgreSQL role cleanup" >&2; exit 1; }
+  grep -q "Require the co-located runner to be removed first" <<<"${out}" \
+    && grep -q "explicitly purge repositories, secrets, and database" <<<"${out}" \
+    || { echo "FAIL: delegated Forgejo purge plan is incomplete" >&2; exit 1; }
 
   out="$(ZOMBIE_COLOR=never ./scripts/uninstall.sh zombie --dry-run 2>&1 || true)"
   grep -q "ubuntu-zombie" <<<"${out}" \
@@ -3276,11 +3270,12 @@ run_noninteractive() {
   fi
   fj_out="$(ZOMBIE_COLOR=never ZOMBIE_NONINTERACTIVE=1 ZOMBIE_INSTALL_FORGEJO=1 \
     ZOMBIE_INSTALL_FORGEJO_RUNNER=1 ./scripts/install.sh install --dry-run)"
-  grep -q "Optional components enabled" <<<"${fj_out}" \
+  grep -q "Components:     zombie forgejo forgejo-runner" <<<"${fj_out}" \
+    && grep -q "Forgejo product lifecycle plan" <<<"${fj_out}" \
     || { echo "FAIL: Forgejo dry-run stanza missing" >&2; exit 1; }
   grep -q "forgejo-runner.service" <<<"${fj_out}" \
     || { echo "FAIL: runner dry-run stanza missing" >&2; exit 1; }
-  grep -q "Caddy internal CA" <<<"${fj_out}" \
+  grep -q "Caddy HTTPS" <<<"${fj_out}" \
     || { echo "FAIL: Forgejo dry-run must describe LAN HTTPS" >&2; exit 1; }
   grep -q "127.0.0.1:3000" <<<"${fj_out}" \
     || { echo "FAIL: Forgejo dry-run must keep backend on loopback" >&2; exit 1; }

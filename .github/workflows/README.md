@@ -23,6 +23,7 @@ removals, and trigger changes are easy to review.
 | `ci.yml` | CI | Lint, syntax, smoke, pytest, package, and secret-pattern checks | Pull requests and pushes to `main` |
 | `codeql.yml` | CodeQL | Static analysis for Python and JavaScript security/quality issues | Pull requests, pushes to `main`, weekly schedule |
 | `dependency-review.yml` | Dependency Review | Block vulnerable or incompatible new dependencies in PRs | Pull requests targeting `main` |
+| `forgejo-release.yml` | Forgejo Release | Build, attest, sign, and publish the independent Forgejo artifact | Forgejo `VERSION` changes, product tags, manual dispatch |
 | `imaginary-friend-release.yml` | Imaginary Friend Release | Build, attest, sign, and publish the independent Friend artifact | Friend `VERSION` changes, product tags, manual dispatch |
 | `integration.yml` | Integration | Best-effort installer dry-run and container checks outside the lint sandbox | Nightly schedule and manual dispatch |
 | `llama-release.yml` | Llama Release | Build, attest, sign, and publish the independent Llama artifact | Llama `VERSION` changes, product tags, manual dispatch |
@@ -53,8 +54,8 @@ same categories of checks contributors are expected to run locally:
 - `bash tests/smoke.sh standards` for repository policy and standards
   checks.
 - `python3 -m pytest tests/python -q` for policy and audit regression tests.
-- Independent Imaginary Friend and Llama product lint and test suites.
-- Root, Imaginary Friend, and Llama package builds.
+- Independent Imaginary Friend, Forgejo, and Llama product lint and test suites.
+- Root, Imaginary Friend, Forgejo, and Llama package builds.
 - A final `git grep` scan for long `sk-`, `sk-ant-`, and
   `tskey-auth-` token-shaped strings.
 
@@ -105,6 +106,14 @@ failure, the action is configured to comment a summary on the pull request.
 The job uses `contents: read` and `pull-requests: write` only where the
 dependency review action needs them.
 
+## `forgejo-release.yml` — Forgejo Release
+
+This workflow validates and packages only `products/forgejo/` plus the
+applicable family schemas and repository license. Product tags use
+`forgejo-v<VERSION>`. The workflow publishes a checksum, SPDX SBOM, test
+evidence, provenance, and keyless cosign material independently of the root
+Ubuntu Zombie release.
+
 ## `imaginary-friend-release.yml` — Imaginary Friend Release
 
 This workflow validates and packages only `products/imaginary-friend/` plus
@@ -121,7 +130,7 @@ same as local installation testing on a disposable Ubuntu Desktop VM.
 Instead, it provides best-effort coverage for install paths that are too
 heavy or too system-specific for the normal CI workflow.
 
-It contains four jobs:
+It contains five jobs:
 
 ### `dry-run`
 
@@ -164,6 +173,15 @@ rollback, retained-state recovery, complete removal, and post-purge reinstall
 on Ubuntu 22.04 and 24.04 runners. The harness refuses to mutate a host without
 the explicit `LLAMA_DISPOSABLE_VM_TEST=1` sentinel and rejects pre-existing
 Llama resources.
+
+### `forgejo-lifecycle`
+
+This job uses checksum-pinned loopback Forgejo fixtures while exercising real
+PostgreSQL, Caddy, Avahi, systemd, certificate trust, clean install,
+idempotent reinstall, backup, suspend, resume, update, rollback, repair,
+same-host runner coordination, sibling isolation, and complete removal on
+Ubuntu 22.04 and 24.04 runners. The harness refuses pre-existing Forgejo state
+and requires `FORGEJO_DISPOSABLE_VM_TEST=1`.
 
 ## `llama-release.yml` — Llama Release
 

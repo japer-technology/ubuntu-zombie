@@ -6,6 +6,7 @@ SHELL := bash
 VERSION := $(shell cat VERSION)
 PYTHON ?= python3
 FRIEND_ROOT := products/imaginary-friend
+FORGEJO_ROOT := products/forgejo
 LLAMA_ROOT := products/llama
 BEEP_ROOT := products/beep
 
@@ -34,12 +35,14 @@ lint:
 	bash tests/smoke.sh syntax
 	bash tests/smoke.sh python
 	$(MAKE) -C $(FRIEND_ROOT) lint PYTHON="$(PYTHON)"
+	$(MAKE) -C $(FORGEJO_ROOT) lint PYTHON="$(PYTHON)"
 	$(MAKE) -C $(LLAMA_ROOT) lint PYTHON="$(PYTHON)"
 	$(MAKE) -C $(BEEP_ROOT) lint PYTHON="$(PYTHON)"
 
 test:
 	bash tests/smoke.sh all
 	$(MAKE) -C $(FRIEND_ROOT) test PYTHON="$(PYTHON)"
+	$(MAKE) -C $(FORGEJO_ROOT) test PYTHON="$(PYTHON)"
 	$(MAKE) -C $(LLAMA_ROOT) test PYTHON="$(PYTHON)"
 	$(MAKE) -C $(BEEP_ROOT) test PYTHON="$(PYTHON)"
 
@@ -57,9 +60,11 @@ verify:
 package:
 	@mkdir -p dist
 	@tar --exclude-vcs --exclude='dist' --exclude='__pycache__' \
+	     --exclude='products/forgejo/dist' \
 	     --exclude='products/llama/dist' \
 	     -czf dist/ubuntu-zombie-$(VERSION).tar.gz \
-	     scripts payload tests products/llama family/schemas Makefile VERSION \
+	     scripts payload tests products/forgejo products/llama family/schemas \
+	     Makefile VERSION \
 	     README.md CHANGELOG.md CONTRIBUTING.md CODE_OF_CONDUCT.md \
 	     LICENSE .editorconfig \
 	     SECURITY.md docs debian
@@ -73,5 +78,6 @@ clean:
 	rm -rf dist
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 	$(MAKE) -C $(FRIEND_ROOT) clean
+	$(MAKE) -C $(FORGEJO_ROOT) clean
 	$(MAKE) -C $(LLAMA_ROOT) clean
 	$(MAKE) -C $(BEEP_ROOT) clean

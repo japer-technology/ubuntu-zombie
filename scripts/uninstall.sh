@@ -64,6 +64,7 @@ readonly COMPONENT_FORGEJO_RUNNER="forgejo-runner"
 readonly COMPONENT_LLAMA="llama"
 COMPONENT_MANIFEST_DIR="${ZOMBIE_COMPONENT_MANIFEST_DIR:-/var/lib/ubuntu-zombie/components}"
 LLAMA_PRODUCT_ROOT="${LLAMA_PRODUCT_ROOT:-${REPO_ROOT}/products/llama}"
+FORGEJO_PRODUCT_ROOT="${FORGEJO_PRODUCT_ROOT:-${REPO_ROOT}/products/forgejo}"
 # Track recoverable failures from the start so early cleanup can continue
 # through later steps while still returning a non-zero final status.
 UNINSTALL_EXIT=0
@@ -92,6 +93,41 @@ llama_product_lifecycle() {
   response="$(llama_product_manage status --json 2>/dev/null)" || return $?
   python3 -c \
     'import json,sys; print(json.load(sys.stdin)["details"]["llama"]["lifecycle"])' \
+    <<<"${response}"
+}
+
+forgejo_product_entrypoint() {
+  if [[ -x "${FORGEJO_PRODUCT_ROOT}/scripts/manage.sh" ]]; then
+    printf '%s\n' "${FORGEJO_PRODUCT_ROOT}/scripts/manage.sh"
+  elif [[ -x /usr/local/sbin/forgejo-manage ]]; then
+    printf '%s\n' /usr/local/sbin/forgejo-manage
+  else
+    return 66
+  fi
+}
+
+forgejo_product_manage() {
+  local entrypoint
+  entrypoint="$(forgejo_product_entrypoint)" || return $?
+  (
+    local variable
+    for variable in "${!FORGEJO_@}"; do
+      case "${variable}" in
+        FORGEJO_ARTIFACT_SHA256|FORGEJO_DISPOSABLE_VM_TEST|FORGEJO_TEST_RELEASE_BASE)
+          ;;
+        *) unset "${variable}" ;;
+      esac
+    done
+    FORGEJO_NONINTERACTIVE="$((ASSUME_YES || DRY_RUN))" \
+      "${entrypoint}" "$@"
+  )
+}
+
+forgejo_product_lifecycle() {
+  local response
+  response="$(forgejo_product_manage status --json 2>/dev/null)" || return $?
+  python3 -c \
+    'import json,sys; print(json.load(sys.stdin)["details"]["forgejo"]["lifecycle"])' \
     <<<"${response}"
 }
 
@@ -452,6 +488,44 @@ remove_component_forgejo_runner() {
 }
 
 remove_component_forgejo() {
+  local fail_count_before="${UNINSTALL_FAIL_COUNT}" lifecycle="" manifest
+  local -a product_arguments=(uninstall)
+  manifest="${COMPONENT_MANIFEST_DIR}/${COMPONENT_FORGEJO}"
+  if (( ${#TARGET_ARGS[@]} == 0 )) && [[ ! -e "${manifest}" ]]; then
+    lifecycle="$(forgejo_product_lifecycle 2>/dev/null || true)"
+    [[ "${lifecycle}" == "legacy" || "${lifecycle}" == "active" \
+        || "${lifecycle}" == "suspended" || "${lifecycle}" == "retained" ]] \
+      || return 0
+  fi
+  if [[ -f /etc/systemd/system/forgejo-runner.service \
+      || -x /usr/local/bin/forgejo-runner \
+      || -d /var/lib/forgejo-runner ]]; then
+    remove_component_forgejo_runner
+  fi
+  (( DRY_RUN )) && product_arguments+=(--dry-run)
+  if (( ASSUME_YES )); then
+    product_arguments+=(
+      --yes
+      --purge
+      --confirmation "DELETE FORGEJO STATE"
+      --non-interactive
+    )
+  fi
+  info "Delegating standalone Forgejo removal to its product lifecycle"
+  if ! forgejo_product_manage "${product_arguments[@]}"; then
+    warn "Independent Forgejo product removal failed."
+    UNINSTALL_FAIL_COUNT=$((UNINSTALL_FAIL_COUNT + 1))
+    UNINSTALL_EXIT=1
+  fi
+  if (( UNINSTALL_FAIL_COUNT == fail_count_before )); then
+    remove_component_manifest "${COMPONENT_FORGEJO_RUNNER}"
+    remove_component_manifest "${COMPONENT_FORGEJO}"
+  else
+    warn "Keeping Forgejo manifest because removal finished with errors."
+  fi
+  warn_remaining_components
+  return 0
+
   local fail_count_before="${UNINSTALL_FAIL_COUNT}"
   local _fj_db _fj_role _fj_user _fj_has_db_state=0 _fj_postgres_ready=0
 

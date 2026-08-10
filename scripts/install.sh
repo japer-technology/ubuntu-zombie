@@ -219,6 +219,7 @@ note_changed()   { STEPS_CHANGED=$((STEPS_CHANGED + 1)); }
 
 PAYLOAD_DIR="${PAYLOAD_DIR:-${REPO_ROOT}/payload}"
 LLAMA_PRODUCT_ROOT="${LLAMA_PRODUCT_ROOT:-${REPO_ROOT}/products/llama}"
+FORGEJO_PRODUCT_ROOT="${FORGEJO_PRODUCT_ROOT:-${REPO_ROOT}/products/forgejo}"
 
 llama_catalog_release() {
   local catalogue="${LLAMA_PRODUCT_ROOT}/payload/etc/llama-builds.json"
@@ -250,6 +251,69 @@ llama_product_manage() {
     LLAMA_PORT="${LLAMA_PORT}" \
     LLAMA_NONINTERACTIVE="${ZOMBIE_NONINTERACTIVE}" \
     "${entrypoint}" "$@"
+}
+
+forgejo_product_entrypoint() {
+  if [[ -x "${FORGEJO_PRODUCT_ROOT}/scripts/manage.sh" ]]; then
+    printf '%s\n' "${FORGEJO_PRODUCT_ROOT}/scripts/manage.sh"
+  elif [[ -x /usr/local/sbin/forgejo-manage ]]; then
+    printf '%s\n' /usr/local/sbin/forgejo-manage
+  else
+    printf 'Forgejo product lifecycle is unavailable. Use the independent Forgejo artifact or a complete source checkout.\n' >&2
+    return 66
+  fi
+}
+
+forgejo_product_manage() {
+  local entrypoint admin_secret="" database_secret="" result
+  local -a product_environment=()
+  entrypoint="$(forgejo_product_entrypoint)" || return $?
+  if [[ -n "${FORGEJO_ADMIN_PASSWORD}" ]]; then
+    admin_secret="$(mktemp)"
+    chmod 600 "${admin_secret}"
+    printf '%s' "${FORGEJO_ADMIN_PASSWORD}" > "${admin_secret}"
+    product_environment+=("FORGEJO_ADMIN_PASSWORD_FILE=${admin_secret}")
+  fi
+  if [[ -n "${FORGEJO_DB_PASSWORD}" ]]; then
+    database_secret="$(mktemp)"
+    chmod 600 "${database_secret}"
+    printf '%s' "${FORGEJO_DB_PASSWORD}" > "${database_secret}"
+    product_environment+=("FORGEJO_DB_PASSWORD_FILE=${database_secret}")
+  fi
+  product_environment+=(
+    "FORGEJO_ADMIN_USER=${FORGEJO_ADMIN_USER}"
+    "FORGEJO_ADMIN_EMAIL=${FORGEJO_ADMIN_EMAIL}"
+    "FORGEJO_DB_NAME=${FORGEJO_DB_NAME}"
+    "FORGEJO_DB_USER=${FORGEJO_DB_USER}"
+    "FORGEJO_VERSION=${FORGEJO_VERSION}"
+    "FORGEJO_HTTP_PORT=${FORGEJO_HTTP_PORT}"
+    "FORGEJO_NONINTERACTIVE=${ZOMBIE_NONINTERACTIVE}"
+  )
+  if (
+    local variable
+    for variable in "${!FORGEJO_@}"; do
+      case "${variable}" in
+        FORGEJO_ARTIFACT_SHA256|FORGEJO_DISPOSABLE_VM_TEST|FORGEJO_TEST_RELEASE_BASE)
+          ;;
+        *) unset "${variable}" ;;
+      esac
+    done
+    env "${product_environment[@]}" "${entrypoint}" "$@"
+  ); then
+    result=0
+  else
+    result=$?
+  fi
+  rm -f -- "${admin_secret}" "${database_secret}"
+  return "${result}"
+}
+
+forgejo_product_value() {
+  local key="$1"
+  forgejo_product_manage status --json 2>/dev/null \
+    | python3 -c \
+      'import json,sys; value=json.load(sys.stdin)["details"]["forgejo"]["configuration"].get(sys.argv[1]); print("" if value is None else value)' \
+      "${key}"
 }
 
 # Known-good versions of the Node bridges. The install path replaces these
@@ -345,7 +409,13 @@ EXPLICIT_TARGETS=0
 . "${SCRIPT_DIR}/component-registry.sh"
 
 component_validate_zombie() { validate_zombie_config; }
-component_validate_forgejo() { validate_forgejo_config; }
+component_validate_forgejo() {
+  local validation
+  validate_forgejo_config
+  if ! validation="$(forgejo_product_manage install --dry-run --json 2>&1)"; then
+    die "Forgejo product configuration validation failed: ${validation}" 2
+  fi
+}
 component_validate_forgejo_runner() { validate_forgejo_runner_config; }
 component_validate_llama() {
   local validation
@@ -358,7 +428,7 @@ component_review_forgejo() { review_forgejo_parameters; }
 component_review_forgejo_runner() { review_forgejo_runner_parameters; }
 component_review_llama() { :; }
 component_dry_run_zombie() { print_zombie_dry_run; }
-component_dry_run_forgejo() { print_forgejo_dry_run; }
+component_dry_run_forgejo() { forgejo_product_manage install --dry-run; }
 component_dry_run_forgejo_runner() { print_forgejo_runner_dry_run; }
 component_dry_run_llama() { llama_product_manage install --dry-run; }
 component_receipt_start_zombie() { receipt_start_zombie; }
@@ -370,7 +440,20 @@ component_receipt_finish_forgejo() { receipt_finish_forgejo; }
 component_receipt_finish_forgejo_runner() { receipt_finish_forgejo_runner; }
 component_receipt_finish_llama() { receipt_finish_llama; }
 component_install_zombie() { install_zombie; }
-component_install_forgejo() { install_forgejo; }
+component_install_forgejo() {
+  local -a arguments=(install --yes --confirmation "ADOPT FORGEJO")
+  [[ "${ZOMBIE_NONINTERACTIVE}" == "1" ]] && arguments+=(--non-interactive)
+  forgejo_product_manage "${arguments[@]}"
+  FORGEJO_RESOLVED_VERSION="$(forgejo_product_value upstream_version)"
+  FORGEJO_URL_HOST="$(
+    forgejo_product_value url \
+      | sed -E 's|^https://([^/]+)/?$|\1|'
+  )"
+  if [[ "${ZOMBIE_INSTALL_FORGEJO_RUNNER}" == "1" ]] \
+      && ! is_selected_component "${COMPONENT_FORGEJO_RUNNER}"; then
+    install_forgejo_runner
+  fi
+}
 component_install_forgejo_runner() { install_forgejo_runner; }
 component_install_llama() {
   local -a arguments=(install --yes)
@@ -390,7 +473,14 @@ component_legacy_forgejo() { legacy_forgejo_present; }
 component_legacy_forgejo_runner() { legacy_forgejo_runner_present; }
 component_legacy_llama() { legacy_llama_present; }
 component_verify_zombie() { verify_zombie; }
-component_verify_forgejo() { verify_forgejo; }
+component_verify_forgejo() {
+  if forgejo_product_manage verify --json >/dev/null 2>&1; then
+    vr ok forgejo delegated "Independent Forgejo product verification passed."
+  else
+    vr fail forgejo delegated \
+      "Independent Forgejo verification failed. Run: sudo forgejo-manage verify"
+  fi
+}
 component_verify_forgejo_runner() { verify_forgejo_runner; }
 component_verify_llama() {
   if llama_product_manage verify --json >/dev/null 2>&1; then
@@ -401,7 +491,18 @@ component_verify_llama() {
   fi
 }
 component_doctor_zombie() { doctor_zombie; }
-component_doctor_forgejo() { doctor_forgejo; }
+component_doctor_forgejo() {
+  local response
+  if response="$(forgejo_product_manage doctor --json 2>/dev/null)" \
+      && python3 -c \
+        'import json,sys; raise SystemExit(json.load(sys.stdin)["status"] != "ok")' \
+        <<<"${response}"; then
+    dr ok forgejo delegated "Independent Forgejo product reports healthy."
+  else
+    dr warn forgejo delegated \
+      "Independent Forgejo product reports drift. Run: forgejo-manage doctor"
+  fi
+}
 component_doctor_forgejo_runner() { doctor_forgejo_runner; }
 component_doctor_llama() {
   local response
@@ -416,13 +517,20 @@ component_doctor_llama() {
   fi
 }
 component_repair_zombie() { repair_zombie; }
-component_repair_forgejo() { repair_forgejo; }
+component_repair_forgejo() {
+  if [[ -f /var/lib/forgejo/installation.json ]]; then
+    forgejo_product_manage repair --yes --non-interactive
+  else
+    forgejo_product_manage install --yes --non-interactive \
+      --confirmation "ADOPT FORGEJO"
+  fi
+}
 component_repair_forgejo_runner() { repair_forgejo_runner; }
 component_repair_llama() {
   llama_product_manage repair --yes --non-interactive
 }
 component_phase_count_zombie() { count_zombie_phases; }
-component_phase_count_forgejo() { count_forgejo_phases; }
+component_phase_count_forgejo() { printf '1\n'; }
 component_phase_count_forgejo_runner() { count_forgejo_runner_phases; }
 component_phase_count_llama() { printf '1\n'; }
 
@@ -1204,10 +1312,6 @@ validate_forgejo_config() {
   if ! is_valid_forgejo_password "${FORGEJO_DB_PASSWORD}"; then
     die "FORGEJO_DB_PASSWORD must be 8-256 printable characters (or empty to auto-generate)." 2
   fi
-  if [[ "${ZOMBIE_RECEIPT}" != "1" ]] \
-      && [[ -z "${FORGEJO_ADMIN_PASSWORD}" || -z "${FORGEJO_DB_PASSWORD}" ]]; then
-    die "Forgejo password generation requires a receipt. Set ZOMBIE_RECEIPT=1, or explicitly set both FORGEJO_ADMIN_PASSWORD and FORGEJO_DB_PASSWORD." 64
-  fi
   if ! is_valid_forgejo_version "${FORGEJO_VERSION}"; then
     die "FORGEJO_VERSION must be a release like 11.0.3 (or empty for latest)." 2
   fi
@@ -1586,10 +1690,24 @@ EOF
 # lifecycle-helper: forgejo-caddy-configure end
 
 forgejo_runner_config_is_managed() {
+  local host
   [[ -r "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
-      && -r /var/lib/forgejo-runner/config.yaml ]] \
-    && cmp -s "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
-      /var/lib/forgejo-runner/config.yaml
+      && -r /var/lib/forgejo-runner/config.yaml ]] || return 1
+  host="$(forgejo_runner_public_host)" || return 1
+  cmp -s \
+    <(sed "s|__FORGEJO_HOST__|${host}|g" \
+      "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml") \
+    /var/lib/forgejo-runner/config.yaml
+}
+
+forgejo_runner_public_host() {
+  local host=""
+  if [[ -r /etc/forgejo/app.ini ]]; then
+    host="$(ini_get /etc/forgejo/app.ini server DOMAIN || true)"
+  fi
+  [[ "${host}" =~ ^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$ ]] \
+    || return 1
+  printf '%s\n' "${host}"
 }
 
 forgejo_manifest_has_runner() {
@@ -4414,6 +4532,7 @@ EOF
 
 install_forgejo_runner() {
   local runner_arch installed_runner runner_tmp runner_token runner_drop_ins
+  local runner_host
 
   # option-sections: forgejo-runner begin
   section "Install Forgejo runner"
@@ -4422,6 +4541,14 @@ install_forgejo_runner() {
     || die "Forgejo runner requires the local Forgejo server component. Run: sudo ./${SCRIPT_NAME} install forgejo-runner" 1
   systemctl is-active --quiet forgejo.service \
     || die "Forgejo must be active before its runner can be installed." 1
+  runner_host="$(forgejo_runner_public_host)" \
+    || die "Forgejo must have a valid HTTPS public host before its runner can be installed." 1
+  [[ -s /etc/forgejo/caddy-local-ca.crt \
+      && -s /usr/local/share/ca-certificates/forgejo-local-ca.crt ]] \
+    || die "Forgejo local CA trust is missing. Run: sudo forgejo-manage repair" 1
+  cmp -s /etc/forgejo/caddy-local-ca.crt \
+      /usr/local/share/ca-certificates/forgejo-local-ca.crt \
+    || die "Forgejo local CA trust is stale. Run: sudo forgejo-manage repair" 1
   runner_arch="$(forgejo_release_arch)" \
     || die "Forgejo runner releases support only amd64/arm64 hosts." 65
 
@@ -4485,9 +4612,10 @@ install_forgejo_runner() {
     info "Managed same-host runner configuration already up to date."
     note_satisfied
   else
-    install -m 640 -o root -g forgejo-runner \
+    sed "s|__FORGEJO_HOST__|${runner_host}|g" \
       "${PAYLOAD_DIR}/etc/forgejo-runner-config.yaml" \
-      /var/lib/forgejo-runner/config.yaml
+      | install -m 640 -o root -g forgejo-runner /dev/stdin \
+        /var/lib/forgejo-runner/config.yaml
     ok "Installed conservative same-host runner configuration."
     note_changed
   fi

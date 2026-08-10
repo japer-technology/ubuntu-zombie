@@ -615,18 +615,17 @@ and request-file rules are in
 A self-hosted [Forgejo](https://forgejo.org/) git forge backed by
 PostgreSQL, with LAN discovery and HTTPS provided by Avahi and Caddy.
 An optional co-located Forgejo Actions runner uses a restricted Docker
-executor with host networking. `docs/FORGEJO.md` documents the install
-path itself (phases, update behaviour, files installed, lifecycle
-subcommands) in depth.
+executor with host networking. The server's independent lifecycle and direct
+inputs are documented in
+[`products/forgejo/`](../products/forgejo/README.md).
 
 Forgejo itself binds only to `127.0.0.1`. Caddy is the LAN-facing entry
 point on HTTPS port `443`, uses its internal certificate authority, and
 proxies to Forgejo's loopback port. Avahi advertises the machine hostname
 through mDNS, so the default URL is
 `https://<lowercase-machine-hostname>.local/`.
-The installer configures Caddy's official signed stable APT repository before
-installing the package, so no manual Caddy repository setup is required.
-The installer writes this hostname route as a marked block in
+The product installs Caddy from the supported Ubuntu package sources and
+writes this hostname route as a marked block in
 `/etc/caddy/Caddyfile` while preserving unrelated Caddy sites. Re-running
 `repair forgejo` replaces that managed block and migrates the older
 `/etc/caddy/conf.d/forgejo.caddy` fragment if present.
@@ -638,15 +637,15 @@ The installer writes this hostname route as a marked block in
 | `FORGEJO_HTTP_PORT`             | `3000`                                   | Forgejo loopback web/API port behind Caddy. |
 | `FORGEJO_ADMIN_USER`            | `forgejo-admin`                          | Initial admin account name. |
 | `FORGEJO_ADMIN_EMAIL`           | `forgejo-admin@localhost.localdomain`    | Initial admin email. |
-| `FORGEJO_ADMIN_PASSWORD`        | *(empty — generated)*                    | Initial admin password (8–256 printable chars). Leave empty to have one generated and recorded in the install receipt. |
+| `FORGEJO_ADMIN_PASSWORD`        | *(empty — generated)*                    | Compatibility input for the initial admin credential; converted to a root-private file reference. |
 | `FORGEJO_DB_NAME`               | `forgejo`                                | PostgreSQL database name. |
 | `FORGEJO_DB_USER`               | `forgejo`                                | PostgreSQL role name. |
-| `FORGEJO_DB_PASSWORD`           | *(empty — generated)*                    | PostgreSQL role password (8–256 printable chars). Leave empty to have one generated and recorded in the install receipt. |
+| `FORGEJO_DB_PASSWORD`           | *(empty — generated)*                    | Compatibility input for the PostgreSQL credential; converted to a root-private file reference. |
 | `FORGEJO_VERSION`               | *(empty — latest release)*               | Pin a Forgejo release (e.g. `11.0.3`); the resolved value is recorded in the receipt. |
 | `FORGEJO_RUNNER_VERSION`        | *(empty — latest release)*               | Pin a forgejo-runner release. |
 | `FORGEJO_RUNNER_LABELS`         | `ubuntu-latest:docker://node:20-bookworm`| Runner labels; the default maps `ubuntu-latest` jobs to a Docker container. |
-| `FORGEJO_CONFIRM_UPDATE`        | *(empty)*                                | Set to capitalized `YES` to approve updating an existing Forgejo installation without an interactive prompt. |
-| `FORGEJO_CONFIRM_DATABASE_REUSE`| *(empty)*                                | Set to capitalized `YES` to approve reusing an existing Forgejo PostgreSQL database/role without an interactive prompt. |
+| `FORGEJO_CONFIRM_UPDATE`        | *(empty)*                                | Legacy compatibility approval used by the root parameter review. |
+| `FORGEJO_CONFIRM_DATABASE_REUSE`| *(empty)*                                | Legacy compatibility approval; ambiguous database state still fails closed. |
 
 Every one of these decision parameters can also be set interactively:
 the review's `9) Options` sub-menu lets you toggle the server and
@@ -657,33 +656,30 @@ and the version pins and runner labels before anything is installed.
 Secrets (`SECRET_KEY`, `INTERNAL_TOKEN`, `JWT_SECRET`,
 `LFS_JWT_SECRET`) are generated at install time and stored only in
 `/etc/forgejo/app.ini` (mode `640`, owner `root:git`); re-runs reuse
-them rather than rotating them. The admin and database passwords are
-options: set
-`FORGEJO_ADMIN_PASSWORD` / `FORGEJO_DB_PASSWORD` to choose them, or
-leave them empty to have the installer generate them randomly and
-record the generated values in the install receipt (root-only, mode
-`600`). Operator-supplied passwords are never recorded. Generated
-passwords are disclosed only in the root-only receipt. A generated admin
+them rather than rotating them. Compatibility callers can set
+`FORGEJO_ADMIN_PASSWORD` / `FORGEJO_DB_PASSWORD`; the shim converts those
+values to private temporary references before invoking the product. No
+credential value enters root or product receipts. A generated initial
+administrator credential is also available once in
+`/etc/forgejo/bootstrap-admin-password` (root-only, mode `600`). A generated admin
 password must be changed on first sign-in; an operator-chosen one is
-kept as-is. If receipts are disabled, both `FORGEJO_ADMIN_PASSWORD` and
-`FORGEJO_DB_PASSWORD` must be supplied; otherwise install exits `64`
-before host mutation.
+kept as-is. The database credential and application recovery secrets remain
+only in `app.ini`. Direct product use accepts
+`FORGEJO_ADMIN_PASSWORD_FILE` and `FORGEJO_DB_PASSWORD_FILE`, not raw values.
 
 The configuration directory is mode `750` and the running Forgejo service
 cannot rewrite it. During an install or upgrade, the installer stops Forgejo,
 temporarily grants the `git` account write access for the one-shot database
 migration, and restores the directory/file to `750`/`640` even if migration
 fails. Startup is considered successful only after `/api/healthz` responds.
-If an existing Forgejo installation or matching PostgreSQL database/role is
-detected, each is reported and protected by a separate exact, capitalized
-`YES` confirmation. `--yes` does not bypass these data-safety gates. For
-unattended updates, set `FORGEJO_CONFIRM_UPDATE=YES` and
-`FORGEJO_CONFIRM_DATABASE_REUSE=YES`. The update path never drops the database
-or repository data. Existing component or database state with a missing,
-empty, or incomplete `app.ini` is not reconstructed: install and repair stop
-before rotating credentials or secrets. A server re-run preserves an
-installed runner from its component manifest or on-disk artifacts and
-restores its boot enablement.
+An existing component installation is adopted only when its root-owned
+manifest, account, unit, loopback settings, and complete recovery secrets
+validate exactly. The product requires the exact `ADOPT FORGEJO` confirmation;
+the compatibility command supplies it only to that validator. Existing
+database state with a missing, empty, mismatched, or incomplete `app.ini`
+fails before credential or secret rotation. Update creates a protected backup
+and never silently drops repository data. Server mutations stop an active
+runner first and restart it only after Forgejo passes its health gates.
 
 ### Trust the Forgejo local certificate authority
 
@@ -704,9 +700,11 @@ substitute their own root CA. After import, open the URL shown by the
 installer or run `sudo ./scripts/install.sh verify forgejo`.
 
 The root certificate is intentionally public; Caddy's private CA key stays
-under `/var/lib/caddy` and is not exported. Removing Forgejo deletes the
-exported certificate and managed Caddy/Avahi configuration, but leaves the
-shared `caddy`, `avahi-daemon`, and `libnss-mdns` packages installed.
+under `/var/lib/caddy` and is not exported. The product also installs that
+public root into the host trust bundle for same-host runner jobs. Removing
+Forgejo deletes the exported and host-trust copies plus managed Caddy/Avahi
+configuration, but leaves the shared `caddy`, `avahi-daemon`, and
+`libnss-mdns` packages installed.
 Remove the trusted root from clients when the Forgejo host is retired.
 
 Caveats:
@@ -723,15 +721,20 @@ Caveats:
   containers and arbitrary host-volume mounts, and does not expose the Docker
   socket inside jobs. It also disables the built-in Actions cache proxy,
   which otherwise listens on every host interface. Job containers still use
-  host networking so they can reach loopback-only Forgejo; they can therefore
-  also reach other host loopback services. The runner process itself has
-  Docker-daemon access, which is root-equivalent. Enable it only for
-  repositories and maintainers trusted to control this machine.
+  host networking so they can reach loopback-only Caddy; an explicit host
+  entry resolves the `.local` URL without mDNS in the image, and a read-only
+  host CA bundle plus Git, OpenSSL, Python, and Node trust variables validates
+  Caddy TLS. Host networking also exposes other host loopback services. The
+  runner process itself has Docker-daemon access, which is root-equivalent.
+  Enable it only for repositories and maintainers trusted to control this
+  machine.
 - Binaries are downloaded from Forgejo's release host and verified against
   published SHA-256 checksums; pin `FORGEJO_VERSION` where
   reproducibility matters.
-- `uninstall.sh` reverses the component; dropping the database/role
-  and removing `/var/lib/forgejo` sit behind their own confirmations.
+- Direct `forgejo-manage uninstall --yes` retains repositories, database, and
+  recovery secrets. Purge requires `DELETE FORGEJO STATE`. The compatibility
+  uninstaller removes the dependent runner first and maps its historical
+  `--yes` behavior to confirmed purge.
 
 ## Component manifest and selective lifecycle
 

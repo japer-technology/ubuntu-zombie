@@ -2,8 +2,8 @@
 Description=Forgejo Actions runner (Ubuntu Zombie optional component)
 Documentation=https://forgejo.org/docs/latest/admin/actions/installation/binary/
 After=network-online.target docker.service forgejo.service
-Wants=network-online.target
-Requires=docker.service forgejo.service
+Wants=network-online.target forgejo.service
+Requires=docker.service
 
 [Service]
 Type=simple

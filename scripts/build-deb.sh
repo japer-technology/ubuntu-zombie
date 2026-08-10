@@ -76,10 +76,13 @@ for item in scripts payload tests Makefile VERSION \
   cp -a "${ROOT}/${item}" "${INSTALL_ROOT}/"
 done
 mkdir -p "${INSTALL_ROOT}/products" "${INSTALL_ROOT}/family"
+cp -a "${ROOT}/products/forgejo" "${INSTALL_ROOT}/products/"
 cp -a "${ROOT}/products/llama" "${INSTALL_ROOT}/products/"
 cp -a "${ROOT}/family/schemas" "${INSTALL_ROOT}/family/"
-rm -rf "${INSTALL_ROOT}/products/llama/dist"
-find "${INSTALL_ROOT}/products/llama" -type d -name __pycache__ \
+rm -rf "${INSTALL_ROOT}/products/forgejo/dist" \
+  "${INSTALL_ROOT}/products/llama/dist"
+find "${INSTALL_ROOT}/products/forgejo" \
+  "${INSTALL_ROOT}/products/llama" -type d -name __pycache__ \
   -prune -exec rm -rf {} +
 
 # Docs duplicated under /usr/share/doc/<pkg>/ so `dpkg -L` reveals
