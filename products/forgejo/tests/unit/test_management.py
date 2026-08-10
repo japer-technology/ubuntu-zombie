@@ -231,6 +231,70 @@ container:
             raised.exception.code, "INVALID_BACKUP_DESTINATION"
         )
 
+    def test_marker_writer_matches_shared_contract(self) -> None:
+        self.paths.state_root.mkdir(parents=True)
+        instance_id = str(uuid.uuid4())
+        artifact = "a" * 64
+        changed: list[str] = []
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"FORGEJO_ARTIFACT_SHA256": artifact},
+                clear=False,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_source_revision",
+                side_effect=AssertionError("artifact installs use their digest"),
+            ),
+            mock.patch("forgejo.management.os.fchown"),
+        ):
+            self.manager._write_marker(
+                instance_id,
+                existing=None,
+                changed=changed,
+            )
+        marker = json.loads(self.paths.marker.read_text(encoding="utf-8"))
+        self.assertEqual(
+            set(marker),
+            {
+                "schema_version",
+                "product_id",
+                "instance_id",
+                "version",
+                "source_revision",
+                "installed_at",
+                "install_root",
+                "lifecycle_entrypoint",
+                "artifact_sha256",
+            },
+        )
+        self.assertEqual(marker["instance_id"], instance_id)
+        self.assertEqual(marker["install_root"], str(self.paths.install_root))
+        self.assertEqual(
+            marker["lifecycle_entrypoint"],
+            str(self.paths.entrypoint),
+        )
+        self.assertEqual(marker["artifact_sha256"], artifact)
+        self.assertEqual(marker["source_revision"], f"artifact-sha256:{artifact}")
+        self.assertEqual(changed, [str(self.paths.marker)])
+
+    def test_marker_writer_rejects_invalid_artifact_digest(self) -> None:
+        self.paths.state_root.mkdir(parents=True)
+        with mock.patch.dict(
+            os.environ,
+            {"FORGEJO_ARTIFACT_SHA256": "not-a-digest"},
+            clear=False,
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager._write_marker(
+                    str(uuid.uuid4()),
+                    existing=None,
+                    changed=[],
+                )
+        self.assertEqual(raised.exception.code, "INVALID_ARTIFACT_DIGEST")
+        self.assertFalse(self.paths.marker.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

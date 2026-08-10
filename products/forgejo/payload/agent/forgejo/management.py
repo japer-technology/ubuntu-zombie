@@ -3210,6 +3210,16 @@ ENABLED = true
         existing: dict[str, Any] | None,
         changed: list[str],
     ) -> None:
+        artifact = os.environ.get("FORGEJO_ARTIFACT_SHA256") or None
+        if artifact is not None and (
+            len(artifact) != 64
+            or any(character not in "0123456789abcdef" for character in artifact)
+        ):
+            raise ManagementError(
+                78,
+                "INVALID_ARTIFACT_DIGEST",
+                "Forgejo artifact digest is invalid.",
+            )
         installed_at = (
             str(existing["installed_at"])
             if existing is not None
@@ -3220,23 +3230,17 @@ ENABLED = true
             "product_id": PRODUCT_ID,
             "instance_id": instance_id,
             "version": self.version,
-            "source_revision": self._source_revision(),
+            "source_revision": (
+                f"artifact-sha256:{artifact}"
+                if artifact is not None
+                else self._source_revision()
+            ),
             "installed_at": installed_at,
-            "updated_at": utc_now(),
+            "install_root": str(self.paths.install_root),
+            "lifecycle_entrypoint": str(self.paths.entrypoint),
+            "artifact_sha256": artifact,
         }
-        if existing is not None and all(
-            existing.get(key) == value[key]
-            for key in (
-                "schema_version",
-                "product_id",
-                "instance_id",
-                "version",
-                "source_revision",
-                "installed_at",
-            )
-        ):
-            return
-        content = json.dumps(value, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+        content = canonical_json(value) + b"\n"
         if not self._file_matches(self.paths.marker, content, 0o644, 0, 0):
             atomic_write(self.paths.marker, content, mode=0o644)
             changed.append(str(self.paths.marker))
