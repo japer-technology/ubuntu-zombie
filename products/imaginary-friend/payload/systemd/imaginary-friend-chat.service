@@ -51,9 +51,6 @@ ReadWritePaths=/var/lib/imaginary-friend/friend.db-journal
 ReadWritePaths=/var/lib/imaginary-friend/exports
 ReadWritePaths=/var/log/imaginary-friend
 __FRIEND_WORKSPACE_PATHS__
-InaccessiblePaths=/opt/ai-zombie /etc/ubuntu-zombie /var/lib/ubuntu-zombie
-InaccessiblePaths=/opt/curriculum-flame /etc/curriculum-flame /var/lib/curriculum-flame
-InaccessiblePaths=/opt/eric /etc/eric /var/lib/eric
 InaccessiblePaths=/root /home
 InaccessiblePaths=/usr/bin/sudo /usr/bin/su /usr/bin/systemctl
 InaccessiblePaths=/usr/bin/apt /usr/bin/apt-get /usr/bin/dpkg

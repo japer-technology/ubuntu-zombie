@@ -117,7 +117,7 @@ Ubuntu Zombie release.
 ## `imaginary-friend-release.yml` — Imaginary Friend Release
 
 This workflow validates and packages only `products/imaginary-friend/` plus
-the applicable family schemas and repository license. Product tags use
+the repository license. Product tags use
 `imaginary-friend-v<VERSION>`. The workflow publishes a checksum, SPDX SBOM,
 test evidence, provenance, and keyless cosign material independently of the
 root Ubuntu Zombie release.

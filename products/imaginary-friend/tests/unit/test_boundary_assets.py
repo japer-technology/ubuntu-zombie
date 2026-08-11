@@ -57,9 +57,6 @@ class BoundaryAssetTests(unittest.TestCase):
             "CapabilityBoundingSet=",
             "IPAddressDeny=any",
             "IPAddressAllow=localhost",
-            "InaccessiblePaths=/opt/ai-zombie",
-            "InaccessiblePaths=/opt/curriculum-flame",
-            "InaccessiblePaths=/opt/eric",
             "InaccessiblePaths=/usr/bin/sudo",
             "InaccessiblePaths=/usr/bin/bash",
         ):
@@ -68,6 +65,7 @@ class BoundaryAssetTests(unittest.TestCase):
         self.assertNotIn(
             "ReadWritePaths=/var/log/imaginary-friend/audit.log", unit
         )
+        self.assertNotIn("InaccessiblePaths=/opt/", unit)
         self.assertNotIn("ExecStart=/bin/", unit)
 
     def test_diagnostics_creates_an_exclusive_restricted_archive(self) -> None:

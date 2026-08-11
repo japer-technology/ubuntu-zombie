@@ -44,22 +44,6 @@ _FORBIDDEN_ROOTS = (
     Path("/usr"),
     Path("/var"),
 )
-_PROTECTED_PRODUCTS = (
-    Path("/opt/ai-zombie"),
-    Path("/etc/ubuntu-zombie"),
-    Path("/var/lib/ubuntu-zombie"),
-    Path("/var/log/ubuntu-zombie"),
-    Path("/opt/curriculum-flame"),
-    Path("/etc/curriculum-flame"),
-    Path("/var/lib/curriculum-flame"),
-    Path("/var/log/curriculum-flame"),
-    Path("/opt/eric"),
-    Path("/etc/eric"),
-    Path("/var/lib/eric"),
-    Path("/var/log/eric"),
-)
-
-
 @dataclass(frozen=True)
 class WorkspaceRoot:
     workspace_id: str
@@ -109,9 +93,6 @@ def validate_nominated_root(path: Path, *, allow_default: bool = False) -> os.st
         for forbidden in _FORBIDDEN_ROOTS:
             if _contains(forbidden, path) or _contains(path, forbidden):
                 raise ValidationError("Workspace root overlaps a protected host tree.")
-    for protected in _PROTECTED_PRODUCTS:
-        if _contains(protected, path) or _contains(path, protected):
-            raise ValidationError("Workspace root overlaps another product.")
     return original
 
 

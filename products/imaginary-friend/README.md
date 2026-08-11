@@ -1,15 +1,26 @@
 # Imaginary Friend
 
 Imaginary Friend is a private, single-owner conversational companion with
-access only to its own state and explicitly nominated workspaces. It is an
-independent product: it does not import Ubuntu Zombie, share its credentials,
-or inherit its root authority.
+access only to its own state and explicitly nominated workspaces. It runs as an
+unprivileged service with a password-protected loopback interface.
 
-The standalone source and independent release machinery are implemented.
-Admission to Ubuntu Zombie's production family catalogue remains gated on the
-manager, disposable-VM, co-installation, and release-verification evidence
-described in the
-[product definition](../../docs/ai-agent/imaginary-friend.md).
+## Install
+
+Start the configured OpenAI-compatible local model, then run the installer on a
+supported Ubuntu Desktop 22.04 or 24.04 LTS `amd64` host:
+
+```bash
+cd products/imaginary-friend
+./scripts/install.sh
+```
+
+The installer obtains root privileges with `sudo` when needed. It asks for the
+human owner, owner password, local model, and retention settings, then displays
+the complete plan and applies it only after approval. Press Enter to accept a
+displayed default; leaving the password empty generates a strong password shown
+once after installation.
+
+On success, open `http://127.0.0.1:6767/`.
 
 ## Safety first
 
@@ -19,8 +30,26 @@ Ubuntu Desktop LTS VM. Do not run it on an agent host or workstation you are
 not prepared to rebuild.
 
 Friend is not a system administrator, shell, coding sandbox, network agent, or
-security boundary against root. A same-host machine administrator, including
-Ubuntu Zombie, can inspect its unencrypted local state.
+security boundary against root. A same-host machine administrator can inspect
+its unencrypted local state.
+
+## Manage
+
+After installation:
+
+```bash
+sudo friend-manage verify
+sudo friend-manage doctor
+sudo friend-manage repair --dry-run
+sudo friend-manage backup
+sudo friend-manage update
+sudo friend-manage suspend
+sudo friend-manage resume
+sudo friend-manage uninstall
+```
+
+For unattended installation, provide the required `FRIEND_*` inputs and run
+`sudo ./scripts/manage.sh install --yes --non-interactive`.
 
 ## Documentation
 
@@ -42,22 +71,16 @@ Ubuntu Zombie, can inspect its unencrypted local state.
   lifecycle failures.
 - [`docs/RELEASE.md`](docs/RELEASE.md) — product versions, artifacts, SBOM,
   provenance, and signatures.
-- [`docs/TESTING.md`](docs/TESTING.md) — test suites, red-team coverage, and
-  open family gates.
-
-The normative first-release behavior remains in
-[`docs/ai-agent/imaginary-friend.md`](../../docs/ai-agent/imaginary-friend.md);
-the shared machine-readable lifecycle contract is
-[`docs/ai-agent/implementation.md`](../../docs/ai-agent/implementation.md).
+- [`docs/TESTING.md`](docs/TESTING.md) — test suites and assurance coverage.
 
 ## Development
 
-From the repository root:
+From the product directory:
 
 ```bash
-make -C products/imaginary-friend lint
-make -C products/imaginary-friend test
-make -C products/imaginary-friend package
+make lint
+make test
+make package
 ```
 
 These commands do not install the product. Root lifecycle testing is guarded

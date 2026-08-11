@@ -1,8 +1,7 @@
 # Architecture
 
-Imaginary Friend is independent at source, install, runtime, state, and
-release. It imports no Ubuntu Zombie payload module and owns its Python
-environment below `/opt/imaginary-friend`.
+Imaginary Friend owns its source, installation, runtime, state, release, and
+Python environment below `/opt/imaginary-friend`.
 
 ## Components
 
@@ -36,8 +35,8 @@ Executable code, policy, configuration, unit files, lifecycle commands, and
 the ownership marker are root-controlled. The service can write only its
 database, export directory, audit log, and rendered workspace paths. The unit
 uses `NoNewPrivileges`, an empty capability set, strict system protection,
-device and namespace restrictions, sibling-product inaccessibility, and
-loopback-only IP policy.
+device and namespace restrictions, restricted host paths, and loopback-only IP
+policy.
 
 Workspace operations keep the nominated root open by descriptor, walk each
 relative component with `O_NOFOLLOW`, compare device and inode identity, reject
@@ -49,9 +48,9 @@ canonical relative path as confirmation.
 
 `scripts/manage.sh` and installed `/usr/local/sbin/friend-manage` implement the
 same JSON contract. Mutations require root, a reviewed plan, the product lock,
-and a valid marker or clean-install transaction. Ubuntu Zombie may eventually
-invoke that exact entry point; it does not become part of the chat runtime and
-does not receive Friend credentials or private content.
+and a valid marker or clean-install transaction. Direct operators and approved
+automation use that exact entry point without receiving Friend credentials or
+private content.
 
 Same-version repair and reinstall use a transient recovery point and preserve
 the previous-version runtime and state snapshot reserved for explicit rollback.

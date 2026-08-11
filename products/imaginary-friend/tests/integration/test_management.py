@@ -6,8 +6,9 @@ import subprocess
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[4]
-MANAGE = ROOT / "products" / "imaginary-friend" / "scripts" / "manage.sh"
+PRODUCT_ROOT = Path(__file__).resolve().parents[2]
+MANAGE = PRODUCT_ROOT / "scripts" / "manage.sh"
+INSTALLER = PRODUCT_ROOT / "scripts" / "install.sh"
 
 
 class ManagementTests(unittest.TestCase):
@@ -18,7 +19,7 @@ class ManagementTests(unittest.TestCase):
         environment.update(extra_environment or {})
         return subprocess.run(
             [str(MANAGE), *arguments],
-            cwd=ROOT,
+            cwd=PRODUCT_ROOT,
             env=environment,
             check=False,
             text=True,
@@ -33,6 +34,23 @@ class ManagementTests(unittest.TestCase):
         self.assertEqual(value["product_id"], "imaginary-friend")
         self.assertEqual(value["phase"], "read")
         self.assertFalse(value["changed"])
+
+    def test_installer_entrypoint_defaults_to_install(self) -> None:
+        environment = dict(os.environ)
+        environment["FRIEND_NONINTERACTIVE"] = "1"
+        completed = subprocess.run(
+            [str(INSTALLER), "--dry-run", "--json"],
+            cwd=PRODUCT_ROOT,
+            env=environment,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(completed.returncode, 64)
+        value = json.loads(completed.stdout)
+        self.assertEqual(value["operation"], "install")
+        self.assertEqual(value["phase"], "plan")
 
     def test_unattended_missing_input_exits_64_with_json(self) -> None:
         completed = self.run_manage(
