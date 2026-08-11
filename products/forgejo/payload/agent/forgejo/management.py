@@ -2429,7 +2429,7 @@ class Manager:
                 and len(values) == len(fixed_fields) + 1
                 and len(version_fields) == 1
                 and re.fullmatch(
-                    r"[a-z][a-z_]*_version",
+                    r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*_version",
                     next(iter(version_fields)),
                 )
                 is not None
@@ -4921,28 +4921,27 @@ def print_plan(
     configuration: dict[str, Any] | None,
     file: Any = None,
 ) -> None:
+    def field(label: str, value: Any) -> None:
+        print(f"  {label + ':':<18}{value}", file=file)
+
     print("Forgejo product lifecycle plan:", file=file)
-    print(f"  Operation:        {result.operation}", file=file)
+    field("Operation", result.operation)
     if configuration is not None:
-        print(f"  Public URL:      {configuration['root_url']}", file=file)
-        print(
-            f"  Administrator:   {configuration['admin_user']} "
-            f"({configuration['admin_email']})",
-            file=file,
+        field("Public URL", configuration["root_url"])
+        field(
+            "Administrator",
+            f"{configuration['admin_user']} ({configuration['admin_email']})",
         )
-        print(
-            f"  PostgreSQL:      {configuration['database_name']} "
+        field(
+            "PostgreSQL",
+            f"{configuration['database_name']} "
             f"(role {configuration['database_user']})",
-            file=file,
         )
-        print(
-            f"  Forgejo version: {configuration['upstream_version']}",
-            file=file,
-        )
-        print(f"  Start at boot:   {configuration['boot']}", file=file)
-    print("  Backend:         http://127.0.0.1:3000 (loopback only)", file=file)
-    print("  State:           /var/lib/forgejo", file=file)
-    print(f"  Digest:          {result.plan_digest}", file=file)
+        field("Forgejo version", configuration["upstream_version"])
+        field("Start at boot", configuration["boot"])
+    field("Backend", "http://127.0.0.1:3000 (loopback only)")
+    field("State", "/var/lib/forgejo")
+    field("Digest", result.plan_digest)
     for index, step in enumerate(result.steps, 1):
         print(f"  {index}. {step['summary']}", file=file)
     if result.operation == "install":

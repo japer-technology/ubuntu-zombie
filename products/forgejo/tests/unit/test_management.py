@@ -204,8 +204,10 @@ ROOT_URL = https://existing.local/
             with self.assertRaises(ManagementError) as raised:
                 self.manager.run(invocation)
         self.assertEqual(raised.exception.code, "CONFIRMATION_REQUIRED")
-        self.assertIn("Public URL:      https://forge.local/", output.getvalue())
-        self.assertIn("Administrator:   owner", output.getvalue())
+        self.assertIn("Public URL:", output.getvalue())
+        self.assertIn("https://forge.local/", output.getvalue())
+        self.assertIn("Administrator:", output.getvalue())
+        self.assertIn("owner (owner@example.test)", output.getvalue())
         self.assertIn("Preserve secrets and deploy", output.getvalue())
         self.assertFalse(self.paths.lock.exists())
 

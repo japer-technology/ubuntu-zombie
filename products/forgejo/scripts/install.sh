@@ -3,10 +3,19 @@ set -Eeuo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 needs_root=1
+skip_next=0
 
 for argument in "$@"; do
+  if (( skip_next )); then
+    skip_next=0
+    continue
+  fi
   case "${argument}" in
+    --) break ;;
     --dry-run|-h|--help) needs_root=0 ;;
+    --request-file|--correlation-id|--plan-digest|--confirmation)
+      skip_next=1
+      ;;
   esac
 done
 
