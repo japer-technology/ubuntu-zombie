@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import os
 import stat
 import tempfile
@@ -44,6 +45,97 @@ class ManagementTests(unittest.TestCase):
     def test_descriptor_exposes_terminal_kill_operation(self) -> None:
         self.assertIn("kill", management.OPERATIONS)
         self.assertEqual(self.manager.descriptor["operations"], list(management.OPERATIONS))
+
+    def test_interactive_install_collects_validated_configuration(self) -> None:
+        arguments = management.parser().parse_args(["install"])
+        inputs: dict[str, object] = {}
+        answers = [
+            "80",
+            "",
+            "unknown",
+            "openai",
+            "",
+            "",
+            "0",
+            "",
+        ]
+        with (
+            mock.patch.object(
+                management.sys.stdin,
+                "isatty",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_prompt",
+                side_effect=answers,
+            ),
+        ):
+            self.manager._prepare_interactive_install(
+                arguments,
+                inputs,
+                request_supplied=False,
+                non_interactive=False,
+            )
+        self.assertEqual(
+            inputs,
+            {
+                "chat_port": 58989,
+                "provider": "openai",
+                "model": None,
+                "model_base_url": None,
+                "ttl_days": 7,
+            },
+        )
+
+    def test_approved_install_skips_setup_questions(self) -> None:
+        arguments = management.parser().parse_args(["install", "--yes"])
+        with mock.patch.object(self.manager, "_prompt") as prompt:
+            self.manager._prepare_interactive_install(
+                arguments,
+                {},
+                request_supplied=False,
+                non_interactive=False,
+            )
+        prompt.assert_not_called()
+
+    def test_interactive_approval_displays_configuration_and_plan(self) -> None:
+        invocation = management.Invocation(
+            operation="install",
+            correlation_id="047fd8bd-ed5f-49f9-8da5-07bfe4ebad14",
+            actor="operator",
+            inputs={
+                "chat_port": 59000,
+                "provider": None,
+                "ttl_days": 14,
+            },
+            confirmation=None,
+            retain_state=None,
+            dry_run=False,
+            json_output=False,
+            non_interactive=False,
+            assume_yes=False,
+            supplied_plan_digest=None,
+        )
+        output = io.StringIO()
+        with (
+            mock.patch.object(
+                management.sys.stdin,
+                "isatty",
+                return_value=True,
+            ),
+            mock.patch.object(self.manager, "_prompt", return_value="no"),
+            mock.patch("sys.stdout", output),
+        ):
+            with self.assertRaises(management.ManagementError) as raised:
+                self.manager.run(invocation)
+        self.assertEqual(raised.exception.code, "CONFIRMATION_REQUIRED")
+        self.assertIn("Chat URL:", output.getvalue())
+        self.assertIn("http://127.0.0.1:59000/", output.getvalue())
+        self.assertIn("Time to live:", output.getvalue())
+        self.assertIn("14 days", output.getvalue())
+        self.assertIn("Converge Beep-only credentials", output.getvalue())
+        self.assertFalse(self.manager.paths.lock.exists())
 
     def test_atomic_write_rejects_non_regular_destination(self) -> None:
         destination = self.root / "destination"
@@ -90,7 +182,6 @@ class ManagementTests(unittest.TestCase):
             ttl_days=7,
         )
         with (
-            mock.patch.object(self.manager, "_deploy_family_schemas"),
             mock.patch.object(self.manager, "_deploy_product_source"),
             mock.patch.object(self.manager, "_deploy_pi_models"),
             mock.patch.object(management.os, "chown"),
@@ -146,6 +237,7 @@ class ManagementTests(unittest.TestCase):
             mock.patch.object(self.manager, "_platform_preflight"),
             mock.patch.object(self.manager, "_collision_preflight"),
             mock.patch.object(self.manager, "_port_preflight"),
+            mock.patch.object(self.manager, "_prepare_interactive_secrets"),
             mock.patch.object(self.manager, "_stop_services"),
             mock.patch.object(self.manager, "_create_recovery_snapshot"),
             mock.patch.object(

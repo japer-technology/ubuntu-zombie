@@ -90,7 +90,7 @@ jobs:
               "commit": os.environ["GITHUB_SHA"],
               "workflow_run_id": os.environ["GITHUB_RUN_ID"],
               "lint": "passed",
-              "unit_integration_parity_and_family_tests": "passed",
+              "unit_integration_and_parity_tests": "passed",
               "package": "passed",
               "standalone_vm": "not_run",
               "coinstallation": "not_run",
