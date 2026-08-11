@@ -6,10 +6,9 @@ goal into shell commands. It deliberately has root-equivalent authority.
 
 ## Product promise
 
-Beep provides behavioural parity with the pinned Ubuntu Zombie lesson set
-while remaining independently installable, authenticatable, configurable,
-auditable, killable, upgradable, recoverable, removable, and releasable.
-Every installed resource is Beep-owned.
+Beep is independently installable, authenticatable, configurable, auditable,
+killable, upgradable, recoverable, removable, and releasable. Every installed
+resource is Beep-owned.
 
 The operator remains the principal. Model output is an untrusted proposal.
 Sensitive tools require policy classification and explicit approval;
@@ -20,8 +19,8 @@ lifecycle result has local audit evidence.
 
 - the owner/operator of the machine;
 - local users explicitly authorised by that operator; and
-- Ubuntu Zombie's future family manager through Beep's fixed root lifecycle
-  request interface.
+- automation explicitly authorised by the operator through Beep's fixed root
+  lifecycle request interface.
 
 ## In scope
 
@@ -36,8 +35,9 @@ lifecycle result has local audit evidence.
 
 Beep is not a security boundary against host root, a remote multi-user service,
 an autonomous legal or human authority, a high-availability peer, or a
-containment layer for Ubuntu Zombie. It does not share credentials or state
-with a sibling and does not automatically inherit sibling releases.
+containment layer for another root-capable process. It does not share
+credentials or state with a sibling and does not automatically inherit sibling
+releases.
 
 Production family admission remains gated on recorded supported-VM,
 co-installation, security-review, and published-release evidence.

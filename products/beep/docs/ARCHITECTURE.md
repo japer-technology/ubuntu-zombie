@@ -72,7 +72,6 @@ inventory transition.
 - listener and cookie: `127.0.0.1:58989`, `beep_session`; and
 - units and commands: names prefixed with `beep`.
 
-Ubuntu Zombie and other products remain outside these roots. Both Beep and
-Ubuntu Zombie can become root, so Unix ownership cannot isolate either from
-the other after compromise; independent namespaces prevent accidental sharing
-and make lifecycle evidence attributable.
+Other products remain outside these roots. Unix ownership cannot isolate Beep
+from another compromised root-capable process; independent namespaces prevent
+accidental sharing and make lifecycle evidence attributable.

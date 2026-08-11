@@ -31,7 +31,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 import auth as runtime_auth
 import family as runtime_family
@@ -122,6 +122,7 @@ PROVIDER_KEYS = {
 DEFAULT_USER = "beep"
 DEFAULT_PORT = 58989
 DEFAULT_TTL_DAYS = 7
+DEFAULT_LM_STUDIO_URL = "http://127.0.0.1:1234/v1"
 DELETE_CONFIRMATION = "DELETE BEEP STATE"
 VERSION_PATTERN = re.compile(r"^\d{4}(?:\.\d{2}){5}$")
 USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
@@ -274,10 +275,6 @@ class Paths:
     @property
     def inventory(self) -> Path:
         return self.agents_state / "inventory.json"
-
-    @property
-    def family_schemas(self) -> Path:
-        return self.install_root / "family" / "schemas"
 
     @property
     def node_root(self) -> Path:
@@ -463,6 +460,8 @@ class Manager:
             or Path(os.environ.get("BEEP_SOURCE_ROOT", str(default_root)))
         ).resolve()
         self.paths = Paths()
+        self._prompted_chat_password: str | None = None
+        self._prompted_provider_credential: tuple[str, str] | None = None
         self.descriptor = load_json(self.source_root / "PRODUCT.json")
         self.version = (
             (self.source_root / "VERSION").read_text(encoding="utf-8").strip()
@@ -510,6 +509,7 @@ class Manager:
             self.source_root / "payload" / "agent" / "server.py",
             self.source_root / "payload" / "etc" / "policy.yaml",
             self.source_root / "payload" / "systemd" / "beep-chat.service",
+            self.source_root / "scripts" / "install.sh",
             self.source_root / "scripts" / "manage.sh",
         )
         if any(not path.is_file() for path in required):
@@ -578,6 +578,205 @@ class Manager:
             return existing[key]
         return default
 
+    @staticmethod
+    def _validate_chat_port(value: Any) -> int:
+        try:
+            port = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ManagementError(
+                65, "INVALID_CONFIGURATION", "chat_port must be an integer."
+            ) from exc
+        if isinstance(value, bool) or not 1024 <= port <= 65535:
+            raise ManagementError(
+                65,
+                "INVALID_CONFIGURATION",
+                "chat_port must be between 1024 and 65535.",
+            )
+        return port
+
+    @staticmethod
+    def _validate_provider(value: Any) -> str | None:
+        if value in ("", None, "none"):
+            return None
+        if not isinstance(value, str) or value not in PROVIDER_KEYS:
+            raise ManagementError(
+                65, "INVALID_CONFIGURATION", "provider is not supported."
+            )
+        return value
+
+    @staticmethod
+    def _validate_model(value: Any, *, provider: str | None) -> str | None:
+        if value in ("", None):
+            if provider in {"openrouter", "lmstudio"}:
+                raise ManagementError(
+                    64,
+                    "REQUIRED_INPUT",
+                    "The selected provider requires a model identifier.",
+                )
+            return None
+        if not isinstance(value, str) or not value.strip() or len(value) > 256:
+            raise ManagementError(65, "INVALID_CONFIGURATION", "model is invalid.")
+        return value.strip()
+
+    def _validate_model_base_url(
+        self, value: Any, *, provider: str | None
+    ) -> str | None:
+        if value in ("", None):
+            if provider == "lmstudio":
+                raise ManagementError(
+                    64,
+                    "REQUIRED_INPUT",
+                    "The lmstudio provider requires model_base_url.",
+                )
+            return None
+        if not isinstance(value, str):
+            raise ManagementError(
+                65, "INVALID_CONFIGURATION", "model_base_url must be a URL."
+            )
+        self._validate_model_url(value)
+        if provider not in {"openai", "lmstudio"}:
+            raise ManagementError(
+                65,
+                "INVALID_CONFIGURATION",
+                "model_base_url is supported only for openai and lmstudio.",
+            )
+        return value
+
+    @staticmethod
+    def _validate_ttl_days(value: Any) -> int:
+        try:
+            ttl_days = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ManagementError(
+                65, "INVALID_CONFIGURATION", "ttl_days must be an integer."
+            ) from exc
+        if isinstance(value, bool) or not 1 <= ttl_days <= 3650:
+            raise ManagementError(
+                65,
+                "INVALID_CONFIGURATION",
+                "ttl_days must be between 1 and 3650.",
+            )
+        return ttl_days
+
+    @staticmethod
+    def _prompt(message: str, *, as_json: bool) -> str:
+        destination = sys.stderr if as_json else sys.stdout
+        print(message, end="", file=destination, flush=True)
+        try:
+            return input()
+        except (EOFError, KeyboardInterrupt) as exc:
+            raise ManagementError(
+                64,
+                "INTERACTIVE_INPUT_REQUIRED",
+                "Interactive installation was cancelled.",
+            ) from exc
+
+    def _prepare_interactive_install(
+        self,
+        args: argparse.Namespace,
+        inputs: dict[str, Any],
+        *,
+        request_supplied: bool,
+        non_interactive: bool,
+    ) -> None:
+        if (
+            args.operation != "install"
+            or request_supplied
+            or args.yes
+            or args.dry_run
+            or non_interactive
+            or not sys.stdin.isatty()
+            or self.paths.marker.exists()
+            or self.paths.config.exists()
+        ):
+            return
+
+        destination = sys.stderr if args.json else sys.stdout
+        print("Beep interactive installer", file=destination)
+        print(
+            "Press Enter to accept each value shown in brackets.",
+            file=destination,
+        )
+
+        def prompt_value(
+            name: str,
+            environment: str,
+            label: str,
+            default: str | None,
+            validator: Callable[[str | None], Any],
+        ) -> None:
+            if name in inputs or environment in os.environ:
+                return
+            while True:
+                suffix = f" [{default}]" if default is not None else ""
+                answer = self._prompt(
+                    f"{label}{suffix}: ",
+                    as_json=args.json,
+                ).strip()
+                candidate = answer if answer else default
+                try:
+                    inputs[name] = validator(candidate)
+                    return
+                except ManagementError as exc:
+                    print(f"  {exc.message}", file=sys.stderr)
+
+        prompt_value(
+            "chat_port",
+            "BEEP_CHAT_PORT",
+            "Loopback chat port",
+            str(DEFAULT_PORT),
+            self._validate_chat_port,
+        )
+        providers = ", ".join(PROVIDER_KEYS)
+        prompt_value(
+            "provider",
+            "BEEP_PROVIDER",
+            f"Model provider (none, {providers})",
+            "none",
+            self._validate_provider,
+        )
+        provider = self._validate_provider(
+            inputs.get("provider", os.environ.get("BEEP_PROVIDER"))
+        )
+        if provider is not None:
+            prompt_value(
+                "model",
+                "BEEP_MODEL",
+                (
+                    "Model identifier"
+                    if provider in {"openrouter", "lmstudio"}
+                    else "Model identifier (optional)"
+                ),
+                None,
+                lambda value: self._validate_model(value, provider=provider),
+            )
+        if provider in {"openai", "lmstudio"}:
+            prompt_value(
+                "model_base_url",
+                "BEEP_MODEL_BASE_URL",
+                (
+                    "Model API base URL"
+                    if provider == "lmstudio"
+                    else "Model API base URL (optional)"
+                ),
+                DEFAULT_LM_STUDIO_URL if provider == "lmstudio" else None,
+                lambda value: self._validate_model_base_url(
+                    value, provider=provider
+                ),
+            )
+        prompt_value(
+            "ttl_days",
+            "BEEP_TTL_DAYS",
+            "Initial time to live in days",
+            str(DEFAULT_TTL_DAYS),
+            self._validate_ttl_days,
+        )
+        print(
+            "The chat password and any provider credential will be requested "
+            "securely after plan approval.",
+            file=destination,
+        )
+
     def configuration(self, invocation: Invocation) -> Configuration:
         existing = self._existing_config()
         agent_user = self._input(
@@ -596,78 +795,28 @@ class Manager:
         raw_port = self._input(
             invocation, "chat_port", "BEEP_CHAT_PORT", existing, DEFAULT_PORT
         )
-        try:
-            chat_port = int(raw_port)
-        except (TypeError, ValueError) as exc:
-            raise ManagementError(
-                65, "INVALID_CONFIGURATION", "chat_port must be an integer."
-            ) from exc
-        if isinstance(raw_port, bool) or not 1024 <= chat_port <= 65535:
-            raise ManagementError(
-                65,
-                "INVALID_CONFIGURATION",
-                "chat_port must be between 1024 and 65535.",
-            )
-        provider = self._input(
-            invocation, "provider", "BEEP_PROVIDER", existing, None
+        chat_port = self._validate_chat_port(raw_port)
+        provider = self._validate_provider(
+            self._input(invocation, "provider", "BEEP_PROVIDER", existing, None)
         )
-        if provider in ("", None):
-            provider = None
-        if not isinstance(provider, (str, type(None))) or (
-            provider is not None and provider not in PROVIDER_KEYS
-        ):
-            raise ManagementError(
-                65, "INVALID_CONFIGURATION", "provider is not supported."
-            )
-        model = self._input(invocation, "model", "BEEP_MODEL", existing, None)
-        if model in ("", None):
-            model = None
-        if not isinstance(model, (str, type(None))) or (
-            isinstance(model, str) and (not model.strip() or len(model) > 256)
-        ):
-            raise ManagementError(65, "INVALID_CONFIGURATION", "model is invalid.")
-        base_url = self._input(
-            invocation, "model_base_url", "BEEP_MODEL_BASE_URL", existing, None
+        model = self._validate_model(
+            self._input(invocation, "model", "BEEP_MODEL", existing, None),
+            provider=provider,
         )
-        if base_url in ("", None):
-            base_url = None
-        if base_url is not None:
-            if not isinstance(base_url, str):
-                raise ManagementError(
-                    65, "INVALID_CONFIGURATION", "model_base_url must be a URL."
-                )
-            self._validate_model_url(base_url)
-            if provider not in {"openai", "lmstudio"}:
-                raise ManagementError(
-                    65,
-                    "INVALID_CONFIGURATION",
-                    "model_base_url is supported only for openai and lmstudio.",
-                )
+        base_url = self._validate_model_base_url(
+            self._input(
+                invocation,
+                "model_base_url",
+                "BEEP_MODEL_BASE_URL",
+                existing,
+                None,
+            ),
+            provider=provider,
+        )
         raw_ttl = self._input(
             invocation, "ttl_days", "BEEP_TTL_DAYS", existing, DEFAULT_TTL_DAYS
         )
-        try:
-            ttl_days = int(raw_ttl)
-        except (TypeError, ValueError) as exc:
-            raise ManagementError(
-                65, "INVALID_CONFIGURATION", "ttl_days must be an integer."
-            ) from exc
-        if isinstance(raw_ttl, bool) or not 1 <= ttl_days <= 3650:
-            raise ManagementError(
-                65, "INVALID_CONFIGURATION", "ttl_days must be between 1 and 3650."
-            )
-        if provider in {"openrouter", "lmstudio"} and model is None:
-            raise ManagementError(
-                64,
-                "REQUIRED_INPUT",
-                "The selected provider requires a model identifier.",
-            )
-        if provider == "lmstudio" and base_url is None:
-            raise ManagementError(
-                64,
-                "REQUIRED_INPUT",
-                "The lmstudio provider requires model_base_url.",
-            )
+        ttl_days = self._validate_ttl_days(raw_ttl)
         return Configuration(
             agent_user=agent_user,
             chat_port=chat_port,
@@ -742,6 +891,12 @@ class Manager:
         non_interactive = bool(
             args.non_interactive or os.environ.get("BEEP_NONINTERACTIVE") == "1"
         )
+        self._prepare_interactive_install(
+            args,
+            inputs,
+            request_supplied=request is not None,
+            non_interactive=non_interactive,
+        )
         return Invocation(
             operation=args.operation,
             correlation_id=correlation_id,
@@ -790,7 +945,7 @@ class Manager:
             value["schema_version"] != 1
             or value["product_id"] != PRODUCT_ID
             or value["operation"] != operation
-            or value["requested_by"] not in {"operator", "ubuntu-zombie"}
+            or value["requested_by"] != "operator"
             or not isinstance(value["inputs"], dict)
             or not isinstance(value["confirmation"], (str, type(None)))
         ):
@@ -1020,6 +1175,7 @@ class Manager:
                 and configuration.provider != "lmstudio"
                 and credential is None
                 and not self._provider_configured(configuration.provider)
+                and (invocation.non_interactive or not sys.stdin.isatty())
             ):
                 required.append(
                     {"name": "provider_credential_file", "secret": True}
@@ -1300,8 +1456,6 @@ class Manager:
             and not self.paths.catalog.is_symlink()
             and self.paths.inventory.is_file()
             and not self.paths.inventory.is_symlink()
-            and self.paths.family_schemas.is_dir()
-            and not self.paths.family_schemas.is_symlink()
         ):
             return False
         try:
@@ -1369,6 +1523,8 @@ class Manager:
         result.plan_digest = self.plan_digest(invocation, steps, configuration)
         result.requires_confirmation = True
         result.required_inputs = self._required_inputs(invocation, configuration)
+        if configuration is not None:
+            result.details = {"configuration": configuration.object()}
         if invocation.dry_run:
             result.status = "blocked" if result.required_inputs else "ok"
             return result, 64 if result.required_inputs else 0
@@ -1387,7 +1543,7 @@ class Manager:
             and invocation.supplied_plan_digest != result.plan_digest
         ):
             raise ManagementError(78, "PLAN_CHANGED", "Supplied plan digest is stale.")
-        self._confirm(invocation)
+        self._confirm(invocation, result, configuration)
         if os.geteuid() != 0:
             raise ManagementError(
                 73, "ROOT_REQUIRED", f"{invocation.operation} requires root."
@@ -1395,7 +1551,11 @@ class Manager:
         event_id = str(uuid.uuid4())
         previous_version: str | None = None
         changed_resources: list[str] = []
-        details: dict[str, Any] = {}
+        details: dict[str, Any] = (
+            {"configuration": configuration.object()}
+            if configuration is not None
+            else {}
+        )
         with self._lock():
             recomputed = self.plan_digest(invocation, steps, configuration)
             if recomputed != result.plan_digest:
@@ -1464,8 +1624,12 @@ class Manager:
                 }
         return result, 0
 
-    @staticmethod
-    def _confirm(invocation: Invocation) -> None:
+    def _confirm(
+        self,
+        invocation: Invocation,
+        result: Result,
+        configuration: Configuration | None,
+    ) -> None:
         if invocation.assume_yes:
             return
         if invocation.non_interactive or not sys.stdin.isatty():
@@ -1474,8 +1638,16 @@ class Manager:
                 "CONFIRMATION_REQUIRED",
                 "A mutating unattended operation requires --yes.",
             )
-        answer = input("Type YES to execute this Beep lifecycle plan: ")
-        if answer != "YES":
+        print_plan(
+            result,
+            configuration=configuration.object() if configuration is not None else None,
+            file=sys.stderr if invocation.json_output else sys.stdout,
+        )
+        answer = self._prompt(
+            "Apply this plan? [y/N]: ",
+            as_json=invocation.json_output,
+        ).strip().lower()
+        if answer not in {"y", "yes"}:
             raise ManagementError(64, "CONFIRMATION_REQUIRED", "Operation cancelled.")
 
     @contextmanager
@@ -1525,6 +1697,7 @@ class Manager:
         previous_version = str(marker["version"]) if marker else None
         instance_id = str(marker["instance_id"]) if marker else self._retained_instance()
         instance_id = instance_id or str(uuid.uuid4())
+        self._prepare_interactive_secrets(invocation, configuration)
         self._platform_preflight()
         self._collision_preflight(marker)
         self._port_preflight(configuration.chat_port, marker is not None)
@@ -2190,7 +2363,6 @@ class Manager:
             self.paths.install_root / "skills",
             changed,
         )
-        self._deploy_family_schemas(changed)
         pi_root = self.paths.install_root / "pi"
         pi_root.mkdir(parents=True, exist_ok=True)
         settings = (payload / "agent" / "templates" / "settings.json.tmpl").read_bytes()
@@ -2269,21 +2441,6 @@ class Manager:
             gid=gid,
         ):
             changed.append(str(models))
-
-    def _deploy_family_schemas(self, changed: list[str]) -> None:
-        candidates = (
-            self.source_root.parents[1] / "family" / "schemas",
-            self.paths.family_schemas,
-        )
-        source = next((path for path in candidates if path.is_dir()), None)
-        if source is None:
-            raise ManagementError(
-                66,
-                "SOURCE_INCOMPLETE",
-                "The shared family schemas are missing from the Beep release.",
-            )
-        if source.resolve() != self.paths.family_schemas.resolve(strict=False):
-            self._sync_tree(source, self.paths.family_schemas, changed)
 
     def _deploy_product_source(self, changed: list[str]) -> None:
         if self.source_root == self.paths.product_root.resolve(strict=False):
@@ -2430,9 +2587,12 @@ class Manager:
         if password_file is not None:
             password = self._read_one_secret(password_file, minimum=12)
             existing["BEEP_ADMIN_PASSWORD_HASH"] = runtime_auth.hash_password(password)
-        elif "BEEP_ADMIN_PASSWORD_HASH" not in existing:
-            password = self._interactive_password()
+        elif not runtime_auth.valid_password_hash(
+            existing.get("BEEP_ADMIN_PASSWORD_HASH")
+        ):
+            password = self._prompted_chat_password or self._interactive_password()
             existing["BEEP_ADMIN_PASSWORD_HASH"] = runtime_auth.hash_password(password)
+            self._prompted_chat_password = None
         credential_file = self._configuration_secret_path(
             invocation,
             "provider_credential_file",
@@ -2446,6 +2606,18 @@ class Manager:
                 )
             elif configuration.provider == "lmstudio":
                 existing.setdefault("LMSTUDIO_API_KEY", "local")
+            elif not existing.get(
+                PROVIDER_KEYS[configuration.provider], ""
+            ).strip():
+                prompted = self._prompted_provider_credential
+                if prompted is None or prompted[0] != configuration.provider:
+                    value = self._interactive_provider_credential(
+                        configuration.provider
+                    )
+                else:
+                    value = prompted[1]
+                existing[PROVIDER_KEYS[configuration.provider]] = value
+                self._prompted_provider_credential = None
         else:
             existing.pop("BEEP_PROVIDER", None)
         if configuration.model is not None:
@@ -2586,19 +2758,83 @@ class Manager:
             )
         return value
 
+    def _prepare_interactive_secrets(
+        self,
+        invocation: Invocation,
+        configuration: Configuration,
+    ) -> None:
+        password_file = self._configuration_secret_path(
+            invocation, "chat_password_file", "BEEP_ADMIN_PASSWORD_FILE"
+        )
+        if password_file is None and not self._password_configured():
+            self._prompted_chat_password = self._interactive_password()
+        credential_file = self._configuration_secret_path(
+            invocation,
+            "provider_credential_file",
+            "BEEP_PROVIDER_CREDENTIAL_FILE",
+        )
+        if (
+            configuration.provider is not None
+            and configuration.provider != "lmstudio"
+            and credential_file is None
+            and not self._provider_configured(configuration.provider)
+        ):
+            self._prompted_provider_credential = (
+                configuration.provider,
+                self._interactive_provider_credential(configuration.provider),
+            )
+
     @staticmethod
     def _interactive_password() -> str:
         if not sys.stdin.isatty():
             raise ManagementError(
                 64, "REQUIRED_INPUT", "A protected chat_password_file is required."
             )
-        first = getpass.getpass("Beep chat password (12-1024 bytes): ")
-        second = getpass.getpass("Confirm Beep chat password: ")
-        if first != second or not 12 <= len(first.encode()) <= 1024:
+        while True:
+            try:
+                first = getpass.getpass("Beep chat password (12-1024 bytes): ")
+                second = getpass.getpass("Confirm Beep chat password: ")
+            except (EOFError, KeyboardInterrupt) as exc:
+                raise ManagementError(
+                    64,
+                    "INTERACTIVE_INPUT_REQUIRED",
+                    "Interactive installation was cancelled.",
+                ) from exc
+            if not 12 <= len(first.encode()) <= 1024:
+                print("  Password must contain 12 to 1024 bytes.", file=sys.stderr)
+                continue
+            if first != second:
+                print("  Passwords did not match.", file=sys.stderr)
+                continue
+            return first
+
+    @staticmethod
+    def _interactive_provider_credential(provider: str) -> str:
+        if not sys.stdin.isatty():
             raise ManagementError(
-                64, "INVALID_PASSWORD", "Passwords did not match or were out of bounds."
+                64,
+                "REQUIRED_INPUT",
+                "A protected provider_credential_file is required.",
             )
-        return first
+        while True:
+            try:
+                value = getpass.getpass(f"{provider} provider credential: ")
+            except (EOFError, KeyboardInterrupt) as exc:
+                raise ManagementError(
+                    64,
+                    "INTERACTIVE_INPUT_REQUIRED",
+                    "Interactive installation was cancelled.",
+                ) from exc
+            if (
+                1 <= len(value.encode()) <= 1024
+                and "\n" not in value
+                and "\r" not in value
+            ):
+                return value
+            print(
+                "  Provider credential must contain 1 to 1024 bytes on one line.",
+                file=sys.stderr,
+            )
 
     def _deploy_services(
         self,
@@ -2718,16 +2954,10 @@ class Manager:
             )
         destination = Path(value).resolve(strict=False)
         protected = (
-            self.paths.install_root,
-            self.paths.configuration_root,
-            self.paths.state_root,
-            self.paths.log_root,
-            Path("/opt/ai-zombie"),
-            Path("/etc/ubuntu-zombie"),
-            Path("/var/lib/ubuntu-zombie"),
-            Path("/var/log/ubuntu-zombie"),
-            Path("/opt/imaginary-friend"),
-            Path("/opt/llama.cpp"),
+            Path("/opt"),
+            Path("/etc"),
+            Path("/var/lib"),
+            Path("/var/log"),
         )
         if any(destination == root or root in destination.parents for root in protected):
             raise ManagementError(
@@ -3409,23 +3639,104 @@ class Manager:
 
 
 def parser() -> argparse.ArgumentParser:
-    value = argparse.ArgumentParser(prog="beep-manage")
-    value.add_argument("operation", choices=OPERATIONS)
-    value.add_argument("--dry-run", action="store_true")
-    value.add_argument("--json", action="store_true")
-    value.add_argument("--non-interactive", action="store_true")
-    value.add_argument("--request-file", type=Path)
-    value.add_argument("--correlation-id")
-    value.add_argument("--plan-digest")
-    value.add_argument("--confirmation")
-    value.add_argument("--yes", action="store_true")
-    value.add_argument("--purge", action="store_true")
+    value = argparse.ArgumentParser(
+        prog="beep-manage",
+        description="Install and manage the private Beep Systems Administrator.",
+    )
+    value.add_argument("operation", choices=OPERATIONS, help="lifecycle operation")
+    value.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="render a plan without making changes",
+    )
+    value.add_argument(
+        "--json",
+        action="store_true",
+        help="write one machine-readable response object",
+    )
+    value.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="never prompt; missing inputs or approval exit 64",
+    )
+    value.add_argument(
+        "--request-file",
+        type=Path,
+        help="read a root-owned lifecycle request",
+    )
+    value.add_argument("--correlation-id", help="use the supplied request UUID")
+    value.add_argument(
+        "--plan-digest",
+        help="require the current plan to match this digest",
+    )
+    value.add_argument(
+        "--confirmation",
+        help="supply an exact destructive confirmation",
+    )
+    value.add_argument(
+        "--yes",
+        action="store_true",
+        help="approve a non-destructive plan without prompting",
+    )
+    value.add_argument(
+        "--purge",
+        action="store_true",
+        help="delete retained state during uninstall",
+    )
     return value
+
+
+def print_plan(
+    result: Result,
+    *,
+    configuration: dict[str, Any] | None,
+    file: Any = None,
+) -> None:
+    def field(label: str, value: Any) -> None:
+        print(f"  {label + ':':<18}{value}", file=file)
+
+    print("Beep product lifecycle plan:", file=file)
+    field("Operation", result.operation)
+    if configuration is not None:
+        provider = configuration["provider"] or "not configured"
+        model = configuration["model"] or (
+            "provider default" if configuration["provider"] else "not configured"
+        )
+        field(
+            "Chat URL",
+            f"http://127.0.0.1:{configuration['chat_port']}/",
+        )
+        field("Service identity", configuration["agent_user"])
+        field("Model provider", provider)
+        field("Model", model)
+        if configuration["model_base_url"] is not None:
+            field("Model API", configuration["model_base_url"])
+        field("Time to live", f"{configuration['ttl_days']} days")
+    field("State", "/var/lib/beep")
+    field("Digest", result.plan_digest)
+    for index, step in enumerate(result.steps, 1):
+        print(f"  {index}. {step['summary']}", file=file)
+    if result.operation == "install":
+        print(
+            "  The chat password and any provider credential are entered "
+            "securely and never printed.",
+            file=file,
+        )
 
 
 def print_result(result: Result, *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(result.object(), ensure_ascii=False, sort_keys=True))
+        return
+    if result.phase == "plan":
+        configuration = None
+        if result.details is not None:
+            candidate = result.details.get("configuration")
+            if isinstance(candidate, dict):
+                configuration = candidate
+        print_plan(result, configuration=configuration)
+        for error in result.errors:
+            print(f"  error {error['code']}: {error['message']}", file=sys.stderr)
         return
     print(f"Beep {result.operation}: {result.status}")
     if result.plan_digest:

@@ -79,7 +79,7 @@ MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 DEFAULT_TIMEOUT = 1800
 OIDC_ISSUER = "https://token.actions.githubusercontent.com"
-REPOSITORY = "japer-technology/ubuntu-zombie"
+REPOSITORY = "japer-technology/beep"
 RELEASE_PREFIX = f"https://github.com/{REPOSITORY}/releases/download/"
 
 DESCRIPTOR_FIELDS = {

@@ -1,7 +1,7 @@
 # Backup, update, and rollback
 
-Beep versions are independent of Ubuntu Zombie. Review and verify every Beep
-release; never point the installed wrapper at an unverified checkout.
+Review and verify every Beep release; never point the installed wrapper at an
+unverified checkout.
 
 ## Backup
 

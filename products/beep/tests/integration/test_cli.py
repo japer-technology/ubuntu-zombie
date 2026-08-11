@@ -9,6 +9,7 @@ from pathlib import Path
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[2]
 MANAGER = PRODUCT_ROOT / "scripts" / "manage.sh"
+INSTALLER = PRODUCT_ROOT / "scripts" / "install.sh"
 
 
 def clean_environment() -> dict[str, str]:
@@ -58,6 +59,27 @@ class ManagementCLITests(unittest.TestCase):
             "chat_password_file",
             {item["name"] for item in response["required_inputs"]},
         )
+
+    def test_installer_entrypoint_defaults_to_install(self) -> None:
+        completed = subprocess.run(
+            [
+                str(INSTALLER),
+                "--dry-run",
+                "--json",
+                "--non-interactive",
+            ],
+            cwd=PRODUCT_ROOT,
+            env=clean_environment(),
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        self.assertEqual(completed.returncode, 64, completed.stderr)
+        response = json.loads(completed.stdout)
+        self.assertEqual(response["operation"], "install")
+        self.assertEqual(response["phase"], "plan")
+        self.assertEqual(response["status"], "blocked")
 
     def test_kill_has_a_non_mutating_plan_surface(self) -> None:
         completed, response = self.run_manager("kill", "--dry-run")

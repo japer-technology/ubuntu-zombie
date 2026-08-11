@@ -10,7 +10,7 @@ REPOSITORY_ROOT := ../..
 help:
 	@echo "Targets:"
 	@echo "  lint     ShellCheck, bash syntax, and Python compile"
-	@echo "  test     unit, integration, parity, and family conformance tests"
+	@echo "  test     unit, integration, and parity tests"
 	@echo "  package  independent Beep source artifact"
 	@echo "  clean    remove generated artifacts and caches"
 
@@ -32,7 +32,6 @@ test:
 	PYTHONPATH=payload/agent "$(PYTHON)" -m unittest discover -s tests/unit -p 'test_*.py'
 	PYTHONPATH=payload/agent "$(PYTHON)" -m unittest discover -s tests/integration -p 'test_*.py'
 	PYTHONPATH=payload/agent "$(PYTHON)" -m unittest discover -s tests/parity -p 'test_*.py'
-	"$(PYTHON)" -m unittest discover -s "$(REPOSITORY_ROOT)/tests/family" -p 'test_*.py'
 
 package:
 	@mkdir -p dist
@@ -40,7 +39,7 @@ package:
 	     --exclude='__pycache__' --exclude='*.pyc' \
 	     -czf "dist/beep-$(VERSION).tar.gz" \
 	     -C "$(REPOSITORY_ROOT)" \
-	     products/beep family/schemas LICENSE
+	     products/beep LICENSE
 	@echo "Wrote dist/beep-$(VERSION).tar.gz"
 
 clean:
