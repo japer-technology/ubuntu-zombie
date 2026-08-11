@@ -174,6 +174,7 @@ class Invocation:
     generated_password: str | None = None
     password: str | None = None
     workspaces: list[Path] = field(default_factory=list)
+    request_supplied: bool = False
 
 
 @dataclass
@@ -595,6 +596,7 @@ class Manager:
             non_interactive=non_interactive,
             assume_yes=args.yes,
             supplied_plan_digest=args.plan_digest,
+            request_supplied=request is not None,
         )
         self._prepare_inputs(invocation)
         return invocation
@@ -672,7 +674,12 @@ class Manager:
     def _prepare_configuration_inputs(self, invocation: Invocation) -> None:
         existing = self._existing_settings()
         needs_install_inputs = invocation.operation == "install" and existing is None
-        interactive_install = needs_install_inputs and not invocation.non_interactive
+        interactive_install = (
+            needs_install_inputs
+            and not invocation.non_interactive
+            and not invocation.assume_yes
+            and not invocation.request_supplied
+        )
         destination = sys.stderr if invocation.json_output else sys.stdout
         if interactive_install:
             if not sys.stdin.isatty():
@@ -687,15 +694,17 @@ class Manager:
                 file=destination,
             )
         owner = invocation.inputs.get("owner_user") or self._owner_from_config()
-        if needs_install_inputs and invocation.non_interactive and not invocation.inputs.get(
-            "owner_user"
+        if (
+            needs_install_inputs
+            and not interactive_install
+            and not invocation.inputs.get("owner_user")
         ):
             raise ManagementError(
                 64,
                 "MISSING_INPUT",
                 "owner_user is required for unattended installation.",
             )
-        if owner is None and not invocation.non_interactive:
+        if owner is None and interactive_install:
             default_owner = os.environ.get("SUDO_USER", "")
             if not default_owner and os.geteuid() != 0:
                 default_owner = pwd.getpwuid(os.geteuid()).pw_name
@@ -726,7 +735,7 @@ class Manager:
                     65, "INVALID_INPUT", "owner_password_file must be absolute."
                 )
             invocation.password = read_secret_file(Path(password_file))
-        elif needs_install_inputs and invocation.non_interactive:
+        elif needs_install_inputs and not interactive_install:
             raise ManagementError(
                 64,
                 "MISSING_INPUT",
@@ -770,13 +779,13 @@ class Manager:
         model = invocation.inputs.get("model", existing["model"] if existing else None)
         if (
             needs_install_inputs
-            and invocation.non_interactive
+            and not interactive_install
             and not invocation.inputs.get("model")
         ):
             raise ManagementError(
                 64, "MISSING_INPUT", "model is required for unattended installation."
             )
-        if model is None and existing is None and not invocation.non_interactive:
+        if model is None and existing is None and interactive_install:
             while model is None:
                 answer = self._prompt(
                     "OpenAI-compatible local model ID: ",

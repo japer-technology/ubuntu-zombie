@@ -370,6 +370,7 @@ class ManagementUnitTests(unittest.TestCase):
     def test_interactive_install_reprompts_for_short_owner_password(self) -> None:
         invocation = self.invocation()
         invocation.non_interactive = False
+        invocation.assume_yes = False
         with (
             mock.patch("friend.management.sys.stdin.isatty", return_value=True),
             mock.patch(
@@ -421,6 +422,24 @@ class ManagementUnitTests(unittest.TestCase):
         self.assertEqual(invocation.inputs["history_retention_days"], 30)
         self.assertEqual(invocation.inputs["audit_retention_days"], 90)
         self.assertIsNotNone(invocation.generated_password)
+
+    def test_request_install_does_not_require_an_interactive_terminal(self) -> None:
+        invocation = self.invocation()
+        invocation.non_interactive = False
+        invocation.request_supplied = True
+        invocation.inputs["owner_password_file"] = "/secure/password"
+        with (
+            mock.patch(
+                "friend.management.read_secret_file",
+                return_value="valid owner password",
+            ),
+            mock.patch.object(self.manager, "_prompt") as prompt,
+            mock.patch.object(self.manager, "_prompt_secret") as prompt_secret,
+        ):
+            self.manager._prepare_configuration_inputs(invocation)
+        prompt.assert_not_called()
+        prompt_secret.assert_not_called()
+        self.assertEqual(invocation.password, "valid owner password")
 
     def test_interactive_approval_displays_configuration_and_plan(self) -> None:
         invocation = self.invocation()
