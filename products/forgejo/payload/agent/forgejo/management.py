@@ -120,6 +120,26 @@ ALLOWED_RELEASE_HOSTS = {
     "code.forgejo.org",
     "codeberg.org",
 }
+MARKER_FIELDS = {
+    "schema_version",
+    "product_id",
+    "instance_id",
+    "version",
+    "source_revision",
+    "installed_at",
+    "install_root",
+    "lifecycle_entrypoint",
+    "artifact_sha256",
+}
+PREVIOUS_MARKER_FIELDS = {
+    "schema_version",
+    "product_id",
+    "instance_id",
+    "version",
+    "source_revision",
+    "installed_at",
+    "updated_at",
+}
 
 
 class ManagementError(Exception):
@@ -1014,18 +1034,22 @@ class Manager:
                 73, "UNSAFE_MARKER", "Forgejo ownership marker metadata is invalid."
             )
         value = read_json(self.paths.marker)
-        fields = {
-            "schema_version",
-            "product_id",
-            "instance_id",
-            "version",
-            "source_revision",
-            "installed_at",
-            "install_root",
-            "lifecycle_entrypoint",
-            "artifact_sha256",
-        }
-        if set(value) != fields:
+        if set(value) == PREVIOUS_MARKER_FIELDS:
+            if not isinstance(value["updated_at"], str) or not value["updated_at"]:
+                raise ManagementError(
+                    65,
+                    "INVALID_MARKER",
+                    "Previous Forgejo marker metadata is invalid.",
+                )
+            value = {
+                key: item
+                for key, item in value.items()
+                if key != "updated_at"
+            }
+            value["install_root"] = str(self.paths.install_root)
+            value["lifecycle_entrypoint"] = str(self.paths.entrypoint)
+            value["artifact_sha256"] = None
+        elif set(value) != MARKER_FIELDS:
             raise ManagementError(
                 65, "INVALID_MARKER", "Forgejo marker fields are invalid."
             )
@@ -1040,6 +1064,10 @@ class Manager:
             )
         validate_uuid(value["instance_id"], label="marker instance_id")
         validate_version(value["version"])
+        if not isinstance(value["installed_at"], str) or not value["installed_at"]:
+            raise ManagementError(
+                65, "INVALID_MARKER", "Marker installation time is invalid."
+            )
         if not isinstance(value["source_revision"], str) or not value[
             "source_revision"
         ]:
@@ -1056,6 +1084,20 @@ class Manager:
                 65, "INVALID_MARKER", "Marker artifact digest is invalid."
             )
         return value
+
+    def _migrate_previous_marker(self) -> bool:
+        if not self.paths.marker.exists():
+            return False
+        normalized = self.load_marker(required=True)
+        value = read_json(self.paths.marker)
+        if set(value) != PREVIOUS_MARKER_FIELDS:
+            return False
+        atomic_write(
+            self.paths.marker,
+            canonical_json(normalized) + b"\n",
+            mode=0o644,
+        )
+        return True
 
     def instance_id(self) -> str | None:
         try:
@@ -1333,6 +1375,8 @@ class Manager:
                 raise ManagementError(
                     65, "UNKNOWN_OPERATION", "Unknown operation."
                 )
+            if self._migrate_previous_marker():
+                changed_resources.append(str(self.paths.marker))
             result.changed = bool(changed_resources)
             marker = self.load_marker()
             result.instance_id = (
@@ -1565,12 +1609,38 @@ class Manager:
             active = self._service_active()
             enabled = self._service_enabled() == "enabled"
             if suspended:
+                suspension_valid = True
+                try:
+                    self._load_suspension()
+                except ManagementError:
+                    suspension_valid = False
+                checks.append(
+                    self.check(
+                        "suspension_metadata",
+                        suspension_valid,
+                        "Forgejo suspension intent is protected and valid.",
+                        "Recover or remove invalid suspension metadata before resume.",
+                    )
+                )
                 checks.append(
                     self.check(
                         "suspension",
-                        not active and not self._runner_active(),
-                        "Forgejo and its dependent runner are stopped while suspended.",
-                        "Stop both services before repairing suspension state.",
+                        (
+                            not active
+                            and not enabled
+                            and not self._runner_active()
+                            and (
+                                not self._runner_present()
+                                or self._service_enabled_named(
+                                    "forgejo-runner.service"
+                                )
+                                != "enabled"
+                            )
+                        ),
+                        "Forgejo and its dependent runner are stopped and "
+                        "disabled while suspended.",
+                        "Stop and disable both services before repairing "
+                        "suspension state.",
                     )
                 )
             else:
@@ -1609,15 +1679,16 @@ class Manager:
                             "Inspect Caddy, CA trust, Avahi, and Forgejo.",
                         )
                     )
-            if self._runner_present() and not suspended:
-                checks.append(
-                    self.check(
-                        "runner_dependency",
-                        active and self._runner_active(),
-                        "The co-located runner is active only with healthy Forgejo.",
-                        "Repair Forgejo, then repair forgejo-runner.",
+            if self._runner_present():
+                if not suspended:
+                    checks.append(
+                        self.check(
+                            "runner_dependency",
+                            active and self._runner_active(),
+                            "The co-located runner is active only with healthy Forgejo.",
+                            "Repair Forgejo, then repair forgejo-runner.",
+                        )
                     )
-                )
                 checks.append(
                     self.check(
                         "runner_same_host_boundary",
@@ -1678,14 +1749,23 @@ class Manager:
             timeout: int = 180,
             input_text: str | None = None,
             environment: dict[str, str] | None = None,
+            stdin: Any | None = None,
+            stdout: Any | None = None,
     ) -> subprocess.CompletedProcess[str]:
+            if input_text is not None and stdin is not None:
+                raise ManagementError(
+                    70,
+                    "INTERNAL_ERROR",
+                    "A command cannot use both text and file input.",
+                )
             try:
                 return subprocess.run(
                     command,
                     check=check,
                     text=True,
                     input=input_text,
-                    stdout=subprocess.PIPE,
+                    stdin=stdin,
+                    stdout=subprocess.PIPE if stdout is None else stdout,
                     stderr=subprocess.PIPE,
                     timeout=timeout,
                     env=environment,
@@ -1718,12 +1798,16 @@ class Manager:
             check: bool = True,
             timeout: int = 180,
             input_text: str | None = None,
+            stdin: Any | None = None,
+            stdout: Any | None = None,
     ) -> subprocess.CompletedProcess[str]:
             return self._run(
                 ["runuser", "-u", user, "--", *command],
                 check=check,
                 timeout=timeout,
                 input_text=input_text,
+                stdin=stdin,
+                stdout=stdout,
             )
 
     def _platform_preflight(self) -> None:
@@ -1777,13 +1861,16 @@ class Manager:
     def _service_active(self) -> bool:
             return self._service_active_named("forgejo.service")
 
-    def _service_enabled(self) -> str:
+    def _service_enabled_named(self, unit: str) -> str:
             result = self._run(
-                ["systemctl", "is-enabled", "forgejo.service"],
+                ["systemctl", "is-enabled", unit],
                 check=False,
                 timeout=15,
             )
             return result.stdout.strip() if result.returncode == 0 else "disabled"
+
+    def _service_enabled(self) -> str:
+            return self._service_enabled_named("forgejo.service")
 
     def _runner_present(self) -> bool:
             return any(
@@ -1819,14 +1906,62 @@ class Manager:
                     )
             return runner_was_active
 
+    def _enforce_suspension(self) -> None:
+            self._stop_services()
+            self._run(
+                ["systemctl", "disable", "forgejo.service"],
+                check=False,
+            )
+            if self._runner_present():
+                self._run(
+                    ["systemctl", "disable", "forgejo-runner.service"],
+                    check=False,
+                )
+
+    def _restore_after_failed_mutation(
+            self,
+            *,
+            server_was_active: bool,
+            runner_was_active: bool,
+            was_suspended: bool,
+    ) -> None:
+            if was_suspended:
+                try:
+                    self._enforce_suspension()
+                except ManagementError:
+                    pass
+                return
+            if (
+                not server_was_active
+                or not self.paths.unit.is_file()
+            ):
+                return
+            try:
+                self._run(
+                    ["systemctl", "start", "forgejo.service"],
+                    check=False,
+                )
+                if (
+                    runner_was_active
+                    and self._health()
+                    and self._https_health()
+                ):
+                    self._run(
+                        ["systemctl", "start", "forgejo-runner.service"],
+                        check=False,
+                    )
+            except ManagementError:
+                return
+
     def _restore_runner(self, runner_was_active: bool) -> None:
             if not runner_was_active:
                 return
-            if not self._health():
+            if not self._health() or not self._https_health():
                 raise ManagementError(
                     1,
                     "RUNNER_DEPENDENCY_UNHEALTHY",
-                    "The runner was not restarted because Forgejo is unhealthy.",
+                    "The runner was not restarted because the complete Forgejo "
+                    "HTTPS path is unhealthy.",
                 )
             self._run(["systemctl", "start", "forgejo-runner.service"])
             for _ in range(30):
@@ -1941,6 +2076,8 @@ class Manager:
             actions = sections.get("actions", {})
             session = sections.get("session", {})
             security = sections.get("security", {})
+            repository = sections.get("repository", {})
+            lfs = sections.get("lfs", {})
             host = server.get("DOMAIN", "")
             return (
                 database.get("DB_TYPE") == "postgres"
@@ -1951,11 +2088,17 @@ class Manager:
                 and server.get("HTTP_PORT") == str(FIXED_PORT)
                 and HOST_RE.fullmatch(host) is not None
                 and server.get("ROOT_URL") == f"https://{host}/"
+                and server.get("LOCAL_ROOT_URL")
+                == f"http://127.0.0.1:{FIXED_PORT}/"
                 and server.get("LFS_START_SERVER", "").lower() == "true"
+                and repository.get("ROOT")
+                == "/var/lib/forgejo/data/forgejo-repositories"
+                and lfs.get("PATH") == "/var/lib/forgejo/data/lfs"
                 and service.get("DISABLE_REGISTRATION", "").lower() == "true"
                 and actions.get("ENABLED", "").lower() == "true"
                 and session.get("COOKIE_NAME") == "forgejo_session"
                 and session.get("COOKIE_SECURE", "").lower() == "true"
+                and security.get("INSTALL_LOCK", "").lower() == "true"
                 and security.get("COOKIE_REMEMBER_NAME") == "forgejo_remember"
             )
 
@@ -2185,9 +2328,15 @@ class Manager:
                 self.paths.configuration_root,
                 self.paths.state_root,
                 self.paths.log_root,
+                self.paths.cache_root,
+                self.paths.backup_root,
                 self.paths.unit,
+                self.paths.logrotate,
+                self.paths.entrypoint,
                 self.paths.binary,
                 self.paths.avahi_service,
+                self.paths.trusted_ca,
+                self.paths.legacy_caddy,
             )
             occupied = [path for path in product_paths if path.exists() or path.is_symlink()]
             caddy_owned = False
@@ -2935,9 +3084,9 @@ ENABLED = true
         if result.returncode != 0:
             return False
         return any(
-            username == field
+            len(fields) > 1 and fields[1] == username
             for line in result.stdout.splitlines()
-            for field in line.split()
+            if (fields := line.split())
         )
 
     def _ensure_admin(
@@ -3010,10 +3159,21 @@ ENABLED = true
                 )
         output: list[str] = []
         active_end = ""
+        marker_lines = {
+            marker
+            for pair in markers
+            for marker in pair
+        }
         for line in content.splitlines():
             if active_end:
                 if line == active_end:
                     active_end = ""
+                elif line in marker_lines:
+                    raise ManagementError(
+                        73,
+                        "CADDY_OWNERSHIP_AMBIGUOUS",
+                        "Caddyfile contains overlapping managed Forgejo blocks.",
+                    )
                 continue
             matched = False
             for begin, end in markers:
@@ -3021,6 +3181,12 @@ ENABLED = true
                     active_end = end
                     matched = True
                     break
+                if line == end:
+                    raise ManagementError(
+                        73,
+                        "CADDY_OWNERSHIP_AMBIGUOUS",
+                        "Caddyfile contains a misplaced managed Forgejo marker.",
+                    )
             if not matched:
                 output.append(line)
         if active_end:
@@ -3046,6 +3212,12 @@ ENABLED = true
         ]
 
     def _render_caddyfile(self, host: str) -> bytes:
+        if self.paths.caddyfile.is_symlink():
+            raise ManagementError(
+                73,
+                "CADDY_OWNERSHIP_AMBIGUOUS",
+                "The shared Caddyfile must not be a symlink.",
+            )
         try:
             current = self.paths.caddyfile.read_text(encoding="utf-8")
         except FileNotFoundError:
@@ -3170,6 +3342,17 @@ ENABLED = true
             "Forgejo did not become healthy and was stopped.",
         )
 
+    def _wait_https_healthy(self) -> None:
+        for _ in range(15):
+            if self._https_health():
+                return
+            time.sleep(2)
+        raise ManagementError(
+            1,
+            "HTTPS_UNHEALTHY",
+            "Forgejo is healthy on loopback but its Caddy HTTPS endpoint is not.",
+        )
+
     def _activate_service(
         self, configuration: Configuration, changed: list[str]
     ) -> None:
@@ -3182,15 +3365,7 @@ ENABLED = true
         self._wait_healthy()
         self._configure_network_services(changed)
         self._export_local_ca(changed)
-        for _ in range(15):
-            if self._https_health():
-                return
-            time.sleep(2)
-        raise ManagementError(
-            1,
-            "HTTPS_UNHEALTHY",
-            "Forgejo is healthy on loopback but its Caddy HTTPS endpoint is not.",
-        )
+        self._wait_https_healthy()
 
     def _installed_binary_version(self) -> str | None:
         if not self.paths.binary.is_file():
@@ -3210,33 +3385,50 @@ ENABLED = true
         existing: dict[str, Any] | None,
         changed: list[str],
     ) -> None:
+        artifact = os.environ.get("FORGEJO_ARTIFACT_SHA256") or None
+        if artifact is not None and (
+            len(artifact) != 64
+            or any(character not in "0123456789abcdef" for character in artifact)
+        ):
+            raise ManagementError(
+                78,
+                "INVALID_ARTIFACT_DIGEST",
+                "Forgejo artifact digest is invalid.",
+            )
         installed_at = (
             str(existing["installed_at"])
             if existing is not None
             else utc_now()
         )
+        preserve_artifact = (
+            artifact is None
+            and existing is not None
+            and existing["artifact_sha256"] is not None
+            and existing["version"] == self.version
+            and self.source_root
+            == self.paths.product_root.resolve(strict=False)
+        )
+        if preserve_artifact:
+            artifact = str(existing["artifact_sha256"])
+            source_revision = str(existing["source_revision"])
+        else:
+            source_revision = (
+                f"artifact-sha256:{artifact}"
+                if artifact is not None
+                else self._source_revision()
+            )
         value = {
             "schema_version": 1,
             "product_id": PRODUCT_ID,
             "instance_id": instance_id,
             "version": self.version,
-            "source_revision": self._source_revision(),
+            "source_revision": source_revision,
             "installed_at": installed_at,
-            "updated_at": utc_now(),
+            "install_root": str(self.paths.install_root),
+            "lifecycle_entrypoint": str(self.paths.entrypoint),
+            "artifact_sha256": artifact,
         }
-        if existing is not None and all(
-            existing.get(key) == value[key]
-            for key in (
-                "schema_version",
-                "product_id",
-                "instance_id",
-                "version",
-                "source_revision",
-                "installed_at",
-            )
-        ):
-            return
-        content = json.dumps(value, indent=2, sort_keys=True).encode("utf-8") + b"\n"
+        content = canonical_json(value) + b"\n"
         if not self._file_matches(self.paths.marker, content, 0o644, 0, 0):
             atomic_write(self.paths.marker, content, mode=0o644)
             changed.append(str(self.paths.marker))
@@ -3288,6 +3480,7 @@ ENABLED = true
             existing["version"] != self.version
         ):
             self._create_backup("pre-install")
+        server_was_active = self._service_active()
         runner_was_active = self._stop_services()
         was_suspended = self.paths.suspended.exists()
         try:
@@ -3312,9 +3505,7 @@ ENABLED = true
             self._ensure_admin(invocation, configuration, changed)
             self._activate_service(configuration, changed)
             if was_suspended:
-                self._run(
-                    ["systemctl", "stop", "forgejo.service"], check=False
-                )
+                self._enforce_suspension()
             else:
                 self._restore_runner(runner_was_active)
             self.paths.retained.unlink(missing_ok=True)
@@ -3327,15 +3518,11 @@ ENABLED = true
                 changed.append(str(self.paths.legacy_manifest))
             return changed, previous_version
         except BaseException:
-            if not was_suspended and self.paths.unit.is_file():
-                self._run(
-                    ["systemctl", "start", "forgejo.service"], check=False
-                )
-                if runner_was_active and self._health():
-                    self._run(
-                        ["systemctl", "start", "forgejo-runner.service"],
-                        check=False,
-                    )
+            self._restore_after_failed_mutation(
+                server_was_active=server_was_active,
+                runner_was_active=runner_was_active,
+                was_suspended=was_suspended,
+            )
             raise
 
     def _execute_repair(
@@ -3465,32 +3652,18 @@ ENABLED = true
             f"forgejo-{label}-{timestamp}-{uuid.uuid4().hex[:8]}.tar.gz"
         )
         temporary = archive.with_name(f".{archive.name}.tmp")
-        try:
-            postgres_gid = grp.getgrnam("postgres").gr_gid
-        except KeyError as exc:
-            raise ManagementError(
-                69,
-                "POSTGRESQL_IDENTITY_MISSING",
-                "The postgres group is unavailable.",
-            ) from exc
         workspace = Path(
             tempfile.mkdtemp(prefix=".forgejo-backup.", dir=destination)
         )
-        os.chown(workspace, 0, postgres_gid)
-        os.chmod(workspace, 0o750)
         dump = workspace / "database.dump"
         try:
-            self._run_as(
-                "postgres",
-                [
-                    "pg_dump",
-                    "--format=custom",
-                    "--file",
-                    str(dump),
-                    name,
-                ],
-                timeout=1800,
-            )
+            with dump.open("xb") as output:
+                self._run_as(
+                    "postgres",
+                    ["pg_dump", "--format=custom", name],
+                    timeout=1800,
+                    stdout=output,
+                )
             os.chown(dump, 0, 0)
             os.chmod(dump, 0o600)
             record = self._binary_record()
@@ -3565,15 +3738,56 @@ ENABLED = true
     ) -> Path:
         server_was_active = self._service_active()
         runner_was_active = self._stop_services()
+
+        def restore_services() -> None:
+            self._run(["systemctl", "start", "forgejo.service"])
+            self._wait_healthy()
+            self._wait_https_healthy()
+            self._restore_runner(runner_was_active)
+
         try:
-            return self._create_backup(label, destination)
-        finally:
+            archive = self._create_backup(label, destination)
+        except BaseException as backup_error:
             if server_was_active and not self.paths.suspended.exists():
-                self._run(
-                    ["systemctl", "start", "forgejo.service"], check=False
-                )
-                if self._health():
-                    self._restore_runner(runner_was_active)
+                try:
+                    restore_services()
+                except BaseException as restore_error:
+                    if isinstance(backup_error, ManagementError):
+                        backup_error.recovery.extend(
+                            [
+                                "Forgejo service restoration also failed after "
+                                "the backup error.",
+                                "Keep Forgejo and its runner stopped; inspect "
+                                "their service journals before retrying.",
+                            ]
+                        )
+                    else:
+                        backup_error = ManagementError(
+                            1,
+                            "BACKUP_AND_RESTORE_FAILED",
+                            "Backup and Forgejo service restoration both failed.",
+                            recovery=[
+                                "Keep Forgejo and its runner stopped; inspect "
+                                "the PostgreSQL, Forgejo, and Caddy journals.",
+                            ],
+                        )
+                    raise backup_error from restore_error
+            raise
+        if server_was_active and not self.paths.suspended.exists():
+            try:
+                restore_services()
+            except BaseException as exc:
+                raise ManagementError(
+                    1,
+                    "BACKUP_RESTORE_FAILED",
+                    f"Backup completed at {archive}, but Forgejo service "
+                    "restoration failed.",
+                    recovery=[
+                        f"Preserve the completed backup at {archive}.",
+                        "Inspect the Forgejo, Caddy, and runner service journals.",
+                    ],
+                ) from exc
+        return archive
 
     def _snapshot_for_rollback(
         self, archive: Path, marker: dict[str, Any]
@@ -3652,7 +3866,9 @@ ENABLED = true
         return changed + [str(archive)], previous, str(archive)
 
     def _validate_rollback_archive(
-        self, metadata: dict[str, Any]
+        self,
+        metadata: dict[str, Any],
+        current: dict[str, Any],
     ) -> tuple[Path, dict[str, Any]]:
         expected = {
             "schema_version",
@@ -3668,10 +3884,26 @@ ENABLED = true
             or metadata["product_id"] != PRODUCT_ID
             or not isinstance(metadata["archive"], str)
             or not isinstance(metadata["archive_sha256"], str)
+            or len(metadata["archive_sha256"]) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in metadata["archive_sha256"]
+            )
+            or not isinstance(metadata["from_version"], str)
+            or not isinstance(metadata["created_at"], str)
+            or not metadata["created_at"]
         ):
             raise ManagementError(
                 65, "INVALID_ROLLBACK", "Rollback metadata is invalid."
             )
+        try:
+            validate_version(metadata["from_version"])
+        except ManagementError as exc:
+            raise ManagementError(
+                65,
+                "INVALID_ROLLBACK",
+                "Rollback metadata version is invalid.",
+            ) from exc
         archive = Path(metadata["archive"])
         if (
             not archive.is_absolute()
@@ -3731,8 +3963,19 @@ ENABLED = true
             or set(manifest) != manifest_fields
             or manifest["schema_version"] != 1
             or manifest["product_id"] != PRODUCT_ID
+            or manifest["product_version"] != metadata["from_version"]
+            or manifest["instance_id"] != current["instance_id"]
+            or not isinstance(manifest["created_at"], str)
+            or not manifest["created_at"]
             or not NAME_RE.fullmatch(str(manifest["database_name"]))
             or not NAME_RE.fullmatch(str(manifest["database_user"]))
+            or (
+                manifest["binary_version"] is not None
+                and (
+                    not isinstance(manifest["binary_version"], str)
+                    or RELEASE_RE.fullmatch(manifest["binary_version"]) is None
+                )
+            )
             or manifest["boot"] not in {"enabled", "disabled"}
             or not isinstance(manifest["suspended"], bool)
         ):
@@ -3816,20 +4059,21 @@ ENABLED = true
             "postgres", ["dropdb", "--if-exists", "--force", name]
         )
         self._run_as("postgres", ["createdb", "-O", user, name])
-        self._run_as(
-            "postgres",
-            [
-                "pg_restore",
-                "--exit-on-error",
-                "--no-owner",
-                "--role",
-                user,
-                "--dbname",
-                name,
-                str(extracted / "database.dump"),
-            ],
-            timeout=1800,
-        )
+        with (extracted / "database.dump").open("rb") as source:
+            self._run_as(
+                "postgres",
+                [
+                    "pg_restore",
+                    "--exit-on-error",
+                    "--no-owner",
+                    "--role",
+                    user,
+                    "--dbname",
+                    name,
+                ],
+                timeout=1800,
+                stdin=source,
+            )
 
     def _execute_rollback(self) -> tuple[list[str], str | None]:
         current = self.load_marker(required=True)
@@ -3839,8 +4083,21 @@ ENABLED = true
                 "ROLLBACK_MISSING",
                 "No Forgejo rollback snapshot is available.",
             )
+        rollback_metadata = self.paths.rollback_metadata.lstat()
+        if (
+            not stat.S_ISREG(rollback_metadata.st_mode)
+            or stat.S_ISLNK(rollback_metadata.st_mode)
+            or rollback_metadata.st_uid != 0
+            or rollback_metadata.st_gid != 0
+            or stat.S_IMODE(rollback_metadata.st_mode) != 0o600
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_ROLLBACK",
+                "Rollback metadata ownership is invalid.",
+            )
         metadata = read_json(self.paths.rollback_metadata)
-        archive, manifest = self._validate_rollback_archive(metadata)
+        archive, manifest = self._validate_rollback_archive(metadata, current)
         pre_rollback = self._coordinated_backup("pre-rollback")
         runner_was_active = self._stop_services()
         workspace = Path(
@@ -3944,12 +4201,63 @@ ENABLED = true
                 self._wait_healthy()
                 self._configure_network_services(changed)
                 self._export_local_ca(changed)
+                self._wait_https_healthy()
                 self._restore_runner(runner_was_active)
-            restored_marker = self.load_marker(required=True)
-            self._snapshot_for_rollback(pre_rollback, restored_marker)
+            self.load_marker(required=True)
+            self._snapshot_for_rollback(pre_rollback, current)
             return changed + [str(pre_rollback)], str(current["version"])
         finally:
             shutil.rmtree(workspace, ignore_errors=True)
+
+    def _load_suspension(self) -> dict[str, Any]:
+        try:
+            metadata = self.paths.suspended.lstat()
+        except OSError as exc:
+            raise ManagementError(
+                66,
+                "SUSPENSION_MISSING",
+                "Forgejo suspension metadata is missing.",
+            ) from exc
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != 0
+            or metadata.st_gid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_SUSPENSION",
+                "Forgejo suspension metadata ownership is invalid.",
+            )
+        value = read_json(self.paths.suspended)
+        expected = {
+            "schema_version",
+            "product_id",
+            "suspended_at",
+            "server_was_active",
+            "runner_was_active",
+            "boot",
+            "runner_boot",
+        }
+        if (
+            set(value) != expected
+            or value["schema_version"] != 1
+            or value["product_id"] != PRODUCT_ID
+            or not isinstance(value["suspended_at"], str)
+            or not value["suspended_at"]
+            or not isinstance(value["server_was_active"], bool)
+            or not isinstance(value["runner_was_active"], bool)
+            or value["runner_was_active"] and not value["server_was_active"]
+            or value["boot"] not in {"enabled", "disabled"}
+            or value["runner_boot"] not in {"enabled", "disabled"}
+        ):
+            raise ManagementError(
+                65,
+                "INVALID_SUSPENSION",
+                "Forgejo suspension metadata is invalid.",
+            )
+        return value
 
     def _execute_suspend(self) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=True)
@@ -3960,13 +4268,55 @@ ENABLED = true
                 "A retained Forgejo installation cannot be suspended.",
             )
         if self.paths.suspended.exists():
-            return [], str(marker["version"])
+            self._load_suspension()
+            changed: list[str] = []
+            if self._runner_active() or self._service_active():
+                self._stop_services()
+                changed.append("forgejo.service:stopped")
+            if self._service_enabled() == "enabled":
+                self._run(
+                    ["systemctl", "disable", "forgejo.service"],
+                    check=False,
+                )
+                changed.append("forgejo.service:disabled")
+            if (
+                self._runner_present()
+                and self._service_enabled_named("forgejo-runner.service")
+                == "enabled"
+            ):
+                self._run(
+                    ["systemctl", "disable", "forgejo-runner.service"],
+                    check=False,
+                )
+                changed.append("forgejo-runner.service:disabled")
+            return changed, str(marker["version"])
         server_was_active = self._service_active()
-        runner_was_active = self._stop_services()
-        boot = self._service_enabled()
+        runner_was_active = self._runner_active()
+        if runner_was_active and not server_was_active:
+            raise ManagementError(
+                73,
+                "RUNNER_DEPENDENCY_INVALID",
+                "The active Forgejo runner has no active Forgejo dependency.",
+            )
+        runner_present = self._runner_present()
+        boot = (
+            "enabled" if self._service_enabled() == "enabled" else "disabled"
+        )
+        runner_boot = (
+            "enabled"
+            if runner_present
+            and self._service_enabled_named("forgejo-runner.service") == "enabled"
+            else "disabled"
+        )
+        self._stop_services()
         self._run(
             ["systemctl", "disable", "forgejo.service"], check=False
         )
+        if runner_present:
+            self._run(
+                ["systemctl", "disable", "forgejo-runner.service"],
+                check=False,
+            )
         value = {
             "schema_version": 1,
             "product_id": PRODUCT_ID,
@@ -3974,6 +4324,7 @@ ENABLED = true
             "server_was_active": server_was_active,
             "runner_was_active": runner_was_active,
             "boot": boot,
+            "runner_boot": runner_boot,
         }
         atomic_write(
             self.paths.suspended,
@@ -3986,43 +4337,82 @@ ENABLED = true
 
     def _execute_resume(self) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=True)
-        if not self.paths.suspended.is_file():
-            return [], str(marker["version"])
-        value = read_json(self.paths.suspended)
-        expected = {
-            "schema_version",
-            "product_id",
-            "suspended_at",
-            "server_was_active",
-            "runner_was_active",
-            "boot",
-        }
         if (
-            set(value) != expected
-            or value["schema_version"] != 1
-            or value["product_id"] != PRODUCT_ID
-            or not isinstance(value["server_was_active"], bool)
-            or not isinstance(value["runner_was_active"], bool)
-            or value["boot"] not in {"enabled", "disabled"}
+            not self.paths.suspended.exists()
+            and not self.paths.suspended.is_symlink()
         ):
+            return [], str(marker["version"])
+        value = self._load_suspension()
+        failures = [
+            check
+            for check in self.verify_checks(probe=False)
+            if check["status"] == "fail"
+        ]
+        if failures:
             raise ManagementError(
-                65,
-                "INVALID_SUSPENSION",
-                "Forgejo suspension metadata is invalid.",
+                78,
+                "BOUNDARY_CHECK_FAILED",
+                f"Cannot resume Forgejo: {failures[0]['id']}.",
             )
-        if value["boot"] == "enabled":
-            self._run(["systemctl", "enable", "forgejo.service"])
-        if value["server_was_active"]:
-            self._run(["systemctl", "start", "forgejo.service"])
-            self._wait_healthy()
-        if value["runner_was_active"]:
-            self._restore_runner(True)
+        runner_present = self._runner_present()
+        if value["runner_was_active"] and not runner_present:
+            raise ManagementError(
+                66,
+                "DEPENDENT_RUNNER_MISSING",
+                "The previously active Forgejo runner is missing.",
+            )
+        try:
+            if value["boot"] == "enabled":
+                self._run(["systemctl", "enable", "forgejo.service"])
+            else:
+                self._run(
+                    ["systemctl", "disable", "forgejo.service"],
+                    check=False,
+                )
+            if runner_present:
+                runner_action = (
+                    "enable"
+                    if value["runner_boot"] == "enabled"
+                    else "disable"
+                )
+                self._run(
+                    [
+                        "systemctl",
+                        runner_action,
+                        "forgejo-runner.service",
+                    ],
+                    check=runner_action == "enable",
+                )
+            if value["server_was_active"]:
+                self._run(["systemctl", "start", "forgejo.service"])
+                self._wait_healthy()
+                self._wait_https_healthy()
+            if value["runner_was_active"]:
+                self._restore_runner(True)
+        except BaseException:
+            self._stop_services()
+            self._run(
+                ["systemctl", "disable", "forgejo.service"],
+                check=False,
+            )
+            if runner_present:
+                self._run(
+                    ["systemctl", "disable", "forgejo-runner.service"],
+                    check=False,
+                )
+            raise
         self.paths.suspended.unlink()
         return [str(self.paths.suspended), "forgejo.service:restored"], str(
             marker["version"]
         )
 
     def _remove_caddy_route(self, changed: list[str]) -> None:
+        if self.paths.caddyfile.is_symlink():
+            raise ManagementError(
+                73,
+                "CADDY_OWNERSHIP_AMBIGUOUS",
+                "The shared Caddyfile must not be a symlink.",
+            )
         if self.paths.caddyfile.is_file():
             current = self.paths.caddyfile.read_text(encoding="utf-8")
             content = self._without_managed_caddy_blocks(current)
@@ -4032,7 +4422,9 @@ ENABLED = true
             ):
                 atomic_write(self.paths.caddyfile, rendered, mode=0o644)
                 changed.append(str(self.paths.caddyfile))
-        self.paths.legacy_caddy.unlink(missing_ok=True)
+        if self.paths.legacy_caddy.exists() or self.paths.legacy_caddy.is_symlink():
+            self._remove_owned_file(self.paths.legacy_caddy)
+            changed.append(str(self.paths.legacy_caddy))
         if self._service_active_named("caddy.service"):
             self._run(
                 ["systemctl", "reload-or-restart", "caddy.service"],
@@ -4041,7 +4433,11 @@ ENABLED = true
 
     def _drop_database(self) -> list[str]:
         if not self.paths.app_ini.is_file():
-            return []
+            raise ManagementError(
+                73,
+                "UNSAFE_DATABASE_REMOVAL",
+                "Cannot purge Forgejo without its protected database configuration.",
+            )
         sections = parse_ini(self.paths.app_ini)
         database = sections.get("database", {})
         name = database.get("NAME", "")
@@ -4084,6 +4480,22 @@ ENABLED = true
             )
         previous = str(marker["version"]) if marker is not None else None
         changed: list[str] = []
+        if legacy:
+            self._write_marker(
+                str(uuid.uuid4()),
+                existing=None,
+                changed=changed,
+            )
+            marker = self.load_marker(required=True)
+            previous = str(marker["version"])
+            self._ensure_directory(
+                self.paths.log_root,
+                0o750,
+                0,
+                0,
+                changed,
+            )
+            self._ensure_log_ownership(changed)
         self._stop_services()
         self._run(
             ["systemctl", "disable", "forgejo.service"], check=False
@@ -4100,7 +4512,7 @@ ENABLED = true
             self.paths.binary,
             self.paths.trusted_ca,
         ):
-            if path.exists():
+            if path.exists() or path.is_symlink():
                 self._remove_owned_file(path)
                 changed.append(str(path))
         self._run(["systemctl", "daemon-reload"], check=False)
@@ -4112,7 +4524,7 @@ ENABLED = true
                 check=False,
             )
         for path in (self.paths.install_root, self.paths.cache_root):
-            if path.exists():
+            if path.exists() or path.is_symlink():
                 self._remove_owned_tree(path)
                 changed.append(str(path))
         if purge:
@@ -4121,7 +4533,7 @@ ENABLED = true
                 self.paths.state_root,
                 self.paths.backup_root,
             ):
-                if path.exists():
+                if path.exists() or path.is_symlink():
                     self._remove_owned_tree(path)
                     changed.append(str(path))
             try:
@@ -4151,7 +4563,7 @@ ENABLED = true
                 self.paths.binary_metadata,
                 self.paths.exported_ca,
             ):
-                if path.exists():
+                if path.exists() or path.is_symlink():
                     self._remove_owned_file(path)
             changed.append(str(self.paths.retained))
         self.paths.legacy_manifest.unlink(missing_ok=True)

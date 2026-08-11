@@ -47,11 +47,11 @@
     },
     "install_root": {
       "type": "string",
-      "pattern": "^/opt/(imaginary-friend|curriculum-flame|eric|llama\\.cpp|beep)$"
+      "pattern": "^/opt/(imaginary-friend|curriculum-flame|eric|forgejo|llama\\.cpp|beep)$"
     },
     "lifecycle_entrypoint": {
       "type": "string",
-      "pattern": "^/usr/local/sbin/(friend|flame|eric|llama|beep)-manage$"
+      "pattern": "^/usr/local/sbin/(friend|flame|eric|forgejo|llama|beep)-manage$"
     },
     "artifact_sha256": {
       "oneOf": [

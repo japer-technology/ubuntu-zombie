@@ -16,5 +16,5 @@ contract. Root smoke tests verify compatibility delegation.
 Ubuntu VM with `FORGEJO_DISPOSABLE_VM_TEST=1`, no pre-existing Forgejo state,
 and an explicit test sentinel. It uses local checksum-pinned fake Forgejo
 binaries while exercising real PostgreSQL, Caddy, Avahi, systemd, CA trust,
-backup, update, rollback, repair, suspension, runner coordination, isolation,
-and uninstall.
+backup, update, migration-failure recovery, rollback, repair, suspension,
+runner coordination, isolation, and uninstall.

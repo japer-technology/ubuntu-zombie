@@ -17,6 +17,7 @@ from conformance import (
 
 ROOT = Path(__file__).resolve().parents[2]
 FRIEND_PRODUCT = ROOT / "products" / "imaginary-friend"
+FORGEJO_PRODUCT = ROOT / "products" / "forgejo"
 LLAMA_PRODUCT = ROOT / "products" / "llama"
 BEEP_PRODUCT = ROOT / "products" / "beep"
 
@@ -76,6 +77,70 @@ class FamilyContractTests(unittest.TestCase):
         self.assertEqual(descriptor["cookie_names"], [])
         self.assertEqual(descriptor["ports"][0]["port"], 8080)
 
+    def test_forgejo_descriptor_and_schema_patterns(self) -> None:
+        descriptor = load_json_strict(FORGEJO_PRODUCT / "PRODUCT.json")
+        validate_product(descriptor)
+        self.assertEqual(descriptor["product_id"], "forgejo")
+        self.assertEqual(descriptor["operations"], list(OPERATIONS))
+        self.assertEqual(
+            descriptor["cookie_names"],
+            ["forgejo_session", "forgejo_remember"],
+        )
+        self.assertEqual(descriptor["ports"][0]["port"], 3000)
+
+        product_schema = load_json_strict(
+            ROOT / "family" / "schemas" / "product-v1.schema.json"
+        )
+        self.assertIsNotNone(
+            re.fullmatch(
+                product_schema["properties"]["source_root"]["pattern"],
+                descriptor["source_root"],
+            )
+        )
+        self.assertIsNotNone(
+            re.fullmatch(
+                product_schema["properties"]["installed_entrypoint"]["pattern"],
+                descriptor["installed_entrypoint"],
+            )
+        )
+        self.assertIn(
+            descriptor["environment_prefix"],
+            product_schema["properties"]["environment_prefix"]["enum"],
+        )
+
+        installation_schema = load_json_strict(
+            ROOT / "family" / "schemas" / "installation-v1.schema.json"
+        )
+        for field in ("install_root", "lifecycle_entrypoint"):
+            self.assertIsNotNone(
+                re.fullmatch(
+                    installation_schema["properties"][field]["pattern"],
+                    descriptor[
+                        "installed_entrypoint"
+                        if field == "lifecycle_entrypoint"
+                        else field
+                    ],
+                )
+            )
+
+        catalog_schema = load_json_strict(
+            ROOT / "family" / "schemas" / "catalog-v1.schema.json"
+        )
+        catalog_product = catalog_schema["$defs"]["product"]["properties"]
+        self.assertIsNotNone(
+            re.fullmatch(
+                catalog_product["descriptor"]["pattern"],
+                "products/forgejo/PRODUCT.json",
+            )
+        )
+        version = (FORGEJO_PRODUCT / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertIsNotNone(
+            re.fullmatch(
+                catalog_product["tag"]["pattern"],
+                f"forgejo-v{version}",
+            )
+        )
+
     def test_beep_descriptor(self) -> None:
         descriptor = load_json_strict(BEEP_PRODUCT / "PRODUCT.json")
         validate_product(descriptor)
@@ -85,7 +150,12 @@ class FamilyContractTests(unittest.TestCase):
         self.assertEqual(descriptor["ports"][0]["port"], 58989)
 
     def test_manage_describe_uses_common_response(self) -> None:
-        for product in (FRIEND_PRODUCT, LLAMA_PRODUCT, BEEP_PRODUCT):
+        for product in (
+            FRIEND_PRODUCT,
+            FORGEJO_PRODUCT,
+            LLAMA_PRODUCT,
+            BEEP_PRODUCT,
+        ):
             with self.subTest(product=product.name):
                 completed = subprocess.run(
                     [str(product / "scripts" / "manage.sh"), "describe", "--json"],

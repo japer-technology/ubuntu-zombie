@@ -80,7 +80,7 @@
         },
         "descriptor": {
           "type": "string",
-          "pattern": "^products/(imaginary-friend|curriculum-flame|eric|llama|beep)/PRODUCT\\.json$"
+          "pattern": "^products/(imaginary-friend|curriculum-flame|eric|forgejo|llama|beep)/PRODUCT\\.json$"
         },
         "version": {
           "type": "string",
@@ -88,7 +88,7 @@
         },
         "tag": {
           "type": "string",
-          "pattern": "^(imaginary-friend|curriculum-flame|eric|llama|beep)-v[0-9]{4}(\\.[0-9]{2}){5}$"
+          "pattern": "^(imaginary-friend|curriculum-flame|eric|forgejo|llama|beep)-v[0-9]{4}(\\.[0-9]{2}){5}$"
         },
         "artifact": {
           "$ref": "#/$defs/asset"

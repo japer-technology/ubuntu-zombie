@@ -49,7 +49,7 @@
     },
     "source_root": {
       "type": "string",
-      "pattern": "^products/(imaginary-friend|curriculum-flame|eric|llama|beep)$"
+      "pattern": "^products/(imaginary-friend|curriculum-flame|eric|forgejo|llama|beep)$"
     },
     "version_file": {
       "const": "VERSION"
@@ -59,7 +59,7 @@
     },
     "installed_entrypoint": {
       "type": "string",
-      "pattern": "^/usr/local/sbin/(friend|flame|eric|llama|beep)-manage$"
+      "pattern": "^/usr/local/sbin/(friend|flame|eric|forgejo|llama|beep)-manage$"
     },
     "install_root": {
       "$ref": "#/$defs/absolute_path"
@@ -81,6 +81,7 @@
         "FRIEND",
         "FLAME",
         "ERIC",
+        "FORGEJO",
         "LLAMA",
         "BEEP"
       ]
