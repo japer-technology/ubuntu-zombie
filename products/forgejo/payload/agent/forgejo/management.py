@@ -4946,7 +4946,7 @@ def print_plan(
         print(f"  {index}. {step['summary']}", file=file)
     if result.operation == "install":
         print(
-            "  Generated initial credentials: "
+            "  Generated credentials, when needed: "
             "/etc/forgejo/bootstrap-admin-password",
             file=file,
         )

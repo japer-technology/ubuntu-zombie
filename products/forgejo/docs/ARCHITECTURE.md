@@ -20,7 +20,7 @@ outside the declared Forgejo boundary.
 the standard-library Python lifecycle. Mutations require root, a lifecycle
 lock, a confirmed plan, and a valid product or narrowly validated legacy
 ownership boundary. Responses, receipts, and append-only audit events use the
-shared family contracts.
+stable product lifecycle contracts.
 
 ## Network and runner boundary
 

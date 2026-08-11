@@ -151,10 +151,22 @@ adduser --system --group --home /var/lib/forgejo-runner \
 install -d -m 750 -o forgejo-runner -g forgejo-runner \
   /var/lib/forgejo-runner
 host="$(awk -F' = ' '$1 == "DOMAIN" {print $2; exit}' /etc/forgejo/app.ini)"
-sed "s|__FORGEJO_HOST__|${host}|g" \
-  "${product_root}/../../payload/etc/forgejo-runner-config.yaml" \
-  | install -m 640 -o root -g forgejo-runner /dev/stdin \
-    /var/lib/forgejo-runner/config.yaml
+cat > "${fixture}/runner-config.yaml" <<EOF
+runner:
+  envs:
+    SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+    NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
+container:
+  network: host
+  privileged: false
+  options: >-
+    --add-host ${host}:127.0.0.1
+    --volume /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+  valid_volumes: []
+  docker_host: "-"
+EOF
+install -m 640 -o root -g forgejo-runner \
+  "${fixture}/runner-config.yaml" /var/lib/forgejo-runner/config.yaml
 install -m 755 /bin/true /usr/local/bin/forgejo-runner
 cat > /etc/systemd/system/forgejo-runner.service <<'EOF'
 [Unit]

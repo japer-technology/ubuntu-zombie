@@ -122,6 +122,7 @@ ROOT_URL = https://existing.local/
         arguments = parser().parse_args(["install"])
         inputs: dict[str, object] = {}
         answers = [
+            "INVALID",
             "owner",
             "owner@example.test",
             "forge",
@@ -179,6 +180,34 @@ ROOT_URL = https://existing.local/
         self.assertFalse(result.changed)
         self.assertFalse(self.paths.lock.exists())
         self.assertFalse(self.paths.install_root.exists())
+
+    def test_interactive_approval_displays_configuration_and_plan(self) -> None:
+        invocation = self.invocation(
+            inputs={
+                "admin_user": "owner",
+                "admin_email": "owner@example.test",
+                "database_name": "forge",
+                "database_user": "forge_role",
+                "upstream_version": "11.0.3",
+                "boot": "disabled",
+            }
+        )
+        invocation.non_interactive = False
+        invocation.assume_yes = False
+        invocation.json_output = False
+        output = io.StringIO()
+        with (
+            mock.patch.object(self.manager, "_host", return_value="forge.local"),
+            mock.patch.object(self.manager, "_prompt", return_value="no"),
+            mock.patch("sys.stdout", output),
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager.run(invocation)
+        self.assertEqual(raised.exception.code, "CONFIRMATION_REQUIRED")
+        self.assertIn("Public URL:      https://forge.local/", output.getvalue())
+        self.assertIn("Administrator:   owner", output.getvalue())
+        self.assertIn("Preserve secrets and deploy", output.getvalue())
+        self.assertFalse(self.paths.lock.exists())
 
     def test_caddy_render_replaces_only_managed_legacy_block(self) -> None:
         self.paths.caddyfile.parent.mkdir(parents=True)
@@ -272,6 +301,55 @@ container:
         self.assertIsNone(marker)
         self.assertTrue(adopting)
         uuid.UUID(instance_id)
+
+    def test_migration_manifest_accepts_one_generic_version_field(self) -> None:
+        manifest = self.paths.migration_manifest
+        self.assertIsNotNone(manifest)
+        assert manifest is not None
+        manifest.parent.mkdir(parents=True)
+        manifest.write_text(
+            "\n".join(
+                (
+                    "format=1",
+                    "component=forgejo",
+                    "source_version=2026.08.11.00.00.00",
+                    "converged_utc=2026-08-11T00:00:00Z",
+                    "component_version=1.2.3",
+                    "suboptions=",
+                )
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        manifest.chmod(0o644)
+        real_lstat = Path.lstat
+
+        def root_owned_lstat(path: Path) -> os.stat_result:
+            metadata = real_lstat(path)
+            if path != manifest:
+                return metadata
+            return os.stat_result(
+                (
+                    metadata.st_mode,
+                    metadata.st_ino,
+                    metadata.st_dev,
+                    metadata.st_nlink,
+                    0,
+                    0,
+                    metadata.st_size,
+                    metadata.st_atime,
+                    metadata.st_mtime,
+                    metadata.st_ctime,
+                )
+            )
+
+        with mock.patch.object(
+            Path,
+            "lstat",
+            autospec=True,
+            side_effect=root_owned_lstat,
+        ):
+            self.assertTrue(self.manager._legacy_manifest_valid())
 
     def test_archive_member_rejects_traversal_and_links(self) -> None:
         traversal = tarfile.TarInfo("forgejo-backup/../../escape")

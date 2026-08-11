@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026.08.11.01.50.22
+
+- Add a primary interactive installer that obtains root privileges, validates
+  setup answers, shows the complete plan, and preserves unattended lifecycle
+  operation.
+- Keep legacy adoption behind an adapter-supplied migration manifest while
+  removing unrelated product coupling from source, tests, documentation, and
+  runtime metadata.
+- Tighten service filesystem protection and make release archives contain only
+  the standalone product and license.
+
 ## 2026.08.11.00.00.30
 
 - Correct the installation marker and shared family schemas, safely migrate the

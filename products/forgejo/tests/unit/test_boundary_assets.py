@@ -6,7 +6,6 @@ from pathlib import Path
 
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[2]
-REPOSITORY_ROOT = PRODUCT_ROOT.parents[1]
 
 
 class BoundaryAssetTests(unittest.TestCase):
@@ -23,22 +22,6 @@ class BoundaryAssetTests(unittest.TestCase):
         self.assertIn("ProtectSystem=strict", unit)
         self.assertIn("ReadWritePaths=/var/lib/forgejo", unit)
         self.assertNotIn("/var/run/docker.sock", unit)
-
-    def test_runner_template_keeps_restricted_executor_and_ca_bridge(self) -> None:
-        config = (
-            REPOSITORY_ROOT / "payload/etc/forgejo-runner-config.yaml"
-        ).read_text(encoding="utf-8")
-        self.assertIn("network: host", config)
-        self.assertIn("privileged: false", config)
-        self.assertIn("valid_volumes: []", config)
-        self.assertIn('docker_host: "-"', config)
-        self.assertIn("__FORGEJO_HOST__:127.0.0.1", config)
-        self.assertIn("NODE_EXTRA_CA_CERTS", config)
-        self.assertIn(
-            "--volume /etc/ssl/certs/ca-certificates.crt:"
-            "/etc/ssl/certs/ca-certificates.crt:ro",
-            config,
-        )
 
     def test_product_has_no_runtime_dependency(self) -> None:
         lock = (

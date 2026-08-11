@@ -31,7 +31,6 @@ lint:
 test:
 	PYTHONPATH=payload/agent "$(PYTHON)" -m unittest discover -s tests/unit -p 'test_*.py'
 	PYTHONPATH=payload/agent "$(PYTHON)" -m unittest discover -s tests/integration -p 'test_*.py'
-	"$(PYTHON)" -m unittest discover -s "$(REPOSITORY_ROOT)/tests/family" -p 'test_*.py'
 
 package:
 	@mkdir -p dist
