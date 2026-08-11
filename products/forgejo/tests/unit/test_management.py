@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -153,6 +156,16 @@ https://old.local {
             )
         self.assertEqual(raised.exception.code, "CADDY_OWNERSHIP_AMBIGUOUS")
 
+    def test_overlapping_caddy_ownership_is_rejected(self) -> None:
+        content = """# BEGIN forgejo-manage Forgejo
+# BEGIN install.sh Forgejo
+# END forgejo-manage Forgejo
+# END install.sh Forgejo
+"""
+        with self.assertRaises(ManagementError) as raised:
+            self.manager._without_managed_caddy_blocks(content)
+        self.assertEqual(raised.exception.code, "CADDY_OWNERSHIP_AMBIGUOUS")
+
     def test_runner_boundary_requires_resolution_ca_and_restrictions(self) -> None:
         self.paths.configuration_root.mkdir(parents=True)
         self.paths.app_ini.write_text(
@@ -294,6 +307,436 @@ container:
                 )
         self.assertEqual(raised.exception.code, "INVALID_ARTIFACT_DIGEST")
         self.assertFalse(self.paths.marker.exists())
+
+    def test_backup_streams_postgres_dump_without_path_access(self) -> None:
+        self.paths.configuration_root.mkdir(parents=True)
+        self.paths.state_root.mkdir(parents=True)
+        self.paths.app_ini.write_text(
+            """[database]
+NAME = forgejo
+USER = forgejo
+""",
+            encoding="utf-8",
+        )
+        streamed: list[bytes] = []
+
+        def run_as(
+            _user: str,
+            command: list[str],
+            **kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            if command[0] == "pg_dump":
+                self.assertNotIn("--file", command)
+                output = kwargs["stdout"]
+                self.assertTrue(hasattr(output, "write"))
+                getattr(output, "write")(b"fixture-database")
+                streamed.append(b"fixture-database")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        marker = {
+            "version": self.manager.version,
+            "instance_id": str(uuid.uuid4()),
+        }
+        with (
+            mock.patch.object(
+                self.manager,
+                "load_marker",
+                return_value=marker,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_run_as",
+                side_effect=run_as,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_binary_record",
+                return_value=None,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_service_enabled",
+                return_value="disabled",
+            ),
+            mock.patch("forgejo.management.os.chown"),
+            mock.patch("forgejo.management.os.fchown"),
+        ):
+            archive = self.manager._create_backup("unit")
+        self.assertEqual(streamed, [b"fixture-database"])
+        self.assertTrue(archive.is_file())
+        self.assertTrue(
+            archive.with_suffix(archive.suffix + ".sha256").is_file()
+        )
+
+    def test_restore_database_streams_dump_to_postgres(self) -> None:
+        extracted = Path(self.temporary.name) / "restore"
+        extracted.mkdir()
+        (extracted / "database.dump").write_bytes(b"fixture-database")
+        configuration = extracted / "app.ini"
+        configuration.write_text(
+            """[database]
+NAME = forgejo
+USER = forgejo
+PASSWD = valid-database-password
+""",
+            encoding="utf-8",
+        )
+        restored: list[bytes] = []
+
+        def run_as(
+            _user: str,
+            command: list[str],
+            **kwargs: object,
+        ) -> subprocess.CompletedProcess[str]:
+            if command[0] == "pg_restore":
+                self.assertNotIn(str(extracted / "database.dump"), command)
+                source = kwargs["stdin"]
+                self.assertTrue(hasattr(source, "read"))
+                restored.append(getattr(source, "read")())
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with mock.patch.object(
+            self.manager,
+            "_run_as",
+            side_effect=run_as,
+        ):
+            self.manager._restore_database(extracted, configuration)
+        self.assertEqual(restored, [b"fixture-database"])
+
+    def test_coordinated_backup_restores_complete_service_path(self) -> None:
+        archive = self.paths.backup_root / "backup.tar.gz"
+        with (
+            mock.patch.object(
+                self.manager,
+                "_service_active",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_stop_services",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_create_backup",
+                return_value=archive,
+            ),
+            mock.patch.object(self.manager, "_run") as run,
+            mock.patch.object(self.manager, "_wait_healthy") as wait_loopback,
+            mock.patch.object(
+                self.manager,
+                "_wait_https_healthy",
+            ) as wait_https,
+            mock.patch.object(
+                self.manager,
+                "_restore_runner",
+            ) as restore_runner,
+        ):
+            result = self.manager._coordinated_backup("unit")
+        self.assertEqual(result, archive)
+        run.assert_called_once_with(
+            ["systemctl", "start", "forgejo.service"]
+        )
+        wait_loopback.assert_called_once_with()
+        wait_https.assert_called_once_with()
+        restore_runner.assert_called_once_with(True)
+
+    def test_runner_restart_requires_https_health(self) -> None:
+        with (
+            mock.patch.object(self.manager, "_health", return_value=True),
+            mock.patch.object(
+                self.manager,
+                "_https_health",
+                return_value=False,
+            ),
+            mock.patch.object(self.manager, "_run") as run,
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager._restore_runner(True)
+        self.assertEqual(
+            raised.exception.code,
+            "RUNNER_DEPENDENCY_UNHEALTHY",
+        )
+        run.assert_not_called()
+
+    def test_suspend_records_and_disables_runner_boot_intent(self) -> None:
+        self.paths.state_root.mkdir(parents=True)
+        marker = {"version": self.manager.version}
+
+        def write_file(
+            path: Path,
+            content: bytes,
+            **_kwargs: object,
+        ) -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+        with (
+            mock.patch.object(
+                self.manager,
+                "load_marker",
+                return_value=marker,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_service_active",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_runner_active",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_runner_present",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_service_enabled",
+                return_value="enabled",
+            ),
+            mock.patch.object(
+                self.manager,
+                "_service_enabled_named",
+                return_value="enabled",
+            ),
+            mock.patch.object(
+                self.manager,
+                "_stop_services",
+                return_value=True,
+            ),
+            mock.patch.object(self.manager, "_run") as run,
+            mock.patch(
+                "forgejo.management.atomic_write",
+                side_effect=write_file,
+            ),
+        ):
+            self.manager._execute_suspend()
+        suspension = json.loads(
+            self.paths.suspended.read_text(encoding="utf-8")
+        )
+        self.assertTrue(suspension["server_was_active"])
+        self.assertTrue(suspension["runner_was_active"])
+        self.assertEqual(suspension["boot"], "enabled")
+        self.assertEqual(suspension["runner_boot"], "enabled")
+        self.assertIn(
+            mock.call(
+                ["systemctl", "disable", "forgejo-runner.service"],
+                check=False,
+            ),
+            run.call_args_list,
+        )
+
+    def test_resume_checks_boundaries_and_https_before_runner(self) -> None:
+        self.paths.state_root.mkdir(parents=True)
+        self.paths.suspended.write_text("{}\n", encoding="utf-8")
+        marker = {"version": self.manager.version}
+        suspension = {
+            "schema_version": 1,
+            "product_id": "forgejo",
+            "suspended_at": "2026-08-10T00:00:00Z",
+            "server_was_active": True,
+            "runner_was_active": True,
+            "boot": "enabled",
+            "runner_boot": "enabled",
+        }
+        with (
+            mock.patch.object(
+                self.manager,
+                "load_marker",
+                return_value=marker,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_load_suspension",
+                return_value=suspension,
+            ),
+            mock.patch.object(
+                self.manager,
+                "verify_checks",
+                return_value=[],
+            ) as verify,
+            mock.patch.object(
+                self.manager,
+                "_runner_present",
+                return_value=True,
+            ),
+            mock.patch.object(self.manager, "_run") as run,
+            mock.patch.object(self.manager, "_wait_healthy") as wait_loopback,
+            mock.patch.object(
+                self.manager,
+                "_wait_https_healthy",
+            ) as wait_https,
+            mock.patch.object(
+                self.manager,
+                "_restore_runner",
+            ) as restore_runner,
+        ):
+            self.manager._execute_resume()
+        verify.assert_called_once_with(probe=False)
+        self.assertIn(
+            mock.call(
+                ["systemctl", "enable", "forgejo-runner.service"],
+                check=True,
+            ),
+            run.call_args_list,
+        )
+        wait_loopback.assert_called_once_with()
+        wait_https.assert_called_once_with()
+        restore_runner.assert_called_once_with(True)
+        self.assertFalse(self.paths.suspended.exists())
+
+    def test_uninstall_adopts_legacy_state_before_retaining_it(self) -> None:
+        invocation = self.invocation("uninstall")
+        marker = {"version": self.manager.version}
+        with (
+            mock.patch.object(
+                self.manager,
+                "load_marker",
+                side_effect=[None, marker],
+            ),
+            mock.patch.object(
+                self.manager,
+                "_legacy_installation_valid",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_runner_present",
+                return_value=False,
+            ),
+            mock.patch.object(self.manager, "_write_marker") as write_marker,
+            mock.patch.object(self.manager, "_ensure_directory"),
+            mock.patch.object(self.manager, "_ensure_log_ownership"),
+            mock.patch.object(
+                self.manager,
+                "_stop_services",
+                return_value=False,
+            ),
+            mock.patch.object(self.manager, "_run"),
+            mock.patch.object(self.manager, "_remove_caddy_route"),
+            mock.patch.object(
+                self.manager,
+                "_service_active_named",
+                return_value=False,
+            ),
+            mock.patch("forgejo.management.atomic_write"),
+        ):
+            self.manager._execute_uninstall(invocation)
+        write_marker.assert_called_once()
+
+    def test_purge_requires_database_configuration(self) -> None:
+        with self.assertRaises(ManagementError) as raised:
+            self.manager._drop_database()
+        self.assertEqual(
+            raised.exception.code,
+            "UNSAFE_DATABASE_REMOVAL",
+        )
+
+    def test_collision_preflight_includes_installed_entrypoint(self) -> None:
+        self.paths.entrypoint.parent.mkdir(parents=True)
+        self.paths.entrypoint.write_text("unmanaged\n", encoding="utf-8")
+        with (
+            mock.patch.object(self.manager, "load_marker", return_value=None),
+            mock.patch.object(
+                self.manager,
+                "_transaction_instance",
+                return_value=None,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_legacy_installation_valid",
+                return_value=False,
+            ),
+            mock.patch(
+                "forgejo.management.pwd.getpwnam",
+                side_effect=KeyError,
+            ),
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager._collision_preflight(self.invocation())
+        self.assertEqual(raised.exception.code, "UNSAFE_COLLISION")
+        self.assertIn(str(self.paths.entrypoint), raised.exception.message)
+
+    def test_configuration_boundary_covers_all_state_paths(self) -> None:
+        self.paths.configuration_root.mkdir(parents=True)
+        configuration = Configuration(
+            "forgejo-admin",
+            "forgejo-admin@localhost.localdomain",
+            "forgejo",
+            "forgejo",
+            "1.2.3",
+            "enabled",
+            "forge.local",
+        )
+        self.paths.app_ini.write_bytes(
+            self.manager._render_app_ini(
+                configuration,
+                "valid-database-password",
+            )
+        )
+        self.assertTrue(self.manager._configuration_boundary_valid())
+        content = self.paths.app_ini.read_text(encoding="utf-8")
+        self.paths.app_ini.write_text(
+            content.replace(
+                "LOCAL_ROOT_URL = http://127.0.0.1:3000/",
+                "LOCAL_ROOT_URL = http://0.0.0.0:3000/",
+            ),
+            encoding="utf-8",
+        )
+        self.assertFalse(self.manager._configuration_boundary_valid())
+
+    def test_admin_lookup_matches_only_username_column(self) -> None:
+        output = subprocess.CompletedProcess(
+            ["forgejo"],
+            0,
+            "1 owner owner@example.invalid true true\n",
+            "",
+        )
+        with mock.patch.object(
+            self.manager,
+            "_run_as",
+            return_value=output,
+        ):
+            self.assertTrue(self.manager._admin_exists("owner"))
+            self.assertFalse(self.manager._admin_exists("true"))
+
+    def test_rollback_rejects_archive_from_another_instance(self) -> None:
+        archive = Path(self.temporary.name) / "rollback.tar.gz"
+        manifest = {
+            "schema_version": 1,
+            "product_id": "forgejo",
+            "product_version": self.manager.version,
+            "instance_id": str(uuid.uuid4()),
+            "created_at": "2026-08-10T00:00:00Z",
+            "database_name": "forgejo",
+            "database_user": "forgejo",
+            "binary_version": "1.2.3",
+            "boot": "enabled",
+            "suspended": False,
+        }
+        payload = json.dumps(manifest).encode("utf-8")
+        with tarfile.open(archive, "w:gz") as bundle:
+            member = tarfile.TarInfo("forgejo-backup/manifest.json")
+            member.size = len(payload)
+            bundle.addfile(member, io.BytesIO(payload))
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        metadata = {
+            "schema_version": 1,
+            "product_id": "forgejo",
+            "from_version": self.manager.version,
+            "archive": str(archive),
+            "archive_sha256": digest,
+            "created_at": "2026-08-10T00:00:00Z",
+        }
+        current = {
+            "instance_id": str(uuid.uuid4()),
+        }
+        with self.assertRaises(ManagementError) as raised:
+            self.manager._validate_rollback_archive(metadata, current)
+        self.assertEqual(raised.exception.code, "INVALID_ROLLBACK")
 
 
 if __name__ == "__main__":

@@ -56,7 +56,7 @@ sibling_before="$(
 )"
 
 write_fixture() {
-  local version="$1" target="$2"
+  local version="$1" target="$2" fail_migrate="${3:-0}"
   cat > "${target}" <<PY
 #!/usr/bin/env python3
 import json
@@ -65,12 +65,13 @@ import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 VERSION = "${version}"
+FAIL_MIGRATE = "${fail_migrate}" == "1"
 args = sys.argv[1:]
 if args == ["--version"]:
     print(f"Forgejo version {VERSION}+gitea-1")
     raise SystemExit(0)
 if args and args[0] == "migrate":
-    raise SystemExit(0)
+    raise SystemExit(1 if FAIL_MIGRATE else 0)
 if args[:3] == ["admin", "user", "list"]:
     marker = pathlib.Path("/var/lib/forgejo/.fixture-admin")
     if marker.exists():
@@ -108,6 +109,7 @@ case "${architecture}" in
 esac
 write_fixture 1.2.3 "${fixture}/forgejo-1.2.3-linux-${release_arch}"
 write_fixture 1.2.4 "${fixture}/forgejo-1.2.4-linux-${release_arch}"
+write_fixture 1.2.5 "${fixture}/forgejo-1.2.5-linux-${release_arch}" 1
 printf '{"tag_name":"v1.2.4"}\n' > "${fixture}/latest.json"
 python3 -m http.server 18765 --bind 127.0.0.1 \
   --directory "${fixture}" >"${fixture}/http.log" 2>&1 &
@@ -132,6 +134,15 @@ systemctl is-active --quiet forgejo.service
 FORGEJO_VERSION=1.2.4 "${product_root}/scripts/manage.sh" \
   update --yes --non-interactive
 /usr/local/bin/forgejo --version | grep -q '1.2.4'
+"${product_root}/scripts/manage.sh" rollback --yes --non-interactive
+/usr/local/bin/forgejo --version | grep -q '1.2.3'
+
+if FORGEJO_VERSION=1.2.5 "${product_root}/scripts/manage.sh" \
+    update --yes --non-interactive; then
+  echo "Forgejo update unexpectedly ignored a failed migration." >&2
+  exit 1
+fi
+/usr/local/bin/forgejo --version | grep -q '1.2.5'
 "${product_root}/scripts/manage.sh" rollback --yes --non-interactive
 /usr/local/bin/forgejo --version | grep -q '1.2.3'
 
