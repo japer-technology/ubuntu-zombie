@@ -10,7 +10,7 @@ REPOSITORY_ROOT := ../..
 help:
 	@echo "Targets:"
 	@echo "  lint     ShellCheck, bash syntax, and Python compile"
-	@echo "  test     unit, integration, and family conformance tests"
+	@echo "  test     unit and integration tests"
 	@echo "  package  independent Imaginary Friend source artifact"
 	@echo "  clean    remove generated artifacts and caches"
 

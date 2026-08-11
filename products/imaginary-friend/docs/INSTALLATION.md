@@ -5,18 +5,31 @@ installation and lifecycle testing. The commands below mutate Linux
 identities, groups, systemd, `/opt`, `/etc`, `/var`, `/srv`, and
 `/usr/local`.
 
-## Inspect before mutation
+## Interactive install
 
-From a verified release checkout:
+Start the configured OpenAI-compatible loopback model, enter the product
+directory, and run:
 
 ```bash
-products/imaginary-friend/scripts/manage.sh describe --json
-products/imaginary-friend/scripts/manage.sh install --dry-run --json
+./scripts/install.sh
 ```
 
-A dry-run creates no lock, credential, log, directory, download, or network
-request. It validates local inputs and renders the ordered plan; the bounded
-model probe is deferred until execution.
+The installer obtains root privileges with `sudo` when needed and asks for:
+
+- the existing non-root human owner;
+- an owner password, or permission to generate one;
+- the OpenAI-compatible loopback endpoint and model ID; and
+- conversation-history and operational-audit retention periods.
+
+Press Enter to accept a displayed default. The installer then displays every
+non-secret setting, the plan digest, and each mutation before asking for
+approval. A generated password is shown once after a successful installation.
+Browse to `http://127.0.0.1:6767/`.
+
+Use `./scripts/install.sh --dry-run` to answer the same setup questions and
+render a non-mutating plan. A dry-run creates no lock, credential file, log,
+directory, download, or network request; the bounded model probe is deferred
+until execution.
 
 ## Unattended install
 
@@ -36,7 +49,7 @@ sudo env \
   FRIEND_OWNER_PASSWORD_FILE=/root/friend-owner-password \
   FRIEND_MODEL_BASE_URL=http://127.0.0.1:8080/v1 \
   FRIEND_MODEL=local-model-id \
-  products/imaginary-friend/scripts/manage.sh install --dry-run --json
+  ./scripts/manage.sh install --dry-run --json
 
 sudo env \
   FRIEND_NONINTERACTIVE=1 \
@@ -44,16 +57,14 @@ sudo env \
   FRIEND_OWNER_PASSWORD_FILE=/root/friend-owner-password \
   FRIEND_MODEL_BASE_URL=http://127.0.0.1:8080/v1 \
   FRIEND_MODEL=local-model-id \
-  products/imaginary-friend/scripts/manage.sh install --yes --json
+  ./scripts/manage.sh install --yes --json
 ```
 
 The model must answer bounded `/models` and `/chat/completions` probes before
-host mutation. On success, browse to `http://127.0.0.1:6767/`. Remove the
-plaintext password file when it is no longer needed.
+host mutation. Remove the plaintext password file when it is no longer needed.
 
-Interactive install reviews the same values and can generate a password shown
-once. Re-running install preserves valid credentials, history, workspace
-nominations, retention, and suspension state.
+Re-running install preserves valid credentials, history, workspace nominations,
+retention, and suspension state.
 
 ## Verify and repair
 

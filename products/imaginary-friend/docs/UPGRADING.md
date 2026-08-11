@@ -1,8 +1,7 @@
 # Upgrading and rollback
 
-Imaginary Friend versions, artifacts, state, and rollback data are independent
-of Ubuntu Zombie and every sibling product. An update restarts only
-`imaginary-friend-chat.service`.
+Imaginary Friend versions, artifacts, state, and rollback data are
+product-owned. An update restarts only `imaginary-friend-chat.service`.
 
 ## Before update
 
@@ -31,7 +30,7 @@ format. An update never owns or migrates workspace file contents.
 and compatible recovery snapshot exist. Approved rollback stops Friend,
 swaps the product-owned runtime, restores compatible Friend state and
 configuration, validates the restored service, and records the restored
-version. It preserves suspension and never changes sibling products.
+version. It preserves suspension and does not change unrelated services.
 
 If a switch fails, the updater attempts to restore the current runtime and
 state and leaves root-only recovery data for `doctor`. Do not delete

@@ -5,6 +5,14 @@ Imaginary Friend uses independent UTC date-time versions in
 
 ## [Unreleased]
 
+### Changed
+
+- Add a primary interactive installer that obtains root privileges, validates
+  setup answers, displays all non-secret settings and the complete plan, and
+  preserves unattended lifecycle operation.
+- Remove unrelated product names and source, runtime, test, documentation, and
+  release-package coupling.
+
 ### Fixed
 
 - Preserve the paired previous-version runtime and recovery snapshot across
@@ -38,7 +46,7 @@ Imaginary Friend uses independent UTC date-time versions in
   tests, and operator documentation.
 - Product-owned vision, architecture, security, privacy, configuration,
   installation, upgrading, recovery, troubleshooting, release, and test
-  evidence, with an explicit record of remaining family admission gates.
+  evidence, with an explicit record of remaining release assurance gates.
 - Regression and negative-boundary coverage for suspension convergence,
   retention changes, service groups, lifecycle input isolation, failure
   correlation, sandbox assets, and the guarded disposable-VM lifecycle.

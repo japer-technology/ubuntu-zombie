@@ -9,7 +9,7 @@ machine owner's control without granting the model authority over the host.
 
 Friend must:
 
-- authenticate one owner independently of every sibling product;
+- authenticate one owner with product-specific credentials;
 - send only conversation context and owner-selected workspace text to the
   configured loopback model;
 - keep file operations within canonical, nominated workspace roots;

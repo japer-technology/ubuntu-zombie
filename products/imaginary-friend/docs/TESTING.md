@@ -2,17 +2,16 @@
 
 ## Non-root checks
 
-Run from the repository root:
+Run from the product directory:
 
 ```bash
-make -C products/imaginary-friend lint
-make -C products/imaginary-friend test
-make -C products/imaginary-friend package
+make lint
+make test
+make package
 ```
 
 `lint` runs ShellCheck, Bash syntax checks, and Python compilation. `test`
-runs unit, hermetic integration, HTTP, lifecycle-contract, and shared family
-conformance suites. Model tests use
+runs unit, hermetic integration, HTTP, and lifecycle tests. Model tests use
 `tests/fixtures/openai_fixture.py`; they do not require a real model or
 external network.
 
@@ -42,13 +41,11 @@ loopback model.
 
 | Gate | Repository evidence | State |
 | ---- | ------------------- | ----- |
-| Product source and fixed slice | `payload/`, `PRODUCT.json`, product definition | Implemented |
-| Unit/integration/family tests | `tests/unit/`, `tests/integration/`, `tests/family/` | Automated |
+| Product source and fixed slice | `payload/`, `PRODUCT.json`, product documentation | Implemented |
+| Unit and integration tests | `tests/unit/`, `tests/integration/` | Automated |
 | Standalone host lifecycle | `tests/vm/lifecycle.sh`, integration workflow | Requires recorded supported-VM pass per release |
 | Negative security boundary | policy, workspace, model, HTTP, asset, and VM tests | Implemented set; continued red-team review required |
-| Ubuntu Zombie-managed lifecycle | Common request/response/audit contract | Manager implementation gate open |
-| Co-installation matrix | Family definition | Open until sibling implementations exist |
-| Artifact verification and catalogue admission | release workflow and `family/catalog.json` | Independent release exists; production admission open |
+| Artifact verification | release workflow | Independent signed release |
 
 Never use real personal conversations, credentials, workspace contents, child
 data, or sibling secrets as fixtures.

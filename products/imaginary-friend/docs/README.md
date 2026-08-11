@@ -1,9 +1,7 @@
 # Imaginary Friend documentation
 
 This directory contains the product-owned operating and assurance documents
-for Imaginary Friend. Start with the
-[product README](../README.md) and the normative
-[product definition](../../../docs/ai-agent/imaginary-friend.md).
+for Imaginary Friend. Start with the [product README](../README.md).
 
 | Question | Document |
 | -------- | -------- |

@@ -1,9 +1,8 @@
 # Security and threat model
 
-Read the normative
-[authority and boundary definition](../../../docs/ai-agent/imaginary-friend.md)
-before installation. This document describes the implemented first-release
-controls; it does not extend Friend's authority.
+Read [`VISION.md`](VISION.md) and [`ARCHITECTURE.md`](ARCHITECTURE.md) before
+installation. This document describes the implemented controls; it does not
+extend Friend's authority.
 
 ## Protected assets
 
@@ -12,7 +11,7 @@ controls; it does not extend Friend's authority.
 - conversation history and workspace metadata;
 - nominated workspace files;
 - root-owned code, policy, configuration, units, marker, and receipts; and
-- sibling product credentials, state, logs, and management interfaces.
+- credentials and state belonging to other local services.
 
 ## Threats and controls
 
@@ -42,8 +41,7 @@ risk boundary.
 
 ## Security reporting
 
-Do not open a public issue for a suspected vulnerability. Follow the private
-reporting process in the repository
-[`SECURITY.md`](../../../SECURITY.md), identify the affected product as
-Imaginary Friend, and include the product version and reproduction details
-without real conversation or workspace content.
+Do not open a public issue for a suspected vulnerability. Use the source
+repository's private vulnerability-reporting channel, identify the affected
+product as Imaginary Friend, and include the product version and reproduction
+details without real conversation or workspace content.

@@ -1,10 +1,19 @@
 # Configuration and owner interfaces
 
-Interactive lifecycle operations review their values. Unattended installation
-uses only `FRIEND_*` inputs and never falls back to Ubuntu Zombie settings.
 Unknown `FRIEND_*` names and unknown request keys fail closed.
 
-## Install, repair, and update inputs
+## Interactive installation
+
+Run `./scripts/install.sh` from the product directory. The installer asks for
+the existing non-root human owner, an optional owner password, the loopback
+model endpoint and model ID, and conversation and audit retention periods.
+Press Enter to accept each displayed default. An empty password response
+generates a strong password that is shown once after installation.
+
+The installer displays all non-secret settings, the plan digest, and every
+mutation step before asking for approval.
+
+## Unattended install, repair, and update inputs
 
 | Environment variable | Request input | Rule |
 | -------------------- | ------------- | ---- |
