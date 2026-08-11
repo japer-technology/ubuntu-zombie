@@ -1,0 +1,2 @@
+Beep install: blocked
+  error OWNERSHIP_COLLISION: Unowned Beep resource collision: /etc/beep, /etc/sudoers.d/90-beep, /opt/beep, /var/lib/beep, /var/log/beep, group:beep, user:beep
