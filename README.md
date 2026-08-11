@@ -217,11 +217,10 @@ More components are specified under [`options/`](options/README.md).
 Forgejo owns its descriptor, version, lifecycle, package, release, tests,
 audit log, and documentation under
 [`products/forgejo/`](products/forgejo/). Install the PostgreSQL-backed server
-directly:
+directly with its interactive installer:
 
 ```bash
-products/forgejo/scripts/manage.sh install --dry-run
-sudo products/forgejo/scripts/manage.sh install --yes
+products/forgejo/scripts/install.sh
 sudo forgejo-manage verify
 ```
 

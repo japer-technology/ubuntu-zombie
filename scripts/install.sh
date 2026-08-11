@@ -286,6 +286,7 @@ forgejo_product_manage() {
     "FORGEJO_VERSION=${FORGEJO_VERSION}"
     "FORGEJO_HTTP_PORT=${FORGEJO_HTTP_PORT}"
     "FORGEJO_NONINTERACTIVE=${ZOMBIE_NONINTERACTIVE}"
+    "FORGEJO_MIGRATION_MANIFEST=/var/lib/ubuntu-zombie/components/forgejo"
   )
   if (
     local variable

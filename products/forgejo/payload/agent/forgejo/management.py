@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 
 PRODUCT_ID = "forgejo"
@@ -101,12 +101,19 @@ KNOWN_ENV = {
     "FORGEJO_ARTIFACT_SHA256",
     "FORGEJO_CONFIRM_ADOPTION",
     "FORGEJO_CONFIRM_DATABASE_REUSE",
+    "FORGEJO_MIGRATION_MANIFEST",
     "FORGEJO_DISPOSABLE_VM_TEST",
     "FORGEJO_TEST_RELEASE_BASE",
 }
 FIXED_PORT = 3000
 DELETE_CONFIRMATION = "DELETE FORGEJO STATE"
 ADOPT_CONFIRMATION = "ADOPT FORGEJO"
+DEFAULT_ADMIN_USER = "forgejo-admin"
+DEFAULT_ADMIN_EMAIL = "forgejo-admin@localhost.localdomain"
+DEFAULT_DATABASE_NAME = "forgejo"
+DEFAULT_DATABASE_USER = "forgejo"
+DEFAULT_UPSTREAM_VERSION = "latest"
+DEFAULT_BOOT = "enabled"
 VERSION_PARTS = 6
 MAX_DOWNLOAD_BYTES = 512 * 1024 * 1024
 RELEASE_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9.]+)?$")
@@ -186,7 +193,7 @@ class Paths:
     trusted_ca: Path = Path(
         "/usr/local/share/ca-certificates/forgejo-local-ca.crt"
     )
-    legacy_manifest: Path = Path("/var/lib/ubuntu-zombie/components/forgejo")
+    migration_manifest: Path | None = None
 
     @property
     def marker(self) -> Path:
@@ -588,7 +595,20 @@ class Manager:
 
     def __init__(self, source_root: Path, paths: Paths | None = None) -> None:
         self.source_root = source_root.resolve()
-        self.paths = paths or Paths()
+        if paths is None:
+            manifest_value = os.environ.get("FORGEJO_MIGRATION_MANIFEST")
+            migration_manifest = Path(manifest_value) if manifest_value else None
+            if migration_manifest is not None and (
+                not migration_manifest.is_absolute()
+                or ".." in migration_manifest.parts
+            ):
+                raise ManagementError(
+                    65,
+                    "INVALID_MIGRATION_MANIFEST",
+                    "FORGEJO_MIGRATION_MANIFEST must be a canonical absolute path.",
+                )
+            paths = Paths(migration_manifest=migration_manifest)
+        self.paths = paths
         self.descriptor = read_json(self.source_root / "PRODUCT.json")
         self._validate_descriptor()
         try:
@@ -745,6 +765,124 @@ class Manager:
             )
         return value
 
+    @staticmethod
+    def _validate_upstream_version(value: str) -> str:
+        if value != DEFAULT_UPSTREAM_VERSION and not RELEASE_RE.fullmatch(value):
+            raise ManagementError(
+                78,
+                "INVALID_CONFIGURATION",
+                "upstream_version must be latest or a Forgejo release.",
+            )
+        return value
+
+    @staticmethod
+    def _prompt(message: str, *, as_json: bool) -> str:
+        destination = sys.stderr if as_json else sys.stdout
+        print(message, end="", file=destination, flush=True)
+        try:
+            return input()
+        except (EOFError, KeyboardInterrupt) as exc:
+            raise ManagementError(
+                64,
+                "INTERACTIVE_INPUT_REQUIRED",
+                "Interactive installation was cancelled.",
+            ) from exc
+
+    def _prepare_interactive_install(
+        self,
+        args: argparse.Namespace,
+        inputs: dict[str, Any],
+        *,
+        request_supplied: bool,
+        non_interactive: bool,
+    ) -> None:
+        if (
+            args.operation != "install"
+            or request_supplied
+            or args.yes
+            or args.dry_run
+            or non_interactive
+            or not sys.stdin.isatty()
+            or self.paths.marker.exists()
+            or self.paths.app_ini.exists()
+        ):
+            return
+
+        destination = sys.stderr if args.json else sys.stdout
+        print("Forgejo interactive installer", file=destination)
+        print(
+            "Press Enter to accept each value shown in brackets.",
+            file=destination,
+        )
+
+        def prompt_value(
+            name: str,
+            label: str,
+            default: str,
+            validator: Callable[[str], str],
+        ) -> None:
+            if name in inputs:
+                return
+            while True:
+                answer = self._prompt(
+                    f"{label} [{default}]: ",
+                    as_json=args.json,
+                ).strip()
+                try:
+                    inputs[name] = validator(answer or default)
+                    return
+                except ManagementError as exc:
+                    print(f"  {exc.message}", file=sys.stderr)
+
+        prompt_value(
+            "admin_user",
+            "Administrator username",
+            DEFAULT_ADMIN_USER,
+            lambda value: self._validate_name(value, label="admin_user"),
+        )
+        prompt_value(
+            "admin_email",
+            "Administrator email",
+            DEFAULT_ADMIN_EMAIL,
+            self._validate_email,
+        )
+        prompt_value(
+            "database_name",
+            "PostgreSQL database name",
+            DEFAULT_DATABASE_NAME,
+            lambda value: self._validate_name(value, label="database_name"),
+        )
+        prompt_value(
+            "database_user",
+            "PostgreSQL role name",
+            DEFAULT_DATABASE_USER,
+            lambda value: self._validate_name(value, label="database_user"),
+        )
+        prompt_value(
+            "upstream_version",
+            "Forgejo version",
+            DEFAULT_UPSTREAM_VERSION,
+            self._validate_upstream_version,
+        )
+        if "boot" not in inputs:
+            while True:
+                answer = self._prompt(
+                    "Start Forgejo automatically at boot? [Y/n]: ",
+                    as_json=args.json,
+                ).strip().lower()
+                if answer in {"", "y", "yes"}:
+                    inputs["boot"] = "enabled"
+                    break
+                if answer in {"n", "no"}:
+                    inputs["boot"] = "disabled"
+                    break
+                print("  Answer yes or no.", file=sys.stderr)
+        print(
+            "Secure database and initial administrator credentials will be "
+            "generated automatically.",
+            file=destination,
+        )
+
     def configuration(self, invocation: Invocation) -> Configuration:
         existing = self._existing_public_config()
         record = self._binary_record()
@@ -772,7 +910,12 @@ class Manager:
             return value
 
         admin_user = self._validate_name(
-            selected("admin_user", "FORGEJO_ADMIN_USER", "", "forgejo-admin"),
+            selected(
+                "admin_user",
+                "FORGEJO_ADMIN_USER",
+                "",
+                DEFAULT_ADMIN_USER,
+            ),
             label="admin_user",
         )
         admin_email = self._validate_email(
@@ -780,33 +923,39 @@ class Manager:
                 "admin_email",
                 "FORGEJO_ADMIN_EMAIL",
                 "",
-                "forgejo-admin@localhost.localdomain",
+                DEFAULT_ADMIN_EMAIL,
             )
         )
         database_name = self._validate_name(
             selected(
-                "database_name", "FORGEJO_DB_NAME", "database_name", "forgejo"
+                "database_name",
+                "FORGEJO_DB_NAME",
+                "database_name",
+                DEFAULT_DATABASE_NAME,
             ),
             label="database_name",
         )
         database_user = self._validate_name(
             selected(
-                "database_user", "FORGEJO_DB_USER", "database_user", "forgejo"
+                "database_user",
+                "FORGEJO_DB_USER",
+                "database_user",
+                DEFAULT_DATABASE_USER,
             ),
             label="database_user",
         )
-        upstream_version = selected(
-            "upstream_version",
-            "FORGEJO_VERSION",
-            "",
-            str(record["version"]) if record is not None else "latest",
-        )
-        if upstream_version != "latest" and not RELEASE_RE.fullmatch(upstream_version):
-            raise ManagementError(
-                78,
-                "INVALID_CONFIGURATION",
-                "upstream_version must be latest or a Forgejo release.",
+        upstream_version = self._validate_upstream_version(
+            selected(
+                "upstream_version",
+                "FORGEJO_VERSION",
+                "",
+                (
+                    str(record["version"])
+                    if record is not None
+                    else DEFAULT_UPSTREAM_VERSION
+                ),
             )
+        )
         if "boot" in inputs:
             boot = inputs["boot"]
         elif os.environ.get("FORGEJO_BOOT"):
@@ -814,7 +963,7 @@ class Manager:
         elif self.paths.marker.exists():
             boot = "enabled" if self._service_enabled() == "enabled" else "disabled"
         else:
-            boot = "enabled"
+            boot = DEFAULT_BOOT
         if boot not in {"enabled", "disabled"}:
             raise ManagementError(
                 78, "INVALID_CONFIGURATION", "boot must be enabled or disabled."
@@ -895,7 +1044,7 @@ class Manager:
                 65, "INVALID_REQUEST", "Request identity is invalid."
             )
         validate_uuid(value["correlation_id"], label="correlation_id")
-        if value["requested_by"] not in {"operator", "ubuntu-zombie", "beep"}:
+        if value["requested_by"] not in {"operator", "beep"}:
             raise ManagementError(
                 65, "INVALID_REQUEST", "requested_by is invalid."
             )
@@ -955,7 +1104,7 @@ class Manager:
                 f"Unknown Forgejo environment variable: {unknown_environment[0]}",
             )
         if os.environ.get("FORGEJO_TEST_RELEASE_BASE") and not Path(
-            "/run/ubuntu-zombie/tests-enabled"
+            "/run/forgejo/tests-enabled"
         ).is_file():
             raise ManagementError(
                 64,
@@ -982,6 +1131,16 @@ class Manager:
                 "UNKNOWN_INPUT",
                 f"Unknown input for {args.operation}: {sorted(unknown_inputs)[0]}",
             )
+        non_interactive = bool(
+            args.non_interactive
+            or os.environ.get("FORGEJO_NONINTERACTIVE") == "1"
+        )
+        self._prepare_interactive_install(
+            args,
+            inputs,
+            request_supplied=request is not None,
+            non_interactive=non_interactive,
+        )
         confirmation = (
             request["confirmation"] if request is not None else args.confirmation
         )
@@ -1000,10 +1159,7 @@ class Manager:
             retain_state,
             args.dry_run,
             args.json,
-            bool(
-                args.non_interactive
-                or os.environ.get("FORGEJO_NONINTERACTIVE") == "1"
-            ),
+            non_interactive,
             args.yes,
             args.plan_digest,
         )
@@ -1287,13 +1443,15 @@ class Manager:
         steps = self.steps_for(invocation.operation)
         result.steps = steps
         result.plan_digest = self.plan_digest(invocation, steps, configuration)
+        if configuration is not None:
+            result.details = {
+                "configuration": configuration.public_object(),
+            }
         destructive = (
             invocation.operation == "uninstall" and invocation.retain_state is False
         )
         result.requires_confirmation = True
         if invocation.dry_run:
-            if configuration is not None:
-                result.details = {"configuration": configuration.public_object()}
             if destructive:
                 result.required_inputs = [
                     {"name": "confirmation", "secret": False}
@@ -1320,8 +1478,20 @@ class Manager:
                     "CONFIRMATION_REQUIRED",
                     "A mutating non-interactive operation requires --yes.",
                 )
-            answer = input("Type YES to execute this Forgejo lifecycle plan: ")
-            if answer != "YES":
+            print_plan(
+                result,
+                configuration=(
+                    configuration.public_object()
+                    if configuration is not None
+                    else None
+                ),
+                file=sys.stderr if invocation.json_output else sys.stdout,
+            )
+            answer = self._prompt(
+                "Apply this plan? [y/N]: ",
+                as_json=invocation.json_output,
+            ).strip().lower()
+            if answer not in {"y", "yes"}:
                 raise ManagementError(
                     64, "CONFIRMATION_REQUIRED", "Operation cancelled."
                 )
@@ -1382,7 +1552,11 @@ class Manager:
             result.instance_id = (
                 str(marker["instance_id"]) if marker is not None else result.instance_id
             )
-            result.details = {}
+            result.details = (
+                {"configuration": configuration.public_object()}
+                if configuration is not None
+                else {}
+            )
             if backup_path is not None:
                 result.details["backup"] = {"path": backup_path}
             receipt = self._write_receipt(
@@ -1460,7 +1634,7 @@ class Manager:
                         self.check(
                             "legacy_installation",
                             False,
-                            "A valid Ubuntu Zombie-managed Forgejo can be adopted.",
+                            "A valid legacy Forgejo installation can be adopted.",
                             f"Run forgejo-manage install --confirmation '{ADOPT_CONFIRMATION}' --yes.",
                             warning=True,
                         )
@@ -2216,7 +2390,9 @@ class Manager:
             return bool(host) and all(item in value for item in required)
 
     def _legacy_manifest_valid(self) -> bool:
-            path = self.paths.legacy_manifest
+            path = self.paths.migration_manifest
+            if path is None:
+                return False
             try:
                 metadata = path.lstat()
                 lines = path.read_text(encoding="utf-8").splitlines()
@@ -2240,16 +2416,23 @@ class Manager:
                 ):
                     return False
                 values[key] = value
+            fixed_fields = {
+                "format",
+                "component",
+                "converged_utc",
+                "component_version",
+                "suboptions",
+            }
+            version_fields = set(values) - fixed_fields
             return (
-                set(values)
-                == {
-                    "format",
-                    "component",
-                    "ubuntu_zombie_version",
-                    "converged_utc",
-                    "component_version",
-                    "suboptions",
-                }
+                fixed_fields.issubset(values)
+                and len(values) == len(fixed_fields) + 1
+                and len(version_fields) == 1
+                and re.fullmatch(
+                    r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*_version",
+                    next(iter(version_fields)),
+                )
+                is not None
                 and values["format"] == "1"
                 and values["component"] == PRODUCT_ID
             )
@@ -2578,7 +2761,7 @@ class Manager:
     def _read_bounded_url(url: str, *, limit: int) -> bytes:
             validate_release_url(url)
             request = urllib.request.Request(
-                url, headers={"User-Agent": "ubuntu-zombie-forgejo/1"}
+                url, headers={"User-Agent": "forgejo-installer/1"}
             )
             opener = urllib.request.build_opener(SafeRedirectHandler())
             try:
@@ -3514,8 +3697,14 @@ ENABLED = true
             )
             self.paths.transaction.unlink(missing_ok=True)
             if adopting:
-                self.paths.legacy_manifest.unlink(missing_ok=True)
-                changed.append(str(self.paths.legacy_manifest))
+                if self.paths.migration_manifest is None:
+                    raise ManagementError(
+                        70,
+                        "INTERNAL_ERROR",
+                        "Migration manifest disappeared during adoption.",
+                    )
+                self.paths.migration_manifest.unlink(missing_ok=True)
+                changed.append(str(self.paths.migration_manifest))
             return changed, previous_version
         except BaseException:
             self._restore_after_failed_mutation(
@@ -4566,7 +4755,8 @@ ENABLED = true
                 if path.exists() or path.is_symlink():
                     self._remove_owned_file(path)
             changed.append(str(self.paths.retained))
-        self.paths.legacy_manifest.unlink(missing_ok=True)
+        if self.paths.migration_manifest is not None:
+            self.paths.migration_manifest.unlink(missing_ok=True)
         return changed, previous
 
     def _write_receipt(
@@ -4678,18 +4868,88 @@ ENABLED = true
 
 
 def parser() -> argparse.ArgumentParser:
-    value = argparse.ArgumentParser(prog="forgejo-manage")
-    value.add_argument("operation", choices=OPERATIONS)
-    value.add_argument("--dry-run", action="store_true")
-    value.add_argument("--json", action="store_true")
-    value.add_argument("--non-interactive", action="store_true")
-    value.add_argument("--request-file", type=Path)
-    value.add_argument("--correlation-id")
-    value.add_argument("--plan-digest")
-    value.add_argument("--yes", action="store_true")
-    value.add_argument("--purge", action="store_true")
-    value.add_argument("--confirmation")
+    value = argparse.ArgumentParser(
+        prog="forgejo-manage",
+        description="Install and manage a private Forgejo server.",
+    )
+    value.add_argument("operation", choices=OPERATIONS, help="lifecycle operation")
+    value.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="render a plan without making changes",
+    )
+    value.add_argument(
+        "--json",
+        action="store_true",
+        help="write one machine-readable response object",
+    )
+    value.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="never prompt; missing approval exits 64",
+    )
+    value.add_argument(
+        "--request-file",
+        type=Path,
+        help="read a root-owned lifecycle request",
+    )
+    value.add_argument("--correlation-id", help="use the supplied request UUID")
+    value.add_argument(
+        "--plan-digest",
+        help="require the current plan to match this digest",
+    )
+    value.add_argument(
+        "--yes",
+        action="store_true",
+        help="approve a non-destructive plan without prompting",
+    )
+    value.add_argument(
+        "--purge",
+        action="store_true",
+        help="delete retained state during uninstall",
+    )
+    value.add_argument(
+        "--confirmation",
+        help="supply an exact destructive or migration confirmation",
+    )
     return value
+
+
+def print_plan(
+    result: Result,
+    *,
+    configuration: dict[str, Any] | None,
+    file: Any = None,
+) -> None:
+    def field(label: str, value: Any) -> None:
+        print(f"  {label + ':':<18}{value}", file=file)
+
+    print("Forgejo product lifecycle plan:", file=file)
+    field("Operation", result.operation)
+    if configuration is not None:
+        field("Public URL", configuration["root_url"])
+        field(
+            "Administrator",
+            f"{configuration['admin_user']} ({configuration['admin_email']})",
+        )
+        field(
+            "PostgreSQL",
+            f"{configuration['database_name']} "
+            f"(role {configuration['database_user']})",
+        )
+        field("Forgejo version", configuration["upstream_version"])
+        field("Start at boot", configuration["boot"])
+    field("Backend", "http://127.0.0.1:3000 (loopback only)")
+    field("State", "/var/lib/forgejo")
+    field("Digest", result.plan_digest)
+    for index, step in enumerate(result.steps, 1):
+        print(f"  {index}. {step['summary']}", file=file)
+    if result.operation == "install":
+        print(
+            "  Generated credentials, when needed: "
+            "/etc/forgejo/bootstrap-admin-password",
+            file=file,
+        )
 
 
 def print_result(result: Result, *, as_json: bool) -> None:
@@ -4701,15 +4961,27 @@ def print_result(result: Result, *, as_json: bool) -> None:
         )
         return
     if result.phase == "plan":
-        print("Forgejo product lifecycle plan:")
-        print("  Backend:  http://127.0.0.1:3000 (loopback only)")
-        print("  Public:   Caddy HTTPS on the host .local name")
-        print("  State:    /var/lib/forgejo")
-        print(f"  Digest:   {result.plan_digest}")
-        for step in result.steps:
-            print(f"  - {step['summary']}")
+        configuration = None
+        if result.details is not None:
+            candidate = result.details.get("configuration")
+            if isinstance(candidate, dict):
+                configuration = candidate
+        print_plan(result, configuration=configuration)
         return
     print(f"Forgejo {result.operation}: {result.status}")
+    configuration = None
+    if result.details is not None:
+        candidate = result.details.get("configuration")
+        if isinstance(candidate, dict):
+            configuration = candidate
+    if configuration is not None:
+        print(f"URL: {configuration['root_url']}")
+        print(f"Administrator: {configuration['admin_user']}")
+        if result.operation == "install":
+            print(
+                "Generated initial credentials (when applicable): "
+                "/etc/forgejo/bootstrap-admin-password"
+            )
     if result.details is not None and result.details.get("lifecycle"):
         print(f"Lifecycle: {result.details['lifecycle']}")
     for check in result.checks:
