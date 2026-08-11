@@ -218,6 +218,55 @@ class ManagementTests(unittest.TestCase):
             0o644,
         )
 
+    def test_runtime_deployment_accepts_internal_node_command_link(self) -> None:
+        command = (
+            self.manager.paths.node_root
+            / "lib"
+            / "node_modules"
+            / "pi"
+            / "cli.js"
+        )
+        command.parent.mkdir(parents=True)
+        command.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+        os.chmod(command, 0o755)
+        link = self.manager.paths.node_root / "bin" / "pi"
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to("../lib/node_modules/pi/cli.js")
+        except OSError as exc:
+            self.skipTest(f"symbolic links are unavailable: {exc}")
+        self.manager.paths.runtime.mkdir(parents=True)
+        configuration = management.Configuration(
+            agent_user="beep",
+            chat_port=58989,
+            provider=None,
+            model=None,
+            model_base_url=None,
+            ttl_days=7,
+        )
+        with (
+            mock.patch.object(self.manager, "_deploy_product_source"),
+            mock.patch.object(self.manager, "_deploy_pi_models"),
+            mock.patch.object(management.os, "chown"),
+        ):
+            self.manager._deploy_runtime(configuration, 1000, 1000, [])
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(link.resolve(), command)
+
+    def test_node_runtime_rejects_escaping_command_link(self) -> None:
+        outside = self.root / "outside.js"
+        outside.write_text("#!/usr/bin/env node\n", encoding="utf-8")
+        link = self.manager.paths.node_root / "bin" / "pi"
+        link.parent.mkdir(parents=True)
+        try:
+            link.symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(f"symbolic links are unavailable: {exc}")
+        with self.assertRaises(management.ManagementError) as raised:
+            self.manager._assert_node_runtime_safe()
+        self.assertEqual(raised.exception.code, "UNSAFE_PATH")
+        self.assertIn("Pinned Node link", raised.exception.message)
+
     def test_failed_existing_convergence_restores_recovery_snapshot(self) -> None:
         marker = {
             "instance_id": "12d515dc-92f6-44d8-adf1-2ca812197307",

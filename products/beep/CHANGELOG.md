@@ -32,6 +32,8 @@ Beep uses independent UTC date-time versions in `yyyy.mm.dd.hh.nn.ss` format.
 
 ### Fixed
 
+- Allow npm's required internal command links inside the pinned Node runtime
+  while continuing to reject absolute, dangling, non-file, and escaping links.
 - Preserve executable modes for the pinned Node runtime and copied lifecycle
   commands.
 - Return exit `64` for unattended plans blocked on required input and reject

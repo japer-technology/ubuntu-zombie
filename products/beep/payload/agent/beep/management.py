@@ -2172,6 +2172,50 @@ class Manager:
         completed = self._run([node, "--version"], check=False)
         return completed.returncode == 0 and completed.stdout.strip() == f"v{NODE_VERSION}"
 
+    def _assert_node_runtime_safe(self) -> None:
+        """Allow npm command links only when they stay inside the Node tree."""
+        root = self.paths.node_root
+        try:
+            root_metadata = root.lstat()
+            resolved_root = root.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Pinned Node runtime is unsafe: {root}"
+            ) from exc
+        if not stat.S_ISDIR(root_metadata.st_mode):
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Pinned Node runtime is unsafe: {root}"
+            )
+        for path in root.rglob("*"):
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    73, "UNSAFE_PATH", f"Pinned Node path is unsafe: {path}"
+                ) from exc
+            if stat.S_ISLNK(metadata.st_mode):
+                try:
+                    link_value = Path(os.readlink(path))
+                    target = path.resolve(strict=True)
+                except (OSError, RuntimeError) as exc:
+                    raise ManagementError(
+                        73, "UNSAFE_PATH", f"Pinned Node link is unsafe: {path}"
+                    ) from exc
+                if (
+                    link_value.is_absolute()
+                    or resolved_root not in target.parents
+                    or not target.is_file()
+                ):
+                    raise ManagementError(
+                        73, "UNSAFE_PATH", f"Pinned Node link is unsafe: {path}"
+                    )
+            elif not (
+                stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)
+            ):
+                raise ManagementError(
+                    73, "UNSAFE_PATH", f"Pinned Node path is unsafe: {path}"
+                )
+
     @staticmethod
     def _extract_node_archive(archive: Path, destination: Path) -> None:
         prefix = PurePosixPath(f"node-v{NODE_VERSION}-linux-x64")
@@ -2383,7 +2427,10 @@ class Manager:
             changed.append(str(version_path))
         self._deploy_product_source(changed)
         self._deploy_pi_models(configuration, uid, gid, changed)
+        self._assert_node_runtime_safe()
         for path in self.paths.install_root.rglob("*"):
+            if path == self.paths.node_root or self.paths.node_root in path.parents:
+                continue
             if path.is_symlink():
                 raise ManagementError(73, "UNSAFE_PATH", f"Runtime contains symlink: {path}")
             if path.is_dir():
