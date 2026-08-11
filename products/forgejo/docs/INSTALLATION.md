@@ -4,27 +4,37 @@ Use a supported Ubuntu Desktop 22.04 or 24.04 LTS host:
 
 ```bash
 cd products/forgejo
-./scripts/manage.sh install --dry-run
-sudo ./scripts/manage.sh install --yes
+./scripts/install.sh
 sudo /usr/local/sbin/forgejo-manage verify
 ```
 
-The product installs only dependencies already used by the former component:
-Forgejo, Git LFS, PostgreSQL, Caddy, Avahi, certificate tools, and mDNS NSS
-support.
+The installer obtains root privileges when needed. It asks for the initial
+administrator, PostgreSQL names, Forgejo version, and boot preference. Every
+question has a default; the installer then shows the complete plan and asks
+for approval before changing the host.
 
-An existing component installation is adopted only when its root-owned
-manifest, account, loopback configuration, complete recovery secrets, unit,
-and unmanaged-drop-in boundary validate. Adoption requires:
+The product installs Forgejo, Git LFS, PostgreSQL, Caddy, Avahi, certificate
+tools, and mDNS NSS support.
+
+For an unattended installation, set any desired variables from
+`docs/CONFIGURATION.md`, then run:
 
 ```bash
-sudo ./scripts/manage.sh install --yes \
+sudo ./scripts/manage.sh install --yes --non-interactive
+```
+
+An external migration adapter may offer an existing installation by setting
+`FORGEJO_MIGRATION_MANIFEST` to its root-owned manifest. Adoption occurs only
+when the manifest, account, loopback configuration, complete recovery secrets,
+unit, and unmanaged-drop-in boundary all validate. It also requires:
+
+```bash
+sudo env FORGEJO_MIGRATION_MANIFEST=/absolute/path/to/manifest \
+  ./scripts/manage.sh install --yes \
   --confirmation "ADOPT FORGEJO"
 ```
 
-Ambiguous partial state is rejected before mutation. The Ubuntu Zombie
-`install forgejo` compatibility command supplies this confirmation only to
-the exact legacy validator.
+Ambiguous partial state is rejected before mutation.
 
 After installation, import `/etc/forgejo/caddy-local-ca.crt` into any LAN
 client that does not already trust the host's Caddy CA.

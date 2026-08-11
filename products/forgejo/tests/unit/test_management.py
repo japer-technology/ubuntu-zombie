@@ -19,6 +19,7 @@ from forgejo.management import (
     ManagementError,
     Manager,
     Paths,
+    parser,
 )
 
 
@@ -47,7 +48,7 @@ class ManagementTests(unittest.TestCase):
             caddy_ca=root / "var/lib/caddy/root.crt",
             trusted_ca=root
             / "usr/local/share/ca-certificates/forgejo-local-ca.crt",
-            legacy_manifest=root / "var/lib/ubuntu-zombie/components/forgejo",
+            migration_manifest=root / "var/lib/migration-source/components/forgejo",
         )
         self.manager = Manager(SOURCE_ROOT)
         self.manager.paths = self.paths
@@ -116,6 +117,57 @@ ROOT_URL = https://existing.local/
             with self.assertRaises(ManagementError) as raised:
                 self.manager.configuration(self.invocation())
         self.assertEqual(raised.exception.code, "INVALID_CONFIGURATION")
+
+    def test_interactive_install_collects_validated_configuration(self) -> None:
+        arguments = parser().parse_args(["install"])
+        inputs: dict[str, object] = {}
+        answers = [
+            "owner",
+            "owner@example.test",
+            "forge",
+            "forge_role",
+            "11.0.3",
+            "no",
+        ]
+        with (
+            mock.patch(
+                "forgejo.management.sys.stdin.isatty",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_prompt",
+                side_effect=answers,
+            ),
+        ):
+            self.manager._prepare_interactive_install(
+                arguments,
+                inputs,
+                request_supplied=False,
+                non_interactive=False,
+            )
+        self.assertEqual(
+            inputs,
+            {
+                "admin_user": "owner",
+                "admin_email": "owner@example.test",
+                "database_name": "forge",
+                "database_user": "forge_role",
+                "upstream_version": "11.0.3",
+                "boot": "disabled",
+            },
+        )
+
+    def test_approved_install_skips_setup_questions(self) -> None:
+        arguments = parser().parse_args(["install", "--yes"])
+        with mock.patch.object(self.manager, "_prompt") as prompt:
+            self.manager._prepare_interactive_install(
+                arguments,
+                {},
+                request_supplied=False,
+                non_interactive=False,
+            )
+        prompt.assert_not_called()
 
     def test_dry_run_is_non_mutating_and_stable(self) -> None:
         invocation = self.invocation(dry_run=True)

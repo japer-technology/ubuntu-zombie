@@ -2,7 +2,7 @@
 
 Product versions use `yyyy.mm.dd.hh.nn.ss` UTC format. A release is an
 independent `forgejo-<VERSION>.tar.gz` source artifact containing
-`products/forgejo`, the family schemas, and the repository license.
+`products/forgejo` and the repository license.
 
 The Forgejo release workflow runs lint, unit, integration, and schema checks;
 packages the source; creates test evidence and an SPDX SBOM; computes

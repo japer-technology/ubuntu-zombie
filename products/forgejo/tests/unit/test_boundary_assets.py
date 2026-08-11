@@ -20,7 +20,7 @@ class BoundaryAssetTests(unittest.TestCase):
             unit,
         )
         self.assertIn("NoNewPrivileges=true", unit)
-        self.assertIn("ProtectSystem=full", unit)
+        self.assertIn("ProtectSystem=strict", unit)
         self.assertIn("ReadWritePaths=/var/lib/forgejo", unit)
         self.assertNotIn("/var/run/docker.sock", unit)
 
@@ -51,13 +51,12 @@ class BoundaryAssetTests(unittest.TestCase):
         ]
         self.assertEqual(dependencies, [])
 
-    def test_descriptor_does_not_claim_runner_or_zombie(self) -> None:
+    def test_descriptor_does_not_claim_runner(self) -> None:
         descriptor = json.loads(
             (PRODUCT_ROOT / "PRODUCT.json").read_text(encoding="utf-8")
         )
         self.assertEqual(descriptor["units"], ["forgejo.service"])
         self.assertNotIn("forgejo-runner", json.dumps(descriptor))
-        self.assertNotIn("ubuntu-zombie", json.dumps(descriptor))
 
 
 if __name__ == "__main__":

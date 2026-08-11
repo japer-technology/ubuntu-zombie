@@ -118,7 +118,8 @@ forgejo_product_manage() {
         *) unset "${variable}" ;;
       esac
     done
-    FORGEJO_NONINTERACTIVE="$((ASSUME_YES || DRY_RUN))" \
+    FORGEJO_MIGRATION_MANIFEST="/var/lib/ubuntu-zombie/components/forgejo" \
+      FORGEJO_NONINTERACTIVE="$((ASSUME_YES || DRY_RUN))" \
       "${entrypoint}" "$@"
   )
 }

@@ -41,18 +41,18 @@ cleanup() {
       --confirmation "DELETE FORGEJO STATE" --non-interactive >/dev/null 2>&1
   fi
   [[ -n "${http_pid}" ]] && kill "${http_pid}" >/dev/null 2>&1
-  rm -rf "${fixture}" /run/ubuntu-zombie/tests-enabled
-  rm -rf /opt/ai-zombie /etc/ubuntu-zombie
+  rm -rf "${fixture}" /run/forgejo/tests-enabled
+  rm -rf /opt/unrelated-service /etc/unrelated-service
 }
 trap cleanup EXIT
 
-mkdir -p /run/ubuntu-zombie /opt/ai-zombie /etc/ubuntu-zombie
-install -m 600 /dev/null /run/ubuntu-zombie/tests-enabled
-printf 'sibling-state\n' > /opt/ai-zombie/forgejo-isolation-probe
-printf 'sibling-config\n' > /etc/ubuntu-zombie/forgejo-isolation-probe
+mkdir -p /run/forgejo /opt/unrelated-service /etc/unrelated-service
+install -m 600 /dev/null /run/forgejo/tests-enabled
+printf 'sibling-state\n' > /opt/unrelated-service/forgejo-isolation-probe
+printf 'sibling-config\n' > /etc/unrelated-service/forgejo-isolation-probe
 sibling_before="$(
-  sha256sum /opt/ai-zombie/forgejo-isolation-probe \
-    /etc/ubuntu-zombie/forgejo-isolation-probe
+  sha256sum /opt/unrelated-service/forgejo-isolation-probe \
+    /etc/unrelated-service/forgejo-isolation-probe
 )"
 
 write_fixture() {
@@ -188,7 +188,7 @@ systemctl daemon-reload
 
 [[ ! -e /var/lib/forgejo && ! -e /etc/forgejo ]]
 [[ "${sibling_before}" == "$(
-  sha256sum /opt/ai-zombie/forgejo-isolation-probe \
-    /etc/ubuntu-zombie/forgejo-isolation-probe
+  sha256sum /opt/unrelated-service/forgejo-isolation-probe \
+    /etc/unrelated-service/forgejo-isolation-probe
 )" ]]
 echo "Forgejo disposable-VM lifecycle passed."

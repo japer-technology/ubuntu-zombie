@@ -39,7 +39,7 @@ package:
 	     --exclude='__pycache__' --exclude='*.pyc' \
 	     -czf "dist/forgejo-$(VERSION).tar.gz" \
 	     -C "$(REPOSITORY_ROOT)" \
-	     products/forgejo family/schemas LICENSE
+	     products/forgejo LICENSE
 	@echo "Wrote dist/forgejo-$(VERSION).tar.gz"
 
 clean:

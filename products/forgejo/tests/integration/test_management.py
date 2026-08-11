@@ -13,6 +13,7 @@ from forgejo.management import PRODUCT_ID
 
 PRODUCT_ROOT = Path(__file__).resolve().parents[2]
 ENTRYPOINT = PRODUCT_ROOT / "scripts/manage.sh"
+INSTALLER = PRODUCT_ROOT / "scripts/install.sh"
 
 
 class ManagementIntegrationTests(unittest.TestCase):
@@ -61,6 +62,27 @@ class ManagementIntegrationTests(unittest.TestCase):
             3000,
         )
 
+    def test_installer_entrypoint_defaults_to_install(self) -> None:
+        environment = dict(os.environ)
+        environment["FORGEJO_SOURCE_ROOT"] = str(PRODUCT_ROOT)
+        result = subprocess.run(
+            [
+                str(INSTALLER),
+                "--dry-run",
+                "--json",
+                "--non-interactive",
+            ],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        value = json.loads(result.stdout)
+        self.assertEqual(value["operation"], "install")
+        self.assertEqual(value["phase"], "plan")
+
     @unittest.skipUnless(
         os.geteuid() == 0, "root ownership is required for request files"
     )
@@ -70,7 +92,7 @@ class ManagementIntegrationTests(unittest.TestCase):
             "product_id": PRODUCT_ID,
             "operation": "install",
             "correlation_id": str(uuid.uuid4()),
-            "requested_by": "ubuntu-zombie",
+            "requested_by": "beep",
             "inputs": {"boot": "disabled"},
             "confirmation": None,
         }

@@ -11,8 +11,8 @@ The descriptor in `PRODUCT.json` declares the stable roots, `git` identity,
 - the exported and host-trusted Caddy local CA copies; and
 - `/usr/local/bin/forgejo` plus its checksum record.
 
-It never owns `forgejo-runner.service`, Docker, runner state, or any Ubuntu
-Zombie resource.
+It never owns `forgejo-runner.service`, Docker, runner state, or resources
+outside the declared Forgejo boundary.
 
 ## Request path
 
