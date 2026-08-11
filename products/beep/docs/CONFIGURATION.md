@@ -35,7 +35,10 @@ and API-key environment variables are rejected.
 | Non-interactive mode | `BEEP_NONINTERACTIVE=1` | Missing required input exits `64` |
 | Artifact digest | `BEEP_ARTIFACT_SHA256` | Set by the verified family-release path and retained in the marker |
 
-`BEEP_SOURCE_ROOT` is a development and installed-wrapper input.
+The lifecycle wrapper sets `BEEP_SOURCE_ROOT` internally. The source-tree
+`scripts/manage.sh` always uses its adjacent product directory, while the
+installed `beep-manage` command always uses `/opt/beep/product`. Caller-supplied
+values do not redirect either wrapper.
 `BEEP_DISPOSABLE_VM_TEST=1` is only for the separately guarded destructive VM
 harness.
 

@@ -7,10 +7,12 @@ import fcntl
 import getpass
 import grp
 import hashlib
+import http.client
 import ipaddress
 import json
 import os
 import platform
+import posixpath
 import pwd
 import re
 import secrets
@@ -23,6 +25,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 import uuid
@@ -119,6 +122,22 @@ PROVIDER_KEYS = {
     "groq": "GROQ_API_KEY",
     "lmstudio": "LMSTUDIO_API_KEY",
 }
+SECRET_ENV_KEYS = {
+    "BEEP_ADMIN_PASSWORD_HASH",
+    "BEEP_PROVIDER",
+    "BEEP_MODEL",
+    "BEEP_MODEL_BASE_URL",
+    "OPENAI_BASE_URL",
+    "BEEP_DIR",
+    "BEEP_SECRETS",
+    "BEEP_POLICY",
+    "BEEP_HISTORY_DB",
+    "BEEP_LIFECYCLE_STATE",
+    "BEEP_AUDIT_LOG",
+    "BEEP_CHAT_PORT",
+    "BEEP_USER",
+    *PROVIDER_KEYS.values(),
+}
 DEFAULT_USER = "beep"
 DEFAULT_PORT = 58989
 DEFAULT_TTL_DAYS = 7
@@ -126,12 +145,30 @@ DEFAULT_LM_STUDIO_URL = "http://127.0.0.1:1234/v1"
 DELETE_CONFIRMATION = "DELETE BEEP STATE"
 VERSION_PATTERN = re.compile(r"^\d{4}(?:\.\d{2}){5}$")
 USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
-MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024
 NODE_VERSION = "22.23.2"
 NODE_ARCHIVE = f"node-v{NODE_VERSION}-linux-x64.tar.xz"
 NODE_URL = f"https://nodejs.org/dist/v{NODE_VERSION}/{NODE_ARCHIVE}"
 NODE_SHA256 = "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307"
 MAX_NODE_ARCHIVE_BYTES = 128 * 1024 * 1024
+DEPENDENCY_ATTEMPTS = 4
+DEPENDENCY_RETRY_SECONDS = 5
+APT_LOCK_WAIT_SECONDS = 300
+LEGACY_MANAGER_SHA256 = (
+    "3bc48547ef0eea690b58a5ef702a6f6934e1f289e7411ee086167f3fa5697333"
+)
+DEPENDENCY_ENVIRONMENT_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+)
 SYSTEM_PACKAGES = (
     "sudo",
     "curl",
@@ -200,6 +237,7 @@ class Paths:
     """Every host resource owned by Beep."""
 
     install_root: Path = Path("/opt/beep")
+    account_home: Path = Path("/home/beep")
     configuration_root: Path = Path("/etc/beep")
     state_root: Path = Path("/var/lib/beep")
     log_root: Path = Path("/var/log/beep")
@@ -209,6 +247,7 @@ class Paths:
     logrotate: Path = Path("/etc/logrotate.d/beep")
     sudoers: Path = Path("/etc/sudoers.d/90-beep")
     entrypoint: Path = Path("/usr/local/sbin/beep-manage")
+    command_root: Path = Path("/usr/local/bin")
     lock: Path = Path("/run/lock/beep.lock")
     rollback_root: Path = Path("/var/lib/beep/recovery")
 
@@ -219,6 +258,14 @@ class Paths:
     @property
     def retained(self) -> Path:
         return self.state_root / "retained.json"
+
+    @property
+    def pending_install(self) -> Path:
+        return self.state_root.with_name(f"{self.state_root.name}.installing.json")
+
+    @property
+    def purge_state(self) -> Path:
+        return self.state_root.with_name(f"{self.state_root.name}.purging.json")
 
     @property
     def suspended(self) -> Path:
@@ -279,6 +326,10 @@ class Paths:
     @property
     def node_root(self) -> Path:
         return self.install_root / "node"
+
+    @property
+    def bridge_marker(self) -> Path:
+        return self.node_root / ".beep-bridges.json"
 
     @property
     def product_root(self) -> Path:
@@ -365,6 +416,18 @@ class Result:
         return value
 
 
+@dataclass
+class _PathSwap:
+    """One same-filesystem replacement in a rollback transaction."""
+
+    target: Path
+    staged: Path
+    previous: Path
+    has_staged: bool = False
+    target_moved: bool = False
+    staged_moved: bool = False
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -404,6 +467,29 @@ def load_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def assert_directory_ancestry_safe(path: Path) -> None:
+    absolute = path.absolute()
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current /= part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Protected directory ancestry is unsafe: {path}",
+            ) from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Protected directory ancestry is unsafe: {path}",
+            )
+
+
 def atomic_write(
     path: Path,
     content: bytes,
@@ -412,7 +498,16 @@ def atomic_write(
     uid: int = 0,
     gid: int = 0,
 ) -> bool:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    assert_directory_ancestry_safe(path.parent)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ManagementError(
+            73,
+            "UNSAFE_PATH",
+            f"Protected directory is unsafe: {path.parent}",
+        ) from exc
+    assert_directory_ancestry_safe(path.parent)
     try:
         metadata = path.lstat()
     except FileNotFoundError:
@@ -462,6 +557,8 @@ class Manager:
         self.paths = Paths()
         self._prompted_chat_password: str | None = None
         self._prompted_provider_credential: tuple[str, str] | None = None
+        self._last_rollback_degraded = False
+        self._approved_plan_digest: str | None = None
         self.descriptor = load_json(self.source_root / "PRODUCT.json")
         self.version = (
             (self.source_root / "VERSION").read_text(encoding="utf-8").strip()
@@ -507,6 +604,8 @@ class Manager:
             raise ManagementError(65, "INVALID_VERSION", "Beep VERSION is invalid.")
         required = (
             self.source_root / "payload" / "agent" / "server.py",
+            self.source_root / "payload" / "agent" / "bridge-package.json",
+            self.source_root / "payload" / "agent" / "bridge-package-lock.json",
             self.source_root / "payload" / "etc" / "policy.yaml",
             self.source_root / "payload" / "systemd" / "beep-chat.service",
             self.source_root / "scripts" / "install.sh",
@@ -516,14 +615,26 @@ class Manager:
             raise ManagementError(
                 66, "SOURCE_INCOMPLETE", "The Beep source payload is incomplete."
             )
-        unsafe = next(
-            (path for path in self.source_root.rglob("*") if path.is_symlink()),
-            None,
-        )
-        if unsafe is not None:
+        try:
+            for path in (self.source_root, *self.source_root.rglob("*")):
+                metadata = path.lstat()
+                if not (
+                    stat.S_ISDIR(metadata.st_mode)
+                    or stat.S_ISREG(metadata.st_mode)
+                ):
+                    raise ManagementError(
+                        78,
+                        "UNSAFE_SOURCE",
+                        f"The Beep source contains an unsafe path: {path}",
+                    )
+        except ManagementError:
+            raise
+        except OSError as exc:
             raise ManagementError(
-                78, "UNSAFE_SOURCE", f"The Beep source contains a symlink: {unsafe}"
-            )
+                78,
+                "UNSAFE_SOURCE",
+                "The Beep source tree is unavailable.",
+            ) from exc
 
     def _validate_environment(self) -> None:
         prohibited = {
@@ -545,6 +656,13 @@ class Manager:
                 65,
                 "UNKNOWN_ENVIRONMENT",
                 f"Unknown Beep environment variable(s): {', '.join(unknown)}",
+            )
+        artifact = os.environ.get("BEEP_ARTIFACT_SHA256")
+        if artifact is not None and re.fullmatch(r"[0-9a-f]{64}", artifact) is None:
+            raise ManagementError(
+                65,
+                "INVALID_ARTIFACT_DIGEST",
+                "BEEP_ARTIFACT_SHA256 must be a lowercase SHA-256 digest.",
             )
 
     def _existing_config(self) -> dict[str, Any]:
@@ -963,23 +1081,53 @@ class Manager:
 
     def instance_id(self) -> str | None:
         marker = self.load_marker(required=False)
-        return str(marker["instance_id"]) if marker is not None else None
+        if marker is not None:
+            return str(marker["instance_id"])
+        purge = self._load_purge_state()
+        return str(purge["instance_id"]) if purge is not None else None
+
+    def _enforce_purge_boundary(self, invocation: Invocation) -> None:
+        if (
+            invocation.operation in MUTATING
+            and self._load_purge_state() is not None
+            and not (
+                invocation.operation == "uninstall"
+                and invocation.retain_state is False
+            )
+        ):
+            raise ManagementError(
+                73,
+                "PURGE_IN_PROGRESS",
+                "An interrupted Beep purge must finish before another mutation.",
+                recovery=[
+                    "Rerun uninstall --purge from verified Beep source with the exact destructive confirmation."
+                ],
+            )
 
     def load_marker(self, *, required: bool) -> dict[str, Any] | None:
-        if not self.paths.marker.exists():
+        try:
+            metadata = self.paths.marker.lstat()
+        except FileNotFoundError:
             if required:
                 raise ManagementError(
                     66, "NOT_INSTALLED", "Beep is not installed on this host."
                 )
             return None
-        try:
-            metadata = self.paths.marker.lstat()
         except OSError as exc:
             raise ManagementError(66, "MARKER_MISSING", "Marker is unavailable.") from exc
+        self._assert_no_symlink_ancestors(self.paths.marker)
+        self._validate_state_control_root(allow_legacy=True)
+        expected_uid = (
+            0 if self.paths.marker == Paths().marker else os.geteuid()
+        )
+        expected_gid = (
+            0 if self.paths.marker == Paths().marker else os.getegid()
+        )
         if (
             stat.S_ISLNK(metadata.st_mode)
             or not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_uid != 0
+            or metadata.st_uid != expected_uid
+            or metadata.st_gid != expected_gid
             or stat.S_IMODE(metadata.st_mode) != 0o644
         ):
             raise ManagementError(73, "UNSAFE_MARKER", "Ownership marker is unsafe.")
@@ -1007,6 +1155,10 @@ class Manager:
             or value.get("install_root") != str(self.paths.install_root)
             or value.get("lifecycle_entrypoint") != str(self.paths.entrypoint)
             or not VERSION_PATTERN.fullmatch(str(value.get("version", "")))
+            or re.fullmatch(r"source:[0-9a-f]{64}", str(value.get("source_revision", "")))
+            is None
+            or not isinstance(value.get("installed_at"), str)
+            or not value["installed_at"]
         ):
             raise ManagementError(65, "INVALID_MARKER", "Ownership marker is invalid.")
         artifact = value.get("artifact_sha256")
@@ -1092,6 +1244,8 @@ class Manager:
         invocation: Invocation,
         steps: list[dict[str, Any]],
         configuration: Configuration | None,
+        *,
+        source_revision: str | None = None,
     ) -> str:
         fingerprints: dict[str, Any] = {}
         for key, value in sorted(invocation.inputs.items()):
@@ -1099,9 +1253,21 @@ class Manager:
                 fingerprints[key] = self._secret_file_digest(Path(str(value)))
             else:
                 fingerprints[key] = value
+        if invocation.operation in CONFIGURATION_OPERATIONS:
+            for key, environment in (
+                ("chat_password_file", "BEEP_ADMIN_PASSWORD_FILE"),
+                ("provider_credential_file", "BEEP_PROVIDER_CREDENTIAL_FILE"),
+            ):
+                if key in fingerprints:
+                    continue
+                value = os.environ.get(environment)
+                if value:
+                    fingerprints[key] = self._secret_file_digest(Path(value))
         value = {
             "product_id": PRODUCT_ID,
             "version": self.version,
+            "source_revision": source_revision or self._source_revision(),
+            "artifact_sha256": os.environ.get("BEEP_ARTIFACT_SHA256"),
             "operation": invocation.operation,
             "instance": self.instance_id(),
             "inputs": fingerprints,
@@ -1113,6 +1279,7 @@ class Manager:
 
     @staticmethod
     def _secret_file_digest(path: Path) -> str:
+        assert_directory_ancestry_safe(path.parent)
         try:
             metadata = path.lstat()
         except OSError as exc:
@@ -1279,7 +1446,7 @@ class Manager:
                 "Run beep-manage repair from a complete verified Beep release.",
             ),
         ]
-        if installed and shutil.which("systemctl"):
+        if shutil.which("systemctl"):
             suspended = self.paths.suspended.exists() or lifecycle_status["dead"]
             chat_active = self._service_active("beep-chat.service")
             health_active = self._service_active("beep-health.timer")
@@ -1347,6 +1514,7 @@ class Manager:
             )
             and version_valid
             and self._node_runtime_supported()
+            and self._bridge_runtime_valid()
         )
 
     @staticmethod
@@ -1485,6 +1653,7 @@ class Manager:
             phase=phase,
             steps=steps,
         )
+        self._enforce_purge_boundary(invocation)
         if invocation.operation == "describe":
             result.details = {"descriptor": self.descriptor}
             self._best_effort_audit(invocation, result)
@@ -1557,18 +1726,34 @@ class Manager:
             else {}
         )
         with self._lock():
-            recomputed = self.plan_digest(invocation, steps, configuration)
+            self._validate_source()
+            locked_source_revision = self._source_revision()
+            locked_configuration = (
+                self.configuration(invocation)
+                if invocation.operation in CONFIGURATION_OPERATIONS
+                else None
+            )
+            locked_steps = self.steps(invocation, locked_configuration)
+            recomputed = self.plan_digest(
+                invocation,
+                locked_steps,
+                locked_configuration,
+                source_revision=locked_source_revision,
+            )
             if recomputed != result.plan_digest:
                 raise ManagementError(
                     78, "PLAN_CHANGED", "Host state changed while acquiring the lock."
                 )
+            self._approved_plan_digest = result.plan_digest
+            configuration = locked_configuration
             if invocation.operation in {"install", "repair", "update"}:
-                changed_resources, previous_version = self._execute_converge(
-                    invocation,
-                    configuration
-                    if configuration is not None
-                    else self.configuration(invocation),
-                )
+                with self._trusted_source_snapshot(locked_source_revision):
+                    changed_resources, previous_version = self._execute_converge(
+                        invocation,
+                        configuration
+                        if configuration is not None
+                        else self.configuration(invocation),
+                    )
             elif invocation.operation == "backup":
                 changed_resources, previous_version, backup = self._execute_backup(
                     invocation
@@ -1589,6 +1774,12 @@ class Manager:
             result.changed = bool(changed_resources)
             result.instance_id = self.instance_id() or result.instance_id
             result.details = details
+            complete_purge = (
+                invocation.operation == "uninstall"
+                and invocation.retain_state is False
+            )
+            if complete_purge:
+                result.status = "in_progress"
             receipt = self._write_receipt(
                 result,
                 previous_version=previous_version,
@@ -1602,22 +1793,35 @@ class Manager:
                 event_id=event_id,
                 receipt_digest=receipt["digest"],
             )
-            if (
-                invocation.operation == "uninstall"
-                and invocation.retain_state is False
-            ):
+            if complete_purge:
                 self._journal_purge_evidence(
                     invocation,
                     result,
                     event_id=event_id,
                     receipt_digest=receipt["digest"],
+                    phase="purge_started",
+                    changed_resources=changed_resources,
                 )
-                self._finalize_purge()
+                finalized = self._finalize_purge()
+                changed_resources = sorted(set(changed_resources + finalized))
+                completion_event_id = str(uuid.uuid4())
+                result.status = "ok"
+                result.changed = bool(changed_resources)
+                self._journal_purge_evidence(
+                    invocation,
+                    result,
+                    event_id=completion_event_id,
+                    receipt_digest=receipt["digest"],
+                    phase="purge_completed",
+                    changed_resources=changed_resources,
+                )
+                self._remove_purge_state()
                 result.receipt = None
                 result.details = {
                     "purge_evidence": {
                         "journal_identifier": "beep-manage",
                         "audit_event_id": event_id,
+                        "completion_event_id": completion_event_id,
                         "receipt_digest": receipt["digest"],
                         "removed_receipt_path": receipt["path"],
                     }
@@ -1652,13 +1856,47 @@ class Manager:
 
     @contextmanager
     def _lock(self) -> Iterator[None]:
-        self.paths.lock.parent.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(
-            self.paths.lock,
-            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-            0o600,
-        )
         try:
+            assert_directory_ancestry_safe(self.paths.lock.parent)
+            self.paths.lock.parent.mkdir(parents=True, exist_ok=True)
+            assert_directory_ancestry_safe(self.paths.lock.parent)
+            descriptor = os.open(
+                self.paths.lock,
+                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+                0o600,
+            )
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_LOCK",
+                "The Beep lifecycle lock is unsafe.",
+            ) from exc
+        try:
+            metadata = os.fstat(descriptor)
+            expected_uid = (
+                0 if self.paths.lock == Paths().lock else os.geteuid()
+            )
+            expected_gid = (
+                0 if self.paths.lock == Paths().lock else os.getegid()
+            )
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != expected_uid
+                or metadata.st_gid != expected_gid
+            ):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_LOCK",
+                    "The Beep lifecycle lock is unsafe.",
+                )
+            try:
+                os.fchmod(descriptor, 0o600)
+            except OSError as exc:
+                raise ManagementError(
+                    73,
+                    "UNSAFE_LOCK",
+                    "The Beep lifecycle lock is unsafe.",
+                ) from exc
             try:
                 fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as exc:
@@ -1669,7 +1907,6 @@ class Manager:
             yield
         finally:
             os.close(descriptor)
-            self.paths.lock.unlink(missing_ok=True)
 
     @contextmanager
     def _lifecycle_environment(self) -> Iterator[None]:
@@ -1694,18 +1931,84 @@ class Manager:
         configuration: Configuration,
     ) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=False)
+        pending = self._load_pending_install() if marker is None else None
+        retained_instance = self._retained_instance() if marker is None else None
+        if (
+            pending is not None
+            and retained_instance is not None
+            and pending["instance_id"] != retained_instance
+        ):
+            raise ManagementError(
+                73,
+                "OWNERSHIP_COLLISION",
+                "Pending and retained Beep instance identities differ.",
+            )
         previous_version = str(marker["version"]) if marker else None
-        instance_id = str(marker["instance_id"]) if marker else self._retained_instance()
+        instance_id = (
+            str(marker["instance_id"])
+            if marker
+            else str(pending["instance_id"])
+            if pending
+            else retained_instance
+        )
         instance_id = instance_id or str(uuid.uuid4())
         self._prepare_interactive_secrets(invocation, configuration)
         self._platform_preflight()
-        self._collision_preflight(marker)
-        self._port_preflight(configuration.chat_port, marker is not None)
-        suspended = self.paths.suspended.exists()
-        if marker is not None:
-            self._stop_services()
-            self._create_recovery_snapshot(invocation.correlation_id)
+        legacy_partial = self._collision_preflight(
+            marker,
+            pending=pending,
+            configuration=configuration,
+        )
+        suspended = self._path_present(self.paths.suspended)
+        prior_service_state = (
+            self._capture_service_state() if marker is not None else None
+        )
+        snapshot_created = False
+        normalized: list[str] = []
+        markerless_services_owned = (
+            marker is None
+            and (
+                self._pending_service_assets_owned(pending)
+                if pending is not None
+                else self._service_assets_owned(
+                    configuration,
+                    allow_legacy=legacy_partial,
+                )
+            )
+        )
         try:
+            if marker is not None:
+                self._stop_services()
+            elif markerless_services_owned:
+                self._stop_markerless_services()
+            if marker is not None:
+                self._secure_state_control_root(normalized)
+            self._port_preflight(configuration.chat_port)
+            if marker is None and pending is None:
+                self._write_pending_install(
+                    instance_id,
+                    configuration,
+                    adopted_legacy=legacy_partial or retained_instance is not None,
+                )
+                pending = self._load_pending_install()
+            elif marker is None and pending is not None:
+                self._write_pending_install(
+                    instance_id,
+                    configuration,
+                    adopted_legacy=True,
+                )
+                pending = self._load_pending_install()
+            self._materialize_python_environment_links(normalized)
+            if self._path_present(self.paths.node_root):
+                self._materialize_node_links(normalized)
+            if marker is not None:
+                self._create_recovery_snapshot(
+                    invocation.correlation_id,
+                    prior_service_state
+                    if prior_service_state is not None
+                    else self._capture_service_state(),
+                )
+                snapshot_created = True
             return self._converge_resources(
                 invocation,
                 configuration,
@@ -1713,25 +2016,80 @@ class Manager:
                 instance_id=instance_id,
                 previous_version=previous_version,
                 suspended=suspended,
+                initial_changed=normalized,
             )
         except Exception as original:
             if marker is None:
-                raise
-            try:
-                self._execute_rollback()
-            except Exception as rollback_error:
-                raise ManagementError(
-                    1,
-                    "AUTOMATIC_ROLLBACK_FAILED",
-                    "Beep convergence failed and automatic rollback also failed.",
-                    recovery=[
-                        "Keep Beep stopped and restore the verified backup or recovery snapshot."
-                    ],
-                ) from rollback_error
-            if isinstance(original, ManagementError):
-                original.recovery.append(
-                    "The pre-operation Beep recovery snapshot was restored automatically."
+                partial_services_owned = (
+                    self._pending_service_assets_owned(pending)
+                    if pending is not None
+                    else self._service_assets_owned(
+                        configuration,
+                        allow_legacy=legacy_partial,
+                    )
                 )
+                if partial_services_owned:
+                    try:
+                        self._stop_markerless_services()
+                    except ManagementError as stop_error:
+                        raise ManagementError(
+                            1,
+                            "PARTIAL_INSTALL_STOP_FAILED",
+                            "Beep installation failed and partial services could not be stopped.",
+                            recovery=[
+                                "Stop the Beep units, then rerun install."
+                            ],
+                        ) from stop_error
+                if isinstance(original, ManagementError):
+                    original.recovery.append(
+                        "The partial installation was recorded safely; rerun install after correcting the reported cause."
+                    )
+                raise
+            if snapshot_created:
+                try:
+                    self._execute_rollback(allow_degraded=True)
+                except Exception as rollback_error:
+                    try:
+                        self._stop_services()
+                    except Exception:
+                        pass
+                    raise ManagementError(
+                        1,
+                        "AUTOMATIC_ROLLBACK_FAILED",
+                        "Beep convergence failed and automatic rollback also failed.",
+                        recovery=[
+                            "Keep Beep stopped and restore the verified backup or recovery snapshot."
+                        ],
+                    ) from rollback_error
+                if isinstance(original, ManagementError):
+                    if self._last_rollback_degraded:
+                        original.recovery.append(
+                            "The pre-operation snapshot was restored; Beep remains stopped because the restored state is degraded."
+                        )
+                    else:
+                        original.recovery.append(
+                            "The pre-operation Beep recovery snapshot was restored automatically."
+                        )
+            else:
+                try:
+                    self._restore_service_state(
+                        prior_service_state
+                        if prior_service_state is not None
+                        else self._capture_service_state()
+                    )
+                except Exception as restart_error:
+                    raise ManagementError(
+                        1,
+                        "SERVICE_RESTORE_FAILED",
+                        "Beep preflight failed and its prior service state could not be restored.",
+                        recovery=[
+                            "Keep Beep stopped and inspect the system journal before retrying."
+                        ],
+                    ) from restart_error
+                if isinstance(original, ManagementError):
+                    original.recovery.append(
+                        "The prior Beep service state was restored automatically."
+                    )
             raise
 
     def _converge_resources(
@@ -1743,12 +2101,14 @@ class Manager:
         instance_id: str,
         previous_version: str | None,
         suspended: bool,
+        initial_changed: list[str] | None = None,
     ) -> tuple[list[str], str | None]:
-        changed: list[str] = []
+        changed = list(initial_changed or [])
         uid, gid = self._ensure_identity(configuration.agent_user, changed)
         self._ensure_directories(uid, gid, changed)
         self._ensure_dependencies(configuration.agent_user, changed)
         self._deploy_runtime(configuration, uid, gid, changed)
+        self._assert_approved_plan_current(invocation, configuration)
         self._deploy_configuration(invocation, configuration, uid, gid, changed)
         self._deploy_services(configuration, uid, gid, changed)
         lifecycle_status = self._lifecycle_status()
@@ -1756,7 +2116,7 @@ class Manager:
             changed,
             suspended=suspended or lifecycle_status["dead"],
         )
-        checks = self.checks_without_marker()
+        checks = self.checks_without_marker(configuration)
         failed = [check for check in checks if check["status"] == "fail"]
         if failed:
             raise ManagementError(
@@ -1782,17 +2142,69 @@ class Manager:
             mode=0o644,
         ):
             changed.append(str(self.paths.marker))
+        self.paths.pending_install.unlink(missing_ok=True)
         self.paths.retained.unlink(missing_ok=True)
         return sorted(set(changed)), previous_version
 
-    def checks_without_marker(self) -> list[dict[str, str]]:
+    def _assert_approved_plan_current(
+        self,
+        invocation: Invocation,
+        configuration: Configuration,
+    ) -> None:
+        if self._approved_plan_digest is None:
+            return
+        current = self.plan_digest(
+            invocation,
+            self.steps(invocation, configuration),
+            configuration,
+            source_revision=self._source_revision(),
+        )
+        if current != self._approved_plan_digest:
+            raise ManagementError(
+                78,
+                "PLAN_CHANGED",
+                "Protected inputs changed while applying the approved plan.",
+            )
+
+    def checks_without_marker(
+        self,
+        configuration: Configuration | None = None,
+    ) -> list[dict[str, str]]:
         checks = self.checks()
+        host_assets_valid = all(
+            path.is_file() and not path.is_symlink()
+            for path in self._host_resources()
+        )
+        if configuration is not None:
+            specifications = self._host_resource_specs(configuration)
+            host_assets_valid = all(
+                self._host_file_matches(
+                    path,
+                    mode=mode,
+                    digests={hashlib.sha256(content).hexdigest()},
+                )
+                for path, (content, mode) in specifications.items()
+            )
+        installation_predicates = {
+            "runtime": (self.paths.install_root / "agent" / "server.py").is_file()
+            and self._runtime_valid(self._lifecycle_status()),
+            "policy": self._policy_valid(),
+            "credentials": self._credentials_valid(),
+            "service_assets": host_assets_valid,
+            "family_manager": self._family_manager_valid(),
+        }
         for check in checks:
             if check["id"] == "marker":
                 check["status"] = "pass"
                 check["summary"] = "Marker will be written after health checks."
                 check["remediation"] = ""
-            elif check["id"] == "descriptor" and self.paths.descriptor.is_file():
+            elif (
+                check["id"] == "descriptor"
+                and self.paths.descriptor.is_file()
+                and not self.paths.descriptor.is_symlink()
+                and self.paths.descriptor.read_bytes()
+                == (self.source_root / "PRODUCT.json").read_bytes()
+            ):
                 check["status"] = "pass"
                 check["summary"] = "Installed descriptor matches this release."
                 check["remediation"] = ""
@@ -1803,30 +2215,33 @@ class Manager:
                 "service_assets",
                 "family_manager",
             }:
-                predicate = {
-                    "runtime": (self.paths.install_root / "agent" / "server.py").is_file()
-                    and self._runtime_valid(self._lifecycle_status()),
-                    "policy": self._policy_valid(),
-                    "credentials": self._credentials_valid(),
-                    "service_assets": all(
-                        path.is_file()
-                        for path in (
-                            self.paths.chat_unit,
-                            self.paths.health_unit,
-                            self.paths.health_timer,
-                        )
-                    ),
-                    "family_manager": (
-                        self._family_manager_valid()
-                    ),
-                }[check["id"]]
-                if predicate:
+                if installation_predicates[check["id"]]:
                     check["status"] = "pass"
                     check["remediation"] = ""
         return checks
 
     def _platform_preflight(self) -> None:
         if os.environ.get("BEEP_DISPOSABLE_VM_TEST") == "1":
+            sentinel = Path("/run/beep-disposable-vm")
+            try:
+                metadata = sentinel.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    73,
+                    "UNSAFE_VM_GUARD",
+                    "The disposable-VM guard file is missing or unsafe.",
+                ) from exc
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != 0
+                or metadata.st_gid != 0
+                or stat.S_IMODE(metadata.st_mode) & 0o022
+            ):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_VM_GUARD",
+                    "The disposable-VM guard file is missing or unsafe.",
+                )
             return
         if platform.machine() not in {"x86_64", "amd64"}:
             raise ManagementError(69, "UNSUPPORTED_PLATFORM", "Beep supports amd64.")
@@ -1850,27 +2265,57 @@ class Manager:
                 "Beep supports Ubuntu Desktop 22.04 and 24.04 LTS.",
             )
 
-    def _collision_preflight(self, marker: dict[str, Any] | None) -> None:
+    def _collision_preflight(
+        self,
+        marker: dict[str, Any] | None,
+        *,
+        pending: dict[str, Any] | None = None,
+        configuration: Configuration | None = None,
+    ) -> bool:
         if marker is not None:
-            return
+            return False
+        if self._load_purge_state() is not None:
+            raise ManagementError(
+                73,
+                "PURGE_IN_PROGRESS",
+                "An interrupted Beep purge must be resumed before installation.",
+                recovery=[
+                    "Rerun uninstall --purge from verified Beep source with the exact destructive confirmation."
+                ],
+            )
+        if pending is None:
+            pending = self._load_pending_install()
         retained = self._load_retained()
-        allowed = {
-            self.paths.state_root,
-            self.paths.configuration_root,
-            self.paths.log_root,
-        } if retained else set()
         resources = (
             self.paths.install_root,
+            self.paths.account_home,
             self.paths.configuration_root,
             self.paths.state_root,
             self.paths.log_root,
-            self.paths.chat_unit,
-            self.paths.health_unit,
-            self.paths.health_timer,
-            self.paths.logrotate,
-            self.paths.sudoers,
-            self.paths.entrypoint,
+            *self._host_resources(),
+            self.paths.pending_install,
         )
+        legacy_partial = (
+            pending is None
+            and retained is None
+            and configuration is not None
+            and self._legacy_partial_install(resources, configuration)
+        )
+        if pending is not None:
+            self._validate_pending_install_resources(pending)
+        if retained is not None:
+            self._validate_retained_resources()
+        if pending is not None or legacy_partial:
+            allowed = set(resources)
+        elif retained is not None:
+            allowed = {
+                self.paths.account_home,
+                self.paths.state_root,
+                self.paths.configuration_root,
+                self.paths.log_root,
+            }
+        else:
+            allowed = set()
         collisions = [
             str(path)
             for path in resources
@@ -1881,14 +2326,14 @@ class Manager:
         except KeyError:
             pass
         else:
-            if not retained:
+            if retained is None and pending is None and not legacy_partial:
                 collisions.append("user:beep")
         try:
             grp.getgrnam(DEFAULT_USER)
         except KeyError:
             pass
         else:
-            if not retained:
+            if retained is None and pending is None and not legacy_partial:
                 collisions.append("group:beep")
         if collisions:
             raise ManagementError(
@@ -1896,19 +2341,362 @@ class Manager:
                 "OWNERSHIP_COLLISION",
                 "Unowned Beep resource collision: " + ", ".join(sorted(collisions)),
             )
+        return legacy_partial
+
+    def _legacy_partial_install(
+        self,
+        resources: tuple[Path, ...],
+        configuration: Configuration,
+    ) -> bool:
+        """Recognize the exact markerless state left by older Beep installers."""
+        try:
+            user = pwd.getpwnam(DEFAULT_USER)
+            group = grp.getgrnam(DEFAULT_USER)
+            metadata = self.paths.sudoers.lstat()
+        except (KeyError, OSError):
+            return False
+        root_uid, root_gid = self._expected_node_owner()
+        if (
+            user.pw_gid != group.gr_gid
+            or user.pw_dir != str(self.paths.account_home)
+            or user.pw_shell != "/bin/bash"
+            or not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != root_uid
+            or metadata.st_gid != root_gid
+            or stat.S_IMODE(metadata.st_mode) != 0o440
+        ):
+            return False
+        try:
+            if self.paths.sudoers.read_bytes() != self._sudoers_content(DEFAULT_USER):
+                return False
+        except OSError:
+            return False
+        specifications = self._host_resource_specs(configuration)
+        for path in set(self._host_resources()) - {self.paths.sudoers}:
+            if not self._path_present(path):
+                continue
+            accepted = {hashlib.sha256(specifications[path][0]).hexdigest()}
+            if path == self.paths.entrypoint:
+                accepted.add(LEGACY_MANAGER_SHA256)
+            if not self._host_file_matches(
+                path,
+                mode=specifications[path][1],
+                digests=accepted,
+            ):
+                return False
+        roots = (
+            self.paths.install_root,
+            self.paths.account_home,
+            self.paths.configuration_root,
+            self.paths.state_root,
+            self.paths.log_root,
+        )
+        present_roots = 0
+        for path in roots:
+            try:
+                metadata = path.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                return False
+            if not stat.S_ISDIR(metadata.st_mode):
+                return False
+            try:
+                self._validate_partial_root(
+                    path,
+                    user=user,
+                    group=group,
+                    allow_legacy_control_owner=True,
+                )
+            except ManagementError:
+                return False
+            present_roots += 1
+        return present_roots > 0
+
+    def _validate_pending_install_resources(self, pending: dict[str, Any]) -> None:
+        """Adopt only resources whose provenance is recorded by the root journal."""
+        try:
+            user = pwd.getpwnam(DEFAULT_USER)
+        except KeyError:
+            user = None
+        try:
+            group = grp.getgrnam(DEFAULT_USER)
+        except KeyError:
+            group = None
+        if user is not None and group is None:
+            raise ManagementError(
+                73,
+                "OWNERSHIP_COLLISION",
+                "The pending Beep identity is incomplete.",
+            )
+        if user is not None and group is not None and (
+            user.pw_gid != group.gr_gid
+            or user.pw_dir != str(self.paths.account_home)
+            or user.pw_shell != "/bin/bash"
+        ):
+            raise ManagementError(
+                73,
+                "OWNERSHIP_COLLISION",
+                "The pending Beep identity does not match the managed account.",
+            )
+        for path in (
+            self.paths.install_root,
+            self.paths.account_home,
+            self.paths.configuration_root,
+            self.paths.state_root,
+            self.paths.log_root,
+        ):
+            if not self._path_present(path):
+                continue
+            if user is None or group is None:
+                raise ManagementError(
+                    73,
+                    "OWNERSHIP_COLLISION",
+                    f"Pending Beep root has no matching identity: {path}",
+                )
+            self._validate_partial_root(
+                path,
+                user=user,
+                group=group,
+                allow_legacy_control_owner=bool(pending["adopted_legacy"]),
+            )
+        recorded = pending["host_resources"]
+        for path in self._host_resources():
+            if not self._path_present(path):
+                continue
+            specification = recorded[str(path)]
+            if not self._host_file_matches(
+                path,
+                mode=specification["mode"],
+                digests=set(specification["sha256"]),
+            ):
+                raise ManagementError(
+                    73,
+                    "OWNERSHIP_COLLISION",
+                    f"Pending Beep host resource is not provenance-matched: {path}",
+                )
+
+    def _validate_partial_root(
+        self,
+        root: Path,
+        *,
+        user: Any,
+        group: Any,
+        allow_legacy_control_owner: bool,
+    ) -> None:
+        root_uid, root_gid = self._expected_node_owner()
+        expected_roots: dict[Path, set[tuple[int, int, int]]] = {
+            self.paths.install_root: {(root_uid, root_gid, 0o755)},
+            self.paths.configuration_root: {(root_uid, root_gid, 0o755)},
+            self.paths.state_root: {(root_uid, root_gid, 0o755)},
+            self.paths.log_root: {(root_uid, root_gid, 0o755)},
+            self.paths.account_home: {(user.pw_uid, group.gr_gid, 0o750)},
+        }
+        if allow_legacy_control_owner and root in {
+            self.paths.state_root,
+            self.paths.log_root,
+        }:
+            expected_roots[root].add((user.pw_uid, group.gr_gid, 0o750))
+        try:
+            metadata = root.lstat()
+        except OSError as exc:
+            raise ManagementError(
+                73, "OWNERSHIP_COLLISION", f"Pending Beep root is unsafe: {root}"
+            ) from exc
+        identity = (
+            metadata.st_uid,
+            metadata.st_gid,
+            stat.S_IMODE(metadata.st_mode),
+        )
+        if not stat.S_ISDIR(metadata.st_mode) or identity not in expected_roots[root]:
+            raise ManagementError(
+                73, "OWNERSHIP_COLLISION", f"Pending Beep root is unsafe: {root}"
+            )
+        if root == self.paths.install_root and self._path_present(self.paths.node_root):
+            self._node_link_replacements()
+        allowed_uids = {root_uid, user.pw_uid}
+        allowed_gids = {root_gid, group.gr_gid}
+        for path in root.rglob("*"):
+            if (
+                root == self.paths.install_root
+                and (
+                    path == self.paths.node_root
+                    or self.paths.node_root in path.parents
+                )
+            ):
+                continue
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    73,
+                    "OWNERSHIP_COLLISION",
+                    f"Pending Beep path is unsafe: {path}",
+                ) from exc
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                and root == self.paths.account_home
+                and self._standard_python_lib64_link(path)
+                and metadata.st_uid in allowed_uids
+                and metadata.st_gid in allowed_gids
+            ):
+                continue
+            if (
+                not (
+                    stat.S_ISDIR(metadata.st_mode)
+                    or stat.S_ISREG(metadata.st_mode)
+                )
+                or metadata.st_uid not in allowed_uids
+                or metadata.st_gid not in allowed_gids
+                or stat.S_IMODE(metadata.st_mode) & 0o022
+            ):
+                raise ManagementError(
+                    73,
+                    "OWNERSHIP_COLLISION",
+                    f"Pending Beep path is unsafe: {path}",
+                )
+
+    def _standard_python_lib64_link(self, path: Path) -> bool:
+        expected = self.paths.account_home / "agent-env" / "lib64"
+        if path != expected:
+            return False
+        try:
+            metadata = path.lstat()
+            target = path.parent / "lib"
+            target_metadata = target.lstat()
+            return (
+                stat.S_ISLNK(metadata.st_mode)
+                and os.readlink(path) == "lib"
+                and stat.S_ISDIR(target_metadata.st_mode)
+            )
+        except OSError:
+            return False
+
+    def _host_resource_specs(
+        self,
+        configuration: Configuration,
+    ) -> dict[Path, tuple[bytes, int]]:
+        payload = self.source_root / "payload"
+        replacements = {
+            "__AGENT_USER__": configuration.agent_user,
+            "__AGENT_HOME__": str(self.paths.account_home),
+            "__BEEP_DIR__": str(self.paths.install_root),
+        }
+        result: dict[Path, tuple[bytes, int]] = {}
+        for source_name, destination, mode in (
+            ("systemd/beep-chat.service", self.paths.chat_unit, 0o644),
+            ("systemd/beep-health.service", self.paths.health_unit, 0o644),
+            ("systemd/beep-health.timer", self.paths.health_timer, 0o644),
+            ("logrotate/beep", self.paths.logrotate, 0o644),
+        ):
+            value = (payload / source_name).read_text(encoding="utf-8")
+            for old, new in replacements.items():
+                value = value.replace(old, new)
+            unresolved = re.findall(r"__[A-Z][A-Z0-9_]*__", value)
+            if unresolved:
+                raise ManagementError(
+                    78, "UNRESOLVED_TEMPLATE", "Service template is invalid."
+                )
+            result[destination] = (value.encode(), mode)
+        result[self.paths.sudoers] = (
+            self._sudoers_content(configuration.agent_user),
+            0o440,
+        )
+        result[self.paths.entrypoint] = (
+            (self.source_root / "scripts" / "manage.sh").read_bytes(),
+            0o755,
+        )
+        for command in HOST_COMMANDS:
+            result[self.paths.command_root / command] = (
+                (payload / "bin" / command).read_bytes(),
+                0o755,
+            )
+        return result
+
+    def _host_file_matches(
+        self,
+        path: Path,
+        *,
+        mode: int,
+        digests: set[str],
+    ) -> bool:
+        try:
+            metadata = path.lstat()
+            self._assert_no_symlink_ancestors(path.parent)
+            content = path.read_bytes()
+        except OSError:
+            return False
+        root_uid, root_gid = self._expected_node_owner()
+        return (
+            stat.S_ISREG(metadata.st_mode)
+            and metadata.st_uid == root_uid
+            and metadata.st_gid == root_gid
+            and stat.S_IMODE(metadata.st_mode) == mode
+            and hashlib.sha256(content).hexdigest() in digests
+        )
+
+    def _service_assets_owned(
+        self,
+        configuration: Configuration,
+        *,
+        allow_legacy: bool,
+    ) -> bool:
+        specifications = self._host_resource_specs(configuration)
+        found = False
+        for path in (
+            self.paths.chat_unit,
+            self.paths.health_unit,
+            self.paths.health_timer,
+        ):
+            if not self._path_present(path):
+                continue
+            found = True
+            digests = {hashlib.sha256(specifications[path][0]).hexdigest()}
+            if not self._host_file_matches(
+                path,
+                mode=specifications[path][1],
+                digests=digests,
+            ):
+                return False
+        return found
+
+    def _pending_service_assets_owned(
+        self,
+        pending: dict[str, Any],
+    ) -> bool:
+        found = False
+        recorded = pending["host_resources"]
+        for path in (
+            self.paths.chat_unit,
+            self.paths.health_unit,
+            self.paths.health_timer,
+        ):
+            if not self._path_present(path):
+                continue
+            found = True
+            specification = recorded[str(path)]
+            if not self._host_file_matches(
+                path,
+                mode=specification["mode"],
+                digests=set(specification["sha256"]),
+            ):
+                return False
+        return found
 
     @staticmethod
     def _path_present(path: Path) -> bool:
         try:
             path.lstat()
-        except OSError:
+        except FileNotFoundError:
             return False
+        except OSError as exc:
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Could not inspect protected path: {path}"
+            ) from exc
         return True
 
     @staticmethod
-    def _port_preflight(port: int, installed: bool) -> None:
-        if installed:
-            return
+    def _port_preflight(port: int) -> None:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
             probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
@@ -1922,9 +2710,321 @@ class Manager:
         retained = self._load_retained()
         return str(retained["instance_id"]) if retained else None
 
-    def _load_retained(self) -> dict[str, Any] | None:
-        if not self.paths.retained.is_file() or self.paths.retained.is_symlink():
+    def _write_pending_install(
+        self,
+        instance_id: str,
+        configuration: Configuration,
+        *,
+        adopted_legacy: bool,
+    ) -> None:
+        resources: dict[str, dict[str, Any]] = {}
+        for path, (content, mode) in self._host_resource_specs(configuration).items():
+            digests = {hashlib.sha256(content).hexdigest()}
+            if adopted_legacy and self._path_present(path):
+                try:
+                    metadata = path.lstat()
+                    if stat.S_ISREG(metadata.st_mode):
+                        digests.add(hashlib.sha256(path.read_bytes()).hexdigest())
+                except OSError as exc:
+                    raise ManagementError(
+                        73,
+                        "OWNERSHIP_COLLISION",
+                        f"Could not record legacy Beep resource: {path}",
+                    ) from exc
+            resources[str(path)] = {
+                "mode": mode,
+                "sha256": sorted(digests),
+            }
+        value = {
+            "schema_version": 1,
+            "product_id": PRODUCT_ID,
+            "instance_id": instance_id,
+            "started_at": utc_now(),
+            "version": self.version,
+            "source_revision": self._source_revision(),
+            "configuration": configuration.object(),
+            "adopted_legacy": adopted_legacy,
+            "host_resources": resources,
+        }
+        atomic_write(
+            self.paths.pending_install,
+            canonical_json(value) + b"\n",
+            mode=0o600,
+        )
+
+    def _load_pending_install(self) -> dict[str, Any] | None:
+        try:
+            metadata = self.paths.pending_install.lstat()
+        except FileNotFoundError:
             return None
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PENDING_INSTALL",
+                "Pending install state is unavailable.",
+            ) from exc
+        self._assert_no_symlink_ancestors(self.paths.pending_install)
+        expected_uid = (
+            0
+            if self.paths.pending_install == Paths().pending_install
+            else os.geteuid()
+        )
+        expected_gid = (
+            0
+            if self.paths.pending_install == Paths().pending_install
+            else os.getegid()
+        )
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != expected_uid
+            or metadata.st_gid != expected_gid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ManagementError(
+                73, "UNSAFE_PENDING_INSTALL", "Pending install state is unsafe."
+            )
+        value = load_json(self.paths.pending_install)
+        try:
+            instance_id = str(uuid.UUID(str(value.get("instance_id"))))
+        except ValueError as exc:
+            raise ManagementError(
+                65, "INVALID_PENDING_INSTALL", "Pending install state is invalid."
+            ) from exc
+        expected_fields = {
+            "schema_version",
+            "product_id",
+            "instance_id",
+            "started_at",
+            "version",
+            "source_revision",
+            "configuration",
+            "adopted_legacy",
+            "host_resources",
+        }
+        configuration = value.get("configuration")
+        expected_configuration_fields = {
+            "schema_version",
+            "agent_user",
+            "chat_port",
+            "provider",
+            "model",
+            "model_base_url",
+            "ttl_days",
+        }
+        resources = value.get("host_resources")
+        if (
+            set(value) != expected_fields
+            or value.get("schema_version") != 1
+            or value.get("product_id") != PRODUCT_ID
+            or value.get("instance_id") != instance_id
+            or not isinstance(value.get("started_at"), str)
+            or not value["started_at"]
+            or not VERSION_PATTERN.fullmatch(str(value.get("version", "")))
+            or re.fullmatch(
+                r"source:[0-9a-f]{64}",
+                str(value.get("source_revision", "")),
+            )
+            is None
+            or not isinstance(value.get("adopted_legacy"), bool)
+            or not isinstance(configuration, dict)
+            or set(configuration) != expected_configuration_fields
+            or configuration.get("schema_version") != 1
+            or configuration.get("agent_user") != DEFAULT_USER
+            or not isinstance(configuration.get("chat_port"), int)
+            or isinstance(configuration.get("chat_port"), bool)
+            or not 1024 <= configuration["chat_port"] <= 65535
+            or configuration.get("provider") not in {None, *PROVIDER_KEYS}
+            or not isinstance(configuration.get("ttl_days"), int)
+            or isinstance(configuration.get("ttl_days"), bool)
+            or not 1 <= configuration["ttl_days"] <= 3650
+            or not isinstance(resources, dict)
+            or set(resources) != {str(path) for path in self._host_resources()}
+        ):
+            raise ManagementError(
+                65, "INVALID_PENDING_INSTALL", "Pending install state is invalid."
+            )
+        for specification in resources.values():
+            if (
+                not isinstance(specification, dict)
+                or set(specification) != {"mode", "sha256"}
+                or specification["mode"] not in {0o440, 0o644, 0o755}
+                or not isinstance(specification["sha256"], list)
+                or not specification["sha256"]
+                or len(specification["sha256"]) > 2
+                or specification["sha256"] != sorted(set(specification["sha256"]))
+                or any(
+                    not isinstance(digest, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                    for digest in specification["sha256"]
+                )
+            ):
+                raise ManagementError(
+                    65,
+                    "INVALID_PENDING_INSTALL",
+                    "Pending install resource provenance is invalid.",
+                )
+        return value
+
+    def _load_purge_state(self) -> dict[str, Any] | None:
+        try:
+            metadata = self.paths.purge_state.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PURGE_STATE",
+                "Interrupted purge state is unavailable.",
+            ) from exc
+        self._assert_no_symlink_ancestors(self.paths.purge_state)
+        expected_uid, expected_gid = self._expected_node_owner()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != expected_uid
+            or metadata.st_gid != expected_gid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_PURGE_STATE",
+                "Interrupted purge state is unsafe.",
+            )
+        value = load_json(self.paths.purge_state)
+        try:
+            instance_id = str(uuid.UUID(str(value.get("instance_id"))))
+        except ValueError as exc:
+            raise ManagementError(
+                65,
+                "INVALID_PURGE_STATE",
+                "Interrupted purge state is invalid.",
+            ) from exc
+        identity = value.get("identity")
+        expected_identity_fields = {"user_uid", "user_gid", "group_gid"}
+        identity_values = tuple(identity.values()) if isinstance(identity, dict) else ()
+        all_absent = identity_values == (None, None, None)
+        all_numeric = (
+            len(identity_values) == 3
+            and all(
+                isinstance(item, int) and not isinstance(item, bool) and item >= 0
+                for item in identity_values
+            )
+        )
+        if (
+            set(value)
+            != {
+                "schema_version",
+                "product_id",
+                "instance_id",
+                "started_at",
+                "version",
+                "identity",
+            }
+            or value.get("schema_version") != 1
+            or value.get("product_id") != PRODUCT_ID
+            or value.get("instance_id") != instance_id
+            or not isinstance(value.get("started_at"), str)
+            or not value["started_at"]
+            or not VERSION_PATTERN.fullmatch(str(value.get("version", "")))
+            or not isinstance(identity, dict)
+            or set(identity) != expected_identity_fields
+            or not (all_absent or all_numeric)
+            or (
+                all_numeric
+                and identity["user_gid"] != identity["group_gid"]
+            )
+        ):
+            raise ManagementError(
+                65,
+                "INVALID_PURGE_STATE",
+                "Interrupted purge state is invalid.",
+            )
+        return value
+
+    def _write_purge_state(
+        self,
+        marker: dict[str, Any],
+        identity: dict[str, int | None],
+    ) -> bool:
+        values = tuple(identity.values()) if isinstance(identity, dict) else ()
+        all_absent = values == (None, None, None)
+        all_numeric = (
+            len(values) == 3
+            and all(
+                isinstance(item, int) and not isinstance(item, bool) and item >= 0
+                for item in values
+            )
+        )
+        if (
+            set(identity) != {"user_uid", "user_gid", "group_gid"}
+            or not (all_absent or all_numeric)
+            or (all_numeric and identity["user_gid"] != identity["group_gid"])
+        ):
+            raise ManagementError(
+                65,
+                "INVALID_PURGE_STATE",
+                "Purge identity provenance is invalid.",
+            )
+        if self._load_purge_state() is not None:
+            raise ManagementError(
+                73,
+                "PURGE_ALREADY_STARTED",
+                "A Beep purge is already in progress.",
+            )
+        self._assert_no_symlink_ancestors(self.paths.purge_state.parent)
+        value = {
+            "schema_version": 1,
+            "product_id": PRODUCT_ID,
+            "instance_id": marker["instance_id"],
+            "started_at": utc_now(),
+            "version": marker["version"],
+            "identity": identity,
+        }
+        changed = atomic_write(
+            self.paths.purge_state,
+            canonical_json(value) + b"\n",
+            mode=0o600,
+        )
+        self._load_purge_state()
+        return changed
+
+    def _remove_purge_state(self) -> None:
+        self._load_purge_state()
+        try:
+            self.paths.purge_state.unlink()
+        except OSError as exc:
+            raise ManagementError(
+                1,
+                "PURGE_STATE_REMOVE_FAILED",
+                "Beep was purged, but its protected purge tombstone remains.",
+                retryable=True,
+                recovery=["Rerun the same purge command from verified Beep source."],
+            ) from exc
+
+    def _load_retained(self) -> dict[str, Any] | None:
+        try:
+            metadata = self.paths.retained.lstat()
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_RETAINED_STATE",
+                "Retained Beep state is unavailable.",
+            ) from exc
+        self._assert_no_symlink_ancestors(self.paths.retained)
+        self._validate_state_control_root(allow_legacy=True)
+        expected_uid, expected_gid = self._expected_node_owner()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != expected_uid
+            or metadata.st_gid != expected_gid
+            or stat.S_IMODE(metadata.st_mode) != 0o600
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_RETAINED_STATE",
+                "Retained Beep state is unsafe.",
+            )
         value = load_json(self.paths.retained)
         if set(value) != {"schema_version", "product_id", "instance_id"}:
             raise ManagementError(65, "INVALID_RETAINED_STATE", "Retained state is invalid.")
@@ -1942,6 +3042,48 @@ class Manager:
             raise ManagementError(65, "INVALID_RETAINED_STATE", "Retained state is invalid.")
         return value
 
+    def _validate_retained_resources(self) -> None:
+        try:
+            user = pwd.getpwnam(DEFAULT_USER)
+            group = grp.getgrnam(DEFAULT_USER)
+        except KeyError as exc:
+            raise ManagementError(
+                73,
+                "OWNERSHIP_COLLISION",
+                "Retained Beep state has no matching managed identity.",
+            ) from exc
+        if (
+            user.pw_gid != group.gr_gid
+            or user.pw_dir != str(self.paths.account_home)
+            or user.pw_shell != "/bin/bash"
+        ):
+            raise ManagementError(
+                73,
+                "IDENTITY_COLLISION",
+                "The retained beep identity differs from the managed account.",
+            )
+        for path in (
+            self.paths.account_home,
+            self.paths.configuration_root,
+            self.paths.state_root,
+            self.paths.log_root,
+        ):
+            if not self._path_present(path):
+                continue
+            self._validate_partial_root(
+                path,
+                user=user,
+                group=group,
+                allow_legacy_control_owner=True,
+            )
+
+    @staticmethod
+    def _sudoers_content(agent_user: str) -> bytes:
+        return (
+            "# Managed by beep-manage. Beep is intentionally root-capable.\n"
+            f"{agent_user} ALL=(ALL) NOPASSWD:ALL\n"
+        ).encode()
+
     def _ensure_identity(
         self, agent_user: str, changed: list[str]
     ) -> tuple[int, int]:
@@ -1957,7 +3099,9 @@ class Manager:
             self._run(
                 [
                     "useradd",
-                    "--create-home",
+                    "--no-create-home",
+                    "--home-dir",
+                    str(self.paths.account_home),
                     "--shell",
                     "/bin/bash",
                     "--gid",
@@ -1967,17 +3111,47 @@ class Manager:
                     agent_user,
                 ]
             )
-            self._run(["passwd", "--lock", agent_user], check=False)
             changed.append(f"user:{agent_user}")
             user = pwd.getpwnam(agent_user)
-        if user.pw_gid != group.gr_gid:
+        if (
+            user.pw_gid != group.gr_gid
+            or user.pw_dir != str(self.paths.account_home)
+            or user.pw_shell != "/bin/bash"
+        ):
             raise ManagementError(
-                73, "IDENTITY_COLLISION", "Existing beep identity has the wrong group."
+                73,
+                "IDENTITY_COLLISION",
+                "Existing beep identity differs from the managed account.",
             )
-        sudoers = (
-            "# Managed by beep-manage. Beep is intentionally root-capable.\n"
-            f"{agent_user} ALL=(ALL) NOPASSWD:ALL\n"
-        ).encode()
+        try:
+            home_metadata = self.paths.account_home.lstat()
+        except FileNotFoundError:
+            assert_directory_ancestry_safe(self.paths.account_home.parent)
+            self.paths.account_home.mkdir(parents=True, mode=0o750)
+            home_metadata = self.paths.account_home.lstat()
+            changed.append(str(self.paths.account_home))
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Managed account home is unsafe: {self.paths.account_home}",
+            ) from exc
+        if not stat.S_ISDIR(home_metadata.st_mode):
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Managed account home is unsafe: {self.paths.account_home}",
+            )
+        if (
+            stat.S_IMODE(home_metadata.st_mode) != 0o750
+            or home_metadata.st_uid != user.pw_uid
+            or home_metadata.st_gid != group.gr_gid
+        ):
+            os.chmod(self.paths.account_home, 0o750)
+            os.chown(self.paths.account_home, user.pw_uid, group.gr_gid)
+            changed.append(str(self.paths.account_home))
+        self._run(["passwd", "--lock", agent_user])
+        sudoers = self._sudoers_content(agent_user)
         with tempfile.NamedTemporaryFile() as temporary:
             temporary.write(sudoers)
             temporary.flush()
@@ -1996,16 +3170,17 @@ class Manager:
             (self.paths.configuration_root / "secrets", 0o700, uid, gid),
             (self.paths.configuration_root / "skills.d", 0o755, 0, 0),
             (self.paths.agents_configuration, 0o755, 0, 0),
-            (self.paths.state_root, 0o750, uid, gid),
+            (self.paths.state_root, 0o755, 0, 0),
             (self.paths.runtime, 0o700, uid, gid),
             (self.paths.runtime / "logs", 0o750, uid, gid),
             (self.paths.runtime / "pi-mono-sessions", 0o700, uid, gid),
             (self.paths.agents_state, 0o700, 0, 0),
-            (self.paths.log_root, 0o750, uid, gid),
-            (self.paths.receipts, 0o750, uid, gid),
+            (self.paths.log_root, 0o755, 0, 0),
+            (self.paths.receipts, 0o750, 0, 0),
             (self.paths.rollback_root, 0o700, 0, 0),
         )
         for path, mode, owner, group in declarations:
+            assert_directory_ancestry_safe(path.parent)
             if path.is_symlink():
                 raise ManagementError(73, "UNSAFE_PATH", f"Refusing symlink: {path}")
             if path.exists() and not path.is_dir():
@@ -2017,13 +3192,54 @@ class Manager:
                 changed.append(str(path))
             os.chmod(path, mode)
             os.chown(path, owner, group)
+        self._ensure_audit_log(uid, gid, changed)
+
+    def _ensure_audit_log(self, uid: int, gid: int, changed: list[str]) -> None:
+        existed = self._path_present(self.paths.audit)
+        if existed:
+            metadata = self.paths.audit.lstat()
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ManagementError(
+                    73, "UNSAFE_PATH", f"Audit log is unsafe: {self.paths.audit}"
+                )
+        descriptor = os.open(
+            self.paths.audit,
+            os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,
+            0o640,
+        )
+        try:
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ManagementError(
+                    73, "UNSAFE_PATH", f"Audit log is unsafe: {self.paths.audit}"
+                )
+            os.fchmod(descriptor, 0o640)
+            if os.geteuid() == 0:
+                os.fchown(descriptor, uid, gid)
+        finally:
+            os.close(descriptor)
+        if not existed:
+            changed.append(str(self.paths.audit))
 
     def _ensure_dependencies(self, agent_user: str, changed: list[str]) -> None:
         if not shutil.which("apt-get") or not shutil.which("dpkg-query"):
             raise ManagementError(
                 69, "DEPENDENCY_MISSING", "apt-get and dpkg-query are required."
             )
-        environment = {**os.environ, "DEBIAN_FRONTEND": "noninteractive"}
+        environment = {
+            name: os.environ[name]
+            for name in DEPENDENCY_ENVIRONMENT_KEYS
+            if name in os.environ
+        }
+        environment.update(
+            {
+                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "HOME": "/root",
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "DEBIAN_FRONTEND": "noninteractive",
+            }
+        )
         missing = [
             package
             for package in SYSTEM_PACKAGES
@@ -2039,9 +3255,30 @@ class Manager:
             != "installed"
         ]
         if missing:
-            self._run(["apt-get", "update", "-qq"], environment=environment)
-            self._run(
-                ["apt-get", "install", "-y", "--no-install-recommends", *missing],
+            self._run_dependency_command(
+                [
+                    "apt-get",
+                    "-o",
+                    "Dpkg::Options::=--force-confdef",
+                    "-o",
+                    "Dpkg::Options::=--force-confold",
+                    "update",
+                    "-qq",
+                ],
+                environment=environment,
+            )
+            self._run_dependency_command(
+                [
+                    "apt-get",
+                    "-o",
+                    "Dpkg::Options::=--force-confdef",
+                    "-o",
+                    "Dpkg::Options::=--force-confold",
+                    "install",
+                    "-y",
+                    "--no-install-recommends",
+                    *missing,
+                ],
                 environment=environment,
             )
             changed.append("system-packages")
@@ -2051,16 +3288,111 @@ class Manager:
                 raise ManagementError(
                     69, "DEPENDENCY_MISSING", f"Required command is missing: {command}"
                 )
-        home = Path(pwd.getpwnam(agent_user).pw_dir)
+        account = pwd.getpwnam(agent_user)
+        home = Path(account.pw_dir)
+        try:
+            home_metadata = home.lstat()
+        except OSError as exc:
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Managed account home is unsafe: {home}"
+            ) from exc
+        if (
+            not stat.S_ISDIR(home_metadata.st_mode)
+            or home_metadata.st_uid != account.pw_uid
+            or home_metadata.st_gid != account.pw_gid
+        ):
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Managed account home is unsafe: {home}"
+            )
         virtualenv = home / "agent-env"
-        if not (virtualenv / "bin" / "python").is_file():
-            venv.EnvBuilder(with_pip=False).create(virtualenv)
-            self._chown_tree(virtualenv, pwd.getpwnam(agent_user).pw_uid, grp.getgrnam(agent_user).gr_gid)
+        python = virtualenv / "bin" / "python"
+        if virtualenv.is_symlink() or (
+            virtualenv.exists() and not virtualenv.is_dir()
+        ):
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Managed Python environment is unsafe: {virtualenv}"
+            )
+        if virtualenv.exists() and self._normalize_python_environment(virtualenv):
+            changed.append(str(virtualenv / "lib64"))
+        python_valid = (
+            python.is_file()
+            and not python.is_symlink()
+            and os.access(python, os.X_OK)
+        )
+        if not python_valid:
+            if virtualenv.exists():
+                self._assert_tree_safe(virtualenv)
+                shutil.rmtree(virtualenv)
+            venv.EnvBuilder(with_pip=False, symlinks=False).create(virtualenv)
+            self._normalize_python_environment(virtualenv)
+            self._chown_tree(virtualenv, account.pw_uid, account.pw_gid)
             changed.append(str(virtualenv))
         self._install_bridges(changed)
 
-    def _ensure_node_runtime(self, changed: list[str]) -> None:
-        if self._node_runtime_supported():
+    def _normalize_python_environment(self, virtualenv: Path) -> bool:
+        """Remove CPython's standard Linux ``lib64 -> lib`` convenience link."""
+        lib64 = virtualenv / "lib64"
+        try:
+            metadata = lib64.lstat()
+        except FileNotFoundError:
+            changed = False
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Managed Python environment is unsafe: {virtualenv}",
+            ) from exc
+        else:
+            if not stat.S_ISLNK(metadata.st_mode):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Managed Python lib64 path is unsafe: {lib64}",
+                )
+            try:
+                link = os.readlink(lib64)
+                target = virtualenv / "lib"
+                target_metadata = target.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Managed Python lib64 link is unsafe: {lib64}",
+                ) from exc
+            if link != "lib" or not stat.S_ISDIR(target_metadata.st_mode):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Managed Python lib64 link is unsafe: {lib64}",
+                )
+            lib64.unlink()
+            changed = True
+        self._assert_tree_safe(virtualenv)
+        return changed
+
+    def _materialize_python_environment_links(self, changed: list[str]) -> None:
+        virtualenv = self.paths.account_home / "agent-env"
+        if not self._path_present(virtualenv):
+            return
+        metadata = virtualenv.lstat()
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Managed Python environment is unsafe: {virtualenv}",
+            )
+        if self._normalize_python_environment(virtualenv):
+            changed.append(str(virtualenv / "lib64"))
+
+    def _ensure_node_runtime(
+        self,
+        changed: list[str],
+        *,
+        force: bool = False,
+    ) -> None:
+        if self._path_present(self.paths.node_root):
+            self._assert_node_runtime_safe()
+        if not force and self._node_runtime_supported():
             return
         if platform.machine() not in {"x86_64", "amd64"}:
             raise ManagementError(
@@ -2068,26 +3400,12 @@ class Manager:
                 "UNSUPPORTED_ARCHITECTURE",
                 "The pinned Beep Node runtime supports amd64 only.",
             )
-        request = urllib.request.Request(
-            NODE_URL, headers={"User-Agent": "beep-manage/1"}
+        archive_bytes = self._download_dependency(
+            NODE_URL,
+            hostname="nodejs.org",
+            maximum_bytes=MAX_NODE_ARCHIVE_BYTES,
+            label="pinned Beep Node runtime",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                final = urllib.parse.urlsplit(response.geturl())
-                if final.scheme != "https" or final.hostname != "nodejs.org":
-                    raise ManagementError(
-                        78,
-                        "DEPENDENCY_DOWNLOAD_FAILED",
-                        "The Node download redirected outside nodejs.org.",
-                    )
-                archive_bytes = response.read(MAX_NODE_ARCHIVE_BYTES + 1)
-        except OSError as exc:
-            raise ManagementError(
-                75,
-                "DEPENDENCY_DOWNLOAD_FAILED",
-                "Could not download the pinned Beep Node runtime.",
-                retryable=True,
-            ) from exc
         if (
             len(archive_bytes) > MAX_NODE_ARCHIVE_BYTES
             or hashlib.sha256(archive_bytes).hexdigest() != NODE_SHA256
@@ -2113,11 +3431,18 @@ class Manager:
                         "version": NODE_VERSION,
                         "archive": NODE_ARCHIVE,
                         "sha256": NODE_SHA256,
+                        "runtime_digest": self._node_base_digest(staged),
                     }
                 )
                 + b"\n",
                 mode=0o644,
             )
+            if not self._node_runtime_supported_at(staged, staged=True):
+                raise ManagementError(
+                    69,
+                    "DEPENDENCY_MISSING",
+                    f"The staged Node {NODE_VERSION} runtime is incomplete.",
+                )
             previous = self.paths.install_root / f".node-old-{uuid.uuid4().hex}"
             if self.paths.node_root.is_symlink():
                 raise ManagementError(
@@ -2144,9 +3469,21 @@ class Manager:
         changed.append(str(self.paths.node_root))
 
     def _node_runtime_supported(self) -> bool:
-        node = self.paths.node_root / "bin" / "node"
-        npm = self.paths.node_root / "bin" / "npm"
-        marker = self.paths.node_root / ".beep-node.json"
+        return self._node_runtime_supported_at(self.paths.node_root, staged=False)
+
+    def _node_runtime_supported_at(self, root: Path, *, staged: bool) -> bool:
+        if not self._path_present(root):
+            return False
+        try:
+            if staged:
+                self._assert_tree_safe(root)
+            else:
+                self._assert_node_runtime_safe()
+        except ManagementError:
+            return False
+        node = root / "bin" / "node"
+        npm = root / "bin" / "npm"
+        marker = root / ".beep-node.json"
         if (
             not node.is_file()
             or node.is_symlink()
@@ -2162,59 +3499,344 @@ class Manager:
             metadata = load_json(marker)
         except ManagementError:
             return False
-        if metadata != {
-            "schema_version": 1,
-            "version": NODE_VERSION,
-            "archive": NODE_ARCHIVE,
-            "sha256": NODE_SHA256,
-        }:
+        if (
+            set(metadata)
+            != {
+                "schema_version",
+                "version",
+                "archive",
+                "sha256",
+                "runtime_digest",
+            }
+            or metadata.get("schema_version") != 1
+            or metadata.get("version") != NODE_VERSION
+            or metadata.get("archive") != NODE_ARCHIVE
+            or metadata.get("sha256") != NODE_SHA256
+        ):
             return False
-        completed = self._run([node, "--version"], check=False)
-        return completed.returncode == 0 and completed.stdout.strip() == f"v{NODE_VERSION}"
-
-    def _assert_node_runtime_safe(self) -> None:
-        """Allow npm command links only when they stay inside the Node tree."""
-        root = self.paths.node_root
         try:
-            root_metadata = root.lstat()
-            resolved_root = root.resolve(strict=True)
-        except (OSError, RuntimeError) as exc:
-            raise ManagementError(
-                73, "UNSAFE_PATH", f"Pinned Node runtime is unsafe: {root}"
-            ) from exc
-        if not stat.S_ISDIR(root_metadata.st_mode):
-            raise ManagementError(
-                73, "UNSAFE_PATH", f"Pinned Node runtime is unsafe: {root}"
+            if metadata["runtime_digest"] != self._node_base_digest(root):
+                return False
+        except ManagementError:
+            return False
+        environment = self._node_subprocess_environment(root)
+        try:
+            node_check = self._run(
+                [node, "--version"],
+                check=False,
+                environment=environment,
             )
-        for path in root.rglob("*"):
+            npm_check = self._run(
+                [npm, "--version"],
+                check=False,
+                environment=environment,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return (
+            node_check.returncode == 0
+            and node_check.stdout.strip() == f"v{NODE_VERSION}"
+            and npm_check.returncode == 0
+            and re.fullmatch(
+                r"\d+(?:\.\d+){2}(?:[-+][0-9A-Za-z.-]+)?",
+                npm_check.stdout.strip(),
+            )
+            is not None
+        )
+
+    @staticmethod
+    def _node_base_digest(root: Path) -> str:
+        if not root.is_dir() or root.is_symlink():
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Pinned Node runtime is unsafe: {root}",
+            )
+        digest = hashlib.sha256()
+        for path in (root, *sorted(root.rglob("*"))):
+            relative_path = path.relative_to(root) if path != root else Path(".")
+            relative = PurePosixPath(*relative_path.parts)
+            mutable_modules = (
+                relative.parts[:2] == ("lib", "node_modules")
+                and (
+                    len(relative.parts) < 3
+                    or relative.parts[2] not in {"npm", "corepack"}
+                )
+            )
+            if (
+                mutable_modules
+                or relative
+                in {
+                    PurePosixPath(".beep-node.json"),
+                    PurePosixPath(".beep-bridges.json"),
+                    PurePosixPath("bin/pi"),
+                }
+            ):
+                continue
             try:
                 metadata = path.lstat()
             except OSError as exc:
                 raise ManagementError(
-                    73, "UNSAFE_PATH", f"Pinned Node path is unsafe: {path}"
+                    73,
+                    "UNSAFE_PATH",
+                    f"Pinned Node runtime path is unsafe: {path}",
                 ) from exc
             if stat.S_ISLNK(metadata.st_mode):
-                try:
-                    link_value = Path(os.readlink(path))
-                    target = path.resolve(strict=True)
-                except (OSError, RuntimeError) as exc:
-                    raise ManagementError(
-                        73, "UNSAFE_PATH", f"Pinned Node link is unsafe: {path}"
-                    ) from exc
-                if (
-                    link_value.is_absolute()
-                    or resolved_root not in target.parents
-                    or not target.is_file()
-                ):
-                    raise ManagementError(
-                        73, "UNSAFE_PATH", f"Pinned Node link is unsafe: {path}"
-                    )
-            elif not (
-                stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Pinned Node runtime path is unsafe: {path}",
+                )
+            digest.update(str(relative).encode())
+            digest.update(b"\0")
+            digest.update(f"{stat.S_IMODE(metadata.st_mode):04o}".encode())
+            digest.update(b"\0")
+            if stat.S_ISREG(metadata.st_mode):
+                with path.open("rb") as handle:
+                    for block in iter(lambda: handle.read(1024 * 1024), b""):
+                        digest.update(block)
+            elif not stat.S_ISDIR(metadata.st_mode):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Pinned Node runtime path is unsafe: {path}",
+                )
+            digest.update(b"\0")
+        return sha256_bytes(digest.digest())
+
+    def _node_subprocess_environment(
+        self,
+        node_root: Path | None = None,
+    ) -> dict[str, str]:
+        root = node_root or self.paths.node_root
+        environment = {
+            name: os.environ[name]
+            for name in DEPENDENCY_ENVIRONMENT_KEYS
+            if name in os.environ
+        }
+        environment.update(
+            {
+                "PATH": (
+                    f"{root / 'bin'}:"
+                    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+                ),
+                "HOME": "/root",
+                "LANG": "C.UTF-8",
+                "LC_ALL": "C.UTF-8",
+                "NPM_CONFIG_PREFIX": str(root),
+                "NPM_CONFIG_USERCONFIG": "/dev/null",
+                "NPM_CONFIG_GLOBALCONFIG": "/dev/null",
+                "NPM_CONFIG_IGNORE_SCRIPTS": "true",
+                "NPM_CONFIG_AUDIT": "false",
+                "NPM_CONFIG_FUND": "false",
+            }
+        )
+        return environment
+
+    def _expected_node_owner(self) -> tuple[int, int]:
+        if self.paths.install_root == Paths().install_root:
+            return 0, 0
+        return os.geteuid(), os.getegid()
+
+    def _assert_node_ancestors_safe(self) -> None:
+        self._assert_no_symlink_ancestors(self.paths.node_root)
+        if self.paths.install_root != Paths().install_root:
+            return
+        for path in (Path("/"), self.paths.install_root.parent, self.paths.install_root):
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Pinned Node runtime ancestry is unsafe: {path}",
+                ) from exc
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != 0
+                or metadata.st_gid != 0
+                or stat.S_IMODE(metadata.st_mode) & 0o022
             ):
                 raise ManagementError(
-                    73, "UNSAFE_PATH", f"Pinned Node path is unsafe: {path}"
+                    73,
+                    "UNSAFE_PATH",
+                    f"Pinned Node runtime ancestry is unsafe: {path}",
                 )
+
+    @staticmethod
+    def _assert_no_symlink_ancestors(path: Path) -> None:
+        absolute = path.absolute()
+        current = Path(absolute.anchor)
+        for part in absolute.parts[1:]:
+            current /= part
+            try:
+                metadata = current.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Protected path ancestry is unsafe: {path}",
+                ) from exc
+            if stat.S_ISLNK(metadata.st_mode):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Protected path ancestry contains a symlink: {current}",
+                )
+
+    def _assert_node_runtime_safe(self) -> None:
+        root = self.paths.node_root
+        self._assert_node_ancestors_safe()
+        expected_uid, expected_gid = self._expected_node_owner()
+        try:
+            entries = (root, *sorted(root.rglob("*")))
+            for path in entries:
+                metadata = path.lstat()
+                if (
+                    stat.S_ISLNK(metadata.st_mode)
+                    or not (
+                        stat.S_ISDIR(metadata.st_mode)
+                        or stat.S_ISREG(metadata.st_mode)
+                    )
+                    or metadata.st_uid != expected_uid
+                    or metadata.st_gid != expected_gid
+                    or stat.S_IMODE(metadata.st_mode) & 0o022
+                ):
+                    raise ManagementError(
+                        73,
+                        "UNSAFE_PATH",
+                        f"Pinned Node runtime path is unsafe: {path}",
+                    )
+        except ManagementError:
+            raise
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Pinned Node runtime is unsafe: {root}",
+            ) from exc
+
+    def _materialize_node_links(self, changed: list[str]) -> None:
+        """Replace legacy safe Node links without ever following an escape."""
+        replacements = self._node_link_replacements()
+        for path, content, mode in replacements:
+            replacement = path.with_name(
+                f".{path.name}.beep-materialize-{uuid.uuid4().hex}"
+            )
+            try:
+                atomic_write(replacement, content, mode=mode)
+                current = path.lstat()
+                if not stat.S_ISLNK(current.st_mode):
+                    raise ManagementError(
+                        73,
+                        "UNSAFE_PATH",
+                        f"Pinned Node link changed during migration: {path}",
+                    )
+                os.replace(replacement, path)
+            finally:
+                replacement.unlink(missing_ok=True)
+            changed.append(str(path))
+        self._assert_node_runtime_safe()
+
+    def _node_link_replacements(self) -> list[tuple[Path, bytes, int]]:
+        """Validate all Node entries and plan safe, regular link replacements."""
+        root = self.paths.node_root
+        self._assert_node_ancestors_safe()
+        expected_uid, expected_gid = self._expected_node_owner()
+        try:
+            root_metadata = root.lstat()
+            resolved_root = root.resolve(strict=True)
+            entries = sorted(root.rglob("*"))
+        except (OSError, RuntimeError) as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Pinned Node runtime is unsafe: {root}",
+            ) from exc
+        if (
+            not stat.S_ISDIR(root_metadata.st_mode)
+            or root_metadata.st_uid != expected_uid
+            or root_metadata.st_gid != expected_gid
+            or stat.S_IMODE(root_metadata.st_mode) & 0o022
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Pinned Node runtime is unsafe: {root}",
+            )
+        replacements: list[tuple[Path, bytes, int]] = []
+        for path in entries:
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Pinned Node runtime path is unsafe: {path}",
+                ) from exc
+            if not stat.S_ISLNK(metadata.st_mode):
+                if (
+                    not (
+                        stat.S_ISDIR(metadata.st_mode)
+                        or stat.S_ISREG(metadata.st_mode)
+                    )
+                    or metadata.st_uid != expected_uid
+                    or metadata.st_gid != expected_gid
+                    or stat.S_IMODE(metadata.st_mode) & 0o022
+                ):
+                    raise ManagementError(
+                        73,
+                        "UNSAFE_PATH",
+                        f"Pinned Node runtime path is unsafe: {path}",
+                    )
+                continue
+            try:
+                link_value = Path(os.readlink(path))
+                target = path.resolve(strict=True)
+                target_metadata = target.stat(follow_symlinks=False)
+                target.relative_to(resolved_root)
+            except (OSError, RuntimeError, ValueError) as exc:
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Pinned Node link is unsafe: {path}",
+                ) from exc
+            if (
+                link_value.is_absolute()
+                or metadata.st_uid != expected_uid
+                or metadata.st_gid != expected_gid
+                or not stat.S_ISREG(target_metadata.st_mode)
+                or target_metadata.st_uid != expected_uid
+                or target_metadata.st_gid != expected_gid
+                or stat.S_IMODE(target_metadata.st_mode) & 0o022
+            ):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Pinned Node link is unsafe: {path}",
+                )
+            mode = stat.S_IMODE(target_metadata.st_mode)
+            target_bytes = target.read_bytes()
+            executable = bool(mode & 0o111)
+            node_shebang = (
+                executable
+                and b"node" in target_bytes.split(b"\n", 1)[0].lower()
+            )
+            if executable:
+                command = self.paths.node_root / "bin" / "node" if node_shebang else target
+                arguments = (
+                    f" {shlex.quote(str(target))}" if node_shebang else ""
+                )
+                content = (
+                    "#!/bin/sh\n"
+                    f"exec {shlex.quote(str(command))}{arguments} \"$@\"\n"
+                ).encode()
+                mode = 0o755
+            else:
+                content = target_bytes
+                mode &= ~0o022
+            replacements.append((path, content, mode))
+        return replacements
 
     @staticmethod
     def _extract_node_archive(archive: Path, destination: Path) -> None:
@@ -2226,6 +3848,7 @@ class Manager:
                 members = source.getmembers()
                 seen: set[PurePosixPath] = set()
                 safe_links: dict[PurePosixPath, tuple[str, ...]] = {}
+                file_modes: dict[tuple[str, ...], int] = {}
                 for member in members:
                     path = PurePosixPath(member.name)
                     if (
@@ -2252,6 +3875,7 @@ class Manager:
                     if member.isfile():
                         file_count += 1
                         total_size += member.size
+                        file_modes[tuple(path.parts[1:])] = member.mode
                     if file_count > 25_000 or total_size > 512 * 1024 * 1024:
                         raise ManagementError(
                             78,
@@ -2308,15 +3932,44 @@ class Manager:
                     relative = member_path.relative_to(prefix)
                     target = destination.joinpath(*relative.parts)
                     link_target = destination.joinpath(*link_parts)
-                    if not link_target.is_file() or link_target.is_symlink():
+                    target_mode = file_modes.get(link_parts)
+                    if (
+                        target_mode is None
+                        or not link_target.is_file()
+                        or link_target.is_symlink()
+                    ):
                         raise ManagementError(
                             78,
                             "DEPENDENCY_INTEGRITY_FAILED",
                             "The Node archive link target is invalid.",
                         )
                     target.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
-                    shutil.copyfile(link_target, target)
-                    os.chmod(target, stat.S_IMODE(link_target.stat().st_mode))
+                    target_mode = stat.S_IMODE(target_mode)
+                    if target_mode & 0o111:
+                        relative_target = posixpath.relpath(
+                            str(PurePosixPath(*link_parts)),
+                            start=str(relative.parent),
+                        )
+                        first_line = link_target.read_bytes().split(b"\n", 1)[0]
+                        command = (
+                            '"${script_dir}/node" '
+                            if b"node" in first_line.lower()
+                            else ""
+                        )
+                        wrapper = (
+                            "#!/bin/sh\n"
+                            'script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\n'
+                            f'exec {command}"${{script_dir}}/"'
+                            f"{shlex.quote(relative_target)} \"$@\"\n"
+                        )
+                        target.write_text(wrapper, encoding="utf-8")
+                        os.chmod(target, 0o755)
+                    else:
+                        shutil.copyfile(link_target, target)
+                        os.chmod(
+                            target,
+                            target_mode,
+                        )
         except ManagementError:
             raise
         except (OSError, tarfile.TarError) as exc:
@@ -2325,72 +3978,649 @@ class Manager:
             ) from exc
 
     def _install_bridges(self, changed: list[str]) -> None:
+        self._assert_node_runtime_safe()
         npm = self.paths.node_root / "bin" / "npm"
         node = self.paths.node_root / "bin" / "node"
-        if not npm.is_file() or not node.is_file():
+        if (
+            not npm.is_file()
+            or npm.is_symlink()
+            or not os.access(npm, os.X_OK)
+            or not node.is_file()
+            or node.is_symlink()
+            or not os.access(node, os.X_OK)
+        ):
             raise ManagementError(69, "DEPENDENCY_MISSING", "Node and npm are required.")
-        environment = {
-            "PATH": (
-                f"{self.paths.node_root / 'bin'}:"
-                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-            ),
-            "HOME": "/root",
-            "LANG": "C.UTF-8",
-            "NPM_CONFIG_PREFIX": str(self.paths.node_root),
+        environment = self._node_subprocess_environment()
+        pins = self._bridge_pins()
+        self._validate_bridge_package_lock(pins)
+        tree_valid = self._bridge_tree_valid(pins)
+        if not tree_valid and str(self.paths.node_root) not in changed:
+            self._ensure_node_runtime(changed, force=True)
+            self._assert_node_runtime_safe()
+            npm = self.paths.node_root / "bin" / "npm"
+            node = self.paths.node_root / "bin" / "node"
+            environment = self._node_subprocess_environment()
+        if not tree_valid:
+            self._install_bridge_archives(npm, pins, environment)
+            self._normalize_node_runtime_metadata(allow_links=False)
+            changed.append("pinned-node-bridges")
+        self._materialize_node_links(changed)
+        direct_state = {
+            package: {"version": version}
+            for package, version, _, _, _ in pins
         }
+        if any(
+            not self._bridge_package_valid(direct_state, package, version)
+            for package, version, _, _, _ in pins
+        ):
+            raise ManagementError(
+                69,
+                "DEPENDENCY_MISSING",
+                "Pinned Beep bridge installation did not verify.",
+            )
+        self._ensure_node_launchers(pins, changed)
+        self._normalize_node_runtime_metadata(allow_links=False)
+        bridge_state = self._bridge_marker_value(pins)
+        if atomic_write(
+            self.paths.bridge_marker,
+            canonical_json(bridge_state) + b"\n",
+            mode=0o644,
+        ):
+            changed.append(str(self.paths.bridge_marker))
+        self._assert_node_runtime_safe()
+
+    def _normalize_node_runtime_metadata(self, *, allow_links: bool) -> None:
+        root = self.paths.node_root
+        self._assert_node_ancestors_safe()
+        expected_uid, expected_gid = self._expected_node_owner()
+        try:
+            entries = (root, *sorted(root.rglob("*")))
+            for path in entries:
+                metadata = path.lstat()
+                if stat.S_ISLNK(metadata.st_mode):
+                    if (
+                        not allow_links
+                        or metadata.st_uid != expected_uid
+                        or metadata.st_gid != expected_gid
+                    ):
+                        raise ManagementError(
+                            73,
+                            "UNSAFE_PATH",
+                            f"Pinned Node runtime path is unsafe: {path}",
+                        )
+                    continue
+                if (
+                    not (
+                        stat.S_ISDIR(metadata.st_mode)
+                        or stat.S_ISREG(metadata.st_mode)
+                    )
+                    or metadata.st_uid != expected_uid
+                    or metadata.st_gid != expected_gid
+                ):
+                    raise ManagementError(
+                        73,
+                        "UNSAFE_PATH",
+                        f"Pinned Node runtime path is unsafe: {path}",
+                    )
+                mode = (
+                    0o755
+                    if stat.S_ISDIR(metadata.st_mode)
+                    or stat.S_IMODE(metadata.st_mode) & 0o111
+                    else 0o644
+                )
+                os.chmod(path, mode)
+                if os.geteuid() == 0:
+                    os.chown(path, expected_uid, expected_gid)
+        except ManagementError:
+            raise
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Pinned Node runtime is unsafe: {root}",
+            ) from exc
+
+    def _bridge_pins(self) -> list[tuple[str, str, str, str, str]]:
         lock = self.source_root / "payload" / "agent" / "bridge-dependencies.lock"
-        pins: list[tuple[str, str, str, str]] = []
-        for line in lock.read_text(encoding="utf-8").splitlines():
+        pins: list[tuple[str, str, str, str, str]] = []
+        expected = {
+            "pi-ai": "@earendil-works/pi-ai",
+            "pi-mono": "@earendil-works/pi-coding-agent",
+        }
+        try:
+            lines = lock.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError) as exc:
+            raise ManagementError(
+                78,
+                "INVALID_DEPENDENCY_LOCK",
+                "Bridge lock is unavailable.",
+            ) from exc
+        seen: set[str] = set()
+        for line in lines:
             if not line or line.startswith("#"):
                 continue
             fields = line.split()
             if len(fields) != 7:
-                raise ManagementError(78, "INVALID_DEPENDENCY_LOCK", "Bridge lock is invalid.")
-            _, package, version, url, digest, _, _ = fields
-            pins.append((package, version, url, digest))
-        installed = self._run(
-            [str(npm), "ls", "-g", "--depth=0", "--json"],
-            check=False,
-            environment=environment,
-        )
-        try:
-            npm_state = json.loads(installed.stdout or "{}").get("dependencies", {})
-        except json.JSONDecodeError:
-            npm_state = {}
-        required = [
-            pin for pin in pins if npm_state.get(pin[0], {}).get("version") != pin[1]
-        ]
-        if not required:
-            return
-        with tempfile.TemporaryDirectory(prefix="beep-bridges-") as directory:
-            archives: list[str] = []
-            for package, version, url, digest in required:
+                raise ManagementError(
+                    78,
+                    "INVALID_DEPENDENCY_LOCK",
+                    "Bridge lock is invalid.",
+                )
+            name, package, version, url, digest, integrity, license_name = fields
+            try:
                 parsed = urllib.parse.urlsplit(url)
-                if parsed.scheme != "https" or parsed.hostname != "registry.npmjs.org":
-                    raise ManagementError(78, "INVALID_DEPENDENCY_LOCK", "Bridge URL is unsafe.")
-                destination = Path(directory) / f"{package.rsplit('/', 1)[-1]}-{version}.tgz"
-                request = urllib.request.Request(url, headers={"User-Agent": "beep-manage/1"})
-                try:
-                    with urllib.request.urlopen(request, timeout=30) as response:
-                        data = response.read(MAX_DOWNLOAD_BYTES + 1)
-                except OSError as exc:
-                    raise ManagementError(
-                        75,
-                        "DEPENDENCY_DOWNLOAD_FAILED",
-                        "Could not download a pinned Beep bridge.",
-                        retryable=True,
-                    ) from exc
-                if len(data) > MAX_DOWNLOAD_BYTES or hashlib.sha256(data).hexdigest() != digest:
-                    raise ManagementError(
-                        78, "DEPENDENCY_INTEGRITY_FAILED", "Bridge digest did not match."
-                    )
-                destination.write_bytes(data)
-                archives.append(str(destination))
-            self._run(
-                [str(npm), "install", "-g", "--ignore-scripts", *archives],
-                environment=environment,
+                port = parsed.port
+            except ValueError:
+                parsed = urllib.parse.urlsplit("")
+                port = -1
+            if (
+                expected.get(name) != package
+                or package in seen
+                or re.fullmatch(r"\d+(?:\.\d+){2}", version) is None
+                or parsed.scheme != "https"
+                or parsed.hostname != "registry.npmjs.org"
+                or port is not None
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.query
+                or parsed.fragment
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+                or not integrity.startswith("sha512-")
+                or license_name != "MIT"
+            ):
+                raise ManagementError(
+                    78,
+                    "INVALID_DEPENDENCY_LOCK",
+                    "Bridge lock is invalid.",
+                )
+            seen.add(package)
+            pins.append((package, version, url, digest, integrity))
+        if seen != set(expected.values()):
+            raise ManagementError(
+                78,
+                "INVALID_DEPENDENCY_LOCK",
+                "Bridge lock is incomplete.",
             )
-        changed.append("pinned-node-bridges")
+        return pins
+
+    def _validate_bridge_package_lock(
+        self,
+        pins: list[tuple[str, str, str, str, str]],
+    ) -> None:
+        manifest_path = self.source_root / "payload" / "agent" / "bridge-package.json"
+        lock_path = (
+            self.source_root / "payload" / "agent" / "bridge-package-lock.json"
+        )
+        manifest = load_json(manifest_path)
+        lock = load_json(lock_path)
+        dependencies = {
+            package: url for package, _, url, _, _ in pins
+        }
+        expected_manifest = {
+            "name": "beep-bridges",
+            "version": "1.0.0",
+            "private": True,
+            "dependencies": dependencies,
+        }
+        packages = lock.get("packages")
+        if (
+            manifest != expected_manifest
+            or set(lock) != {"name", "version", "lockfileVersion", "requires", "packages"}
+            or lock.get("name") != "beep-bridges"
+            or lock.get("version") != "1.0.0"
+            or lock.get("lockfileVersion") != 3
+            or lock.get("requires") is not True
+            or not isinstance(packages, dict)
+            or packages.get("")
+            != {
+                "name": "beep-bridges",
+                "version": "1.0.0",
+                "dependencies": dependencies,
+            }
+        ):
+            raise ManagementError(
+                78,
+                "INVALID_DEPENDENCY_LOCK",
+                "The complete bridge dependency lock is invalid.",
+            )
+        for name, package in packages.items():
+            path = PurePosixPath(name) if isinstance(name, str) else PurePosixPath("/")
+            if name == "":
+                continue
+            if (
+                not isinstance(name, str)
+                or "\\" in name
+                or path.is_absolute()
+                or ".." in path.parts
+                or not path.parts
+                or path.parts[0] != "node_modules"
+                or not isinstance(package, dict)
+                or not isinstance(package.get("version"), str)
+                or not package["version"]
+                or not isinstance(package.get("resolved"), str)
+                or not isinstance(package.get("integrity"), str)
+                or re.fullmatch(
+                    r"sha512-[A-Za-z0-9+/]+={0,2}",
+                    package["integrity"],
+                )
+                is None
+            ):
+                raise ManagementError(
+                    78,
+                    "INVALID_DEPENDENCY_LOCK",
+                    "The complete bridge dependency lock contains an unsafe entry.",
+                )
+            try:
+                resolved = urllib.parse.urlsplit(package["resolved"])
+                port = resolved.port
+            except ValueError as exc:
+                raise ManagementError(
+                    78,
+                    "INVALID_DEPENDENCY_LOCK",
+                    "The complete bridge dependency lock contains an invalid URL.",
+                ) from exc
+            if (
+                resolved.scheme != "https"
+                or resolved.hostname != "registry.npmjs.org"
+                or port is not None
+                or resolved.username is not None
+                or resolved.password is not None
+                or resolved.query
+                or resolved.fragment
+            ):
+                raise ManagementError(
+                    78,
+                    "INVALID_DEPENDENCY_LOCK",
+                    "The complete bridge dependency lock leaves the npm registry.",
+                )
+        for package, version, url, _, integrity in pins:
+            direct = packages.get(f"node_modules/{package}")
+            if not isinstance(direct, dict) or (
+                direct.get("version"),
+                direct.get("resolved"),
+                direct.get("integrity"),
+            ) != (version, url, integrity):
+                raise ManagementError(
+                    78,
+                    "INVALID_DEPENDENCY_LOCK",
+                    "The direct bridge pins differ from the complete dependency lock.",
+                )
+
+    def _bridge_marker_value(
+        self,
+        pins: list[tuple[str, str, str, str, str]],
+    ) -> dict[str, Any]:
+        modules = self.paths.node_root / "lib" / "node_modules"
+        manifest = self.source_root / "payload" / "agent" / "bridge-package.json"
+        package_lock = (
+            self.source_root / "payload" / "agent" / "bridge-package-lock.json"
+        )
+        return {
+            "schema_version": 1,
+            "packages": [
+                {
+                    "name": package,
+                    "version": version,
+                    "url": url,
+                    "sha256": digest,
+                    "integrity": integrity,
+                }
+                for package, version, url, digest, integrity in pins
+            ],
+            "manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+            "lock_sha256": hashlib.sha256(package_lock.read_bytes()).hexdigest(),
+            "tree_digest": self._tree_digest(modules),
+        }
+
+    def _bridge_tree_valid(
+        self,
+        pins: list[tuple[str, str, str, str, str]],
+    ) -> bool:
+        marker = self.paths.bridge_marker
+        try:
+            metadata = marker.lstat()
+            value = load_json(marker)
+        except (OSError, ManagementError):
+            return False
+        expected_uid, expected_gid = self._expected_node_owner()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != expected_uid
+            or metadata.st_gid != expected_gid
+            or stat.S_IMODE(metadata.st_mode) != 0o644
+        ):
+            return False
+        try:
+            expected = self._bridge_marker_value(pins)
+        except ManagementError:
+            return False
+        return value == expected
+
+    def _install_bridge_archives(
+        self,
+        npm: Path,
+        pins: list[tuple[str, str, str, str, str]],
+        environment: dict[str, str],
+    ) -> None:
+        with tempfile.TemporaryDirectory(prefix="beep-bridges-") as directory:
+            work = Path(directory)
+            self._validate_bridge_package_lock(pins)
+            shutil.copy2(
+                self.source_root / "payload" / "agent" / "bridge-package.json",
+                work / "package.json",
+            )
+            shutil.copy2(
+                self.source_root / "payload" / "agent" / "bridge-package-lock.json",
+                work / "package-lock.json",
+            )
+            install_environment = {
+                **environment,
+                "NPM_CONFIG_CACHE": str(work / "npm-cache"),
+            }
+            self._run_dependency_command(
+                [
+                    str(npm),
+                    "--prefix",
+                    str(work),
+                    "ci",
+                    "--ignore-scripts",
+                    "--no-bin-links",
+                    "--no-audit",
+                    "--no-fund",
+                    "--registry=https://registry.npmjs.org/",
+                ],
+                environment=install_environment,
+            )
+            source_modules = work / "node_modules"
+            self._assert_tree_safe(source_modules)
+            modules = self.paths.node_root / "lib" / "node_modules"
+            self._assert_tree_safe(modules)
+            for target in modules.iterdir():
+                if target.name in {"npm", "corepack"}:
+                    continue
+                if target.is_dir():
+                    shutil.rmtree(target)
+                elif target.is_file() and not target.is_symlink():
+                    target.unlink()
+                else:
+                    raise ManagementError(
+                        73,
+                        "UNSAFE_PATH",
+                        f"Pinned Node module path is unsafe: {target}",
+                    )
+            for source in source_modules.iterdir():
+                if source.name in {"npm", "corepack"}:
+                    raise ManagementError(
+                        78,
+                        "DEPENDENCY_INTEGRITY_FAILED",
+                        "The bridge lock attempts to replace Node's package manager.",
+                    )
+                target = modules / source.name
+                if source.is_dir():
+                    shutil.copytree(source, target, symlinks=False)
+                elif source.is_file() and not source.is_symlink():
+                    shutil.copy2(source, target)
+                else:
+                    raise ManagementError(
+                        78,
+                        "DEPENDENCY_INTEGRITY_FAILED",
+                        f"The locked bridge tree contains an unsafe entry: {source}",
+                    )
+            self._assert_tree_safe(modules)
+
+    def _bridge_package_valid(
+        self,
+        npm_state: dict[str, Any],
+        package: str,
+        version: str,
+    ) -> bool:
+        state = npm_state.get(package)
+        if not isinstance(state, dict) or state.get("version") != version:
+            return False
+        package_root = self.paths.node_root / "lib" / "node_modules" / package
+        manifest = package_root / "package.json"
+        if manifest.is_symlink() or not manifest.is_file():
+            return False
+        try:
+            metadata = load_json(manifest)
+        except ManagementError:
+            return False
+        return metadata.get("name") == package and metadata.get("version") == version
+
+    def _bridge_runtime_valid(self) -> bool:
+        try:
+            pins = self._bridge_pins()
+            self._validate_bridge_package_lock(pins)
+            if not self._bridge_tree_valid(pins):
+                return False
+            state = {
+                package: {"version": version}
+                for package, version, _, _, _ in pins
+            }
+            if any(
+                not self._bridge_package_valid(state, package, version)
+                for package, version, _, _, _ in pins
+            ):
+                return False
+            package = "@earendil-works/pi-coding-agent"
+            package_root = (
+                self.paths.node_root / "lib" / "node_modules" / package
+            )
+            manifest = load_json(package_root / "package.json")
+            commands = manifest.get("bin")
+            relative_value = commands.get("pi") if isinstance(commands, dict) else None
+            if not isinstance(relative_value, str):
+                return False
+            relative = PurePosixPath(relative_value)
+            if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+                return False
+            target = package_root.joinpath(*relative.parts)
+            launcher = self.paths.node_root / "bin" / "pi"
+            expected = (
+                "#!/bin/sh\n"
+                f"exec {shlex.quote(str(self.paths.node_root / 'bin' / 'node'))} "
+                f"{shlex.quote(str(target))} \"$@\"\n"
+            ).encode()
+            metadata = launcher.lstat()
+            return (
+                stat.S_ISREG(metadata.st_mode)
+                and stat.S_IMODE(metadata.st_mode) == 0o755
+                and target.is_file()
+                and not target.is_symlink()
+                and launcher.read_bytes() == expected
+            )
+        except (OSError, ManagementError):
+            return False
+
+    def _ensure_node_launchers(
+        self,
+        pins: list[tuple[str, str, str, str, str]],
+        changed: list[str],
+    ) -> None:
+        """Replace npm links with regular launchers into the pinned packages."""
+        self._materialize_node_links(changed)
+        package = "@earendil-works/pi-coding-agent"
+        expected_version = next(
+            (version for name, version, _, _, _ in pins if name == package),
+            None,
+        )
+        package_root = self.paths.node_root / "lib" / "node_modules" / package
+        manifest = package_root / "package.json"
+        if expected_version is None or manifest.is_symlink() or not manifest.is_file():
+            raise ManagementError(
+                78,
+                "DEPENDENCY_INTEGRITY_FAILED",
+                "The pinned pi command package is incomplete.",
+            )
+        metadata = load_json(manifest)
+        commands = metadata.get("bin")
+        relative_value = commands.get("pi") if isinstance(commands, dict) else None
+        if (
+            metadata.get("name") != package
+            or metadata.get("version") != expected_version
+            or not isinstance(relative_value, str)
+        ):
+            raise ManagementError(
+                78,
+                "DEPENDENCY_INTEGRITY_FAILED",
+                "The pinned pi command metadata is invalid.",
+            )
+        relative = PurePosixPath(relative_value)
+        if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+            raise ManagementError(
+                78,
+                "DEPENDENCY_INTEGRITY_FAILED",
+                "The pinned pi command path is unsafe.",
+            )
+        target = package_root.joinpath(*relative.parts)
+        if target.is_symlink() or not target.is_file():
+            raise ManagementError(
+                78,
+                "DEPENDENCY_INTEGRITY_FAILED",
+                "The pinned pi command is unavailable.",
+            )
+        bin_root = self.paths.node_root / "bin"
+        if bin_root.is_symlink() or not bin_root.is_dir():
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Pinned Node command path is unsafe: {bin_root}"
+            )
+        launcher = bin_root / "pi"
+        content = (
+            "#!/bin/sh\n"
+            f"exec {shlex.quote(str(self.paths.node_root / 'bin' / 'node'))} "
+            f"{shlex.quote(str(target))} \"$@\"\n"
+        ).encode()
+        if atomic_write(launcher, content, mode=0o755):
+            changed.append(str(launcher))
+        self._assert_node_runtime_safe()
+
+    @staticmethod
+    def _download_dependency(
+        url: str,
+        *,
+        hostname: str,
+        maximum_bytes: int,
+        label: str,
+    ) -> bytes:
+        parsed = urllib.parse.urlsplit(url)
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ManagementError(
+                78,
+                "DEPENDENCY_DOWNLOAD_FAILED",
+                f"The {label} download URL is invalid.",
+            ) from exc
+        if (
+            parsed.scheme != "https"
+            or parsed.hostname != hostname
+            or port is not None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.fragment
+        ):
+            raise ManagementError(
+                78,
+                "DEPENDENCY_DOWNLOAD_FAILED",
+                f"The {label} download URL is unsafe.",
+            )
+        request = urllib.request.Request(
+            url, headers={"User-Agent": "beep-manage/1"}
+        )
+        last_error: BaseException | None = None
+        for attempt in range(1, DEPENDENCY_ATTEMPTS + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    final = urllib.parse.urlsplit(response.geturl())
+                    try:
+                        final_port = final.port
+                    except ValueError as exc:
+                        raise ManagementError(
+                            78,
+                            "DEPENDENCY_DOWNLOAD_FAILED",
+                            f"The {label} download redirected to an invalid URL.",
+                        ) from exc
+                    if (
+                        final.scheme != "https"
+                        or final.hostname != hostname
+                        or final_port is not None
+                        or final.username is not None
+                        or final.password is not None
+                        or final.fragment
+                    ):
+                        raise ManagementError(
+                            78,
+                            "DEPENDENCY_DOWNLOAD_FAILED",
+                            f"The {label} download redirected outside {hostname}.",
+                        )
+                    data = response.read(maximum_bytes + 1)
+                    if len(data) > maximum_bytes:
+                        raise ManagementError(
+                            78,
+                            "DEPENDENCY_INTEGRITY_FAILED",
+                            f"The {label} download exceeds its size limit.",
+                        )
+                    return data
+            except ManagementError:
+                raise
+            except (OSError, http.client.HTTPException) as exc:
+                last_error = exc
+                if attempt < DEPENDENCY_ATTEMPTS:
+                    time.sleep(DEPENDENCY_RETRY_SECONDS)
+        raise ManagementError(
+            75,
+            "DEPENDENCY_DOWNLOAD_FAILED",
+            f"Could not download the {label}.",
+            retryable=True,
+        ) from last_error
+
+    def _run_dependency_command(
+        self,
+        arguments: list[str],
+        *,
+        environment: dict[str, str],
+    ) -> subprocess.CompletedProcess[str]:
+        attempt = 0
+        lock_deadline = time.monotonic() + APT_LOCK_WAIT_SECONDS
+        while True:
+            attempt += 1
+            try:
+                completed = self._run(
+                    arguments,
+                    check=False,
+                    environment=environment,
+                )
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                completed = subprocess.CompletedProcess(
+                    arguments,
+                    1,
+                    "",
+                    str(exc),
+                )
+            if completed.returncode == 0:
+                return completed
+            detail = f"{completed.stdout}\n{completed.stderr}".lower()
+            apt_locked = Path(arguments[0]).name == "apt-get" and any(
+                phrase in detail
+                for phrase in (
+                    "could not get lock",
+                    "unable to acquire the dpkg frontend lock",
+                    "is another process using it",
+                )
+            )
+            if apt_locked and time.monotonic() < lock_deadline:
+                time.sleep(DEPENDENCY_RETRY_SECONDS)
+                continue
+            if attempt < DEPENDENCY_ATTEMPTS:
+                time.sleep(DEPENDENCY_RETRY_SECONDS)
+                continue
+            raise ManagementError(
+                75,
+                "DEPENDENCY_COMMAND_FAILED",
+                f"Dependency command failed: {Path(arguments[0]).name}",
+                retryable=True,
+                recovery=["Inspect the Beep lifecycle audit and system journal."],
+            )
 
     def _deploy_runtime(
         self,
@@ -2427,10 +4657,7 @@ class Manager:
             changed.append(str(version_path))
         self._deploy_product_source(changed)
         self._deploy_pi_models(configuration, uid, gid, changed)
-        self._assert_node_runtime_safe()
         for path in self.paths.install_root.rglob("*"):
-            if path == self.paths.node_root or self.paths.node_root in path.parents:
-                continue
             if path.is_symlink():
                 raise ManagementError(73, "UNSAFE_PATH", f"Runtime contains symlink: {path}")
             if path.is_dir():
@@ -2450,13 +4677,25 @@ class Manager:
         gid: int,
         changed: list[str],
     ) -> None:
+        home = Path(pwd.getpwnam(configuration.agent_user).pw_dir)
+        models = home / ".pi" / "agent" / "models.json"
+        assert_directory_ancestry_safe(models.parent)
         if (
             configuration.provider != "lmstudio"
             or configuration.model is None
             or configuration.model_base_url is None
         ):
+            if self._path_present(models):
+                metadata = models.lstat()
+                if not stat.S_ISREG(metadata.st_mode):
+                    raise ManagementError(
+                        73,
+                        "UNSAFE_PATH",
+                        f"Refusing unsafe Pi model configuration: {models}",
+                    )
+                models.unlink()
+                changed.append(str(models))
             return
-        home = Path(pwd.getpwnam(configuration.agent_user).pw_dir)
         pi_root = home / ".pi"
         agent_root = pi_root / "agent"
         for path in (pi_root, agent_root):
@@ -2465,7 +4704,6 @@ class Manager:
             path.mkdir(mode=0o700, exist_ok=True)
             os.chmod(path, 0o700)
             os.chown(path, uid, gid)
-        models = agent_root / "models.json"
         content = {
             "providers": {
                 "lmstudio": {
@@ -2550,6 +4788,12 @@ class Manager:
                     )
                 target.mkdir(parents=True, exist_ok=True)
                 continue
+            if not item.is_file():
+                raise ManagementError(
+                    78,
+                    "UNSAFE_SOURCE",
+                    f"Unsupported source path: {item}",
+                )
             mode = 0o755 if executable or os.access(item, os.X_OK) else 0o644
             if atomic_write(target, item.read_bytes(), mode=mode):
                 changed.append(str(target))
@@ -2559,10 +4803,17 @@ class Manager:
                     raise ManagementError(
                         73, "UNSAFE_PATH", f"Refusing destination symlink: {target}"
                     )
-                if target.is_dir():
+                metadata = target.lstat()
+                if stat.S_ISDIR(metadata.st_mode):
                     target.rmdir()
-                else:
+                elif stat.S_ISREG(metadata.st_mode):
                     target.unlink()
+                else:
+                    raise ManagementError(
+                        73,
+                        "UNSAFE_PATH",
+                        f"Refusing unsupported destination: {target}",
+                    )
                 changed.append(str(target))
 
     def _deploy_configuration(
@@ -2645,6 +4896,14 @@ class Manager:
             "provider_credential_file",
             "BEEP_PROVIDER_CREDENTIAL_FILE",
         )
+        selected_credential = (
+            PROVIDER_KEYS[configuration.provider]
+            if configuration.provider is not None
+            else None
+        )
+        for credential_key in PROVIDER_KEYS.values():
+            if credential_key != selected_credential:
+                existing.pop(credential_key, None)
         if configuration.provider is not None:
             existing["BEEP_PROVIDER"] = configuration.provider
             if credential_file is not None:
@@ -2774,7 +5033,12 @@ class Manager:
             if not line or line.startswith("#"):
                 continue
             key, separator, value = line.partition("=")
-            if not separator or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key):
+            if (
+                not separator
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key)
+                or key not in SECRET_ENV_KEYS
+                or key in result
+            ):
                 raise ManagementError(78, "INVALID_SECRET_ENV", "Secret environment is invalid.")
             lexer = shlex.shlex(value, posix=True)
             lexer.whitespace_split = True
@@ -2795,8 +5059,28 @@ class Manager:
     @staticmethod
     def _read_one_secret(path: Path, *, minimum: int) -> str:
         try:
-            value = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError as exc:
+            raise ManagementError(65, "INVALID_SECRET", "Secret file is unavailable.") from exc
+        try:
+            metadata = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != 0
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+                or metadata.st_size > 1025
+            ):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_SECRET_FILE",
+                    "Secret files must be root-owned regular files with mode 0600.",
+                )
+            content = os.read(descriptor, 1026)
+        finally:
+            os.close(descriptor)
+        try:
+            value = content.decode("utf-8")
+        except UnicodeError as exc:
             raise ManagementError(65, "INVALID_SECRET", "Secret file is not UTF-8.") from exc
         value = value.rstrip("\n")
         if "\n" in value or "\r" in value or not minimum <= len(value.encode()) <= 1024:
@@ -2890,36 +5174,23 @@ class Manager:
         gid: int,
         changed: list[str],
     ) -> None:
-        payload = self.source_root / "payload"
-        home = Path(pwd.getpwnam(configuration.agent_user).pw_dir)
-        replacements = {
-            "__AGENT_USER__": configuration.agent_user,
-            "__AGENT_HOME__": str(home),
-            "__BEEP_DIR__": str(self.paths.install_root),
-        }
-        assets = (
-            ("systemd/beep-chat.service", self.paths.chat_unit, 0o644),
-            ("systemd/beep-health.service", self.paths.health_unit, 0o644),
-            ("systemd/beep-health.timer", self.paths.health_timer, 0o644),
-            ("logrotate/beep", self.paths.logrotate, 0o644),
-        )
-        for source_name, destination, mode in assets:
-            value = (payload / source_name).read_text(encoding="utf-8")
-            for old, new in replacements.items():
-                value = value.replace(old, new)
-            if "__" in value and source_name.startswith(("systemd/", "logrotate/")):
-                unresolved = re.findall(r"__[A-Z][A-Z0-9_]*__", value)
-                if unresolved:
-                    raise ManagementError(78, "UNRESOLVED_TEMPLATE", "Service template is invalid.")
-            if atomic_write(destination, value.encode(), mode=mode):
+        specifications = self._host_resource_specs(configuration)
+        for destination in (
+            self.paths.chat_unit,
+            self.paths.health_unit,
+            self.paths.health_timer,
+            self.paths.logrotate,
+        ):
+            content, mode = specifications[destination]
+            if atomic_write(destination, content, mode=mode):
                 changed.append(str(destination))
-        wrapper = (self.source_root / "scripts" / "manage.sh").read_bytes()
-        if atomic_write(self.paths.entrypoint, wrapper, mode=0o755):
+        wrapper, wrapper_mode = specifications[self.paths.entrypoint]
+        if atomic_write(self.paths.entrypoint, wrapper, mode=wrapper_mode):
             changed.append(str(self.paths.entrypoint))
         for command in HOST_COMMANDS:
-            destination = Path("/usr/local/bin") / command
-            source = self.paths.install_root / "bin" / command
-            if atomic_write(destination, source.read_bytes(), mode=0o755):
+            destination = self.paths.command_root / command
+            content, mode = specifications[destination]
+            if atomic_write(destination, content, mode=mode):
                 changed.append(str(destination))
         os.chown(self.paths.secrets, uid, gid)
 
@@ -2932,6 +5203,18 @@ class Manager:
             return
         self._run(["systemctl", "enable", "--now", "beep-chat.service"])
         self._run(["systemctl", "enable", "--now", "beep-health.timer"])
+        failed = [
+            unit
+            for unit in ("beep-chat.service", "beep-health.timer")
+            if not self._service_active(unit) or not self._service_enabled(unit)
+        ]
+        if failed:
+            raise ManagementError(
+                1,
+                "SERVICE_START_FAILED",
+                "Beep units did not become active and enabled: "
+                + ", ".join(failed),
+            )
         changed.extend(["unit:beep-chat.service", "unit:beep-health.timer"])
 
     def _execute_backup(
@@ -2947,11 +5230,22 @@ class Manager:
         archive = destination / f"beep-{self.version}-{invocation.correlation_id}.tar.gz"
         if archive.exists() or archive.is_symlink():
             raise ManagementError(73, "BACKUP_EXISTS", "Backup destination already exists.")
-        suspended = self.paths.suspended.exists()
-        self._stop_services()
+        changed: list[str] = []
+        self._secure_state_control_root(changed)
+        self._assert_account_home_migratable()
+        for path in (
+            self.paths.configuration_root,
+            self.paths.state_root,
+            self.paths.log_root,
+        ):
+            self._assert_tree_safe(path)
+        self._materialize_python_environment_links(changed)
+        service_state = self._capture_service_state()
         try:
+            self._stop_services()
             with tarfile.open(archive, "x:gz") as output:
                 for path, name in (
+                    (self.paths.account_home, "home"),
                     (self.paths.configuration_root, "etc"),
                     (self.paths.state_root, "state"),
                     (self.paths.log_root, "log"),
@@ -2985,9 +5279,24 @@ class Manager:
             archive.unlink(missing_ok=True)
             raise
         finally:
-            if not suspended and not self._lifecycle_status()["dead"]:
-                self._start_services([], suspended=False)
-        return [str(archive)], str(marker["version"]), str(archive)
+            try:
+                self._restore_service_state(service_state)
+            except Exception as exc:
+                archive.unlink(missing_ok=True)
+                try:
+                    self._stop_services()
+                except Exception:
+                    pass
+                raise ManagementError(
+                    1,
+                    "SERVICE_RESTORE_FAILED",
+                    "Backup did not commit because Beep's prior service state could not be restored.",
+                    recovery=[
+                        "Keep Beep stopped, inspect the system journal, and retry backup with a new correlation ID."
+                    ],
+                ) from exc
+        changed.append(str(archive))
+        return sorted(set(changed)), str(marker["version"]), str(archive)
 
     def _backup_destination(self, invocation: Invocation) -> Path | None:
         value = invocation.inputs.get(
@@ -3005,6 +5314,7 @@ class Manager:
             Path("/etc"),
             Path("/var/lib"),
             Path("/var/log"),
+            self.paths.account_home,
         )
         if any(destination == root or root in destination.parents for root in protected):
             raise ManagementError(
@@ -3014,13 +5324,22 @@ class Manager:
             )
         return destination
 
-    def _create_recovery_snapshot(self, correlation_id: str) -> Path:
+    def _create_recovery_snapshot(
+        self,
+        correlation_id: str,
+        service_state: dict[str, Any],
+    ) -> Path:
         marker = self.load_marker(required=True)
+        self._validate_service_snapshot(service_state)
+        self._prepare_recovery_root(create=True)
         snapshot = self.paths.rollback_root / correlation_id
-        if snapshot.exists():
-            self._assert_tree_safe(snapshot)
-            shutil.rmtree(snapshot)
-        self.paths.rollback_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self._path_present(snapshot):
+            raise ManagementError(
+                73,
+                "RECOVERY_SNAPSHOT_EXISTS",
+                "A recovery snapshot already uses this correlation ID.",
+                recovery=["Retry with a new lifecycle correlation ID."],
+            )
         temporary = Path(
             tempfile.mkdtemp(
                 prefix=f".beep-recovery-{correlation_id}-",
@@ -3028,13 +5347,20 @@ class Manager:
             )
         )
         try:
+            root_presence: dict[str, bool] = {}
             for source, name in (
                 (self.paths.install_root, "opt"),
+                (self.paths.account_home, "home"),
                 (self.paths.configuration_root, "etc"),
             ):
+                if not self._path_present(source):
+                    root_presence[name] = False
+                    continue
                 self._assert_tree_safe(source)
                 shutil.copytree(source, temporary / name, symlinks=False)
+                root_presence[name] = True
             self._assert_tree_safe(self.paths.state_root)
+            root_presence["state"] = True
 
             def omit_recovery(directory: str, names: list[str]) -> set[str]:
                 if Path(directory) == self.paths.state_root:
@@ -3050,9 +5376,12 @@ class Manager:
             ownership: dict[str, list[int]] = {}
             for source, name in (
                 (self.paths.install_root, "opt"),
+                (self.paths.account_home, "home"),
                 (self.paths.configuration_root, "etc"),
                 (self.paths.state_root, "state"),
             ):
+                if not root_presence[name]:
+                    continue
                 ownership.update(
                     self._ownership_map(
                         source,
@@ -3072,6 +5401,7 @@ class Manager:
                     )
                 if not host_path.exists():
                     continue
+                self._assert_no_symlink_ancestors(host_path.parent)
                 if not host_path.is_file():
                     raise ManagementError(
                         73, "UNSAFE_PATH", f"Host resource is not a file: {host_path}"
@@ -3085,7 +5415,7 @@ class Manager:
                 ownership[f"host/{relative}"] = [metadata.st_uid, metadata.st_gid]
             digests = {
                 name: self._tree_digest(temporary / name)
-                for name in ("opt", "etc", "state", "host")
+                for name in ("opt", "home", "etc", "state", "host")
                 if (temporary / name).exists()
             }
             atomic_write(
@@ -3098,6 +5428,8 @@ class Manager:
                         "instance_id": marker["instance_id"],
                         "created_at": utc_now(),
                         "version": marker["version"],
+                        "root_presence": root_presence,
+                        "service_state": service_state,
                         "tree_digests": digests,
                         "host_files": sorted(present_host_files),
                         "ownership": ownership,
@@ -3110,17 +5442,44 @@ class Manager:
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary)
-        atomic_write(
-            self.paths.rollback_root / "latest",
-            f"{snapshot.name}\n".encode(),
-            mode=0o600,
-        )
+        try:
+            atomic_write(
+                self.paths.rollback_root / "latest",
+                f"{snapshot.name}\n".encode(),
+                mode=0o600,
+            )
+        except Exception:
+            if self._path_present(snapshot):
+                self._assert_tree_safe(snapshot)
+                shutil.rmtree(snapshot)
+            raise
         return snapshot
 
-    def _execute_rollback(self) -> tuple[list[str], str | None]:
+    def _execute_rollback(
+        self,
+        *,
+        allow_degraded: bool = False,
+    ) -> tuple[list[str], str | None]:
+        self._last_rollback_degraded = False
         marker = self.load_marker(required=True)
+        changed: list[str] = []
+        self._secure_state_control_root(changed)
+        if self._path_present(self.paths.node_root):
+            self._node_link_replacements()
+        self._prepare_recovery_root(create=False)
         latest = self.paths.rollback_root / "latest"
-        if not latest.is_file() or latest.is_symlink():
+        try:
+            latest_metadata = latest.lstat()
+        except OSError:
+            latest_metadata = None
+        expected_uid, expected_gid = self._expected_node_owner()
+        if (
+            latest_metadata is None
+            or not stat.S_ISREG(latest_metadata.st_mode)
+            or latest_metadata.st_uid != expected_uid
+            or latest_metadata.st_gid != expected_gid
+            or stat.S_IMODE(latest_metadata.st_mode) != 0o600
+        ):
             raise ManagementError(66, "ROLLBACK_UNAVAILABLE", "No rollback snapshot exists.")
         name = latest.read_text(encoding="utf-8").strip()
         try:
@@ -3140,6 +5499,8 @@ class Manager:
             "instance_id",
             "created_at",
             "version",
+            "root_presence",
+            "service_state",
             "tree_digests",
             "host_files",
             "ownership",
@@ -3151,8 +5512,19 @@ class Manager:
             or metadata["correlation_id"] != name
             or metadata["instance_id"] != marker["instance_id"]
             or not VERSION_PATTERN.fullmatch(str(metadata["version"]))
+            or not isinstance(metadata["root_presence"], dict)
+            or set(metadata["root_presence"])
+            != {"opt", "home", "etc", "state"}
+            or any(
+                not isinstance(present, bool)
+                for present in metadata["root_presence"].values()
+            )
+            or metadata["root_presence"]["state"] is not True
+            or not self._service_snapshot_valid(metadata["service_state"])
             or not isinstance(metadata["tree_digests"], dict)
             or not isinstance(metadata["host_files"], list)
+            or any(not isinstance(path, str) for path in metadata["host_files"])
+            or metadata["host_files"] != sorted(set(metadata["host_files"]))
             or not isinstance(metadata["ownership"], dict)
             or any(
                 path not in {str(item) for item in self._host_resources()}
@@ -3162,75 +5534,497 @@ class Manager:
             raise ManagementError(65, "ROLLBACK_INVALID", "Rollback metadata is invalid.")
         self._validate_snapshot_ownership(metadata["ownership"], snapshot)
         for tree_name, expected_digest in metadata["tree_digests"].items():
-            if tree_name not in {"opt", "etc", "state", "host"} or (
+            if tree_name not in {"opt", "home", "etc", "state", "host"} or (
                 self._tree_digest(snapshot / tree_name) != expected_digest
             ):
                 raise ManagementError(
                     78, "ROLLBACK_INTEGRITY_FAILED", "Rollback snapshot changed."
                 )
-        if not {"opt", "etc", "state"} <= set(metadata["tree_digests"]):
-            raise ManagementError(65, "ROLLBACK_INVALID", "Rollback snapshot is incomplete.")
-        self._stop_services()
-        for source, destination in (
-            (snapshot / "opt", self.paths.install_root),
-            (snapshot / "etc", self.paths.configuration_root),
+        expected_root_trees = {
+            name
+            for name, present in metadata["root_presence"].items()
+            if present
+        }
+        if (
+            not expected_root_trees <= set(metadata["tree_digests"])
+            or bool(metadata["host_files"])
+            != ("host" in metadata["tree_digests"])
+            or any(
+                name in metadata["tree_digests"]
+                for name, present in metadata["root_presence"].items()
+                if not present
+            )
         ):
-            self._assert_tree_safe(source)
-            if destination.exists():
-                self._assert_tree_safe(destination)
-                shutil.rmtree(destination)
-            shutil.copytree(source, destination, symlinks=False)
-        self._assert_tree_safe(self.paths.state_root)
-        for path in self.paths.state_root.iterdir():
-            if path == self.paths.rollback_root:
+            raise ManagementError(65, "ROLLBACK_INVALID", "Rollback snapshot is incomplete.")
+        for name, destination in (
+            ("opt", self.paths.install_root),
+            ("home", self.paths.account_home),
+            ("etc", self.paths.configuration_root),
+        ):
+            if not self._path_present(destination):
                 continue
-            if path.is_dir():
-                shutil.rmtree(path)
+            if name == "opt":
+                self._assert_install_tree_migratable()
+            elif name == "home":
+                self._assert_account_home_migratable()
             else:
-                path.unlink()
-        state_source = snapshot / "state"
-        for path in state_source.iterdir():
-            target = self.paths.state_root / path.name
-            if path.is_dir():
-                shutil.copytree(path, target, symlinks=False)
-            else:
-                shutil.copy2(path, target)
-        host_files = set(metadata["host_files"])
+                self._assert_tree_safe(destination)
+        self._assert_tree_safe(self.paths.state_root)
         for host_path in self._host_resources():
-            if host_path.is_symlink():
-                raise ManagementError(73, "UNSAFE_PATH", f"Refusing symlink: {host_path}")
-            if host_path.exists():
-                if not host_path.is_file():
+            if not self._path_present(host_path):
+                continue
+            self._assert_no_symlink_ancestors(host_path.parent)
+            host_metadata = host_path.lstat()
+            if not stat.S_ISREG(host_metadata.st_mode):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Host resource is unsafe: {host_path}",
+                )
+        self._restore_snapshot_transactionally(
+            snapshot,
+            metadata,
+            changed,
+            allow_degraded=allow_degraded,
+        )
+        changed.extend(
+            [
+                str(self.paths.install_root),
+                str(self.paths.account_home),
+                str(self.paths.configuration_root),
+                str(self.paths.state_root),
+            ]
+        )
+        return sorted(set(changed)), str(marker["version"])
+
+    def _restore_snapshot_transactionally(
+        self,
+        snapshot: Path,
+        metadata: dict[str, Any],
+        changed: list[str],
+        *,
+        allow_degraded: bool,
+    ) -> None:
+        """Replace rollback targets with reversible same-filesystem renames."""
+        token = uuid.uuid4().hex
+        transaction = self.paths.state_root / f".beep-rollback-{token}"
+        swaps: list[_PathSwap] = []
+        generated: list[Path] = []
+
+        def reserve(path: Path) -> None:
+            if self._path_present(path):
+                raise ManagementError(
+                    73,
+                    "ROLLBACK_TRANSACTION_COLLISION",
+                    f"Rollback transaction path already exists: {path}",
+                )
+
+        try:
+            reserve(transaction)
+            self._assert_no_symlink_ancestors(transaction.parent)
+            transaction.mkdir(mode=0o700)
+            generated.append(transaction)
+            os.chmod(transaction, 0o700)
+            if os.geteuid() == 0:
+                expected_uid, expected_gid = self._expected_node_owner()
+                os.chown(transaction, expected_uid, expected_gid)
+
+            for name, destination in (
+                ("opt", self.paths.install_root),
+                ("home", self.paths.account_home),
+                ("etc", self.paths.configuration_root),
+            ):
+                self._assert_no_symlink_ancestors(destination.parent)
+                staged = destination.with_name(
+                    f".{destination.name}.beep-rollback-new-{token}"
+                )
+                previous = destination.with_name(
+                    f".{destination.name}.beep-rollback-old-{token}"
+                )
+                reserve(staged)
+                reserve(previous)
+                record = _PathSwap(
+                    target=destination,
+                    staged=staged,
+                    previous=previous,
+                )
+                swaps.append(record)
+                if not metadata["root_presence"][name]:
+                    continue
+                source = snapshot / name
+                self._assert_tree_safe(source)
+                generated.append(staged)
+                shutil.copytree(source, staged, symlinks=False)
+                self._assert_tree_safe(staged)
+                if self._tree_digest(staged) != metadata["tree_digests"][name]:
                     raise ManagementError(
-                        73, "UNSAFE_PATH", f"Host resource is not a file: {host_path}"
+                        78,
+                        "ROLLBACK_INTEGRITY_FAILED",
+                        f"Could not stage the {name} rollback tree faithfully.",
                     )
-                host_path.unlink()
-            if str(host_path) in host_files:
+                record.has_staged = True
+
+            state_source = snapshot / "state"
+            self._assert_tree_safe(state_source)
+            state_staged = transaction / "state-new"
+            state_previous = transaction / "state-old"
+            shutil.copytree(state_source, state_staged, symlinks=False)
+            state_previous.mkdir(mode=0o700)
+            self._assert_tree_safe(state_staged)
+            if self._tree_digest(state_staged) != metadata["tree_digests"]["state"]:
+                raise ManagementError(
+                    78,
+                    "ROLLBACK_INTEGRITY_FAILED",
+                    "Could not stage the state rollback tree faithfully.",
+                )
+            if self._path_present(state_staged / self.paths.rollback_root.name):
+                raise ManagementError(
+                    65,
+                    "ROLLBACK_INVALID",
+                    "The state snapshot contains the reserved recovery directory.",
+                )
+
+            host_files = set(metadata["host_files"])
+            for host_path in self._host_resources():
+                self._assert_no_symlink_ancestors(host_path.parent)
+                staged = host_path.with_name(
+                    f".{host_path.name}.beep-rollback-new-{token}"
+                )
+                previous = host_path.with_name(
+                    f".{host_path.name}.beep-rollback-old-{token}"
+                )
+                reserve(staged)
+                reserve(previous)
+                record = _PathSwap(
+                    target=host_path,
+                    staged=staged,
+                    previous=previous,
+                )
+                swaps.append(record)
+                if str(host_path) not in host_files:
+                    continue
                 source = snapshot / "host" / host_path.relative_to("/")
                 if not source.is_file() or source.is_symlink():
                     raise ManagementError(
-                        78, "ROLLBACK_INTEGRITY_FAILED", "Host snapshot is incomplete."
+                        78,
+                        "ROLLBACK_INTEGRITY_FAILED",
+                        "Host snapshot is incomplete.",
                     )
-                host_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, host_path)
-        self._restore_snapshot_ownership(metadata["ownership"])
-        self._start_services(
-            [],
-            suspended=self.paths.suspended.exists() or self._lifecycle_status()["dead"],
-        )
-        restored_manager = Manager(source_root=self.paths.product_root)
-        failed = [
-            check for check in restored_manager.checks() if check["status"] == "fail"
-        ]
-        if failed:
+                generated.append(staged)
+                shutil.copy2(source, staged)
+                staged_metadata = staged.lstat()
+                source_metadata = source.lstat()
+                if (
+                    not stat.S_ISREG(staged_metadata.st_mode)
+                    or stat.S_IMODE(staged_metadata.st_mode)
+                    != stat.S_IMODE(source_metadata.st_mode)
+                    or staged.read_bytes() != source.read_bytes()
+                ):
+                    raise ManagementError(
+                        78,
+                        "ROLLBACK_INTEGRITY_FAILED",
+                        f"Could not stage the host rollback file faithfully: {host_path}",
+                    )
+                record.has_staged = True
+        except Exception as exc:
+            cleanup_errors = self._cleanup_rollback_artifacts(generated)
+            if cleanup_errors:
+                raise ManagementError(
+                    1,
+                    "ROLLBACK_STAGING_CLEANUP_FAILED",
+                    "Rollback staging failed and temporary data could not be removed.",
+                    recovery=[
+                        "Inspect and remove only these root-owned transaction paths: "
+                        + ", ".join(cleanup_errors)
+                    ],
+                ) from exc
+            if isinstance(exc, ManagementError):
+                raise
             raise ManagementError(
-                1, "ROLLBACK_HEALTH_FAILED", "Restored Beep failed integrity checks."
+                1,
+                "ROLLBACK_STAGING_FAILED",
+                "The rollback snapshot could not be staged without changing the live installation.",
+                retryable=True,
+                recovery=["Correct the reported filesystem error and retry rollback."],
+            ) from exc
+
+        prior_service_state: dict[str, Any] | None = None
+        state_root_metadata = self.paths.state_root.lstat()
+        state_records: list[_PathSwap] = []
+        completion_started = False
+        try:
+            prior_service_state = self._capture_service_state()
+            self._stop_services()
+            self._assert_tree_safe(self.paths.state_root)
+            current_state_names = {
+                path.name
+                for path in self.paths.state_root.iterdir()
+                if path not in {self.paths.rollback_root, transaction}
+            }
+            staged_state_names = {path.name for path in state_staged.iterdir()}
+            for name in sorted(current_state_names | staged_state_names):
+                record = _PathSwap(
+                    target=self.paths.state_root / name,
+                    staged=state_staged / name,
+                    previous=state_previous / name,
+                    has_staged=name in staged_state_names,
+                )
+                state_records.append(record)
+            root_count = 3
+            swaps[root_count:root_count] = state_records
+            self._apply_rollback_swaps(swaps)
+            self._restore_snapshot_ownership(metadata["ownership"])
+            self._secure_state_control_root(changed)
+            completion_started = True
+            self._complete_rollback(
+                metadata["service_state"],
+                allow_degraded=allow_degraded,
             )
-        return [
-            str(self.paths.install_root),
-            str(self.paths.configuration_root),
-            str(self.paths.state_root),
-        ], str(marker["version"])
+        except Exception as exc:
+            reversal_errors = self._reverse_rollback_swaps(swaps)
+            try:
+                if os.geteuid() == 0:
+                    os.chown(
+                        self.paths.state_root,
+                        state_root_metadata.st_uid,
+                        state_root_metadata.st_gid,
+                    )
+                os.chmod(
+                    self.paths.state_root,
+                    stat.S_IMODE(state_root_metadata.st_mode),
+                )
+            except OSError:
+                reversal_errors.append(str(self.paths.state_root))
+            if reversal_errors:
+                try:
+                    self._stop_services()
+                except Exception:
+                    pass
+                raise ManagementError(
+                    1,
+                    "ROLLBACK_TRANSACTION_FAILED",
+                    "Rollback failed and the prior installation could not be restored atomically.",
+                    recovery=[
+                        "Keep Beep services stopped and preserve these transaction paths: "
+                        + ", ".join(reversal_errors)
+                    ],
+                ) from exc
+            cleanup_errors = self._cleanup_rollback_artifacts(generated)
+            try:
+                if allow_degraded or completion_started:
+                    self._stop_services()
+                elif prior_service_state is not None:
+                    self._restore_service_state(prior_service_state)
+            except Exception as service_exc:
+                try:
+                    self._stop_services()
+                except Exception:
+                    pass
+                raise ManagementError(
+                    1,
+                    "ROLLBACK_TRANSACTION_FAILED",
+                    "The prior installation was restored but services could not be placed in a safe state.",
+                    recovery=["Keep Beep services stopped and inspect the system journal."],
+                ) from service_exc
+            if cleanup_errors:
+                raise ManagementError(
+                    1,
+                    "ROLLBACK_STAGING_CLEANUP_FAILED",
+                    "The prior installation was restored but transaction data remains.",
+                    recovery=[
+                        "Inspect and remove only these root-owned transaction paths: "
+                        + ", ".join(cleanup_errors)
+                    ],
+                ) from exc
+            recovery_message = (
+                "The pre-rollback installation was restored; Beep services remain stopped."
+                if allow_degraded or completion_started
+                else "The pre-rollback installation and service state were restored."
+            )
+            if isinstance(exc, ManagementError):
+                exc.recovery.append(recovery_message)
+                raise
+            raise ManagementError(
+                1,
+                "ROLLBACK_APPLY_FAILED",
+                "Rollback could not be applied; the prior installation was restored.",
+                retryable=True,
+                recovery=[recovery_message],
+            ) from exc
+
+        previous_paths = [record.previous for record in swaps if record.target_moved]
+        cleanup_errors = self._cleanup_rollback_artifacts(
+            [*previous_paths, *generated]
+        )
+        if cleanup_errors:
+            try:
+                self._stop_services()
+            except Exception:
+                pass
+            raise ManagementError(
+                1,
+                "ROLLBACK_COMMIT_CLEANUP_FAILED",
+                "Rollback completed, but superseded transaction data remains.",
+                recovery=[
+                    "Keep Beep services stopped and inspect these transaction paths: "
+                    + ", ".join(cleanup_errors)
+                ],
+            )
+
+    def _apply_rollback_swaps(self, swaps: list[_PathSwap]) -> None:
+        for record in swaps:
+            if self._path_present(record.target):
+                os.replace(record.target, record.previous)
+                record.target_moved = True
+            if record.has_staged:
+                if not self._path_present(record.staged):
+                    raise ManagementError(
+                        78,
+                        "ROLLBACK_INTEGRITY_FAILED",
+                        f"A staged rollback target disappeared: {record.target}",
+                    )
+                os.replace(record.staged, record.target)
+                record.staged_moved = True
+
+    def _reverse_rollback_swaps(self, swaps: list[_PathSwap]) -> list[str]:
+        failures: list[str] = []
+        for record in reversed(swaps):
+            try:
+                if record.staged_moved and self._path_present(record.target):
+                    os.replace(record.target, record.staged)
+                if record.target_moved:
+                    if not self._path_present(record.previous):
+                        raise OSError(f"missing prior rollback target: {record.previous}")
+                    os.replace(record.previous, record.target)
+            except Exception:
+                failures.extend(
+                    [str(record.target), str(record.staged), str(record.previous)]
+                )
+        return sorted(set(failures))
+
+    def _cleanup_rollback_artifacts(self, paths: list[Path]) -> list[str]:
+        failures: list[str] = []
+        for path in dict.fromkeys(paths):
+            try:
+                if not self._path_present(path):
+                    continue
+                metadata = path.lstat()
+                if stat.S_ISDIR(metadata.st_mode):
+                    shutil.rmtree(path)
+                elif stat.S_ISREG(metadata.st_mode):
+                    path.unlink()
+                else:
+                    raise OSError(f"unsafe rollback artifact: {path}")
+            except Exception:
+                failures.append(str(path))
+        return failures
+
+    def _complete_rollback(
+        self,
+        service_state: dict[str, Any],
+        *,
+        allow_degraded: bool,
+    ) -> None:
+        try:
+            try:
+                restored_manager = Manager(source_root=self.paths.product_root)
+            except Exception as exc:
+                raise ManagementError(
+                    1,
+                    "ROLLBACK_HEALTH_FAILED",
+                    "Restored Beep management source is unavailable.",
+                ) from exc
+            failed = [
+                check
+                for check in restored_manager.checks()
+                if check["status"] == "fail" and check["id"] != "service_state"
+            ]
+            if failed:
+                raise ManagementError(
+                    1,
+                    "ROLLBACK_HEALTH_FAILED",
+                    "Restored Beep failed integrity checks.",
+                )
+            self._restore_service_state(service_state)
+        except Exception:
+            self._stop_services()
+            if not allow_degraded:
+                raise
+            self._last_rollback_degraded = True
+
+    def _prepare_recovery_root(self, *, create: bool) -> None:
+        self._assert_tree_safe(self.paths.state_root)
+        self._validate_state_control_root(allow_legacy=False)
+        if not self._path_present(self.paths.rollback_root):
+            if not create:
+                raise ManagementError(
+                    66, "ROLLBACK_UNAVAILABLE", "No rollback snapshot exists."
+                )
+            self.paths.rollback_root.mkdir(mode=0o700)
+            os.chmod(self.paths.rollback_root, 0o700)
+            if os.geteuid() == 0:
+                os.chown(self.paths.rollback_root, 0, 0)
+        self._assert_no_symlink_ancestors(self.paths.rollback_root)
+        metadata = self.paths.rollback_root.lstat()
+        expected_uid, expected_gid = self._expected_node_owner()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != expected_uid
+            or metadata.st_gid != expected_gid
+            or stat.S_IMODE(metadata.st_mode) != 0o700
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_RECOVERY_ROOT",
+                "The Beep recovery root is unsafe.",
+            )
+
+    def _validate_state_control_root(self, *, allow_legacy: bool) -> None:
+        try:
+            metadata = self.paths.state_root.lstat()
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_STATE_ROOT",
+                "The Beep lifecycle state root is unsafe.",
+            ) from exc
+        expected_uid, expected_gid = self._expected_node_owner()
+        identity = (
+            metadata.st_uid,
+            metadata.st_gid,
+            stat.S_IMODE(metadata.st_mode),
+        )
+        accepted = {(expected_uid, expected_gid, 0o755)}
+        if allow_legacy:
+            try:
+                user = pwd.getpwnam(DEFAULT_USER)
+                group = grp.getgrnam(DEFAULT_USER)
+            except KeyError:
+                pass
+            else:
+                accepted.add((user.pw_uid, group.gr_gid, 0o750))
+        if not stat.S_ISDIR(metadata.st_mode) or identity not in accepted:
+            raise ManagementError(
+                73,
+                "UNSAFE_STATE_ROOT",
+                "The Beep lifecycle state root is unsafe.",
+            )
+        self._assert_no_symlink_ancestors(self.paths.state_root)
+
+    def _secure_state_control_root(self, changed: list[str]) -> None:
+        self._validate_state_control_root(allow_legacy=True)
+        expected_uid, expected_gid = self._expected_node_owner()
+        metadata = self.paths.state_root.lstat()
+        if (
+            metadata.st_uid != expected_uid
+            or metadata.st_gid != expected_gid
+            or stat.S_IMODE(metadata.st_mode) != 0o755
+        ):
+            os.chmod(self.paths.state_root, 0o755)
+            if os.geteuid() == 0:
+                os.chown(self.paths.state_root, expected_uid, expected_gid)
+            changed.append(str(self.paths.state_root))
+        self._validate_state_control_root(allow_legacy=False)
 
     def _host_resources(self) -> tuple[Path, ...]:
         return (
@@ -3240,7 +6034,7 @@ class Manager:
             self.paths.logrotate,
             self.paths.sudoers,
             self.paths.entrypoint,
-            *(Path("/usr/local/bin") / name for name in HOST_COMMANDS),
+            *(self.paths.command_root / name for name in HOST_COMMANDS),
         )
 
     @staticmethod
@@ -3268,6 +6062,31 @@ class Manager:
     def _validate_snapshot_ownership(value: dict[str, Any], snapshot: Path) -> None:
         if not value:
             raise ManagementError(65, "ROLLBACK_INVALID", "Ownership map is missing.")
+        expected_names: set[str] = set()
+        for prefix in ("opt", "home", "etc", "state"):
+            root = snapshot / prefix
+            if not root.is_dir() or root.is_symlink():
+                continue
+            for path in (root, *sorted(root.rglob("*"))):
+                relative = (
+                    PurePosixPath(".")
+                    if path == root
+                    else PurePosixPath(*path.relative_to(root).parts)
+                )
+                expected_names.add(str(PurePosixPath(prefix) / relative))
+        host_root = snapshot / "host"
+        if host_root.is_dir() and not host_root.is_symlink():
+            expected_names.update(
+                str(PurePosixPath("host") / PurePosixPath(*path.relative_to(host_root).parts))
+                for path in host_root.rglob("*")
+                if path.is_file() and not path.is_symlink()
+            )
+        if set(value) != expected_names:
+            raise ManagementError(
+                65,
+                "ROLLBACK_INVALID",
+                "Ownership map does not cover the complete snapshot.",
+            )
         for name, ownership in value.items():
             path = PurePosixPath(name) if isinstance(name, str) else PurePosixPath("/")
             if (
@@ -3275,7 +6094,7 @@ class Manager:
                 or path.is_absolute()
                 or ".." in path.parts
                 or not path.parts
-                or path.parts[0] not in {"opt", "etc", "state", "host"}
+                or path.parts[0] not in {"opt", "home", "etc", "state", "host"}
                 or not isinstance(ownership, list)
                 or len(ownership) != 2
                 or any(
@@ -3295,6 +6114,7 @@ class Manager:
     def _restore_snapshot_ownership(self, value: dict[str, list[int]]) -> None:
         roots = {
             "opt": self.paths.install_root,
+            "home": self.paths.account_home,
             "etc": self.paths.configuration_root,
             "state": self.paths.state_root,
         }
@@ -3337,19 +6157,38 @@ class Manager:
 
     def _execute_suspend(self) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=True)
-        self._stop_services()
+        changed_resources: list[str] = []
+        self._secure_state_control_root(changed_resources)
+        prior_service_state = self._capture_service_state()
         value = {
             "schema_version": 1,
             "product_id": PRODUCT_ID,
             "suspended_at": utc_now(),
         }
-        changed = atomic_write(
-            self.paths.suspended, canonical_json(value) + b"\n", mode=0o600
-        )
-        return ([str(self.paths.suspended)] if changed else []), str(marker["version"])
+        try:
+            self._stop_services()
+            changed = atomic_write(
+                self.paths.suspended, canonical_json(value) + b"\n", mode=0o600
+            )
+        except Exception:
+            try:
+                self._restore_service_state(prior_service_state)
+            except Exception as restore_exc:
+                raise ManagementError(
+                    1,
+                    "SERVICE_RESTORE_FAILED",
+                    "Suspend failed and Beep's prior service state could not be restored.",
+                    recovery=["Keep Beep stopped and inspect the system journal."],
+                ) from restore_exc
+            raise
+        if changed:
+            changed_resources.append(str(self.paths.suspended))
+        return sorted(set(changed_resources)), str(marker["version"])
 
     def _execute_resume(self) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=True)
+        changed: list[str] = []
+        self._secure_state_control_root(changed)
         if self._lifecycle_status()["dead"]:
             raise ManagementError(
                 78,
@@ -3361,15 +6200,42 @@ class Manager:
             raise ManagementError(
                 78, "RESUME_BLOCKED", "Beep integrity checks failed before resume."
             )
-        changed: list[str] = []
-        if self.paths.suspended.exists():
-            self.paths.suspended.unlink()
-            changed.append(str(self.paths.suspended))
-        self._start_services(changed, suspended=False)
+        prior_service_state = self._capture_service_state()
+        suspended_present = self._path_present(self.paths.suspended)
+        if suspended_present:
+            suspended_metadata = self.paths.suspended.lstat()
+            if not stat.S_ISREG(suspended_metadata.st_mode):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Suspension marker is unsafe: {self.paths.suspended}",
+                )
+        try:
+            self._start_services(changed, suspended=False)
+            if suspended_present:
+                self.paths.suspended.unlink()
+                changed.append(str(self.paths.suspended))
+        except Exception:
+            try:
+                self._restore_service_state(prior_service_state)
+            except Exception as restore_exc:
+                try:
+                    self._stop_services()
+                except Exception:
+                    pass
+                raise ManagementError(
+                    1,
+                    "SERVICE_RESTORE_FAILED",
+                    "Resume failed and Beep's prior service state could not be restored.",
+                    recovery=["Keep Beep stopped and inspect the system journal."],
+                ) from restore_exc
+            raise
         return sorted(set(changed)), str(marker["version"])
 
     def _execute_kill(self) -> tuple[list[str], str | None]:
         marker = self.load_marker(required=True)
+        changed: list[str] = []
+        self._secure_state_control_root(changed)
         self._stop_services()
         lifecycle_path = self.paths.runtime / "lifecycle.json"
         if lifecycle_path.is_symlink() or (
@@ -3391,7 +6257,6 @@ class Manager:
             ) from exc
         os.chmod(lifecycle_path, 0o600)
         os.chown(lifecycle_path, account.pw_uid, account.pw_gid)
-        changed: list[str] = []
         if before != lifecycle_path.read_bytes():
             changed.append(str(lifecycle_path))
 
@@ -3422,58 +6287,332 @@ class Manager:
     def _execute_uninstall(
         self, invocation: Invocation
     ) -> tuple[list[str], str | None]:
-        marker = self.load_marker(required=True)
+        marker = self.load_marker(required=False)
+        purge_state = self._load_purge_state()
+        if purge_state is not None and invocation.retain_state is not False:
+            raise ManagementError(
+                73,
+                "PURGE_IN_PROGRESS",
+                "An interrupted Beep purge can only be resumed as a complete purge.",
+            )
+        if marker is None:
+            if purge_state is None:
+                raise ManagementError(
+                    66, "NOT_INSTALLED", "Beep is not installed on this host."
+                )
+            marker = {
+                "instance_id": purge_state["instance_id"],
+                "version": purge_state["version"],
+            }
+        elif purge_state is not None and (
+            marker["instance_id"] != purge_state["instance_id"]
+            or marker["version"] != purge_state["version"]
+        ):
+            raise ManagementError(
+                73,
+                "PURGE_IDENTITY_CHANGED",
+                "The installed marker does not match the interrupted purge.",
+            )
         if invocation.retain_state is False and invocation.confirmation != DELETE_CONFIRMATION:
             raise ManagementError(
                 64,
                 "DESTRUCTIVE_CONFIRMATION_REQUIRED",
                 f"Complete removal requires confirmation: {DELETE_CONFIRMATION}",
             )
-        self._stop_services()
+        resuming_purge = purge_state is not None
+        identity = self._preflight_uninstall(invocation, purge_state=purge_state)
         changed: list[str] = []
-        for path in (
-            self.paths.chat_unit,
-            self.paths.health_unit,
-            self.paths.health_timer,
-            self.paths.logrotate,
-            self.paths.sudoers,
-            self.paths.entrypoint,
-            *(Path("/usr/local/bin") / name for name in HOST_COMMANDS),
-        ):
-            if path.exists() and not path.is_symlink():
-                path.unlink()
-                changed.append(str(path))
-            elif path.is_symlink():
-                raise ManagementError(73, "UNSAFE_PATH", f"Refusing symlink: {path}")
-        if self.paths.install_root.exists():
+        if invocation.retain_state is False and purge_state is None:
+            if self._write_purge_state(marker, identity):
+                changed.append(str(self.paths.purge_state))
+        if resuming_purge:
+            self._ensure_purge_evidence_roots(changed)
+        if self._path_present(self.paths.state_root):
+            self._secure_state_control_root(changed)
+        if resuming_purge:
+            self._stop_markerless_services()
+        else:
+            self._stop_services()
+        if self._path_present(self.paths.account_home):
+            self._materialize_python_environment_links(changed)
+        if self._path_present(self.paths.node_root):
+            self._materialize_node_links(changed)
+        for path in self._host_resources():
+            if not self._path_present(path):
+                continue
+            self._assert_no_symlink_ancestors(path.parent)
+            metadata = path.lstat()
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Host resource is unsafe: {path}",
+                )
+            path.unlink()
+            changed.append(str(path))
+        if self._path_present(self.paths.install_root):
             self._assert_tree_safe(self.paths.install_root)
             shutil.rmtree(self.paths.install_root)
             changed.append(str(self.paths.install_root))
+        if self._path_present(self.paths.pending_install):
+            self.paths.pending_install.unlink()
+            changed.append(str(self.paths.pending_install))
         if invocation.retain_state:
             retained = {
                 "schema_version": 1,
                 "product_id": PRODUCT_ID,
                 "instance_id": marker["instance_id"],
             }
-            atomic_write(
+            if atomic_write(
                 self.paths.retained, canonical_json(retained) + b"\n", mode=0o600
-            )
-            self.paths.marker.unlink(missing_ok=True)
-        else:
-            for path in (
-                self.paths.configuration_root,
-                self.paths.state_root,
             ):
-                if path.exists():
-                    self._assert_tree_safe(path)
-                    shutil.rmtree(path)
-                    changed.append(str(path))
-            changed.extend(
-                [str(self.paths.log_root), "user:beep", "group:beep"]
-            )
+                changed.append(str(self.paths.retained))
+            if self._path_present(self.paths.marker):
+                self.paths.marker.unlink()
+                changed.append(str(self.paths.marker))
         if shutil.which("systemctl"):
             self._run(["systemctl", "daemon-reload"], check=False)
         return sorted(set(changed)), str(marker["version"])
+
+    def _preflight_uninstall(
+        self,
+        invocation: Invocation,
+        *,
+        purge_state: dict[str, Any] | None = None,
+    ) -> dict[str, int | None]:
+        expected_uid, expected_gid = self._expected_node_owner()
+        if purge_state is None:
+            self._validate_receipt_roots()
+            self._validate_receipt_destinations(invocation.correlation_id)
+            self._validate_audit_target()
+        else:
+            self._validate_purge_resume_evidence(invocation.correlation_id)
+        if invocation.retain_state is False:
+            self._validate_purge_journal()
+        for path in self._host_resources():
+            if not self._path_present(path):
+                continue
+            metadata = path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != expected_uid
+                or metadata.st_gid != expected_gid
+                or stat.S_IMODE(metadata.st_mode) & 0o022
+            ):
+                raise ManagementError(
+                    73, "UNSAFE_PATH", f"Host resource is unsafe: {path}"
+                )
+        if self._path_present(self.paths.install_root):
+            self._assert_install_tree_migratable()
+        if self._path_present(self.paths.pending_install):
+            self._assert_no_symlink_ancestors(self.paths.pending_install)
+            metadata = self.paths.pending_install.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != expected_uid
+                or metadata.st_gid != expected_gid
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+            ):
+                raise ManagementError(
+                    73, "UNSAFE_PATH", "Pending Beep install state is unsafe."
+                )
+        for path in (
+            self.paths.account_home,
+            self.paths.configuration_root,
+            self.paths.state_root,
+            self.paths.log_root,
+        ):
+            if self._path_present(path):
+                if path == self.paths.account_home:
+                    self._assert_account_home_migratable()
+                else:
+                    self._assert_tree_safe(path)
+        identity = self._validate_purge_identity(purge_state)
+        user_present = identity["user_uid"] is not None
+        group_present = identity["group_gid"] is not None
+        if invocation.retain_state and not (user_present and group_present):
+            raise ManagementError(
+                73,
+                "IDENTITY_COLLISION",
+                "Retaining Beep state requires the managed identity.",
+            )
+        if invocation.retain_state and self._path_present(self.paths.retained):
+            metadata = self.paths.retained.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != expected_uid
+                or metadata.st_gid != expected_gid
+                or stat.S_IMODE(metadata.st_mode) != 0o600
+            ):
+                raise ManagementError(
+                    73, "UNSAFE_PATH", "Retained Beep state is unsafe."
+                )
+        return identity
+
+    def _validate_purge_identity(
+        self,
+        purge_state: dict[str, Any] | None,
+    ) -> dict[str, int | None]:
+        try:
+            user = pwd.getpwnam(DEFAULT_USER)
+        except KeyError:
+            user = None
+        try:
+            group = grp.getgrnam(DEFAULT_USER)
+        except KeyError:
+            group = None
+        if purge_state is None:
+            if (user is None) != (group is None):
+                raise ManagementError(
+                    73,
+                    "IDENTITY_COLLISION",
+                    "The existing beep identity is incomplete and cannot be proven safe.",
+                )
+            if user is None:
+                return {"user_uid": None, "user_gid": None, "group_gid": None}
+            if (
+                user.pw_gid != group.gr_gid
+                or user.pw_dir != str(self.paths.account_home)
+                or user.pw_shell != "/bin/bash"
+            ):
+                raise ManagementError(
+                    73,
+                    "IDENTITY_COLLISION",
+                    "The existing beep identity is not safe to remove.",
+                )
+            return {
+                "user_uid": user.pw_uid,
+                "user_gid": user.pw_gid,
+                "group_gid": group.gr_gid,
+            }
+
+        expected = purge_state["identity"]
+        if expected["user_uid"] is None:
+            if user is not None or group is not None:
+                raise ManagementError(
+                    73,
+                    "IDENTITY_COLLISION",
+                    "A new beep identity appeared after purge began.",
+                )
+            return dict(expected)
+        if user is not None and (
+            user.pw_uid != expected["user_uid"]
+            or user.pw_gid != expected["user_gid"]
+            or user.pw_dir != str(self.paths.account_home)
+            or user.pw_shell != "/bin/bash"
+        ):
+            raise ManagementError(
+                73,
+                "IDENTITY_COLLISION",
+                "The beep account changed after purge began.",
+            )
+        if group is not None and group.gr_gid != expected["group_gid"]:
+            raise ManagementError(
+                73,
+                "IDENTITY_COLLISION",
+                "The beep group changed after purge began.",
+            )
+        return dict(expected)
+
+    def _validate_purge_resume_evidence(self, correlation_id: str) -> None:
+        if not self._path_present(self.paths.log_root):
+            return
+        expected_uid, expected_gid = self._expected_node_owner()
+        metadata = self.paths.log_root.lstat()
+        if (
+            not stat.S_ISDIR(metadata.st_mode)
+            or metadata.st_uid != expected_uid
+            or metadata.st_gid != expected_gid
+            or stat.S_IMODE(metadata.st_mode) != 0o755
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_RECEIPT_PATH",
+                "Interrupted purge evidence directory is unsafe.",
+            )
+        self._assert_no_symlink_ancestors(self.paths.log_root)
+        self._assert_tree_safe(self.paths.log_root)
+        if self._path_present(self.paths.receipts):
+            receipt_metadata = self.paths.receipts.lstat()
+            if (
+                not stat.S_ISDIR(receipt_metadata.st_mode)
+                or receipt_metadata.st_uid != expected_uid
+                or receipt_metadata.st_gid != expected_gid
+                or stat.S_IMODE(receipt_metadata.st_mode) != 0o750
+            ):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_RECEIPT_PATH",
+                    "Interrupted purge receipt directory is unsafe.",
+                )
+            self._validate_receipt_destinations(correlation_id)
+        self._validate_audit_target()
+
+    def _ensure_purge_evidence_roots(self, changed: list[str]) -> None:
+        expected_uid, expected_gid = self._expected_node_owner()
+        self._assert_no_symlink_ancestors(self.paths.log_root.parent)
+        for path, mode in (
+            (self.paths.log_root, 0o755),
+            (self.paths.receipts, 0o750),
+        ):
+            if not self._path_present(path):
+                path.mkdir(mode=mode)
+                changed.append(str(path))
+            os.chmod(path, mode)
+            if os.geteuid() == 0:
+                os.chown(path, expected_uid, expected_gid)
+        self._validate_receipt_roots()
+
+    def _assert_install_tree_migratable(self) -> None:
+        root = self.paths.install_root
+        node_present = self._path_present(self.paths.node_root)
+        if node_present:
+            self._node_link_replacements()
+        try:
+            root_metadata = root.lstat()
+            entries = root.rglob("*")
+            if not stat.S_ISDIR(root_metadata.st_mode):
+                raise OSError("install root is not a directory")
+            for path in entries:
+                if node_present and (
+                    path == self.paths.node_root
+                    or self.paths.node_root in path.parents
+                ):
+                    continue
+                metadata = path.lstat()
+                if not (
+                    stat.S_ISDIR(metadata.st_mode)
+                    or stat.S_ISREG(metadata.st_mode)
+                ):
+                    raise OSError(f"unsafe install path: {path}")
+        except OSError as exc:
+            raise ManagementError(
+                73, "UNSAFE_PATH", f"Unsafe product tree: {root}"
+            ) from exc
+
+    def _assert_account_home_migratable(self) -> None:
+        root = self.paths.account_home
+        try:
+            root_metadata = root.lstat()
+            if not stat.S_ISDIR(root_metadata.st_mode):
+                raise OSError("account home is not a directory")
+            for path in root.rglob("*"):
+                metadata = path.lstat()
+                if stat.S_ISLNK(metadata.st_mode):
+                    if self._standard_python_lib64_link(path):
+                        continue
+                    raise OSError(f"unsafe account-home link: {path}")
+                if not (
+                    stat.S_ISDIR(metadata.st_mode)
+                    or stat.S_ISREG(metadata.st_mode)
+                ):
+                    raise OSError(f"unsafe account-home path: {path}")
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Unsafe managed account home: {root}",
+            ) from exc
 
     @staticmethod
     def _journal_purge_evidence(
@@ -3482,14 +6621,13 @@ class Manager:
         *,
         event_id: str,
         receipt_digest: str,
+        phase: str,
+        changed_resources: list[str],
     ) -> None:
+        if phase not in {"purge_started", "purge_completed"}:
+            raise ManagementError(65, "INVALID_PURGE_PHASE", "Purge phase is invalid.")
+        Manager._validate_purge_journal()
         systemd_cat = Path("/usr/bin/systemd-cat")
-        if not systemd_cat.is_file() or systemd_cat.is_symlink():
-            raise ManagementError(
-                69,
-                "JOURNAL_UNAVAILABLE",
-                "Cannot purge Beep without recording final journal evidence.",
-            )
         evidence = {
             "timestamp": utc_now(),
             "event_id": event_id,
@@ -3497,10 +6635,11 @@ class Manager:
             "product_id": PRODUCT_ID,
             "instance_id": result.instance_id,
             "operation": "uninstall",
-            "phase": "execute",
+            "phase": phase,
             "actor": invocation.actor,
             "result": result.status,
-            "changed": result.changed,
+            "changed": bool(changed_resources),
+            "changed_resources": sorted(set(changed_resources)),
             "receipt_digest": receipt_digest,
             "purge": True,
         }
@@ -3519,20 +6658,254 @@ class Manager:
                 "Final Beep purge evidence could not be written to the journal.",
             )
 
-    def _finalize_purge(self) -> None:
-        if self.paths.log_root.exists():
-            self._assert_tree_safe(self.paths.log_root)
-            shutil.rmtree(self.paths.log_root)
-        self._run(["userdel", "--remove", DEFAULT_USER], check=False)
-        self._run(["groupdel", DEFAULT_USER], check=False)
+    def _finalize_purge(self) -> list[str]:
+        purge_state = self._load_purge_state()
+        if purge_state is None:
+            raise ManagementError(
+                73,
+                "PURGE_STATE_MISSING",
+                "Protected purge state disappeared before removal completed.",
+            )
+        self._validate_purge_identity(purge_state)
+        changed: list[str] = []
+        home_present = self._path_present(self.paths.account_home)
+        if home_present:
+            self._assert_tree_safe(self.paths.account_home)
+        pending_present = self._path_present(self.paths.pending_install)
+        if pending_present:
+            metadata = self.paths.pending_install.lstat()
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    "Pending Beep install state is unsafe.",
+                )
+        purge_roots = (
+            self.paths.configuration_root,
+            self.paths.state_root,
+            self.paths.log_root,
+        )
+        present_roots = [path for path in purge_roots if self._path_present(path)]
+        for path in present_roots:
+            self._assert_tree_safe(path)
+        try:
+            pwd.getpwnam(DEFAULT_USER)
+        except KeyError:
+            user_present = False
+        else:
+            user_present = True
+        try:
+            grp.getgrnam(DEFAULT_USER)
+        except KeyError:
+            group_present = False
+        else:
+            group_present = True
+        if user_present:
+            self._run(["userdel", "--remove", DEFAULT_USER], check=False)
+        try:
+            pwd.getpwnam(DEFAULT_USER)
+        except KeyError:
+            pass
+        else:
+            raise ManagementError(
+                1,
+                "IDENTITY_REMOVE_FAILED",
+                "The Beep account could not be removed.",
+            )
+
+        if user_present:
+            changed.append("user:beep")
+        try:
+            grp.getgrnam(DEFAULT_USER)
+        except KeyError:
+            group_still_present = False
+        else:
+            group_still_present = True
+        if group_still_present:
+            self._run(["groupdel", DEFAULT_USER], check=False)
+        try:
+            grp.getgrnam(DEFAULT_USER)
+        except KeyError:
+            pass
+        else:
+            raise ManagementError(
+                1,
+                "IDENTITY_REMOVE_FAILED",
+                "The Beep group could not be removed.",
+            )
+        if group_present:
+            changed.append("group:beep")
+        if pending_present:
+            self.paths.pending_install.unlink()
+            changed.append(str(self.paths.pending_install))
+        if home_present and self._path_present(self.paths.account_home):
+            self._assert_tree_safe(self.paths.account_home)
+            shutil.rmtree(self.paths.account_home)
+        if home_present:
+            changed.append(str(self.paths.account_home))
+        for path in present_roots:
+            if self._path_present(path):
+                shutil.rmtree(path)
+            changed.append(str(path))
+        return sorted(set(changed))
+
+    @staticmethod
+    def _validate_purge_journal() -> None:
+        systemd_cat = Path("/usr/bin/systemd-cat")
+        try:
+            metadata = systemd_cat.lstat()
+        except OSError as exc:
+            raise ManagementError(
+                69,
+                "JOURNAL_UNAVAILABLE",
+                "Cannot purge Beep without recording final journal evidence.",
+            ) from exc
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or stat.S_IMODE(metadata.st_mode) & 0o022
+            or not os.access(systemd_cat, os.X_OK)
+        ):
+            raise ManagementError(
+                69,
+                "JOURNAL_UNAVAILABLE",
+                "Cannot purge Beep without recording final journal evidence.",
+            )
 
     def _stop_services(self) -> None:
         if not shutil.which("systemctl"):
             return
+        failed: list[str] = []
         for unit in ("beep-health.timer", "beep-chat.service"):
             self._run(["systemctl", "disable", "--now", unit], check=False)
-            if self._service_active(unit):
-                raise ManagementError(1, "SERVICE_STOP_FAILED", f"{unit} remained active.")
+            if self._service_active(unit) or self._service_enabled(unit):
+                failed.append(unit)
+        self._run(["systemctl", "stop", "beep-health.service"], check=False)
+        if self._service_active("beep-health.service"):
+            failed.append("beep-health.service")
+        if failed:
+            raise ManagementError(
+                1,
+                "SERVICE_STOP_FAILED",
+                "Beep units remained active or enabled: " + ", ".join(failed),
+            )
+
+    def _stop_markerless_services(self) -> None:
+        """Stop only unit names backed by a present, provenance-checked asset."""
+        if not shutil.which("systemctl"):
+            return
+        failed: list[str] = []
+        for path, unit in (
+            (self.paths.health_timer, "beep-health.timer"),
+            (self.paths.chat_unit, "beep-chat.service"),
+        ):
+            if not self._path_present(path):
+                continue
+            self._run(["systemctl", "disable", "--now", unit], check=False)
+            if self._service_active(unit) or self._service_enabled(unit):
+                failed.append(unit)
+        if self._path_present(self.paths.health_unit):
+            self._run(
+                ["systemctl", "stop", "beep-health.service"],
+                check=False,
+            )
+            if self._service_active("beep-health.service"):
+                failed.append("beep-health.service")
+        if failed:
+            raise ManagementError(
+                1,
+                "SERVICE_STOP_FAILED",
+                "Beep units remained active or enabled: " + ", ".join(failed),
+            )
+
+    def _capture_service_state(self) -> dict[str, Any]:
+        available = shutil.which("systemctl") is not None
+        units = {
+            unit: {
+                "active": self._service_active(unit) if available else False,
+                "enabled": self._service_enabled(unit) if available else False,
+            }
+            for unit in ("beep-chat.service", "beep-health.timer")
+        }
+        return {
+            "schema_version": 1,
+            "systemctl": available,
+            "units": units,
+        }
+
+    @staticmethod
+    def _service_snapshot_valid(value: Any) -> bool:
+        if not isinstance(value, dict) or set(value) != {
+            "schema_version",
+            "systemctl",
+            "units",
+        }:
+            return False
+        if value["schema_version"] != 1 or not isinstance(value["systemctl"], bool):
+            return False
+        units = value["units"]
+        if not isinstance(units, dict) or set(units) != {
+            "beep-chat.service",
+            "beep-health.timer",
+        }:
+            return False
+        return all(
+            isinstance(state, dict)
+            and set(state) == {"active", "enabled"}
+            and all(isinstance(flag, bool) for flag in state.values())
+            for state in units.values()
+        ) and (
+            value["systemctl"]
+            or not any(flag for state in units.values() for flag in state.values())
+        )
+
+    @classmethod
+    def _validate_service_snapshot(cls, value: Any) -> None:
+        if not cls._service_snapshot_valid(value):
+            raise ManagementError(
+                65,
+                "ROLLBACK_INVALID",
+                "Recovery service state is invalid.",
+            )
+
+    def _restore_service_state(self, value: dict[str, Any]) -> None:
+        self._validate_service_snapshot(value)
+        if not value["systemctl"]:
+            return
+        if not shutil.which("systemctl"):
+            raise ManagementError(
+                69,
+                "SYSTEMD_MISSING",
+                "systemctl is required to restore Beep service state.",
+            )
+        self._run(["systemctl", "daemon-reload"])
+        for unit in ("beep-chat.service", "beep-health.timer"):
+            state = value["units"][unit]
+            self._run(
+                [
+                    "systemctl",
+                    "enable" if state["enabled"] else "disable",
+                    unit,
+                ],
+                check=False,
+            )
+            self._run(
+                [
+                    "systemctl",
+                    "start" if state["active"] else "stop",
+                    unit,
+                ],
+                check=False,
+            )
+            if (
+                self._service_active(unit) != state["active"]
+                or self._service_enabled(unit) != state["enabled"]
+            ):
+                raise ManagementError(
+                    1,
+                    "SERVICE_RESTORE_FAILED",
+                    f"Could not restore prior service state for {unit}.",
+                )
 
     @staticmethod
     def _service_active(unit: str) -> bool:
@@ -3543,30 +6916,135 @@ class Manager:
             stderr=subprocess.DEVNULL,
         ).returncode == 0
 
+    @staticmethod
+    def _service_enabled(unit: str) -> bool:
+        return subprocess.run(
+            ["systemctl", "is-enabled", "--quiet", unit],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        ).returncode == 0
+
     def _source_revision(self) -> str:
         digest = hashlib.sha256()
         for path in sorted(self.source_root.rglob("*")):
+            relative = path.relative_to(self.source_root)
             if (
-                not path.is_file()
-                or path.is_symlink()
-                or "dist" in path.parts
-                or "__pycache__" in path.parts
+                "dist" in relative.parts
+                or "__pycache__" in relative.parts
                 or path.suffix == ".pyc"
             ):
                 continue
-            digest.update(str(path.relative_to(self.source_root)).encode())
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    78,
+                    "UNSAFE_SOURCE",
+                    f"The Beep source changed while hashing: {path}",
+                ) from exc
+            if stat.S_ISDIR(metadata.st_mode):
+                kind = b"directory"
+            elif stat.S_ISREG(metadata.st_mode):
+                kind = b"file"
+            else:
+                raise ManagementError(
+                    78,
+                    "UNSAFE_SOURCE",
+                    f"The Beep source contains an unsafe path: {path}",
+                )
+            digest.update(str(relative).encode())
             digest.update(b"\0")
-            digest.update(path.read_bytes())
+            digest.update(kind)
+            digest.update(b"\0")
+            digest.update(f"{stat.S_IMODE(metadata.st_mode):04o}".encode())
+            digest.update(b"\0")
+            if kind == b"file":
+                try:
+                    digest.update(path.read_bytes())
+                except OSError as exc:
+                    raise ManagementError(
+                        78,
+                        "UNSAFE_SOURCE",
+                        f"The Beep source changed while hashing: {path}",
+                    ) from exc
             digest.update(b"\0")
         return f"source:{digest.hexdigest()}"
 
+    @contextmanager
+    def _trusted_source_snapshot(self, expected_revision: str) -> Iterator[None]:
+        """Pin every deployment read to one root-owned, reviewed source tree."""
+        original = self.source_root
+        try:
+            with tempfile.TemporaryDirectory(prefix="beep-source-") as directory:
+                snapshot = Path(directory) / "product"
+                try:
+                    shutil.copytree(
+                        original,
+                        snapshot,
+                        symlinks=True,
+                        ignore=shutil.ignore_patterns(
+                            "dist", "__pycache__", "*.pyc"
+                        ),
+                    )
+                    self.source_root = snapshot
+                    snapshot_descriptor = load_json(snapshot / "PRODUCT.json")
+                    snapshot_version = (
+                        (snapshot / "VERSION").read_text(encoding="utf-8").strip()
+                    )
+                    self._validate_source()
+                    if (
+                        snapshot_descriptor != self.descriptor
+                        or snapshot_version != self.version
+                        or self._source_revision() != expected_revision
+                    ):
+                        raise ManagementError(
+                            78,
+                            "PLAN_CHANGED",
+                            "Beep source changed while creating its trusted snapshot.",
+                        )
+                except ManagementError:
+                    raise
+                except (OSError, shutil.Error, UnicodeError) as exc:
+                    raise ManagementError(
+                        78,
+                        "PLAN_CHANGED",
+                        "Beep source changed while creating its trusted snapshot.",
+                    ) from exc
+                yield
+        finally:
+            self.source_root = original
+
     @staticmethod
     def _assert_tree_safe(root: Path) -> None:
-        if root.is_symlink() or not root.is_dir():
+        try:
+            root_metadata = root.lstat()
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_PATH",
+                f"Unsafe product tree: {root}",
+            ) from exc
+        if not stat.S_ISDIR(root_metadata.st_mode):
             raise ManagementError(73, "UNSAFE_PATH", f"Unsafe product tree: {root}")
         for path in root.rglob("*"):
-            if path.is_symlink():
-                raise ManagementError(73, "UNSAFE_PATH", f"Symlink rejected: {path}")
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Unsafe product path: {path}",
+                ) from exc
+            if not (
+                stat.S_ISDIR(metadata.st_mode)
+                or stat.S_ISREG(metadata.st_mode)
+            ):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_PATH",
+                    f"Unsupported product path: {path}",
+                )
 
     @staticmethod
     def _chown_tree(root: Path, uid: int, gid: int) -> None:
@@ -3608,7 +7086,7 @@ class Manager:
         changed_resources: list[str],
         event_id: str,
     ) -> dict[str, str]:
-        self.paths.receipts.mkdir(parents=True, exist_ok=True)
+        self._validate_receipt_roots()
         receipt = {
             "schema_version": 1,
             "response": result.object(),
@@ -3624,9 +7102,94 @@ class Manager:
         }
         content = canonical_json(receipt) + b"\n"
         historical = self.paths.receipts / f"{result.correlation_id}.json"
+        self._validate_receipt_destinations(result.correlation_id)
         atomic_write(historical, content, mode=0o640)
         atomic_write(self.paths.receipt, content, mode=0o640)
         return {"path": str(self.paths.receipt), "digest": sha256_bytes(content)}
+
+    def _validate_receipt_roots(self) -> None:
+        expected_uid, expected_gid = self._expected_node_owner()
+        for path, mode in (
+            (self.paths.log_root, 0o755),
+            (self.paths.receipts, 0o750),
+        ):
+            try:
+                metadata = path.lstat()
+            except OSError as exc:
+                raise ManagementError(
+                    73,
+                    "UNSAFE_RECEIPT_PATH",
+                    f"Management receipt directory is unsafe: {path}",
+                ) from exc
+            if (
+                not stat.S_ISDIR(metadata.st_mode)
+                or metadata.st_uid != expected_uid
+                or metadata.st_gid != expected_gid
+                or stat.S_IMODE(metadata.st_mode) != mode
+            ):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_RECEIPT_PATH",
+                    f"Management receipt directory is unsafe: {path}",
+                )
+        self._assert_no_symlink_ancestors(self.paths.receipts)
+        self._assert_tree_safe(self.paths.receipts)
+
+    def _validate_receipt_destinations(self, correlation_id: str) -> None:
+        expected_uid, expected_gid = self._expected_node_owner()
+        for path in (
+            self.paths.receipt,
+            self.paths.receipts / f"{correlation_id}.json",
+        ):
+            if not self._path_present(path):
+                continue
+            metadata = path.lstat()
+            if (
+                not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != expected_uid
+                or metadata.st_gid != expected_gid
+                or stat.S_IMODE(metadata.st_mode) != 0o640
+            ):
+                raise ManagementError(
+                    73,
+                    "UNSAFE_RECEIPT_PATH",
+                    f"Management receipt path is unsafe: {path}",
+                )
+
+    def _validate_audit_target(self) -> None:
+        expected_uid, expected_gid = self._expected_node_owner()
+        try:
+            root_metadata = self.paths.log_root.lstat()
+        except OSError as exc:
+            raise ManagementError(
+                73,
+                "UNSAFE_AUDIT_PATH",
+                f"Management audit directory is unsafe: {self.paths.log_root}",
+            ) from exc
+        if (
+            not stat.S_ISDIR(root_metadata.st_mode)
+            or root_metadata.st_uid != expected_uid
+            or root_metadata.st_gid != expected_gid
+            or stat.S_IMODE(root_metadata.st_mode) != 0o755
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_AUDIT_PATH",
+                f"Management audit directory is unsafe: {self.paths.log_root}",
+            )
+        self._assert_no_symlink_ancestors(self.paths.log_root)
+        if not self._path_present(self.paths.audit):
+            return
+        metadata = self.paths.audit.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o640
+        ):
+            raise ManagementError(
+                73,
+                "UNSAFE_AUDIT_PATH",
+                f"Management audit file is unsafe: {self.paths.audit}",
+            )
 
     def _append_audit(
         self,
@@ -3636,6 +7199,7 @@ class Manager:
         event_id: str,
         receipt_digest: str | None,
     ) -> None:
+        self._validate_audit_target()
         event = {
             "timestamp": utc_now(),
             "event_id": event_id,
@@ -3650,7 +7214,6 @@ class Manager:
             "changed": result.changed,
             "receipt_digest": receipt_digest,
         }
-        self.paths.audit.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(
             self.paths.audit,
             os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW,

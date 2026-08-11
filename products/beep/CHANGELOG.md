@@ -29,13 +29,38 @@ Beep uses independent UTC date-time versions in `yyyy.mm.dd.hh.nn.ss` format.
   catalogue validation, provenance, and signature verification.
 - Generalise backup boundary checks to protect every system configuration,
   application, state, and log root without naming another product.
+- Keep `/var/lib/beep` lifecycle control and `/var/log/beep` management
+  evidence parents root-owned while limiting `beep` write access to explicit
+  runtime and audit files.
 
 ### Fixed
 
-- Allow npm's required internal command links inside the pinned Node runtime
-  while continuing to reject absolute, dangling, non-file, and escaping links.
+- Convert validated Node/npm launch links to regular launchers, disable npm
+  `bin` links, and remove Python venv's standard Linux `lib64` link so install,
+  backup, recovery snapshots, rollback, repair, and uninstall keep uniformly
+  symlink-free managed trees.
+- Pin and validate the complete transitive npm graph, disable dependency
+  scripts, verify Node and npm before activation, preserve proxy/private-CA
+  settings, and add bounded download, command, and apt-lock retries.
+- Make failed first installs safely rerunnable with a root-owned provenance
+  journal, provenance-checked partial-resource adoption, verified service
+  activation, and owned-service cleanup without stopping unrelated same-name
+  units.
+- Snapshot the account home and exact service state, stop the running health
+  oneshot, reject reused recovery IDs, and validate rollback destinations
+  before mutation. Stage rollback targets on their destination filesystems and
+  reverse completed swaps if application or ownership restoration fails.
+- Preflight every uninstall target and management-evidence path before removal;
+  distinguish purge-started from verified purge-completed journal evidence,
+  and make interrupted purges safely resumable with exact identity provenance.
+- Bind approval to source and artifact revisions, deploy from a trusted source
+  snapshot, hash exclusions relative to the source root, and recheck protected
+  input fingerprints immediately before use.
+- Bind source and installed management wrappers deterministically, scrub the
+  sudo environment, and reject source links or special files before Python
+  import.
 - Preserve executable modes for the pinned Node runtime and copied lifecycle
-  commands.
+  commands, and enforce Unix line endings for every shipped shell entrypoint.
 - Return exit `64` for unattended plans blocked on required input and reject
   raw secret environment values with a specific bounded error.
 - Fail closed on absent, corrupt, non-finite, or unsafe lifecycle state; keep

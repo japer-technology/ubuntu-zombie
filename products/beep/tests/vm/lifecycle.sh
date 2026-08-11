@@ -34,8 +34,11 @@ common=(
 export BEEP_ADMIN_PASSWORD_FILE="${password_file}"
 export BEEP_DISPOSABLE_VM_TEST=1
 
-"${product_root}/scripts/manage.sh" install "${common[@]}"
-"${product_root}/scripts/manage.sh" install "${common[@]}"
+"${product_root}/scripts/install.sh" "${common[@]}"
+"${product_root}/scripts/install.sh" "${common[@]}"
+"${product_root}/scripts/manage.sh" repair "${common[@]}"
+"${product_root}/scripts/manage.sh" update "${common[@]}"
+"${product_root}/scripts/manage.sh" rollback "${common[@]}"
 "${product_root}/scripts/manage.sh" verify --json
 export BEEP_BACKUP_DESTINATION="${backup_root}"
 "${product_root}/scripts/manage.sh" backup "${common[@]}"

@@ -75,6 +75,22 @@ command, port, regular-file collision, or dangling link. Re-running install
 converges the same owned installation and preserves credentials, policy,
 history, suspension, instance identity, and any death tombstone.
 
+Before the first host mutation, Beep writes a root-owned pending-install
+journal beside its state root. If a dependency download, apt lock, service
+start, or health check fails, Beep stops only units whose exact shipped bytes
+prove they belong to that attempt. Correct the reported cause and rerun the
+same install command; the manager validates every recorded resource before
+adopting the partial installation.
+
+Node, npm, and the complete transitive bridge graph are version-and-integrity
+locked. Installation uses bounded retries, waits for apt locks, disables npm
+scripts and generated command links, and verifies both Node and npm before the
+runtime is accepted. Installation succeeds only after the chat service and
+health timer are both active and enabled. Standard Node/npm links and Python's
+Linux `lib64` link are converted to validated regular launchers or removed,
+leaving snapshots, backup, rollback, repair, and uninstall with one
+symlink-free tree invariant.
+
 ## Verify and diagnose
 
 ```bash
@@ -119,9 +135,16 @@ sudo beep-manage uninstall --purge \
 ```
 
 The manager removes only resources proved by Beep's marker and fixed
-descriptor. Purge writes final correlation evidence to the system journal
-before deleting local receipts, logs, account, and group. Operator-created
-backups and exports are not removed.
+descriptor. Purge writes a non-success `purge_started` record before deleting
+local receipts, logs, account, and group, then writes `purge_completed` only
+after each removal verifies. Before deletion begins it also writes the
+root-owned `/var/lib/beep.purging.json` tombstone, bound to the installation
+instance and exact account/group IDs. If power or storage failure interrupts
+purge, rerun the same command from verified Beep source; the tombstone permits
+only that purge to resume and is removed after completion evidence is durable.
+Use that source tree's `scripts/manage.sh` if the installed entrypoint was
+already removed.
+Operator-created backups and exports are not removed.
 
 ## Stable exits
 

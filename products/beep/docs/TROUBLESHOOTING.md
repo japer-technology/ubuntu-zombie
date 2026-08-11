@@ -36,6 +36,40 @@ the provider-specific variable in `/etc/beep/secrets/env`. Never paste a key
 into chat, a command argument, request JSON, issue, or diagnostic bundle.
 LM Studio requires a named model and a validated private or loopback base URL.
 
+## Install reports `UNSAFE_PATH`
+
+Do not delete the reported path merely to make installation continue. Beep
+uses `lstat`-style checks and rejects symlinks, special files, writable control
+parents, ownership drift, and unsupported entries before destructive work.
+
+An npm `bin` link or Python `agent-env/lib64 -> lib` link created by an older
+partial Beep attempt is recognized only when its owner and resolved target are
+inside the exact managed runtime. Rerun the verified installer: it converts
+those known links to the current symlink-free representation. Any escaping,
+absolute, dangling, foreign, or otherwise unrecorded link remains blocked.
+
+If the first install failed during a transient download or apt lock, retain
+`/var/lib/beep.installing.json`, correct network/package-manager availability,
+and rerun install. That root-owned journal is what permits exact partial-state
+adoption; hand-editing it or adding an unrecorded Beep host command correctly
+changes the result to `OWNERSHIP_COLLISION`.
+
+## Install reports `PURGE_IN_PROGRESS`
+
+An earlier complete purge was interrupted. Do not remove
+`/var/lib/beep.purging.json`: it is the root-owned proof that lets Beep finish
+without adopting a newly created `beep` account or group. From the same
+verified source, rerun:
+
+```bash
+cd /path/to/verified-source/products/beep
+sudo ./scripts/manage.sh uninstall --purge \
+  --confirmation 'DELETE BEEP STATE' --yes --json
+```
+
+Every other lifecycle mutation remains blocked until the resumed purge verifies
+each remaining resource, records `purge_completed`, and removes the tombstone.
+
 ## Tool waits or is denied
 
 Inspect the proposed class and current `/etc/beep/policy.yaml`. Elevated work

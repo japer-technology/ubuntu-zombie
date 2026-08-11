@@ -46,10 +46,14 @@ rollback before returning the bounded failure. System-package changes cannot
 be transactionally removed; recovery therefore verifies the restored product
 and reports any remaining host-level remediation.
 
-The lifecycle file is owned by `beep`, mode `0600`. Missing, malformed,
-non-finite, non-regular, or expired state is dead. Death cancels active turns
-and pending reactivation, revokes sessions, stops the chat service, and stops
-the bound health timer. Reinstall and resume never clear a tombstone.
+The `/var/lib/beep` control parent, marker, retained state, recovery root, and
+the sibling `/var/lib/beep.purging.json` purge tombstone are root-controlled;
+only `/var/lib/beep/runtime` is writable by `beep`. The
+lifecycle file inside that runtime is owned by `beep`, mode `0600`. Missing,
+malformed, non-finite, non-regular, or expired state is dead. Death cancels
+active turns and pending reactivation, revokes sessions, stops the chat
+service, and stops the bound health timer. Reinstall and resume never clear a
+tombstone.
 
 ## Family-manager flow
 

@@ -1,0 +1,2 @@
+*.sh text eol=lf
+payload/bin/* text eol=lf
