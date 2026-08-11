@@ -4921,7 +4921,8 @@ def print_plan(
     configuration: dict[str, Any] | None,
     file: Any = None,
 ) -> None:
-    print(f"Forgejo {result.operation} plan:", file=file)
+    print("Forgejo product lifecycle plan:", file=file)
+    print(f"  Operation:        {result.operation}", file=file)
     if configuration is not None:
         print(f"  Public URL:      {configuration['root_url']}", file=file)
         print(
