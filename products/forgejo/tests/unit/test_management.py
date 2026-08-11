@@ -308,6 +308,117 @@ container:
         self.assertEqual(raised.exception.code, "INVALID_ARTIFACT_DIGEST")
         self.assertFalse(self.paths.marker.exists())
 
+    def test_previous_release_marker_is_loaded_and_migrated(self) -> None:
+        self.paths.state_root.mkdir(parents=True)
+        instance_id = str(uuid.uuid4())
+        previous = {
+            "schema_version": 1,
+            "product_id": "forgejo",
+            "instance_id": instance_id,
+            "version": self.manager.version,
+            "source_revision": "source-tree-sha256:" + "a" * 64,
+            "installed_at": "2026-08-10T00:00:00Z",
+            "updated_at": "2026-08-10T00:01:00Z",
+        }
+        self.paths.marker.write_text(
+            json.dumps(previous),
+            encoding="utf-8",
+        )
+        self.paths.marker.chmod(0o644)
+        real_lstat = Path.lstat
+
+        def root_owned_lstat(path: Path) -> os.stat_result:
+            metadata = real_lstat(path)
+            if path != self.paths.marker:
+                return metadata
+            return os.stat_result(
+                (
+                    metadata.st_mode,
+                    metadata.st_ino,
+                    metadata.st_dev,
+                    metadata.st_nlink,
+                    0,
+                    0,
+                    metadata.st_size,
+                    metadata.st_atime,
+                    metadata.st_mtime,
+                    metadata.st_ctime,
+                )
+            )
+
+        with (
+            mock.patch.object(
+                Path,
+                "lstat",
+                autospec=True,
+                side_effect=root_owned_lstat,
+            ),
+            mock.patch("forgejo.management.os.fchown"),
+        ):
+            normalized = self.manager.load_marker(required=True)
+            migrated = self.manager._migrate_previous_marker()
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized["instance_id"], instance_id)
+        self.assertNotIn("updated_at", normalized)
+        self.assertEqual(
+            normalized["install_root"],
+            str(self.paths.install_root),
+        )
+        self.assertIsNone(normalized["artifact_sha256"])
+        self.assertTrue(migrated)
+        self.assertEqual(
+            set(json.loads(self.paths.marker.read_text(encoding="utf-8"))),
+            {
+                "schema_version",
+                "product_id",
+                "instance_id",
+                "version",
+                "source_revision",
+                "installed_at",
+                "install_root",
+                "lifecycle_entrypoint",
+                "artifact_sha256",
+            },
+        )
+
+    def test_installed_entrypoint_preserves_artifact_provenance(self) -> None:
+        self.paths.state_root.mkdir(parents=True)
+        artifact = "b" * 64
+        existing = {
+            "schema_version": 1,
+            "product_id": "forgejo",
+            "instance_id": str(uuid.uuid4()),
+            "version": self.manager.version,
+            "source_revision": f"artifact-sha256:{artifact}",
+            "installed_at": "2026-08-10T00:00:00Z",
+            "install_root": str(self.paths.install_root),
+            "lifecycle_entrypoint": str(self.paths.entrypoint),
+            "artifact_sha256": artifact,
+        }
+        self.manager.source_root = self.paths.product_root.resolve(strict=False)
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch.object(
+                self.manager,
+                "_source_revision",
+                side_effect=AssertionError(
+                    "installed artifact provenance must be preserved"
+                ),
+            ),
+            mock.patch("forgejo.management.os.fchown"),
+        ):
+            self.manager._write_marker(
+                existing["instance_id"],
+                existing=existing,
+                changed=[],
+            )
+        marker = json.loads(self.paths.marker.read_text(encoding="utf-8"))
+        self.assertEqual(marker["artifact_sha256"], artifact)
+        self.assertEqual(
+            marker["source_revision"],
+            f"artifact-sha256:{artifact}",
+        )
+
     def test_backup_streams_postgres_dump_without_path_access(self) -> None:
         self.paths.configuration_root.mkdir(parents=True)
         self.paths.state_root.mkdir(parents=True)
@@ -478,6 +589,7 @@ PASSWD = valid-database-password
                 self.manager._coordinated_backup("unit")
         self.assertIs(raised.exception, backup_error)
         self.assertIs(raised.exception.__cause__, restore_error)
+        self.assertIn("restoration also failed", backup_error.recovery[0])
 
     def test_completed_backup_path_survives_restore_failure(self) -> None:
         archive = self.paths.backup_root / "completed.tar.gz"
@@ -532,6 +644,66 @@ PASSWD = valid-database-password
             "RUNNER_DEPENDENCY_UNHEALTHY",
         )
         run.assert_not_called()
+
+    def test_failed_mutation_does_not_restart_runner_without_https(self) -> None:
+        self.paths.unit.parent.mkdir(parents=True)
+        self.paths.unit.write_text("[Service]\n", encoding="utf-8")
+        with (
+            mock.patch.object(self.manager, "_run") as run,
+            mock.patch.object(self.manager, "_health", return_value=True),
+            mock.patch.object(
+                self.manager,
+                "_https_health",
+                return_value=False,
+            ),
+        ):
+            self.manager._restore_after_failed_mutation(
+                server_was_active=True,
+                runner_was_active=True,
+                was_suspended=False,
+            )
+        run.assert_called_once_with(
+            ["systemctl", "start", "forgejo.service"],
+            check=False,
+        )
+
+    def test_failed_suspended_mutation_reasserts_suspension(self) -> None:
+        with mock.patch.object(
+            self.manager,
+            "_enforce_suspension",
+        ) as enforce:
+            self.manager._restore_after_failed_mutation(
+                server_was_active=True,
+                runner_was_active=True,
+                was_suspended=True,
+            )
+        enforce.assert_called_once_with()
+
+    def test_enforce_suspension_disables_server_and_runner(self) -> None:
+        with (
+            mock.patch.object(self.manager, "_stop_services") as stop,
+            mock.patch.object(
+                self.manager,
+                "_runner_present",
+                return_value=True,
+            ),
+            mock.patch.object(self.manager, "_run") as run,
+        ):
+            self.manager._enforce_suspension()
+        stop.assert_called_once_with()
+        self.assertEqual(
+            run.call_args_list,
+            [
+                mock.call(
+                    ["systemctl", "disable", "forgejo.service"],
+                    check=False,
+                ),
+                mock.call(
+                    ["systemctl", "disable", "forgejo-runner.service"],
+                    check=False,
+                ),
+            ],
+        )
 
     def test_suspend_records_and_disables_runner_boot_intent(self) -> None:
         self.paths.state_root.mkdir(parents=True)
