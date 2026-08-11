@@ -500,7 +500,7 @@ class Manager:
         if value["operation"] != operation:
             raise ManagementError(65, "REQUEST_MISMATCH", "Request operation does not match.")
         validate_uuid(value["correlation_id"], label="request correlation_id")
-        if value["requested_by"] not in {"operator", "ubuntu-zombie", "beep"}:
+        if value["requested_by"] != "operator":
             raise ManagementError(65, "INVALID_REQUEST", "requested_by is invalid.")
         if not isinstance(value["inputs"], dict):
             raise ManagementError(65, "INVALID_REQUEST", "Request inputs must be an object.")
@@ -599,6 +599,30 @@ class Manager:
         self._prepare_inputs(invocation)
         return invocation
 
+    @staticmethod
+    def _prompt(message: str, *, as_json: bool) -> str:
+        destination = sys.stderr if as_json else sys.stdout
+        print(message, end="", file=destination, flush=True)
+        try:
+            return input()
+        except (EOFError, KeyboardInterrupt) as exc:
+            raise ManagementError(
+                64,
+                "INTERACTIVE_INPUT_REQUIRED",
+                "Interactive installation was cancelled.",
+            ) from exc
+
+    @staticmethod
+    def _prompt_secret(message: str) -> str:
+        try:
+            return getpass.getpass(message)
+        except (EOFError, KeyboardInterrupt) as exc:
+            raise ManagementError(
+                64,
+                "INTERACTIVE_INPUT_REQUIRED",
+                "Interactive installation was cancelled.",
+            ) from exc
+
     def _prepare_inputs(self, invocation: Invocation) -> None:
         operation = invocation.operation
         if operation in {"install", "repair", "update", "resume"}:
@@ -606,7 +630,10 @@ class Manager:
         if operation == "backup":
             destination = invocation.inputs.get("backup_destination")
             if destination is None and not invocation.non_interactive:
-                destination = input("Absolute backup destination directory: ").strip()
+                destination = self._prompt(
+                    "Absolute backup destination directory: ",
+                    as_json=invocation.json_output,
+                ).strip()
                 invocation.inputs["backup_destination"] = destination
             if not isinstance(destination, str) or not destination:
                 raise ManagementError(
@@ -623,12 +650,16 @@ class Manager:
                         "MISSING_INPUT",
                         "Unattended uninstall requires retain_state in a request file.",
                     )
-                answer = input("Retain protected Friend state? [Y/n]: ").strip().lower()
+                answer = self._prompt(
+                    "Retain protected Friend state? [Y/n]: ",
+                    as_json=invocation.json_output,
+                ).strip().lower()
                 invocation.retain_state = answer not in {"n", "no"}
             if not invocation.retain_state:
                 invocation.confirmation = invocation.confirmation or (
-                    "" if invocation.non_interactive else input(
-                        f"Type {DELETE_CONFIRMATION!r} to delete Friend state: "
+                    "" if invocation.non_interactive else self._prompt(
+                        f"Type {DELETE_CONFIRMATION!r} to delete Friend state: ",
+                        as_json=invocation.json_output,
                     )
                 )
                 if invocation.confirmation != DELETE_CONFIRMATION:
@@ -641,6 +672,20 @@ class Manager:
     def _prepare_configuration_inputs(self, invocation: Invocation) -> None:
         existing = self._existing_settings()
         needs_install_inputs = invocation.operation == "install" and existing is None
+        interactive_install = needs_install_inputs and not invocation.non_interactive
+        destination = sys.stderr if invocation.json_output else sys.stdout
+        if interactive_install:
+            if not sys.stdin.isatty():
+                raise ManagementError(
+                    64,
+                    "INTERACTIVE_INPUT_REQUIRED",
+                    "Run the installer in a terminal or use --non-interactive with required inputs.",
+                )
+            print("Imaginary Friend interactive installer", file=destination)
+            print(
+                "Press Enter to accept each value shown in brackets.",
+                file=destination,
+            )
         owner = invocation.inputs.get("owner_user") or self._owner_from_config()
         if needs_install_inputs and invocation.non_interactive and not invocation.inputs.get(
             "owner_user"
@@ -652,8 +697,22 @@ class Manager:
             )
         if owner is None and not invocation.non_interactive:
             default_owner = os.environ.get("SUDO_USER", "")
-            owner = input(f"Human owner [{default_owner}]: ").strip() or default_owner
-            invocation.inputs["owner_user"] = owner
+            if not default_owner and os.geteuid() != 0:
+                default_owner = pwd.getpwuid(os.geteuid()).pw_name
+            while owner is None:
+                suffix = f" [{default_owner}]" if default_owner else ""
+                answer = self._prompt(
+                    f"Human owner{suffix}: ",
+                    as_json=invocation.json_output,
+                ).strip()
+                candidate = answer or default_owner
+                try:
+                    self._validate_owner(candidate)
+                except ManagementError as exc:
+                    print(f"  {exc.message}", file=destination)
+                else:
+                    owner = candidate
+                    invocation.inputs["owner_user"] = owner
         if not owner and (needs_install_inputs or existing is None):
             raise ManagementError(
                 64, "MISSING_INPUT", "owner_user is required for installation."
@@ -674,21 +733,40 @@ class Manager:
                 "owner_password_file is required for unattended installation.",
             )
         elif existing is None:
-            first = getpass.getpass(
-                "Owner password (leave empty to generate a strong password): "
-            )
-            if first:
-                second = getpass.getpass("Repeat owner password: ")
+            while invocation.password is None:
+                first = self._prompt_secret(
+                    "Owner password (leave empty to generate a strong password): "
+                )
+                if not first:
+                    invocation.generated_password = secrets.token_urlsafe(24)
+                    invocation.password = invocation.generated_password
+                    break
+                second = self._prompt_secret("Repeat owner password: ")
                 if not secrets.compare_digest(first, second):
-                    raise ManagementError(64, "PASSWORD_MISMATCH", "Passwords did not match.")
-                invocation.password = validate_owner_password(first)
-            else:
-                invocation.generated_password = secrets.token_urlsafe(24)
-                invocation.password = invocation.generated_password
+                    print("  Passwords did not match.", file=destination)
+                    continue
+                try:
+                    invocation.password = validate_owner_password(first)
+                except ManagementError as exc:
+                    print(f"  {exc.message}", file=destination)
         model_url = invocation.inputs.get(
             "model_base_url",
             existing["model_base_url"] if existing else DEFAULT_MODEL_BASE_URL,
         )
+        if interactive_install and "model_base_url" not in invocation.inputs:
+            while True:
+                answer = self._prompt(
+                    f"Local model endpoint [{model_url}]: ",
+                    as_json=invocation.json_output,
+                ).strip()
+                candidate = answer or str(model_url)
+                try:
+                    validate_model_base_url(candidate)
+                except FriendError as exc:
+                    print(f"  {exc.message}", file=destination)
+                else:
+                    model_url = candidate
+                    break
         model = invocation.inputs.get("model", existing["model"] if existing else None)
         if (
             needs_install_inputs
@@ -699,8 +777,18 @@ class Manager:
                 64, "MISSING_INPUT", "model is required for unattended installation."
             )
         if model is None and existing is None and not invocation.non_interactive:
-            model = input("OpenAI-compatible local model ID: ").strip()
-            invocation.inputs["model"] = model
+            while model is None:
+                answer = self._prompt(
+                    "OpenAI-compatible local model ID: ",
+                    as_json=invocation.json_output,
+                ).strip()
+                try:
+                    validate_model_id(answer)
+                except FriendError as exc:
+                    print(f"  {exc.message}", file=destination)
+                else:
+                    model = answer
+                    invocation.inputs["model"] = model
         if existing is None and not model:
             raise ManagementError(64, "MISSING_INPUT", "model is required for installation.")
         try:
@@ -718,6 +806,40 @@ class Manager:
             "audit_retention_days",
             existing["audit_retention_days"] if existing else 90,
         )
+        if interactive_install and "history_retention_days" not in invocation.inputs:
+            while True:
+                answer = self._prompt(
+                    f"Conversation history retention in days [{history}]: ",
+                    as_json=invocation.json_output,
+                ).strip()
+                try:
+                    history = self._bounded_integer(
+                        answer or history,
+                        "history_retention_days",
+                        1,
+                        365,
+                    )
+                except ManagementError as exc:
+                    print(f"  {exc.message}", file=destination)
+                else:
+                    break
+        if interactive_install and "audit_retention_days" not in invocation.inputs:
+            while True:
+                answer = self._prompt(
+                    f"Operational audit retention in days [{audit}]: ",
+                    as_json=invocation.json_output,
+                ).strip()
+                try:
+                    audit = self._bounded_integer(
+                        answer or audit,
+                        "audit_retention_days",
+                        30,
+                        3650,
+                    )
+                except ManagementError as exc:
+                    print(f"  {exc.message}", file=destination)
+                else:
+                    break
         history_value = self._bounded_integer(history, "history_retention_days", 1, 365)
         audit_value = self._bounded_integer(audit, "audit_retention_days", 30, 3650)
         invocation.inputs["history_retention_days"] = history_value
@@ -1009,6 +1131,17 @@ class Manager:
             )
         return fingerprints
 
+    @staticmethod
+    def plan_configuration(invocation: Invocation) -> dict[str, Any]:
+        return {
+            "owner_user": invocation.inputs["owner_user"],
+            "model_base_url": invocation.inputs["model_base_url"],
+            "model": invocation.inputs["model"],
+            "history_retention_days": invocation.inputs["history_retention_days"],
+            "audit_retention_days": invocation.inputs["audit_retention_days"],
+            "workspaces": [str(path) for path in invocation.workspaces],
+        }
+
     def plan_digest(
         self, invocation: Invocation, steps: list[dict[str, Any]], instance_id: str | None
     ) -> str:
@@ -1034,10 +1167,16 @@ class Manager:
                 "Unattended mutation requires --yes after reviewing the plan.",
             )
         destination = sys.stderr if invocation.json_output else sys.stdout
-        print("Imaginary Friend lifecycle plan:", file=destination)
-        for index, step in enumerate(result.steps, 1):
-            print(f"  {index}. {step['summary']}", file=destination)
-        answer = input("Apply this plan? [y/N]: ").strip().lower()
+        configuration = None
+        if result.details is not None:
+            candidate = result.details.get("configuration")
+            if isinstance(candidate, dict):
+                configuration = candidate
+        print_plan(result, configuration=configuration, file=destination)
+        answer = self._prompt(
+            "Apply this plan? [y/N]: ",
+            as_json=invocation.json_output,
+        ).strip().lower()
         if answer not in {"y", "yes"}:
             raise ManagementError(64, "PLAN_NOT_APPROVED", "Lifecycle plan was not approved.")
 
@@ -1103,7 +1242,12 @@ class Manager:
             if invocation.operation == "doctor":
                 return result, 0
             return result, 1 if failed else 0
+        if invocation.operation in {"install", "repair", "update", "resume"}:
+            result.details = {
+                "configuration": self.plan_configuration(invocation),
+            }
         result.plan_digest = self.plan_digest(invocation, result.steps, instance_id)
+        result.requires_confirmation = True
         if invocation.supplied_plan_digest is not None:
             supplied = invocation.supplied_plan_digest
             if supplied != result.plan_digest:
@@ -3387,10 +3531,54 @@ def parser() -> argparse.ArgumentParser:
     return value
 
 
+def print_plan(
+    result: Result,
+    *,
+    configuration: dict[str, Any] | None,
+    file: Any = None,
+) -> None:
+    def field_value(label: str, value: Any) -> None:
+        print(f"  {label + ':':<22}{value}", file=file)
+
+    print("Imaginary Friend lifecycle plan:", file=file)
+    field_value("Operation", result.operation)
+    if configuration is not None:
+        field_value("Human owner", configuration["owner_user"])
+        field_value("Model endpoint", configuration["model_base_url"])
+        field_value("Model ID", configuration["model"])
+        field_value(
+            "History retention",
+            f"{configuration['history_retention_days']} days",
+        )
+        field_value(
+            "Audit retention",
+            f"{configuration['audit_retention_days']} days",
+        )
+        field_value("Workspaces", ", ".join(configuration["workspaces"]))
+    field_value("Local URL", "http://127.0.0.1:6767/")
+    field_value("State", "/var/lib/imaginary-friend")
+    field_value("Digest", result.plan_digest)
+    for index, step in enumerate(result.steps, 1):
+        print(f"  {index}. {step['summary']}", file=file)
+    if result.operation == "install":
+        print(
+            "  A generated owner password is shown once after installation.",
+            file=file,
+        )
+
+
 def _print_result(result: Result, *, as_json: bool) -> None:
     value = result.object()
     if as_json:
             sys.stdout.write(json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
+            return
+    if result.phase == "plan" and result.plan_digest:
+            configuration = None
+            if result.details is not None:
+                candidate = result.details.get("configuration")
+                if isinstance(candidate, dict):
+                    configuration = candidate
+            print_plan(result, configuration=configuration)
             return
     print(
             f"{result.operation}: {result.status} "
@@ -3406,6 +3594,8 @@ def _print_result(result: Result, *, as_json: bool) -> None:
             print(f"Recovery: {guidance}", file=sys.stderr)
     if result.receipt:
             print(f"Receipt: {result.receipt['path']} ({result.receipt['digest']})")
+    if result.operation == "install" and result.status == "ok":
+            print("Open: http://127.0.0.1:6767/")
 
 
 def main(argv: list[str] | None = None) -> int:

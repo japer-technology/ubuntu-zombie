@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import tempfile
 import unittest
@@ -261,7 +262,7 @@ class ManagementUnitTests(unittest.TestCase):
             "product_id": "imaginary-friend",
             "operation": "resume",
             "correlation_id": str(uuid.uuid4()),
-            "requested_by": "ubuntu-zombie",
+            "requested_by": "operator",
             "inputs": {"history_retention_days": 60},
             "confirmation": None,
         }
@@ -366,16 +367,80 @@ class ManagementUnitTests(unittest.TestCase):
         self.assertEqual(invocation.inputs["owner_user"], "owner")
         self.assertEqual(invocation.inputs["model"], "fixture-friend")
 
-    def test_interactive_install_rejects_short_owner_password(self) -> None:
+    def test_interactive_install_reprompts_for_short_owner_password(self) -> None:
         invocation = self.invocation()
         invocation.non_interactive = False
-        with mock.patch(
-            "friend.management.getpass.getpass",
-            side_effect=["short", "short"],
+        with (
+            mock.patch("friend.management.sys.stdin.isatty", return_value=True),
+            mock.patch(
+                "friend.management.getpass.getpass",
+                side_effect=[
+                    "short",
+                    "short",
+                    "valid owner password",
+                    "valid owner password",
+                ],
+            ),
+            mock.patch("friend.management.print"),
+        ):
+            self.manager._prepare_configuration_inputs(invocation)
+        self.assertEqual(invocation.password, "valid owner password")
+
+    def test_interactive_install_collects_validated_configuration(self) -> None:
+        invocation = Invocation(
+            operation="install",
+            correlation_id=str(uuid.uuid4()),
+            actor="operator",
+            inputs={},
+            confirmation=None,
+            retain_state=None,
+            dry_run=False,
+            json_output=False,
+            non_interactive=False,
+            assume_yes=False,
+            supplied_plan_digest=None,
+        )
+        with (
+            mock.patch("friend.management.sys.stdin.isatty", return_value=True),
+            mock.patch.object(
+                self.manager,
+                "_prompt",
+                side_effect=["owner", "", "fixture-friend", "", ""],
+            ),
+            mock.patch.object(self.manager, "_prompt_secret", return_value=""),
+            mock.patch.object(self.manager, "_validate_owner"),
+            mock.patch("friend.management.print"),
+        ):
+            self.manager._prepare_configuration_inputs(invocation)
+        self.assertEqual(invocation.inputs["owner_user"], "owner")
+        self.assertEqual(
+            invocation.inputs["model_base_url"],
+            "http://127.0.0.1:8080/v1",
+        )
+        self.assertEqual(invocation.inputs["model"], "fixture-friend")
+        self.assertEqual(invocation.inputs["history_retention_days"], 30)
+        self.assertEqual(invocation.inputs["audit_retention_days"], 90)
+        self.assertIsNotNone(invocation.generated_password)
+
+    def test_interactive_approval_displays_configuration_and_plan(self) -> None:
+        invocation = self.invocation()
+        invocation.non_interactive = False
+        invocation.assume_yes = False
+        invocation.json_output = False
+        output = io.StringIO()
+        with (
+            mock.patch.object(self.manager, "_prompt", return_value="no"),
+            mock.patch("friend.management.os.geteuid", return_value=0),
+            mock.patch("sys.stdout", output),
         ):
             with self.assertRaises(ManagementError) as raised:
-                self.manager._prepare_configuration_inputs(invocation)
-        self.assertEqual(raised.exception.code, "INVALID_SECRET")
+                self.manager.run(invocation)
+        self.assertEqual(raised.exception.code, "PLAN_NOT_APPROVED")
+        self.assertIn("Human owner:", output.getvalue())
+        self.assertIn("Model endpoint:", output.getvalue())
+        self.assertIn("fixture-friend", output.getvalue())
+        self.assertIn("Validate platform, model, inputs", output.getvalue())
+        self.assertFalse(self.paths.lock.exists())
 
     def test_repair_preserves_restricted_workspace_without_new_file(self) -> None:
         self.paths.state_root.mkdir(parents=True)
