@@ -137,6 +137,23 @@ class ManagementTests(unittest.TestCase):
         self.assertIn("Converge Beep-only credentials", output.getvalue())
         self.assertFalse(self.manager.paths.lock.exists())
 
+    def test_interactive_provider_credential_retries_invalid_input(self) -> None:
+        with (
+            mock.patch.object(
+                management.sys.stdin,
+                "isatty",
+                return_value=True,
+            ),
+            mock.patch.object(
+                management.getpass,
+                "getpass",
+                side_effect=["", "provider-secret"],
+            ) as prompt,
+        ):
+            value = self.manager._interactive_provider_credential("openai")
+        self.assertEqual(value, "provider-secret")
+        self.assertEqual(prompt.call_count, 2)
+
     def test_atomic_write_rejects_non_regular_destination(self) -> None:
         destination = self.root / "destination"
         destination.mkdir()

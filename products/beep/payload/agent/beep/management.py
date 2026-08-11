@@ -2816,21 +2816,25 @@ class Manager:
                 "REQUIRED_INPUT",
                 "A protected provider_credential_file is required.",
             )
-        try:
-            value = getpass.getpass(f"{provider} provider credential: ")
-        except (EOFError, KeyboardInterrupt) as exc:
-            raise ManagementError(
-                64,
-                "INTERACTIVE_INPUT_REQUIRED",
-                "Interactive installation was cancelled.",
-            ) from exc
-        if not 1 <= len(value.encode()) <= 1024 or "\n" in value or "\r" in value:
-            raise ManagementError(
-                64,
-                "INVALID_SECRET",
-                "Provider credential must contain 1 to 1024 bytes on one line.",
+        while True:
+            try:
+                value = getpass.getpass(f"{provider} provider credential: ")
+            except (EOFError, KeyboardInterrupt) as exc:
+                raise ManagementError(
+                    64,
+                    "INTERACTIVE_INPUT_REQUIRED",
+                    "Interactive installation was cancelled.",
+                ) from exc
+            if (
+                1 <= len(value.encode()) <= 1024
+                and "\n" not in value
+                and "\r" not in value
+            ):
+                return value
+            print(
+                "  Provider credential must contain 1 to 1024 bytes on one line.",
+                file=sys.stderr,
             )
-        return value
 
     def _deploy_services(
         self,
