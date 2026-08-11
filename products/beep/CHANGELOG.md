@@ -6,6 +6,9 @@ Beep uses independent UTC date-time versions in `yyyy.mm.dd.hh.nn.ss` format.
 
 ### Added
 
+- Primary interactive installer that obtains root privileges, validates setup
+  answers, shows the complete plan, and securely prompts for credentials after
+  approval while preserving unattended lifecycle operation.
 - Standalone root-capable Beep runtime with authenticated loopback chat,
   provider adapters, closed tools, policy approvals, audit, conversation
   history, TTL, reactivation, diagnostics, and family management.
@@ -16,6 +19,16 @@ Beep uses independent UTC date-time versions in `yyyy.mm.dd.hh.nn.ss` format.
   cosign signatures, source record, operator documentation, parity fixture, and
   guarded disposable-VM harness.
 - Authenticated conversation export and confirmation-bound deletion.
+
+### Changed
+
+- Remove inherited product branding and external schema packaging so Beep
+  source, runtime metadata, documentation, tests, and release archives are
+  standalone.
+- Use the Beep release repository consistently for version discovery, family
+  catalogue validation, provenance, and signature verification.
+- Generalise backup boundary checks to protect every system configuration,
+  application, state, and log root without naming another product.
 
 ### Fixed
 

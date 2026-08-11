@@ -21,7 +21,7 @@ Do not manually start a dead service or edit its tombstone.
 - Use exactly `http://127.0.0.1:58989/` unless the configured port differs.
 - Beep rejects non-loopback Host values and cross-origin mutations.
 - Cookies are Beep-only, `HttpOnly`, `SameSite=Strict`, and expire after 12
-  hours. An Ubuntu Zombie or sibling cookie never authenticates.
+  hours. Another product's cookie never authenticates.
 - Password rotation clears current sessions. Lost passwords require
   root-controlled repair with a protected file.
 

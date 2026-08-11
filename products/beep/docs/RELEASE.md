@@ -16,10 +16,10 @@ attestation, signatures, and GitHub release.
 
 `.github/workflows/beep-release.yml` is triggered by the independent Beep
 version or tag. Every third-party action is pinned by commit. The workflow
-runs product lint and tests, packages only `products/beep/`, applicable family
-schemas, and the repository licence, generates an SPDX SBOM and test evidence,
-computes SHA-256 checksums, creates a GitHub artifact attestation, signs every
-asset with keyless cosign, and publishes the product tag and release.
+runs product lint and tests, packages only `products/beep/` and the repository
+licence, generates an SPDX SBOM and test evidence, computes SHA-256 checksums,
+creates a GitHub artifact attestation, signs every asset with keyless cosign,
+and publishes the product tag and release.
 
 Test evidence distinguishes automated source gates from external standalone
 VM and co-installation gates. A successful release workflow does not by itself
@@ -38,7 +38,7 @@ The verifier requires exactly one versioned checksum manifest, rejects unsafe
 artifact names, verifies every listed digest, verifies the checksum and listed
 assets against the cosign identity for
 `.github/workflows/beep-release.yml` in
-`japer-technology/ubuntu-zombie`, and verifies each attested subject with the
+`japer-technology/beep`, and verifies each attested subject with the
 local provenance bundle.
 
 Then confirm:
@@ -50,6 +50,6 @@ Then confirm:
 5. the changelog describes the intended migration and open risks; and
 6. the install plan names only Beep resources.
 
-Do not install a lone archive, copy an Ubuntu Zombie runtime, use a release
-from `japer-technology/beep`, weaken the certificate identity, or treat
+Do not install a lone archive, copy another product's runtime, use a release
+from another repository, weaken the certificate identity, or treat
 source-checkout tests as signed-release evidence.

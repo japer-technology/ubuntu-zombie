@@ -1,5 +1,20 @@
 # Configuration and credential rotation
 
+## Interactive installation
+
+Run `./scripts/install.sh` from the product directory. The installer asks for
+the loopback chat port, model provider and applicable model settings, and
+initial time to live. Press Enter to accept each displayed default. The
+installer then shows the selected values, plan digest, and every lifecycle step
+before asking for approval.
+
+After approval, protected prompts collect the chat password and any required
+provider credential. These secrets are hashed or written directly to the
+protected Beep environment and are never included in plan output, arguments,
+receipts, or audit events.
+
+## Unattended installation
+
 ## Lifecycle inputs
 
 The manager rejects unknown `BEEP_*` variables. Secret values must be supplied
@@ -10,9 +25,9 @@ and API-key environment variables are rejected.
 | ----- | ----------- | --------------- |
 | Agent user | `BEEP_USER` | Fixed to `beep` |
 | Chat port | `BEEP_CHAT_PORT` | `58989`, unprivileged loopback port |
-| Chat password file | `BEEP_ADMIN_PASSWORD_FILE` | Required for unattended first install; one 12–1,024-byte UTF-8 line |
+| Chat password file | `BEEP_ADMIN_PASSWORD_FILE` | Required for unattended first install; prompted interactively |
 | Provider | `BEEP_PROVIDER` | Optional: `openai`, `anthropic`, `gemini`, `xai`, `openrouter`, `mistral`, `groq`, or `lmstudio` |
-| Provider credential file | `BEEP_PROVIDER_CREDENTIAL_FILE` | Required for a non-local configured provider unless already stored |
+| Provider credential file | `BEEP_PROVIDER_CREDENTIAL_FILE` | Required unattended for a non-local provider unless already stored |
 | Model | `BEEP_MODEL` | Provider model override; required for OpenRouter and LM Studio |
 | Model base URL | `BEEP_MODEL_BASE_URL` | HTTPS, or literal private/loopback HTTP; only OpenAI-compatible or LM Studio |
 | TTL days | `BEEP_TTL_DAYS` | `7`; integer 1–3,650 |
@@ -23,6 +38,10 @@ and API-key environment variables are rejected.
 `BEEP_SOURCE_ROOT` is a development and installed-wrapper input.
 `BEEP_DISPOSABLE_VM_TEST=1` is only for the separately guarded destructive VM
 harness.
+
+Use `--yes --non-interactive` with automation. `--yes` skips setup questions
+and plan approval; `--non-interactive` guarantees that missing protected inputs
+exit `64` rather than prompting.
 
 Family requests use an absolute root-owned mode-`0600` JSON request file. The
 request fixes product `beep`, operation, canonical correlation UUID, actor,
@@ -65,6 +84,6 @@ diagnostics remain available but model turns cannot complete.
 - A valid session key is preserved by repair and reinstall. To rotate it, stop
   Beep, replace it with 32–4,096 random bytes owned by `beep` mode `0600`, then
   restart; all old cookies become invalid.
-- Never copy Ubuntu Zombie or sibling credential files into `/etc/beep`.
+- Never copy another product's credential files into `/etc/beep`.
 
 Run `sudo beep-manage verify --json` after any root configuration change.

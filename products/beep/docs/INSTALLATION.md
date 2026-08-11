@@ -17,7 +17,29 @@ For a published release:
 
 A source checkout is for reviewed development on a disposable VM only.
 
-## Plan
+## Interactive installation
+
+From the extracted product directory, run:
+
+```bash
+./scripts/install.sh
+```
+
+The installer obtains root privileges when needed. It asks for the loopback
+chat port, provider and model settings, and initial time to live. Every optional
+question has a secure default. It then displays the complete lifecycle plan and
+asks for approval before changing the host.
+
+After approval, enter and confirm the chat password. If a cloud provider was
+selected, enter its credential at the protected prompt. Neither secret is
+printed or included in lifecycle output. When installation completes, verify
+the result:
+
+```bash
+sudo beep-manage verify
+```
+
+## Unattended plan
 
 Create a root-owned mode-`0600` password file containing one line, then inspect
 the non-mutating unattended plan:
@@ -32,7 +54,7 @@ sudo env \
 A blocked plan lists required inputs and exits `64`. It must not create locks,
 directories, credentials, downloads, logs, or network traffic.
 
-## Install
+## Unattended installation
 
 After reviewing the plan:
 

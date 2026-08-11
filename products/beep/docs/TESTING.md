@@ -20,8 +20,8 @@ make -C products/beep package
   checks, strict bounded JSON, fail-closed lifecycle, cookies, export, and
   deletion;
 - a machine-readable product parity fixture; and
-- the repository's shared family conformance suite, including Beep's
-  product-specific `kill` extension.
+- installer entrypoint, interactive setup, complete plan, standalone package,
+  and product-boundary checks.
 
 The tests use temporary files and loopback servers. They do not install
 packages, create users, invoke sudo, mutate systemd, or contact a model or
@@ -45,12 +45,12 @@ revival, tombstone preservation across reinstall, and complete removal.
 
 | Gate | Repository evidence | Release evidence state |
 | ---- | ------------------- | ---------------------- |
-| Source lint, unit, integration, parity, family | `Makefile`, `tests/` | Automated |
+| Source lint, unit, integration, parity | `Makefile`, `tests/` | Automated |
 | Package contents and version | `make package` | Automated |
 | Release checksum, SBOM, provenance, signatures | `beep-release.yml` | Automated when published |
 | Ubuntu 22.04 Desktop `amd64` lifecycle | Guarded harness | Recorded pass still required |
 | Ubuntu 24.04 Desktop `amd64` lifecycle | Guarded harness | Recorded pass still required |
-| Ubuntu Zombie root-peer co-installation | Namespace and marker assertions | Open |
+| Root-peer co-installation | Namespace and marker assertions | Open |
 | Full admitted-family co-installation | Family contract and target suites | Open |
 | Update/rollback failure injection on host | Automatic source tests and VM plan | Recorded VM matrix open |
 | Independent security review and red team | Threat model and negative source tests | Open |
