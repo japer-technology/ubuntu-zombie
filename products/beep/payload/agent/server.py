@@ -86,8 +86,7 @@ AGENT_REACTIVATION_OPEN = "<beep-reactivation>"
 AGENT_REACTIVATION_CLOSE = "</beep-reactivation>"
 _VERSION_SOURCES = {
     "beep": (
-        "https://api.github.com/repos/japer-technology/"
-        "ubuntu-zombie/releases?per_page=100",
+        "https://api.github.com/repos/japer-technology/beep/releases?per_page=100",
         "beep_tag",
     ),
     "pi-mono": (

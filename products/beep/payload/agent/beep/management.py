@@ -790,7 +790,7 @@ class Manager:
             value["schema_version"] != 1
             or value["product_id"] != PRODUCT_ID
             or value["operation"] != operation
-            or value["requested_by"] not in {"operator", "ubuntu-zombie"}
+            or value["requested_by"] != "operator"
             or not isinstance(value["inputs"], dict)
             or not isinstance(value["confirmation"], (str, type(None)))
         ):
@@ -2718,16 +2718,10 @@ class Manager:
             )
         destination = Path(value).resolve(strict=False)
         protected = (
-            self.paths.install_root,
-            self.paths.configuration_root,
-            self.paths.state_root,
-            self.paths.log_root,
-            Path("/opt/ai-zombie"),
-            Path("/etc/ubuntu-zombie"),
-            Path("/var/lib/ubuntu-zombie"),
-            Path("/var/log/ubuntu-zombie"),
-            Path("/opt/imaginary-friend"),
-            Path("/opt/llama.cpp"),
+            Path("/opt"),
+            Path("/etc"),
+            Path("/var/lib"),
+            Path("/var/log"),
         )
         if any(destination == root or root in destination.parents for root in protected):
             raise ManagementError(

@@ -43,8 +43,7 @@ class ProductParityTests(unittest.TestCase):
         server = (
             PRODUCT_ROOT / "payload" / "agent" / "server.py"
         ).read_text(encoding="utf-8")
-        self.assertIn("ubuntu-zombie/releases?per_page=100", server)
-        self.assertNotIn("beep/releases/latest", server)
+        self.assertIn("japer-technology/beep/releases?per_page=100", server)
 
 
 if __name__ == "__main__":

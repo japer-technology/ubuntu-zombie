@@ -2,7 +2,7 @@
 # Verify a downloaded Beep release directory.
 set -Eeuo pipefail
 
-REPO="${BEEP_RELEASE_REPO:-japer-technology/ubuntu-zombie}"
+REPO="${BEEP_RELEASE_REPO:-japer-technology/beep}"
 DEFAULT_CERT_IDENTITY_REGEXP="https://github[.]com/${REPO}/[.]github"
 DEFAULT_CERT_IDENTITY_REGEXP+="/workflows/beep-release[.]yml"
 DEFAULT_CERT_IDENTITY_REGEXP+="@refs/(heads/main|tags/beep-v.*)"
