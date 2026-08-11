@@ -441,6 +441,80 @@ PASSWD = valid-database-password
         wait_https.assert_called_once_with()
         restore_runner.assert_called_once_with(True)
 
+    def test_backup_error_is_not_masked_by_restore_error(self) -> None:
+        backup_error = ManagementError(
+            1,
+            "BACKUP_FAILED",
+            "The database dump failed.",
+        )
+        restore_error = ManagementError(
+            1,
+            "SERVICE_START_FAILED",
+            "Forgejo did not restart.",
+        )
+        with (
+            mock.patch.object(
+                self.manager,
+                "_service_active",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_stop_services",
+                return_value=False,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_create_backup",
+                side_effect=backup_error,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_run",
+                side_effect=restore_error,
+            ),
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager._coordinated_backup("unit")
+        self.assertIs(raised.exception, backup_error)
+        self.assertIs(raised.exception.__cause__, restore_error)
+
+    def test_completed_backup_path_survives_restore_failure(self) -> None:
+        archive = self.paths.backup_root / "completed.tar.gz"
+        restore_error = ManagementError(
+            1,
+            "SERVICE_START_FAILED",
+            "Forgejo did not restart.",
+        )
+        with (
+            mock.patch.object(
+                self.manager,
+                "_service_active",
+                return_value=True,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_stop_services",
+                return_value=False,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_create_backup",
+                return_value=archive,
+            ),
+            mock.patch.object(
+                self.manager,
+                "_run",
+                side_effect=restore_error,
+            ),
+        ):
+            with self.assertRaises(ManagementError) as raised:
+                self.manager._coordinated_backup("unit")
+        self.assertEqual(raised.exception.code, "BACKUP_RESTORE_FAILED")
+        self.assertIn(str(archive), raised.exception.message)
+        self.assertIn(str(archive), raised.exception.recovery[0])
+        self.assertIs(raised.exception.__cause__, restore_error)
+
     def test_runner_restart_requires_https_health(self) -> None:
         with (
             mock.patch.object(self.manager, "_health", return_value=True),

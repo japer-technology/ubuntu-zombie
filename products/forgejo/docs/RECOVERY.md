@@ -5,7 +5,8 @@ The configuration carries database credentials and application encryption
 material; repositories alone are not sufficient for a complete recovery.
 
 `forgejo-manage update` records the pre-update archive in protected rollback
-metadata. Run:
+metadata. The archive is accepted only for the product instance that created
+it. Run:
 
 ```bash
 sudo forgejo-manage rollback --yes

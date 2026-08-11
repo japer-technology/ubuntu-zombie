@@ -3631,14 +3631,37 @@ ENABLED = true
     ) -> Path:
         server_was_active = self._service_active()
         runner_was_active = self._stop_services()
+
+        def restore_services() -> None:
+            self._run(["systemctl", "start", "forgejo.service"])
+            self._wait_healthy()
+            self._wait_https_healthy()
+            self._restore_runner(runner_was_active)
+
         try:
-            return self._create_backup(label, destination)
-        finally:
+            archive = self._create_backup(label, destination)
+        except BaseException as backup_error:
             if server_was_active and not self.paths.suspended.exists():
-                self._run(["systemctl", "start", "forgejo.service"])
-                self._wait_healthy()
-                self._wait_https_healthy()
-                self._restore_runner(runner_was_active)
+                try:
+                    restore_services()
+                except BaseException as restore_error:
+                    raise backup_error from restore_error
+            raise
+        if server_was_active and not self.paths.suspended.exists():
+            try:
+                restore_services()
+            except BaseException as exc:
+                raise ManagementError(
+                    1,
+                    "BACKUP_RESTORE_FAILED",
+                    f"Backup completed at {archive}, but Forgejo service "
+                    "restoration failed.",
+                    recovery=[
+                        f"Preserve the completed backup at {archive}.",
+                        "Inspect the Forgejo, Caddy, and runner service journals.",
+                    ],
+                ) from exc
+        return archive
 
     def _snapshot_for_rollback(
         self, archive: Path, marker: dict[str, Any]
