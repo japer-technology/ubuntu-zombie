@@ -2587,7 +2587,9 @@ class Manager:
         if password_file is not None:
             password = self._read_one_secret(password_file, minimum=12)
             existing["BEEP_ADMIN_PASSWORD_HASH"] = runtime_auth.hash_password(password)
-        elif "BEEP_ADMIN_PASSWORD_HASH" not in existing:
+        elif not runtime_auth.valid_password_hash(
+            existing.get("BEEP_ADMIN_PASSWORD_HASH")
+        ):
             password = self._prompted_chat_password or self._interactive_password()
             existing["BEEP_ADMIN_PASSWORD_HASH"] = runtime_auth.hash_password(password)
             self._prompted_chat_password = None
@@ -2604,7 +2606,9 @@ class Manager:
                 )
             elif configuration.provider == "lmstudio":
                 existing.setdefault("LMSTUDIO_API_KEY", "local")
-            elif PROVIDER_KEYS[configuration.provider] not in existing:
+            elif not existing.get(
+                PROVIDER_KEYS[configuration.provider], ""
+            ).strip():
                 prompted = self._prompted_provider_credential
                 if prompted is None or prompted[0] != configuration.provider:
                     value = self._interactive_provider_credential(
