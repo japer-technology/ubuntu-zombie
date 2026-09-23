@@ -3588,22 +3588,27 @@ def _print_result(result: Result, *, as_json: bool) -> None:
             if isinstance(candidate, dict):
                 configuration = candidate
         print_plan(result, configuration=configuration)
-        return
     print(
         f"{result.operation}: {result.status} "
         f"(version {result.product_version}, correlation {result.correlation_id})"
     )
-    if result.plan_digest:
+    if result.plan_digest and result.phase != "plan":
         print(f"Plan: {result.plan_digest}")
     for check in result.checks:
         print(f"[{check['status']}] {check['id']}: {check['summary']}")
+        if check["status"] != "pass" and check.get("remediation"):
+            print(f"  Next step: {check['remediation']}")
     for error in result.errors:
         print(f"ERROR {error['code']}: {error['message']}", file=sys.stderr)
     for guidance in result.recovery:
         print(f"Recovery: {guidance}", file=sys.stderr)
     if result.receipt:
         print(f"Receipt: {result.receipt['path']} ({result.receipt['digest']})")
-    if result.operation == "install" and result.status == "ok":
+    if (
+        result.operation == "install"
+        and result.phase == "execute"
+        and result.status == "ok"
+    ):
         print("Open: http://127.0.0.1:6767/")
 
 

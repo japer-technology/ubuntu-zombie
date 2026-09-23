@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ from friend.management import (
     ManagementError,
     Manager,
     Paths,
+    main,
     read_secret_file,
 )
 
@@ -440,6 +442,87 @@ class ManagementUnitTests(unittest.TestCase):
         prompt.assert_not_called()
         prompt_secret.assert_not_called()
         self.assertEqual(invocation.password, "valid owner password")
+
+    def test_interactive_preview_reports_checks_without_mutation(self) -> None:
+        for as_json in (False, True):
+            for blocked in (False, True):
+                with self.subTest(as_json=as_json, blocked=blocked):
+                    output = io.StringIO()
+                    prompts = io.StringIO()
+                    arguments = ["install", "--dry-run"]
+                    if as_json:
+                        arguments.append("--json")
+                    checks = [
+                        self.manager.check(
+                            "install_boundary",
+                            not blocked,
+                            "Workspace collision." if blocked else "Boundaries passed.",
+                            "Choose a product-owned workspace." if blocked else "",
+                        ),
+                        self.manager.check(
+                            "model", True, "Model probe is deferred.", warning=True
+                        ),
+                    ]
+                    with (
+                        mock.patch.dict(os.environ, {}, clear=True),
+                        mock.patch("friend.management.Manager", return_value=self.manager),
+                        mock.patch("sys.stdin.isatty", return_value=True),
+                        mock.patch("builtins.input", side_effect=[
+                            "owner", "", "fixture-friend", "", "",
+                        ]),
+                        mock.patch("friend.management.getpass.getpass", return_value=""),
+                        mock.patch.object(self.manager, "_validate_owner"),
+                        mock.patch.object(
+                            self.manager, "preflight_checks", return_value=checks
+                        ) as preflight,
+                        mock.patch.object(self.manager, "_execute") as execute,
+                        mock.patch.object(self.manager, "mutation_lock") as lock,
+                        mock.patch.object(self.manager, "_probe_model") as probe,
+                        mock.patch("sys.stdout", output),
+                        mock.patch("sys.stderr", prompts),
+                    ):
+                        exit_code = main(arguments)
+                    self.assertEqual(exit_code, 1 if blocked else 0)
+                    preflight.assert_called_once()
+                    self.assertFalse(preflight.call_args.kwargs["network"])
+                    execute.assert_not_called()
+                    lock.assert_not_called()
+                    probe.assert_not_called()
+                    self.assertFalse(self.paths.state_root.exists())
+                    self.assertFalse(self.paths.lock.exists())
+                    if as_json:
+                        value = json.loads(output.getvalue())
+                        self.assertEqual(value["checks"], checks)
+                        self.assertEqual(value["status"], "blocked" if blocked else "ok")
+                        self.assertNotIn("password", output.getvalue().lower())
+                        self.assertIn("Human owner", prompts.getvalue())
+                    else:
+                        self.assertIn("Imaginary Friend lifecycle plan:", output.getvalue())
+                        self.assertIn("install: blocked" if blocked else "install: ok",
+                                      output.getvalue())
+                        self.assertIn("[warn] model: Model probe is deferred.",
+                                      output.getvalue())
+                        if blocked:
+                            self.assertIn("[fail] install_boundary: Workspace collision.",
+                                          output.getvalue())
+                            self.assertIn("Next step: Choose a product-owned workspace.",
+                                          output.getvalue())
+                    self.assertNotIn("Open: http://127.0.0.1:6767/", output.getvalue())
+                    self.assertNotIn("Apply this plan?", output.getvalue() + prompts.getvalue())
+
+    def test_interactive_install_cancellation_does_not_mutate(self) -> None:
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch("friend.management.Manager", return_value=self.manager),
+            mock.patch("sys.stdin.isatty", return_value=True),
+            mock.patch("builtins.input", side_effect=KeyboardInterrupt),
+            mock.patch.object(self.manager, "_execute") as execute,
+            mock.patch("sys.stdout", io.StringIO()),
+            mock.patch("sys.stderr", io.StringIO()),
+        ):
+            self.assertEqual(main(["install", "--dry-run"]), 64)
+        execute.assert_not_called()
+        self.assertFalse(self.paths.lock.exists())
 
     def test_interactive_approval_displays_configuration_and_plan(self) -> None:
         invocation = self.invocation()

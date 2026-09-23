@@ -15,6 +15,9 @@ Imaginary Friend uses independent UTC date-time versions in
 
 ### Fixed
 
+- Show blocked checks, remediation, and deferred model probes in installer
+  previews instead of displaying only the plan. Keep the chat-opening
+  instruction exclusive to successful installation, not preview.
 - Preserve the paired previous-version runtime and recovery snapshot across
   same-version repair and reinstall, while retaining failure recovery for the
   active operation.
