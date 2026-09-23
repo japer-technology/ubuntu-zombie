@@ -812,7 +812,18 @@ class Manager:
         destination = sys.stderr if args.json else sys.stdout
         print("Beep interactive installer", file=destination)
         print(
+            "Beep creates a dedicated account with passwordless sudo "
+            "(full control of this computer).",
+            file=destination,
+        )
+        print(
             "Press Enter to accept each value shown in brackets.",
+            file=destination,
+        )
+        print(
+            "Chat is private to this computer. Choose a cloud provider if you "
+            "have an API key, or lmstudio for an existing local model server. "
+            "Choose none to set up Beep without AI responses.",
             file=destination,
         )
 
@@ -885,7 +896,7 @@ class Manager:
         prompt_value(
             "ttl_days",
             "BEEP_TTL_DAYS",
-            "Initial time to live in days",
+            "Initial time to live in days (Beep stops when this expires)",
             str(DEFAULT_TTL_DAYS),
             self._validate_ttl_days,
         )
@@ -1754,6 +1765,8 @@ class Manager:
                         if configuration is not None
                         else self.configuration(invocation),
                     )
+                if invocation.operation == "install":
+                    details["suspended"] = self._path_present(self.paths.suspended)
             elif invocation.operation == "backup":
                 changed_resources, previous_version, backup = self._execute_backup(
                     invocation
@@ -7338,25 +7351,51 @@ def print_result(result: Result, *, as_json: bool) -> None:
     if as_json:
         print(json.dumps(result.object(), ensure_ascii=False, sort_keys=True))
         return
+    configuration = None
+    if result.details is not None:
+        candidate = result.details.get("configuration")
+        if isinstance(candidate, dict):
+            configuration = candidate
     if result.phase == "plan":
-        configuration = None
-        if result.details is not None:
-            candidate = result.details.get("configuration")
-            if isinstance(candidate, dict):
-                configuration = candidate
         print_plan(result, configuration=configuration)
-        for error in result.errors:
-            print(f"  error {error['code']}: {error['message']}", file=sys.stderr)
-        return
-    print(f"Beep {result.operation}: {result.status}")
-    if result.plan_digest:
-        print(f"Plan digest: {result.plan_digest}")
-    for step in result.steps:
-        print(f"  - {step['summary']}")
-    for check in result.checks:
-        print(f"  [{check['status']}] {check['summary']}")
+        print(f"Plan status: {result.status}")
+    else:
+        print(f"Beep {result.operation}: {result.status}")
+        if result.plan_digest:
+            print(f"Plan digest: {result.plan_digest}")
+        for step in result.steps:
+            print(f"  - {step['summary']}")
+        for check in result.checks:
+            print(f"  [{check['status']}] {check['summary']}")
+            if check.get("remediation"):
+                print(f"    Next: {check['remediation']}")
+    for required in result.required_inputs:
+        print(f"  Required input: {required['name']}", file=sys.stderr)
     for error in result.errors:
         print(f"  error {error['code']}: {error['message']}", file=sys.stderr)
+    for instruction in result.recovery:
+        print(f"  Next: {instruction}", file=sys.stderr)
+    if (
+        result.operation == "install"
+        and result.phase == "execute"
+        and result.status == "ok"
+        and configuration is not None
+    ):
+        print("\nBeep installation complete.")
+        if result.details and result.details.get("suspended"):
+            print("Beep remains suspended. To start it: sudo beep-manage resume")
+        print(
+            "Chat on this computer: "
+            f"http://127.0.0.1:{configuration['chat_port']}/"
+        )
+        print("Sign in with your Beep chat password (not your Linux password).")
+        if configuration["provider"] is None:
+            print(
+                "No model provider is configured; AI responses are unavailable. "
+                "See docs/CONFIGURATION.md to configure a provider."
+            )
+        print("Verify installation: sudo beep-manage verify")
+        print("Diagnose problems: sudo beep-manage doctor")
 
 
 def failure_result(

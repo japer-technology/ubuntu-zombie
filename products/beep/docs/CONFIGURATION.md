@@ -77,6 +77,19 @@ model URL input.
 If no provider is configured, local lifecycle, history, status, audit, and
 diagnostics remain available but model turns cannot complete.
 
+To add a provider after choosing `none`, run a configuration repair from a
+terminal, for example:
+
+```bash
+sudo env BEEP_PROVIDER=openai beep-manage repair
+```
+
+Review and approve the plan, then enter the API key at the protected prompt.
+For other providers, supply the corresponding `BEEP_PROVIDER` and any required
+`BEEP_MODEL` or `BEEP_MODEL_BASE_URL` from the table above. Repair preserves
+history, existing credentials, and lifecycle state; it does not reset the TTL
+or revive a dead installation.
+
 ## Rotation
 
 - Run `sudo beep-secrets-edit` to edit provider material through a protected

@@ -171,6 +171,33 @@ class ManagementCLITests(unittest.TestCase):
         self.assertEqual(response["phase"], "plan")
         self.assertEqual(response["status"], "blocked")
 
+    def test_standalone_copy_needs_no_parent_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            product = Path(directory) / "beep"
+            shutil.copytree(
+                PRODUCT_ROOT, product,
+                ignore=shutil.ignore_patterns("dist", "__pycache__", "*.pyc"),
+            )
+            completed = subprocess.run(
+                [
+                    str(product / "scripts" / "install.sh"),
+                    "--dry-run", "--non-interactive", "--json",
+                ],
+                cwd=directory,
+                env=clean_environment(),
+                check=False, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+        self.assertEqual(completed.returncode, 64, completed.stderr)
+        response = json.loads(completed.stdout)
+        self.assertEqual(response["product_id"], "beep")
+        self.assertEqual(response["operation"], "install")
+        self.assertEqual(response["phase"], "plan")
+        self.assertEqual(
+            response["required_inputs"],
+            [{"name": "chat_password_file", "secret": True}],
+        )
+
     @unittest.skipIf(os.geteuid() == 0, "root does not use the sudo handoff")
     def test_installer_forwards_configuration_through_sudo(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

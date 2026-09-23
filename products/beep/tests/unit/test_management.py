@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import stat
 import subprocess
@@ -207,6 +208,138 @@ class ManagementTests(unittest.TestCase):
                 non_interactive=False,
             )
         prompt.assert_not_called()
+
+    def test_interactive_defaults_explain_privileges_and_provider_choice(self) -> None:
+        for as_json in (False, True):
+            with self.subTest(as_json=as_json):
+                arguments = management.parser().parse_args(
+                    ["install", *(["--json"] if as_json else [])]
+                )
+                output = io.StringIO()
+                errors = io.StringIO()
+                inputs: dict[str, object] = {}
+                with (
+                    mock.patch.dict(os.environ, {}, clear=True),
+                    mock.patch.object(management.sys.stdin, "isatty", return_value=True),
+                    mock.patch.object(self.manager, "_prompt", return_value="") as prompt,
+                    mock.patch("sys.stdout", output),
+                    mock.patch("sys.stderr", errors),
+                ):
+                    self.manager._prepare_interactive_install(
+                        arguments, inputs,
+                        request_supplied=False, non_interactive=False,
+                    )
+                guidance = errors.getvalue() if as_json else output.getvalue()
+                self.assertIn("passwordless sudo", guidance)
+                self.assertIn("without AI responses", guidance)
+                self.assertEqual(inputs["provider"], None)
+                self.assertEqual(inputs["chat_port"], management.DEFAULT_PORT)
+                self.assertEqual(prompt.call_count, 3)
+                self.assertIn("Beep stops when this expires", prompt.call_args.args[0])
+                if as_json:
+                    self.assertEqual(output.getvalue(), "")
+
+    def test_setup_questions_remain_interactive_only(self) -> None:
+        for flags, tty, request in (
+            (["--dry-run"], True, False),
+            (["--non-interactive"], True, False),
+            ([], False, False),
+            ([], True, True),
+        ):
+            with self.subTest(flags=flags, tty=tty, request=request):
+                arguments = management.parser().parse_args(["install", *flags])
+                with (
+                    mock.patch.object(management.sys.stdin, "isatty", return_value=tty),
+                    mock.patch.object(self.manager, "_prompt") as prompt,
+                ):
+                    self.manager._prepare_interactive_install(
+                        arguments, {}, request_supplied=request,
+                        non_interactive=arguments.non_interactive,
+                    )
+                prompt.assert_not_called()
+
+    def test_install_completion_uses_selected_port_and_preserves_suspension(self) -> None:
+        for suspended in (False, True):
+            with self.subTest(suspended=suspended):
+                configuration = default_configuration().object()
+                configuration["chat_port"] = 59000
+                configuration["provider"] = None
+                result = management.Result(
+                    operation="install", correlation_id="test",
+                    product_version=self.manager.version, instance_id=None,
+                    phase="execute",
+                    details={"configuration": configuration, "suspended": suspended},
+                )
+                output = io.StringIO()
+                with mock.patch("sys.stdout", output):
+                    management.print_result(result, as_json=False)
+                text = output.getvalue()
+                self.assertIn("Beep installation complete.", text)
+                self.assertIn("http://127.0.0.1:59000/", text)
+                self.assertIn("not your Linux password", text)
+                self.assertIn("AI responses are unavailable", text)
+                self.assertIn("sudo beep-manage verify", text)
+                self.assertEqual("sudo beep-manage resume" in text, suspended)
+
+    def test_install_output_does_not_claim_success_for_plan_or_failure(self) -> None:
+        for phase, status in (("plan", "ok"), ("execute", "failed")):
+            with self.subTest(phase=phase, status=status):
+                result = management.Result(
+                    operation="install", correlation_id="test",
+                    product_version=self.manager.version, instance_id=None,
+                    phase=phase, status=status,
+                    details={"configuration": default_configuration().object()},
+                )
+                output = io.StringIO()
+                with mock.patch("sys.stdout", output):
+                    management.print_result(result, as_json=False)
+                self.assertNotIn("installation complete", output.getvalue())
+
+    def test_human_output_includes_missing_inputs_and_recovery(self) -> None:
+        for phase in ("plan", "execute"):
+            with self.subTest(phase=phase):
+                result = management.Result(
+                    operation="install", correlation_id="test",
+                    product_version=self.manager.version, instance_id=None,
+                    phase=phase, status="blocked",
+                    required_inputs=[{"name": "chat_password_file", "secret": True}],
+                    errors=[{"code": "REQUIRED_INPUT", "message": "Missing input."}],
+                    recovery=["Supply a protected password file."],
+                )
+                output = io.StringIO()
+                errors = io.StringIO()
+                with mock.patch("sys.stdout", output), mock.patch("sys.stderr", errors):
+                    management.print_result(result, as_json=False)
+                self.assertIn("blocked", output.getvalue())
+                self.assertIn("Required input: chat_password_file", errors.getvalue())
+                self.assertIn("error REQUIRED_INPUT", errors.getvalue())
+                self.assertIn("Next: Supply a protected password file.", errors.getvalue())
+
+    def test_doctor_output_includes_check_remediation(self) -> None:
+        result = management.Result(
+            operation="doctor", correlation_id="test",
+            product_version=self.manager.version, instance_id=None, phase="read",
+            checks=[self.manager.check("test", False, "Service stopped.", "Run repair.")],
+        )
+        output = io.StringIO()
+        with mock.patch("sys.stdout", output):
+            management.print_result(result, as_json=False)
+        self.assertIn("Next: Run repair.", output.getvalue())
+
+    def test_json_output_remains_a_single_result_object(self) -> None:
+        result = management.Result(
+            operation="install", correlation_id="test",
+            product_version=self.manager.version, instance_id=None, phase="execute",
+            details={"configuration": default_configuration().object()},
+            recovery=["Recovery guidance."],
+        )
+        output = io.StringIO()
+        errors = io.StringIO()
+        with mock.patch("sys.stdout", output), mock.patch("sys.stderr", errors):
+            management.print_result(result, as_json=True)
+        self.assertEqual(json.loads(output.getvalue()), result.object())
+        self.assertEqual(len(output.getvalue().splitlines()), 1)
+        self.assertEqual(errors.getvalue(), "")
 
     def test_interactive_approval_displays_configuration_and_plan(self) -> None:
         invocation = management.Invocation(
