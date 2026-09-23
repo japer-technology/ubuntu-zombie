@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -63,6 +65,43 @@ class ManagementTests(unittest.TestCase):
         value = json.loads(completed.stdout)
         self.assertEqual(value["errors"][0]["code"], "MISSING_INPUT")
         self.assertEqual(value["phase"], "plan")
+
+    def test_product_entrypoints_work_outside_repository(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            standalone = Path(directory) / "imaginary-friend"
+            shutil.copytree(
+                PRODUCT_ROOT,
+                standalone,
+                ignore=shutil.ignore_patterns("dist", "__pycache__", "*.pyc", "tests"),
+            )
+            environment = {
+                key: value for key, value in os.environ.items()
+                if not key.startswith(("FRIEND_", "IMAGINARY_FRIEND_"))
+                and key != "PYTHONPATH"
+            }
+            for entrypoint, arguments, expected in (
+                ("manage.sh", ["describe", "--json"], 0),
+                ("install.sh", ["--help"], 0),
+                ("install.sh", ["--dry-run", "--non-interactive", "--json"], 64),
+            ):
+                with self.subTest(entrypoint=entrypoint, arguments=arguments):
+                    completed = subprocess.run(
+                        [str(standalone / "scripts" / entrypoint), *arguments],
+                        cwd=directory,
+                        env=environment,
+                        check=False,
+                        text=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        timeout=30,
+                    )
+                    self.assertEqual(completed.returncode, expected, completed.stderr)
+                    if "--json" in arguments:
+                        value = json.loads(completed.stdout)
+                        self.assertEqual(value["product_id"], "imaginary-friend")
+                        self.assertFalse(value["changed"])
+                    else:
+                        self.assertIn("Imaginary Friend", completed.stdout)
 
     def test_unknown_friend_environment_fails_closed(self) -> None:
         completed = self.run_manage(

@@ -31,6 +31,11 @@ render a non-mutating plan. A dry-run creates no lock, credential file, log,
 directory, download, or network request; the bounded model probe is deferred
 until execution.
 
+The preview also reports whether the plan is blocked, lists failed checks
+and suggested next steps, and warns that the model has not yet been probed.
+Resolve any failed checks before running the installer again without
+`--dry-run`. A successful preview is not an installation.
+
 ## Unattended install
 
 Create the password file outside the repository:

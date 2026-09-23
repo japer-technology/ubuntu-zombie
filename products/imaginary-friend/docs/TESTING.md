@@ -24,6 +24,11 @@ assets and rotation paths, exclusive diagnostic archives, lifecycle plans,
 rollback preservation, strict input types, descriptor validation, and source
 independence.
 
+Installer coverage includes question-and-answer previews, cancellation,
+visible failed checks and remediation, secret-free JSON output, and entry
+points launched from a standalone product copy outside the repository.
+These tests do not install services or change host accounts.
+
 ## Disposable-VM lifecycle
 
 `tests/vm/lifecycle.sh` refuses to run unless it is root and
