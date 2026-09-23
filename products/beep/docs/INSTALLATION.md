@@ -19,7 +19,8 @@ A source checkout is for reviewed development on a disposable VM only.
 
 ## Interactive installation
 
-From the extracted product directory, run:
+From this product's directory in a source checkout, or `products/beep` in the
+extracted release, run:
 
 ```bash
 ./scripts/install.sh
@@ -30,14 +31,27 @@ chat port, provider and model settings, and initial time to live. Every optional
 question has a secure default. It then displays the complete lifecycle plan and
 asks for approval before changing the host.
 
+The prompts explain Beep's root-equivalent account and the provider choices.
+Choose a cloud provider if you have its API key, or `lmstudio` for an existing
+model server. Accepting `none` installs Beep without AI responses; it does not
+download or configure a model. The default seven-day time to live stops Beep
+when it expires.
+
 After approval, enter and confirm the chat password. If a cloud provider was
 selected, enter its credential at the protected prompt. Neither secret is
-printed or included in lifecycle output. When installation completes, verify
-the result:
+printed or included in lifecycle output. When installation completes, it prints
+the selected loopback chat URL. Open it on the installed computer and sign in
+with your Beep chat password, not your Linux password. If an existing install
+was suspended, it remains suspended and the installer prints the resume
+command. Verify the result:
 
 ```bash
 sudo beep-manage verify
 ```
+
+Human-readable failures include available recovery instructions; `doctor`
+also displays remediation for failed checks. A blocked preview lists missing
+inputs rather than claiming installation succeeded.
 
 ## Unattended plan
 

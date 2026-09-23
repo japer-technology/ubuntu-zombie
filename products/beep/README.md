@@ -1,17 +1,15 @@
 # Beep
 
-Beep is an independent, private, root-capable AI Systems Administrator for
-Ubuntu Desktop LTS. It owns the `beep` identity, loopback chat, credentials,
-policy, history, audit, lifecycle, family manager, package, and release.
-
-The standalone source, lifecycle, family manager, tests, package, and release
-workflow are implemented. Beep is not yet admitted to the production family
-catalogue: recorded supported-VM, root-peer co-installation, external security
-review, and published release-verification evidence remain release gates.
+Beep installs a private, root-capable AI Systems Administrator on Ubuntu
+Desktop LTS. Run the installer, answer the questions, and use the local chat.
+Beep owns its account, credentials, policy, history, audit, and lifecycle; no
+other product needs to be installed.
 
 ## Install
 
-On a supported Ubuntu Desktop 22.04 or 24.04 LTS host, run:
+Use a disposable Ubuntu Desktop 22.04 or 24.04 LTS `amd64` VM until the
+release gates below are complete. From this directory (or the extracted
+release's `products/beep` directory), run:
 
 ```bash
 ./scripts/install.sh
@@ -21,6 +19,32 @@ The installer obtains root privileges with `sudo` when needed, asks the setup
 questions, displays the complete plan, and applies it only after approval.
 Press Enter to accept secure defaults. The chat password and any provider
 credential are entered through protected prompts and are never printed.
+
+You will choose the chat port, model provider, any required model settings,
+and time to live. Cloud providers need an API key; LM Studio needs an existing
+model server. The default provider, `none`, installs Beep without AI responses.
+The default seven-day time to live stops Beep when it expires.
+
+On success, the installer prints your local chat URL and verification commands.
+Open that URL on the installed computer and sign in with the Beep chat password
+you chose, not your Linux password. No environment variables or request files
+are needed for interactive setup.
+
+## Manage
+
+After installation:
+
+```bash
+sudo beep-manage verify
+sudo beep-manage doctor
+sudo beep-manage suspend
+sudo beep-manage resume
+sudo beep-manage uninstall
+```
+
+Mutating commands ask for approval. Uninstall retains configuration and data
+by default. See [`docs/INSTALLATION.md`](docs/INSTALLATION.md) for unattended
+installation, backup, recovery, and explicit permanent deletion.
 
 ## Root-equivalent warning
 
@@ -32,6 +56,10 @@ create redundancy or containment.
 
 Run installation and lifecycle tests only on a disposable supported Ubuntu
 Desktop 22.04 or 24.04 LTS `amd64` VM that you are prepared to rebuild.
+
+Recorded supported-VM, root-peer co-installation, external security review,
+and published release-verification evidence remain release gates. Beep is not
+yet admitted to the production family catalogue.
 
 ## Documentation
 

@@ -22,6 +22,9 @@ Beep uses independent UTC date-time versions in `yyyy.mm.dd.hh.nn.ss` format.
 
 ### Changed
 
+- Explain root authority, provider choices, and expiry during interactive setup;
+  show the selected chat URL, login guidance, and verification commands after
+  installation while preserving suspension on reinstall.
 - Remove inherited product branding and external schema packaging so Beep
   source, runtime metadata, documentation, tests, and release archives are
   standalone.
@@ -35,6 +38,8 @@ Beep uses independent UTC date-time versions in `yyyy.mm.dd.hh.nn.ss` format.
 
 ### Fixed
 
+- Display missing inputs, recovery instructions, and failed-check remediation
+  in human-readable lifecycle output without adding prose to JSON responses.
 - Convert validated Node/npm launch links to regular launchers, disable npm
   `bin` links, and remove Python venv's standard Linux `lib64` link so install,
   backup, recovery snapshots, rollback, repair, and uninstall keep uniformly

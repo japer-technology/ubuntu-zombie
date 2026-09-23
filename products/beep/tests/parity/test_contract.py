@@ -48,11 +48,14 @@ class ProductParityTests(unittest.TestCase):
     def test_product_has_no_parent_brand_references(self) -> None:
         forbidden = "zom" + "bie"
         for path in PRODUCT_ROOT.rglob("*"):
+            relative = path.relative_to(PRODUCT_ROOT)
             if (
-                not path.is_file()
-                or "dist" in path.parts
-                or "__pycache__" in path.parts
+                "dist" in relative.parts
+                or "__pycache__" in relative.parts
             ):
+                continue
+            self.assertNotIn(forbidden, relative.as_posix().lower(), relative)
+            if not path.is_file():
                 continue
             content = path.read_text(encoding="utf-8", errors="ignore").lower()
             self.assertNotIn(forbidden, content, path)
