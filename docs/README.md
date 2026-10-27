@@ -42,6 +42,9 @@ Zombie before.
 
 ## "I want to see how it got here"
 
+- [`INDEPENDENT-REPOSITORIES-PLAN.md`](INDEPENDENT-REPOSITORIES-PLAN.md) —
+  finish standalone installable repositories, building on the Forgejo
+  distribution while preserving compatibility and release trust.
 - [`RELEASE-PLAN-123.md`](RELEASE-PLAN-123.md) — the next planned
   steps for the release process.
 - [`analysis/`](analysis/) — working notes from repository-wide
