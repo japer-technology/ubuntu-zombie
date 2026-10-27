@@ -71,6 +71,11 @@ preserve a second implementation of the same operation.
 
 ## Implementation plan
 
+The complementary [independent repositories completion plan](
+docs/INDEPENDENT-REPOSITORIES-PLAN.md) builds on the Forgejo distribution
+already started. It proposes validated product repositories in addition to
+the canonical source here, without changing the runtime boundaries below.
+
 ### 1. Fix the common lifecycle boundary
 
 - Generalize the existing family lifecycle request, response, receipt,
